@@ -366,19 +366,20 @@ Content-Type: application/json</code></pre></div>
       </section>
       <section id="responses">
         <p class="eyebrow">Accepted response</p><h2>Every valid send is asynchronous</h2>
-        <p class="intro">Helixcer first records the message and queues provider delivery. Accepted sends therefore return <code class="plain">202 Accepted</code>. The first status is normally <code class="plain">pending</code>; Meta submission happens just after the response.</p>
+        <p class="intro">Helixcer first records the message and queues provider delivery. Accepted sends therefore return <code class="plain">202 Accepted</code>. The first <code class="plain">messageStatus</code> value is normally <code class="plain">pending</code>; Meta submission happens just after the response.</p>
+        <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p><code>status</code> reports whether the API request succeeded. <code>messageStatus</code> reports the message's delivery state.</p></div>
         <div class="response-grid">
           <article class="response queued"><span class="response-code">202 Accepted</span><h3>Stored and queued</h3><p>The message exists in the inbox and provider delivery is running asynchronously.</p></article>
           <article class="response created"><span class="response-code">GET 200</span><h3>Current state</h3><p>The status route returns the latest stored result using the same flat shape.</p></article>
           <article class="response failed"><span class="response-code">4xx / 5xx</span><h3>Request rejected</h3><p>Read the stable error code and decide whether the request is safe to retry.</p></article>
         </div>
         <div class="code-card"><div class="code-head"><span>202 · accepted for async delivery</span><button class="copy" type="button">Copy</button></div><pre><code>{
-  "ok": true,
+  "status": true,
   "messageId": "594798db-1c00-481f-adab-137d1c80b2d8",
   "conversationId": "9e9411e9-c1a7-4a66-a46f-e6e31d9577da",
   "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
-  "status": "pending",
+  "messageStatus": "pending",
   "providerMessageId": "",
   "error": "",
   "clientReference": "order-1001",
@@ -397,12 +398,12 @@ Content-Type: application/json</code></pre></div>
         </div>
         <p class="intro">A message can move to <code class="plain">failed</code>. Status updates are asynchronous, and some recipients or devices may not produce every intermediate event.</p>
         <div class="code-card" style="margin-top:22px"><div class="code-head"><span>200 · current status</span><button class="copy" type="button">Copy</button></div><pre><code>{
-  "ok": true,
+  "status": true,
   "messageId": "594798db-1c00-481f-adab-137d1c80b2d8",
   "conversationId": "9e9411e9-c1a7-4a66-a46f-e6e31d9577da",
   "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
-  "status": "delivered",
+  "messageStatus": "delivered",
   "providerMessageId": "wamid.HBgMOTE5OTk5OTk5OTk5FQIAERgS...",
   "error": "",
   "clientReference": "order-1001",
@@ -429,7 +430,7 @@ Content-Type: application/json</code></pre></div>
         <p class="eyebrow">Error handling</p><h2>Stable codes for application logic</h2>
         <p class="intro">Use <code class="plain">error.code</code>, not the human-readable message. Include <code class="plain">requestId</code> or the matching <code class="plain">X-Request-Id</code> response header when contacting support.</p>
         <div class="code-card" style="margin:22px 0"><div class="code-head"><span>Standard error</span><button class="copy" type="button">Copy</button></div><pre><code>{
-  "ok": false,
+  "status": false,
   "error": {
     "code": "channel_not_ready",
     "message": "The WhatsApp channel is missing its access token.",

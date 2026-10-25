@@ -114,6 +114,40 @@ function postTemplate(token, idempotencyKey, body, headers = {}) {
   });
 }
 
+test('public Developer API preflight and rate-limit errors use the status envelope', async () => {
+  const preflight = await handleRequest(new Request('https://api.chat.helixcer.com/api/v1/whatsapp/template-messages', {
+    method: 'OPTIONS', headers: { Origin: 'https://chat.helixcer.com' }
+  }), {});
+  assert.equal(preflight.status, 405);
+  const preflightBody = await preflight.json();
+  assert.equal(preflightBody.status, false);
+  assert.equal(Object.hasOwn(preflightBody, 'ok'), false);
+
+  const { database, env } = await fixture();
+  const token = `hxc_live_limited1.${'l'.repeat(43)}`;
+  await insertKey(database, token, 'key-limited', 'hxc_live_limited1');
+  env.INBOX_HUB = {
+    idFromName: value => value,
+    get: () => ({ fetch: async () => new Response(null, {
+      status: 429, headers: { 'Retry-After': '42', 'X-RateLimit-Limit': '60' }
+    }) })
+  };
+  try {
+    const limited = await handleRequest(postTemplate(token, null, {
+      channelId: 'wa-sales', to: '+91 98765 43210',
+      template: { name: 'order_update', language: { code: 'en_US' } }
+    }), env);
+    assert.equal(limited.status, 429);
+    assert.equal(limited.headers.get('Retry-After'), '42');
+    const limitedBody = await limited.json();
+    assert.equal(limitedBody.status, false);
+    assert.equal(Object.hasOwn(limitedBody, 'ok'), false);
+    assert.equal(limitedBody.error.code, 'rate_limited');
+  } finally {
+    database.close();
+  }
+});
+
 test('external template API accepts requests without an Idempotency-Key', async () => {
   const { database, env } = await fixture();
   const token = `hxc_live_noidem123.${'n'.repeat(43)}`;
@@ -134,7 +168,9 @@ test('external template API accepts requests without an Idempotency-Key', async 
     assert.equal(response.status, 202);
     assert.equal(response.headers.get('Idempotent-Replayed'), null);
     const accepted = await response.json();
-    assert.equal(accepted.ok, true);
+    assert.equal(accepted.status, true);
+    assert.equal(accepted.messageStatus, 'pending');
+    assert.equal(Object.hasOwn(accepted, 'ok'), false);
     assert.equal(database.prepare('SELECT count(*) AS count FROM messages').get().count, 1);
     const storedRequest = database.prepare('SELECT idempotency_key_hash FROM external_api_requests').get();
     assert.match(storedRequest.idempotency_key_hash, /^[a-f0-9]{64}$/);
@@ -142,7 +178,10 @@ test('external template API accepts requests without an Idempotency-Key', async 
 
     const invalid = await handleRequest(postTemplate(token, 'short', body), env, { waitUntil() {} });
     assert.equal(invalid.status, 400);
-    assert.equal((await invalid.json()).error.code, 'invalid_idempotency_key');
+    const invalidBody = await invalid.json();
+    assert.equal(invalidBody.status, false);
+    assert.equal(Object.hasOwn(invalidBody, 'ok'), false);
+    assert.equal(invalidBody.error.code, 'invalid_idempotency_key');
   } finally {
     globalThis.fetch = originalFetch;
     database.close();
@@ -225,8 +264,9 @@ test('external template API persists once, dispatches, replays safely, and scope
     });
     assert.equal(response.status, 202);
     const accepted = await response.json();
-    assert.equal(accepted.ok, true);
-    assert.equal(accepted.status, 'pending');
+    assert.equal(accepted.status, true);
+    assert.equal(accepted.messageStatus, 'pending');
+    assert.equal(Object.hasOwn(accepted, 'ok'), false);
     assert.equal(database.prepare('SELECT count(*) AS count FROM messages').get().count, 1);
     assert.equal(database.prepare('SELECT count(*) AS count FROM external_api_requests').get().count, 1);
     assert.equal(database.prepare('SELECT count(*) AS count FROM outbox').get().count, 1);
@@ -282,7 +322,10 @@ test('external template API persists once, dispatches, replays safely, and scope
     changed.template.components[0].parameters[0].text = 'Different';
     const conflict = await handleRequest(postTemplate(token, 'order-1001-send', changed), env, { waitUntil() {} });
     assert.equal(conflict.status, 409);
-    assert.equal((await conflict.json()).error.code, 'idempotency_conflict');
+    const conflictBody = await conflict.json();
+    assert.equal(conflictBody.status, false);
+    assert.equal(Object.hasOwn(conflictBody, 'ok'), false);
+    assert.equal(conflictBody.error.code, 'idempotency_conflict');
 
     const statusUrl = `https://api.chat.helixcer.com/api/v1/messages/${accepted.messageId}`;
     const status = await handleRequest(new Request(statusUrl, {
@@ -291,7 +334,9 @@ test('external template API persists once, dispatches, replays safely, and scope
     assert.equal(status.status, 200);
     const statusBody = await status.json();
     assert.equal(statusBody.providerMessageId, 'wamid.template-1');
-    assert.equal(statusBody.status, 'delivered');
+    assert.equal(statusBody.status, true);
+    assert.equal(statusBody.messageStatus, 'delivered');
+    assert.equal(Object.hasOwn(statusBody, 'ok'), false);
 
     const otherToken = `hxc_live_otherkey1.${'t'.repeat(43)}`;
     await insertKey(database, otherToken, 'key-two', 'hxc_live_otherkey1');
@@ -299,12 +344,18 @@ test('external template API persists once, dispatches, replays safely, and scope
       headers: { Authorization: `Bearer ${otherToken}` }
     }), env);
     assert.equal(hidden.status, 404);
+    const hiddenBody = await hidden.json();
+    assert.equal(hiddenBody.status, false);
+    assert.equal(Object.hasOwn(hiddenBody, 'ok'), false);
 
     const browser = await handleRequest(postTemplate(token, 'order-1002-send', body, {
       Origin: 'https://chat.helixcer.com'
     }), env);
     assert.equal(browser.status, 403);
-    assert.equal((await browser.json()).error.code, 'server_to_server_only');
+    const browserBody = await browser.json();
+    assert.equal(browserBody.status, false);
+    assert.equal(Object.hasOwn(browserBody, 'ok'), false);
+    assert.equal(browserBody.error.code, 'server_to_server_only');
   } finally {
     globalThis.fetch = originalFetch;
     database.close();
@@ -368,7 +419,10 @@ test('API key management reveals a secret once, stores only its hash, lists meta
       headers: { Authorization: `Bearer ${created.apiKey}` }
     }), env);
     assert.equal(rejected.status, 401);
-    assert.equal((await rejected.json()).error.code, 'invalid_api_key');
+    const rejectedBody = await rejected.json();
+    assert.equal(rejectedBody.status, false);
+    assert.equal(Object.hasOwn(rejectedBody, 'ok'), false);
+    assert.equal(rejectedBody.error.code, 'invalid_api_key');
   } finally {
     database.close();
   }

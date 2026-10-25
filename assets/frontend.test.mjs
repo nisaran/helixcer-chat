@@ -153,6 +153,12 @@ test("Developer API documentation is channel-organized and keeps the send contra
   assert.match(sendSection, /POST<\/span><code>https:\/\/api\.chat\.helixcer\.com\/api\/v1\/whatsapp\/template-messages<\/code>/);
   assert.match(sendSection, /<code>contact\.displayName<\/code>[\s\S]*?Name used to save or update to the contact list/);
   assert.doesNotMatch(apiDocs, /Idempotency-Key|id="idempotency"|href="#idempotency"/i);
+  assert.match(apiDocs, /"status": true/);
+  assert.match(apiDocs, /"messageStatus": "pending"/);
+  assert.match(apiDocs, /"messageStatus": "delivered"/);
+  assert.match(apiDocs, /"status": false/);
+  assert.match(apiDocs, /status<\/code> reports whether the API request succeeded/);
+  assert.doesNotMatch(apiDocs, /"ok": (?:true|false)/);
 });
 
 test("WhatsApp credential guidance distinguishes the three Meta secrets", () => {

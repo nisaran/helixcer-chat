@@ -488,16 +488,18 @@ The example above illustrates pass-through, not a universal schema. Copy the com
 
 ### `202 Accepted` — stored for asynchronous delivery
 
-Helixcer records the message and queues provider delivery before responding. The first status is normally `pending`; submission to Meta happens asynchronously after the response.
+Helixcer records the message and queues provider delivery before responding. The first `messageStatus` value is normally `pending`; submission to Meta happens asynchronously after the response.
+
+`status` reports whether the API request succeeded. `messageStatus` reports the message's delivery state.
 
 ```json
 {
-  "ok": true,
+  "status": true,
   "messageId": "594798db-1c00-481f-adab-137d1c80b2d8",
   "conversationId": "9e9411e9-c1a7-4a66-a46f-e6e31d9577da",
   "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
-  "status": "pending",
+  "messageStatus": "pending",
   "providerMessageId": "",
   "error": "",
   "clientReference": "order-1001",
@@ -515,7 +517,7 @@ Errors use a stable machine-readable code plus a human-readable message:
 
 ```json
 {
-  "ok": false,
+  "status": false,
   "error": {
     "code": "channel_not_ready",
     "message": "The WhatsApp channel is missing its access token.",
@@ -545,12 +547,12 @@ Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
 
 ```json
 {
-  "ok": true,
+  "status": true,
   "messageId": "594798db-1c00-481f-adab-137d1c80b2d8",
   "conversationId": "9e9411e9-c1a7-4a66-a46f-e6e31d9577da",
   "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
-  "status": "delivered",
+  "messageStatus": "delivered",
   "providerMessageId": "wamid.HBgMOTE5OTk5OTk5OTk5FQIAERgS...",
   "error": "",
   "clientReference": "order-1001",
@@ -560,7 +562,7 @@ Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
 }
 ```
 
-Typical status progression is:
+Typical `messageStatus` progression is:
 
 `pending` → `retrying` → `submitted` → `sent` → `delivered` → `read`
 

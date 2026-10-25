@@ -190,7 +190,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
   const cors = corsHeaders(request.headers.get('Origin') || '', env.ALLOWED_ORIGINS || '');
   if (request.method === 'OPTIONS') {
     if (url.pathname.startsWith('/api/v1/')) {
-      return json({ ok: false, error: { code: 'server_to_server_only', message: 'This API does not accept browser CORS requests.' } }, 405);
+      return json({ status: false, error: { code: 'server_to_server_only', message: 'This API does not accept browser CORS requests.' } }, 405);
     }
     if (!cors['Access-Control-Allow-Origin']) return new Response(null, { status: 403 });
     return new Response(null, { status: 204, headers: cors });
@@ -462,7 +462,7 @@ async function handleExternalApi(request, env, ctx, url) {
     if (statusMatch && request.method === 'GET') {
       requireApiScope(apiPrincipal, 'messages:read');
       const item = await getExternalMessageStatus(env, apiPrincipal, decodeURIComponent(statusMatch[1]), url);
-      const response = json({ ok: true, ...item, requestId });
+      const response = json({ status: true, ...item, requestId });
       response.headers.set('X-Request-Id', requestId);
       return response;
     }
@@ -471,7 +471,7 @@ async function handleExternalApi(request, env, ctx, url) {
     const status = Number(error?.status) || 500;
     if (status >= 500) console.error('external_api_request_failed', { requestId, path: url.pathname, status, message: cleanError(error) });
     const response = json({
-      ok: false,
+      status: false,
       error: {
         code: error?.code || (status >= 500 ? 'internal_error' : 'invalid_request'),
         message: status >= 500 ? 'The service could not complete the request.' : cleanError(error),
@@ -526,7 +526,7 @@ async function enforceExternalApiRateLimit(env, principal, requestId) {
   if (response.status === 204) return null;
   if (response.status === 429) {
     const retryAfter = response.headers.get('Retry-After') || '60';
-    const limited = json({ ok: false, error: {
+    const limited = json({ status: false, error: {
       code: 'rate_limited', message: 'Too many API requests. Retry after the indicated delay.', requestId
     } }, 429);
     limited.headers.set('X-Request-Id', requestId);
@@ -622,7 +622,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   ctx.waitUntil(sendOrQueue(env, messageId));
   return externalMessageResponse({
     messageId, conversationId: identity.conversationId, contactId: identity.contactId,
-    channelId: channel.channelId, status: 'pending', providerMessageId: '', error: '',
+    channelId: channel.channelId, messageStatus: 'pending', providerMessageId: '', error: '',
     clientReference: input.clientReference, createdAt: now,
     statusUrl: new URL(`/api/v1/messages/${encodeURIComponent(messageId)}`, url.origin).toString()
   }, requestId, false, suppliedIdempotencyKey !== null);
@@ -647,7 +647,7 @@ async function getExternalMessageStatus(env, principal, messageId, url) {
     conversationId: row.conversation_id,
     contactId: row.contact_id,
     channelId: row.channel_id,
-    status: row.status,
+    messageStatus: row.status,
     providerMessageId: row.provider_message_id || '',
     error: row.error || '',
     clientReference: row.client_reference || '',
@@ -657,7 +657,7 @@ async function getExternalMessageStatus(env, principal, messageId, url) {
 }
 
 function externalMessageResponse(item, requestId, replayed, includeReplayHeader) {
-  const response = json({ ok: true, ...item, requestId }, 202);
+  const response = json({ status: true, ...item, requestId }, 202);
   if (includeReplayHeader) response.headers.set('Idempotent-Replayed', replayed ? 'true' : 'false');
   return response;
 }
