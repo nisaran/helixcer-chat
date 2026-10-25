@@ -2,7 +2,7 @@ import {
   authenticateRequest,
   createInvitation,
   DEFAULT_WORKSPACE_ID,
-  finishGoogleOAuth,
+  finishGoogleOAuthResponse,
   listTeam,
   logout,
   principalView,
@@ -18,6 +18,9 @@ const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
 const MAX_EXTERNAL_JSON_BODY = 131072;
 const MAX_CREDENTIAL_LENGTH = 4096;
+const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024;
+const MAX_ATTACHMENT_CAPTION_LENGTH = 1024;
 const EXTERNAL_API_OPERATION = 'whatsapp.template.send';
 const EXTERNAL_API_IDEMPOTENCY_DAYS = 7;
 const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram']);
@@ -202,9 +205,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (request.method === 'GET' && url.pathname === '/auth/google/start') {
       const limited = await enforceOAuthRateLimit(request, env);
       if (limited) return limited;
-      return startGoogleOAuth(request, env);
+      return await startGoogleOAuth(request, env);
     }
-    if (request.method === 'GET' && url.pathname === '/auth/google/callback') return finishGoogleOAuth(request, env);
+    if (request.method === 'GET' && url.pathname === '/auth/google/callback') return await finishGoogleOAuthResponse(request, env);
     if (request.method === 'POST' && (url.pathname === '/auth/logout' || url.pathname === '/api/logout')) {
       if (!cors['Access-Control-Allow-Origin']) return json({ ok: false, error: 'Origin not allowed.' }, 403);
       const logoutPrincipal = await authenticateRequest(request, env);
@@ -299,6 +302,12 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
       return withCors(json(result), cors);
     }
+    const channelVerifyTokenMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/verify-token$/);
+    if (channelVerifyTokenMatch && request.method === 'GET') {
+      requireRole(principal, 'admin');
+      const channelId = decodeURIComponent(channelVerifyTokenMatch[1]);
+      return withCors(json(await getChannelVerifyToken(env, workspaceId, channelId, principal)), cors);
+    }
     if (url.pathname === '/api/conversations' && request.method === 'GET') {
       return withCors(json({ items: await listConversations(env, workspaceId, url) }), cors);
     }
@@ -311,11 +320,32 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     const messagesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/messages$/);
     if (messagesMatch && request.method === 'GET') {
-      return withCors(json({ items: await listMessages(env, workspaceId, decodeURIComponent(messagesMatch[1]), url) }), cors);
+      const id = decodeURIComponent(messagesMatch[1]);
+      const [items, replyWindow] = await Promise.all([
+        listMessages(env, workspaceId, id, url),
+        getConversationReplyWindow(env, workspaceId, id)
+      ]);
+      return withCors(json({ items, ...replyWindow }), cors);
     }
     if (messagesMatch && request.method === 'POST') {
       const id = decodeURIComponent(messagesMatch[1]);
       const result = await createOutboundMessage(env, workspaceId, id, await readJson(request), principal);
+      await broadcast(env, workspaceId, { type: 'message.created', conversationId: id, messageId: result.message.messageId });
+      ctx.waitUntil(sendOrQueue(env, result.message.messageId));
+      return withCors(json({ ok: true, item: result.message }, 202), cors);
+    }
+    const templateMessageMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/template$/);
+    if (templateMessageMatch && request.method === 'POST') {
+      const id = decodeURIComponent(templateMessageMatch[1]);
+      const result = await createConversationTemplateMessage(env, workspaceId, id, await readJson(request), principal);
+      await broadcast(env, workspaceId, { type: 'message.created', conversationId: id, messageId: result.message.messageId });
+      ctx.waitUntil(sendOrQueue(env, result.message.messageId));
+      return withCors(json({ ok: true, item: result.message }, 202), cors);
+    }
+    const attachmentMessageMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/attachments$/);
+    if (attachmentMessageMatch && request.method === 'POST') {
+      const id = decodeURIComponent(attachmentMessageMatch[1]);
+      const result = await createConversationAttachmentMessage(env, workspaceId, id, request, principal);
       await broadcast(env, workspaceId, { type: 'message.created', conversationId: id, messageId: result.message.messageId });
       ctx.waitUntil(sendOrQueue(env, result.message.messageId));
       return withCors(json({ ok: true, item: result.message }, 202), cors);
@@ -1169,6 +1199,29 @@ async function verifyChannel(env, workspaceId, channelId, request) {
   throw httpError(400, 'This connector cannot be verified automatically.');
 }
 
+async function getChannelVerifyToken(env, workspaceId, channelId, principal) {
+  const id = cleanId(channelId, 'Channel ID');
+  const row = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,config_json,secret_key,workspace_id
+    FROM channels WHERE channel_id=?1 AND workspace_id=?2`).bind(id, workspaceId).first();
+  if (!row) throw httpError(404, 'Channel not found.');
+  const connectorType = logicalConnectorType(row);
+  if (!['whatsapp_cloud', 'instagram'].includes(connectorType)) {
+    throw httpError(400, 'This channel does not use a webhook verify token.');
+  }
+  const channel = {
+    channelId: row.channel_id,
+    name: row.name,
+    connectorType,
+    config: safeJsonParse(row.config_json, {}),
+    secretKey: row.secret_key,
+    workspaceId: row.workspace_id
+  };
+  const verifyToken = (await readChannelCredentials(env, channel)).verifyToken || '';
+  if (!verifyToken) throw httpError(404, 'No webhook verify token is saved for this channel.');
+  await audit(env, principal, 'read_verify_token', 'channel', id, {});
+  return { ok: true, channelId: id, verifyToken };
+}
+
 async function verifyWhatsAppChannel(env, channel) {
   const channelId = channel.channelId;
   const credentials = await readChannelCredentials(env, channel);
@@ -1677,19 +1730,58 @@ async function listConversations(env, workspaceId, url) {
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
   const cursor = url.searchParams.get('cursor') || '';
   const result = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.status,c.assigned_to,
-      c.subject,c.last_message_at,c.unread_count,c.tags_json,ch.name AS channel_name,
-      (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id ORDER BY timestamp DESC LIMIT 1) AS last_message
+      c.subject,c.last_message_at,c.unread_count,c.tags_json,ch.name AS channel_name,ch.connector_type,ch.provider_type,
+      (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id ORDER BY timestamp DESC LIMIT 1) AS last_message,
+      (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
+        AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
     FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id
     WHERE c.workspace_id=?1 AND ch.workspace_id=?1 AND (?2='' OR c.status=?2) AND (?3='' OR c.channel_id=?3)
       AND (?4='' OR c.subject LIKE '%'||?4||'%' OR c.conversation_id LIKE '%'||?4||'%')
       AND (?5='' OR c.last_message_at<?5)
     ORDER BY c.last_message_at DESC LIMIT ?6`).bind(workspaceId, status, channelId, q, cursor, limit).all();
-  return result.results.map(row => ({
-    conversationId: row.conversation_id, contactId: row.contact_id, channelId: row.channel_id,
-    channelName: row.channel_name, status: row.status, assignedTo: row.assigned_to,
-    subject: row.subject, lastMessageAt: row.last_message_at, unreadCount: row.unread_count,
-    tags: safeJsonParse(row.tags_json, []), lastMessage: row.last_message || ''
-  }));
+  return result.results.map(row => {
+    const connectorType = logicalConnectorType(row);
+    return {
+      conversationId: row.conversation_id, contactId: row.contact_id, channelId: row.channel_id,
+      channelName: row.channel_name, connectorType, status: row.status, assignedTo: row.assigned_to,
+      subject: row.subject, lastMessageAt: row.last_message_at, unreadCount: row.unread_count,
+      tags: safeJsonParse(row.tags_json, []), lastMessage: row.last_message || '',
+      ...whatsappReplyWindowState(connectorType, row.last_inbound_at)
+    };
+  });
+}
+
+async function getConversationReplyWindow(env, workspaceId, conversationId) {
+  const row = await env.DB.prepare(`SELECT ch.connector_type,ch.provider_type,
+      (SELECT MAX(timestamp) FROM messages m WHERE m.workspace_id=c.workspace_id
+        AND m.conversation_id=c.conversation_id AND m.direction='inbound') AS last_inbound_at
+    FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
+    WHERE c.conversation_id=?1 AND c.workspace_id=?2`).bind(conversationId, workspaceId).first();
+  if (!row) throw httpError(404, 'Conversation not found.');
+  return whatsappReplyWindowState(logicalConnectorType(row), row.last_inbound_at);
+}
+
+export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Date.now()) {
+  if (connectorType !== 'whatsapp_cloud') {
+    return { freeformAllowed: true, replyWindowExpiresAt: '', replyWindowReason: '' };
+  }
+  const inboundTime = new Date(String(lastInboundAt || '')).valueOf();
+  if (!Number.isFinite(inboundTime)) {
+    return {
+      freeformAllowed: false,
+      replyWindowExpiresAt: '',
+      replyWindowReason: 'No customer message has opened the WhatsApp 24-hour service window. Send an approved template.'
+    };
+  }
+  const expiresAt = inboundTime + WHATSAPP_REPLY_WINDOW_MS;
+  const freeformAllowed = Number(now) <= expiresAt;
+  return {
+    freeformAllowed,
+    replyWindowExpiresAt: new Date(expiresAt).toISOString(),
+    replyWindowReason: freeformAllowed
+      ? ''
+      : 'The WhatsApp 24-hour service window has closed. Send an approved template to continue.'
+  };
 }
 
 async function listContacts(env, workspaceId, url) {
@@ -1718,13 +1810,14 @@ async function listMessages(env, workspaceId, conversationId, url) {
   const limit = clampInt(url.searchParams.get('limit'), 1, 200, 100);
   const before = url.searchParams.get('before') || '';
   if (!await env.DB.prepare('SELECT 1 FROM conversations WHERE conversation_id=?1 AND workspace_id=?2').bind(conversationId, workspaceId).first()) throw httpError(404, 'Conversation not found.');
-  const result = await env.DB.prepare(`SELECT message_id,direction,text,message_type,status,timestamp,channel_id,provider_message_id,error
+  const result = await env.DB.prepare(`SELECT message_id,direction,text,message_type,status,timestamp,channel_id,provider_message_id,error,payload_json
     FROM messages WHERE workspace_id=?1 AND conversation_id=?2 AND (?3='' OR timestamp<?3) ORDER BY timestamp DESC LIMIT ?4`)
     .bind(workspaceId, conversationId, before, limit).all();
   return result.results.reverse().map(row => ({
     messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
     status: row.status, timestamp: row.timestamp, channelId: row.channel_id,
-    providerMessageId: row.provider_message_id, error: row.error
+    providerMessageId: row.provider_message_id, error: row.error,
+    attachment: messageAttachmentView(row.message_type, safeJsonParse(row.payload_json, {}))
   }));
 }
 
@@ -1786,10 +1879,15 @@ async function createContact(env, workspaceId, payload, principal) {
 
 async function createOutboundMessage(env, workspaceId, conversationId, payload, principal) {
   const text = cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH);
-  const row = await env.DB.prepare(`SELECT c.contact_id,c.channel_id,i.channel_profile_id FROM conversations c
+  const row = await env.DB.prepare(`SELECT c.contact_id,c.channel_id,i.channel_profile_id,ch.connector_type,ch.provider_type,
+      (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
+        AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
+    FROM conversations c
     JOIN channel_identities i ON i.contact_id=c.contact_id AND i.channel_id=c.channel_id AND i.workspace_id=c.workspace_id
+    JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
     WHERE c.conversation_id=?1 AND c.workspace_id=?2`).bind(conversationId, workspaceId).first();
   if (!row) throw httpError(404, 'Conversation or channel identity not found.');
+  assertFreeformReplyAllowed(logicalConnectorType(row), row.last_inbound_at);
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
   await env.DB.batch([
@@ -1799,6 +1897,190 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
   ]);
   await audit(env, principal, 'send_message', 'conversation', conversationId, { channelId: row.channel_id, messageId });
   return { message: { messageId, conversationId, channelId: row.channel_id, direction: 'outbound', messageType: 'text', text, status: 'pending', timestamp: now } };
+}
+
+function assertFreeformReplyAllowed(connectorType, lastInboundAt) {
+  const state = whatsappReplyWindowState(connectorType, lastInboundAt);
+  if (!state.freeformAllowed) {
+    const error = httpError(409, state.replyWindowReason);
+    error.code = 'whatsapp_reply_window_closed';
+    error.replyWindowExpiresAt = state.replyWindowExpiresAt;
+    throw error;
+  }
+  return state;
+}
+
+async function conversationDeliveryTarget(env, workspaceId, conversationId) {
+  const row = await env.DB.prepare(`SELECT c.contact_id,c.channel_id,i.channel_profile_id,ch.connector_type,ch.provider_type,
+      ch.config_json,ch.secret_key,ch.enabled,
+      (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
+        AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
+    FROM conversations c
+    JOIN channel_identities i ON i.contact_id=c.contact_id AND i.channel_id=c.channel_id AND i.workspace_id=c.workspace_id
+    JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
+    WHERE c.conversation_id=?1 AND c.workspace_id=?2`).bind(conversationId, workspaceId).first();
+  if (!row) throw httpError(404, 'Conversation or channel identity not found.');
+  return {
+    ...row,
+    connectorType: logicalConnectorType(row),
+    channel: {
+      channelId: row.channel_id,
+      workspaceId,
+      connectorType: logicalConnectorType(row),
+      config: safeJsonParse(row.config_json, {}),
+      secretKey: row.secret_key
+    }
+  };
+}
+
+async function createConversationTemplateMessage(env, workspaceId, conversationId, payload, principal) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Template payload must be an object.');
+  rejectUnknownKeys(payload, new Set(['name', 'language', 'components', 'previewText']), 'template request');
+  const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
+  if (target.connectorType !== 'whatsapp_cloud') throw httpError(409, 'Templates are available only for WhatsApp conversations.');
+  if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
+  const template = validateWhatsAppTemplate({
+    name: payload.name,
+    language: payload.language,
+    ...(payload.components === undefined ? {} : { components: payload.components })
+  });
+  const previewText = payload.previewText === undefined
+    ? `Template: ${template.name} (${template.language.code})`
+    : cleanOptionalText(payload.previewText, 'Preview text', MAX_TEXT_LENGTH);
+  const now = new Date().toISOString();
+  const messageId = crypto.randomUUID();
+  const encryptedPayload = await encryptOutboundPayload({ template }, env.CHANNEL_CREDENTIALS_KEY, workspaceId, messageId);
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
+        status,timestamp,payload_json,workspace_id)
+      VALUES (?1,?2,?3,?4,'outbound','template',?5,'pending',?6,?7,?8)`)
+      .bind(messageId, conversationId, target.contact_id, target.channel_id, previewText, now,
+        JSON.stringify({ template: { name: template.name, language: template.language } }), workspaceId),
+    env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
+      VALUES (?1,?2,?3,?4,?4)`).bind(messageId, workspaceId, encryptedPayload, now),
+    env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,0,6,?3,'pending','',?4,?4,?5)`)
+      .bind(crypto.randomUUID(), messageId, now, now, workspaceId),
+    env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2')
+      .bind(conversationId, workspaceId, now)
+  ]);
+  await audit(env, principal, 'send_template', 'conversation', conversationId, {
+    channelId: target.channel_id, messageId, templateName: template.name
+  });
+  return { message: {
+    messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: 'template',
+    text: previewText, status: 'pending', timestamp: now,
+    template: { name: template.name, language: template.language }
+  } };
+}
+
+async function createConversationAttachmentMessage(env, workspaceId, conversationId, request, principal) {
+  const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
+  if (target.connectorType !== 'whatsapp_cloud') throw httpError(409, 'Attachments are currently available only for WhatsApp conversations.');
+  if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
+  assertFreeformReplyAllowed(target.connectorType, target.last_inbound_at);
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.toLowerCase().startsWith('multipart/form-data;')) throw httpError(415, 'Content-Type must be multipart/form-data.');
+  const declaredLength = Number(request.headers.get('Content-Length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_ATTACHMENT_BYTES + 1024 * 1024) {
+    throw httpError(413, 'Attachment request is too large.');
+  }
+  let form;
+  try { form = await request.formData(); } catch { throw httpError(400, 'Multipart attachment data is invalid.'); }
+  const file = form.get('file');
+  if (!file || typeof file !== 'object' || typeof file.arrayBuffer !== 'function') throw httpError(400, 'A file field is required.');
+  const attachment = validateWhatsAppAttachment(file, form.get('caption'));
+  const providerMediaId = await uploadWhatsAppMedia(env, target.channel, file, attachment);
+  const now = new Date().toISOString();
+  const messageId = crypto.randomUUID();
+  const encryptedPayload = await encryptOutboundPayload({ media: { ...attachment, id: providerMediaId } },
+    env.CHANNEL_CREDENTIALS_KEY, workspaceId, messageId);
+  const preview = attachment.caption || `[${attachment.type}: ${attachment.filename}]`;
+  const safeAttachment = { type: attachment.type, filename: attachment.filename, mimeType: attachment.mimeType,
+    size: attachment.size, caption: attachment.caption };
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
+        status,timestamp,payload_json,workspace_id)
+      VALUES (?1,?2,?3,?4,'outbound',?5,?6,'pending',?7,?8,?9)`)
+      .bind(messageId, conversationId, target.contact_id, target.channel_id, attachment.type, preview, now,
+        JSON.stringify({ attachment: safeAttachment }), workspaceId),
+    env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
+      VALUES (?1,?2,?3,?4,?4)`).bind(messageId, workspaceId, encryptedPayload, now),
+    env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,0,6,?3,'pending','',?4,?4,?5)`)
+      .bind(crypto.randomUUID(), messageId, now, now, workspaceId),
+    env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2')
+      .bind(conversationId, workspaceId, now)
+  ]);
+  await audit(env, principal, 'send_attachment', 'conversation', conversationId, {
+    channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType, size: attachment.size
+  });
+  return { message: {
+    messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
+    text: preview, status: 'pending', timestamp: now, attachment: safeAttachment
+  } };
+}
+
+function validateWhatsAppAttachment(file, captionValue) {
+  const mimeType = String(file.type || '').toLowerCase().split(';', 1)[0].trim();
+  const types = new Map([
+    ['image/jpeg', 'image'], ['image/png', 'image'], ['image/webp', 'image'],
+    ['video/mp4', 'video'], ['video/3gpp', 'video'],
+    ['audio/aac', 'audio'], ['audio/amr', 'audio'], ['audio/mpeg', 'audio'],
+    ['audio/mp4', 'audio'], ['audio/ogg', 'audio'],
+    ['application/pdf', 'document'], ['text/plain', 'document'], ['text/csv', 'document'],
+    ['application/msword', 'document'],
+    ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'document'],
+    ['application/vnd.ms-excel', 'document'],
+    ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'document'],
+    ['application/vnd.ms-powerpoint', 'document'],
+    ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'document']
+  ]);
+  const type = types.get(mimeType);
+  if (!type) throw httpError(415, 'This file type is not supported for WhatsApp attachments.');
+  const size = Number(file.size || 0);
+  if (!Number.isFinite(size) || size <= 0) throw httpError(400, 'The attachment is empty.');
+  if (size > MAX_ATTACHMENT_BYTES) throw httpError(413, 'Attachments may not exceed 16 MB.');
+  const rawName = String(file.name || `attachment.${mimeType.split('/')[1] || 'bin'}`)
+    .replace(/[\u0000-\u001f\u007f\\/]+/g, ' ').trim();
+  const filename = (rawName || 'attachment').slice(0, 240);
+  const caption = captionValue === null || captionValue === undefined || String(captionValue).trim() === ''
+    ? ''
+    : cleanOptionalText(String(captionValue), 'Caption', MAX_ATTACHMENT_CAPTION_LENGTH);
+  return { type, mimeType, size, filename, caption };
+}
+
+async function uploadWhatsAppMedia(env, channel, file, attachment) {
+  const credentials = await readChannelCredentials(env, channel);
+  const token = credentials.accessToken;
+  const phoneNumberId = channel.config?.phoneNumberId;
+  if (!token || !phoneNumberId) throw httpError(409, 'WhatsApp credentials are not configured.');
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const body = new FormData();
+  body.set('messaging_product', 'whatsapp');
+  body.set('type', attachment.mimeType);
+  body.set('file', file, attachment.filename);
+  const response = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneNumberId)}/media`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body
+  });
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok || !data.id) {
+    throw httpError(422, `WhatsApp could not accept this attachment: ${providerError(data, response.status)}`);
+  }
+  return String(data.id);
+}
+
+function messageAttachmentView(messageType, payload) {
+  if (!['image', 'video', 'audio', 'document'].includes(String(messageType || ''))) return null;
+  const value = payload?.attachment;
+  if (!value || typeof value !== 'object') return null;
+  return {
+    type: String(value.type || messageType),
+    filename: String(value.filename || ''),
+    mimeType: String(value.mimeType || ''),
+    size: Number(value.size || 0),
+    caption: String(value.caption || '')
+  };
 }
 
 async function sendOrQueue(env, messageId) {
@@ -1878,6 +2160,17 @@ async function dispatchOutbound(env, messageId) {
       throw nonRetryableError('The encrypted template payload could not be decrypted.');
     }
     result = await sendWhatsAppTemplate(env, channel, row.channel_profile_id, outbound.template, messageId);
+  } else if (channel.connectorType === 'whatsapp_cloud' && ['image', 'video', 'audio', 'document'].includes(row.message_type)) {
+    const stored = await env.DB.prepare(`SELECT encrypted_payload FROM outbound_payloads
+      WHERE message_id=?1 AND workspace_id=?2`).bind(messageId, row.workspace_id).first();
+    if (!stored?.encrypted_payload) throw nonRetryableError('The encrypted attachment payload is unavailable.');
+    let outbound;
+    try {
+      outbound = await decryptOutboundPayload(stored.encrypted_payload, env.CHANNEL_CREDENTIALS_KEY, row.workspace_id, messageId);
+    } catch {
+      throw nonRetryableError('The encrypted attachment payload could not be decrypted.');
+    }
+    result = await sendWhatsAppMedia(env, channel, row.channel_profile_id, outbound.media, messageId);
   } else if (channel.connectorType === 'whatsapp_cloud') result = await sendWhatsApp(env, channel, row.channel_profile_id, row.text);
   else if (channel.connectorType === 'telegram') result = await sendTelegram(env, channel, row.channel_profile_id, row.text);
   else if (channel.connectorType === 'instagram') result = await sendInstagram(env, channel, row.channel_profile_id, row.text);
@@ -1932,6 +2225,46 @@ async function sendWhatsAppTemplate(env, channel, recipient, template, messageId
     throw error;
   }
   return { status: 'submitted', providerMessageId: data.messages?.[0]?.id || '', httpStatus: response.status };
+}
+
+async function sendWhatsAppMedia(env, channel, recipient, media, messageId) {
+  const credentials = await readChannelCredentials(env, channel);
+  const token = credentials.accessToken;
+  const phoneNumberId = channel.config?.phoneNumberId;
+  if (!token || !phoneNumberId) throw nonRetryableError('WhatsApp credentials are not configured.');
+  const type = String(media?.type || '');
+  if (!['image', 'video', 'audio', 'document'].includes(type) || !media?.id) {
+    throw nonRetryableError('The WhatsApp attachment payload is invalid.');
+  }
+  const item = { id: String(media.id) };
+  if (type !== 'audio' && media.caption) item.caption = String(media.caption).slice(0, MAX_ATTACHMENT_CAPTION_LENGTH);
+  if (type === 'document' && media.filename) item.filename = String(media.filename).slice(0, 240);
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const body = {
+    messaging_product: 'whatsapp', recipient_type: 'individual',
+    to: normalizeWhatsAppRecipient(recipient), type, [type]: item,
+    biz_opaque_callback_data: String(messageId).slice(0, 512)
+  };
+  const response = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneNumberId)}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) {
+    const code = data?.error?.code ? ` (${data.error.code})` : '';
+    const providerMessage = String(data?.error?.message || `HTTP ${response.status}`).slice(0, 300);
+    const error = new Error(`WhatsApp API${code}: ${providerMessage}`);
+    error.retryable = isRetryableWhatsAppStatus(response.status);
+    throw error;
+  }
+  return {
+    status: 'submitted', providerMessageId: data.messages?.[0]?.id || '', httpStatus: response.status,
+    attachment: {
+      type, filename: String(media.filename || ''), mimeType: String(media.mimeType || ''),
+      size: Number(media.size || 0), caption: String(media.caption || '')
+    }
+  };
 }
 
 async function sendGeneric(env, channel, row) {

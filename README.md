@@ -10,17 +10,22 @@ Helixcer Chat is a zero-monthly-cost omnichannel inbox designed for GitHub Pages
 - REST API backed by indexed D1 tables for contacts, identities, conversations, messages, webhook deduplication, retries, and audit history.
 - Realtime browser refresh through a hibernatable Durable Object WebSocket.
 - Any number of WhatsApp Cloud, Telegram Bot, and Instagram Messaging connections per workspace, with provider verification, signed/token-protected webhooks, and inbound/outbound text.
+- Channel credentials save immediately without calling the provider. Verification is a separate, explicit action, and administrators can copy a saved webhook verify token on demand without exposing it in normal channel payloads.
 - Provider credentials encrypted in D1 under one Cloudflare Worker master secret; no per-channel environment bindings or secrets are exposed to the browser.
 - D1 outbox with scheduled exponential-backoff retries. No paid queue is required.
+- WhatsApp conversations enforce Meta's 24-hour customer-service window. When it closes, the free-form composer is blocked and agents can send an approved template instead.
+- WhatsApp agents can attach supported images, videos, audio, and documents. Files are uploaded directly to Meta and are not copied into paid Helixcer object storage.
+- A Settings page controls browser notifications for new customer messages while the Helixcer dashboard is open.
 - Workspace API keys and a server-to-server Helixcer Messaging API. Its first available module sends WhatsApp templates and records each external send in the shared inbox before dispatching it to Meta.
 - Built-in API documentation for simple templates, variables, media headers, static and dynamic buttons, authentication, Flow, catalog, carousel, and future Meta-native components.
+- Supplied Helixcer artwork is used for dashboard branding and the browser icon. Google callback failures return to the branded sign-in screen with a safe, readable error instead of a raw Worker exception page.
 
 ## Repository layout
 
 ```text
 index.html                 GitHub Pages entry point
 api-docs.html              Browser-friendly Helixcer Developer API reference
-assets/                    Dashboard JavaScript and styles
+assets/                    Dashboard JavaScript, styles, and Helixcer brand assets
 docs/                      Markdown API reference
 worker/src/index.js        Cloudflare Worker API
 worker/migrations/         D1 schema
@@ -54,7 +59,7 @@ The Worker setup is documented in [`worker/README.md`](worker/README.md). In sum
 5. Export the current D1 database, apply all migrations, deploy the Worker, and deploy the Pages gateway.
 6. Sign in with the configured owner email and verify the inbox, team roles, and realtime connection before publishing the updated GitHub Pages frontend.
 7. Add each WhatsApp, Telegram, or Instagram connection in the dashboard. The Worker encrypts its credentials in D1; do not create `WA_MAIN_*` or other per-channel Worker secrets.
-8. Configure the exact channel-specific callback shown in the dashboard. WhatsApp starts placing correctly signed inbound webhook messages in the Inbox as soon as they arrive, without waiting for API/provider verification. Complete **Verify sending** before relying on outbound replies. Managed Meta calls default to Graph API v26.0.
+8. Save the channel, copy its callback and verify token, and configure them at the provider. Saving never calls Meta or another provider. WhatsApp starts placing correctly signed inbound webhook messages in the Inbox as soon as they arrive, without waiting for API/provider verification. Run the separate **Verify connection** action before relying on outbound replies. Managed Meta calls default to Graph API v26.0.
 9. Open **Developer API** from the sidebar and create a one-time workspace API key for each external backend or automation. Each key belongs to the workspace, and each request selects the appropriate connection with `channelId`. The currently available external-send module is WhatsApp templates; use [`api-docs.html`](api-docs.html) for its request contract and examples.
 
 Never place Google credentials, provider tokens, signing secrets, the bootstrap owner email, or a recovery token in GitHub.

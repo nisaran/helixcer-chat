@@ -23,6 +23,8 @@ test("normal authentication uses a top-level link and cookie credentials", () =>
   assert.match(app, /credentials:\s*"include"/);
   assert.match(app, /request\("\/api\/me"\)/);
   assert.match(app, /meta\[name="helixcer-api-base"\]/);
+  assert.match(app, /authParams\.get\("auth_error"\)/);
+  assert.match(app, /authParams\.delete\("auth_error_code"\)/);
   assert.doesNotMatch(app, /STORAGE_KEY|LEGACY_API_BASES/);
 });
 
@@ -107,18 +109,45 @@ test("Meta verify tokens live beside their callback and can be safely replaced",
   assert.match(app, /recentVerifyTokens: new Map\(\)/);
   assert.match(app, /updateChannel\(channelId, \{ credentials: \{ verifyToken \} \}\)/);
   assert.match(app, /state\.recentVerifyTokens\.set\(channelId, verifyToken\)/);
+  assert.match(app, /state\.recentVerifyTokens\.clear\(\)/);
   assert.match(app, /It will be masked again after a refresh/);
 });
 
-test("saving a channel preserves inbound-first WhatsApp setup and avoids duplicate creation", () => {
+test("saving a channel never runs provider verification and avoids duplicate creation", () => {
   assert.match(app, /savedChannelId = channelId \|\| String\(result\.channelId \|\| ""\)/);
   assert.match(app, /\$\("channelIdInput"\)\.value = savedChannelId/);
-  assert.match(app, /const receiveBeforeVerification = payload\.enabled && payload\.connectorType === "whatsapp_cloud"/);
-  assert.match(app, /if \(payload\.enabled && !receiveBeforeVerification\) \{[\s\S]*?state\.api\.verifyChannel\(savedChannelId\)/);
-  assert.match(app, /will place valid signed webhook messages in the Inbox now/);
-  assert.match(app, /Connection saved, but verification failed/);
-  assert.match(app, /syncChannelForm\(payload\.connectorType, true,/);
+  const saveChannelBody = app.slice(app.indexOf("async function saveChannel"), app.indexOf("async function toggleChannel"));
+  assert.doesNotMatch(saveChannelBody, /verifyChannel|Verifying|verification failed/i);
+  assert.match(saveChannelBody, /was saved without running provider verification/);
   assert.match(app, /savedChannelId \? "Save changes" : "Save connection"/);
+});
+
+test("WhatsApp inbox supports templates, attachments, and reply-window blocking", () => {
+  assert.match(html, /id="replyWindowNotice"/);
+  assert.match(html, /id="attachmentInput" type="file"/);
+  assert.match(html, /id="templateDialog"/);
+  assert.match(app, /freeformAllowed/);
+  assert.match(app, /\/api\/conversations\/\$\{encodeURIComponent\(conversationId\)\}\/template/);
+  assert.match(app, /\/api\/conversations\/\$\{encodeURIComponent\(conversationId\)\}\/attachments/);
+  assert.match(app, /The 24-hour reply window is closed/);
+  assert.match(app, /const request = previewText \? \{ \.\.\.template, previewText \} : template/);
+  assert.match(app, /\/approved template\/i\.test\(reason\)/);
+});
+
+test("settings expose permission-aware browser notifications", () => {
+  assert.match(html, /data-route="settings"/);
+  assert.match(html, /id="settingsRoute" data-route-panel="settings"/);
+  assert.match(html, /id="pushNotificationsToggle"/);
+  assert.match(app, /Notification\.requestPermission\(\)/);
+  assert.match(app, /new Notification\(/);
+  assert.match(app, /type === "webhook\.received"[\s\S]*?await loadAll\(\)[\s\S]*?notifyInboundMessage/);
+  assert.match(app, /lastNotificationAt: new Map\(\)/);
+});
+
+test("Helixcer mark brands the login, sidebar, and favicon", () => {
+  assert.match(html, /rel="icon" href="\.\/assets\/helixcer-mark\.jpg"/);
+  assert.match(html, /class="auth-brand-logo" src="\.\/assets\/helixcer-logo\.jpg" alt="Helixcer"/);
+  assert.match(html, /class="brand-mark"[^>]*>[\s\S]*?src="\.\/assets\/helixcer-mark\.jpg"/);
 });
 
 test("Developer API keys are managed by admins and shown only once", () => {

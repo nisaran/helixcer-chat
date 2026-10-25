@@ -9,6 +9,7 @@ import {
   requireRole,
   startGoogleOAuth,
   finishGoogleOAuth,
+  finishGoogleOAuthResponse,
   updateMembership,
   validateReturnTo,
   verifyGoogleIdToken
@@ -68,6 +69,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0002_identity_and_workspaces.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0003_whatsapp_channel.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0004_multichannel_credentials.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0005_external_template_api.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -258,6 +260,48 @@ async function performGoogleLogin(env, options = {}) {
   }), env);
   return { principal, sessionToken };
 }
+
+test('browser OAuth callback redirects failures to the app without exposing provider details', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const start = await startGoogleOAuth(new Request(
+    'https://api.chat.helixcer.com/auth/google/start?return_to=https%3A%2F%2Fchat.helixcer.com%2Finbox'
+  ), env);
+  const authorize = new URL(start.headers.get('location'));
+  const state = authorize.searchParams.get('state');
+  const callback = await finishGoogleOAuthResponse(new Request(
+    `https://api.chat.helixcer.com/auth/google/callback?code=test-code&state=${encodeURIComponent(state)}`,
+    { headers: { Cookie: `__Host-helixcer_oauth=${encodeURIComponent(state)}` } }
+  ), env, async () => {
+    throw new Error('upstream-secret-diagnostic');
+  });
+
+  assert.equal(callback.status, 302);
+  const target = new URL(callback.headers.get('location'));
+  assert.equal(target.origin, 'https://chat.helixcer.com');
+  assert.equal(target.searchParams.get('auth_error_code'), 'google_sign_in_unavailable');
+  assert.match(target.searchParams.get('auth_error'), /temporarily unavailable/i);
+  assert.doesNotMatch(target.toString(), /upstream-secret-diagnostic/);
+  assert.match(callback.headers.get('set-cookie'), /__Host-helixcer_oauth=;/);
+  assert.match(callback.headers.get('set-cookie'), /Max-Age=0/);
+  assert.equal(database.prepare('SELECT count(*) AS count FROM oauth_states').get().count, 0);
+  database.close();
+});
+
+test('browser OAuth callback turns invalid state into a retryable sign-in redirect', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const callback = await finishGoogleOAuthResponse(new Request(
+    'https://api.chat.helixcer.com/auth/google/callback?code=test-code&state=wrong',
+    { headers: { Cookie: '__Host-helixcer_oauth=different' } }
+  ), env);
+
+  assert.equal(callback.status, 302);
+  const target = new URL(callback.headers.get('location'));
+  assert.equal(target.searchParams.get('auth_error_code'), 'invalid_or_expired_sign_in');
+  assert.match(target.searchParams.get('auth_error'), /start Google sign-in again/i);
+  database.close();
+});
 
 function performOwnerLogin(env) {
   return performGoogleLogin(env, { name: 'Primary owner' });
@@ -579,6 +623,38 @@ test('managed channel CRUD encrypts credentials, preserves blank secrets, and ke
   assert.equal(listed.config.wabaId, '123456789012345');
   assert.equal(listed.setup.credentialsPresent, true);
   assert.deepEqual(listed.setup.credentialFields, { accessToken: true, verifyToken: true, appSecret: true });
+
+  const verifyTokenResponse = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-sales/verify-token', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  assert.equal(verifyTokenResponse.status, 200);
+  assert.equal(verifyTokenResponse.headers.get('Cache-Control'), 'no-store');
+  assert.deepEqual(await verifyTokenResponse.json(), {
+    ok: true, channelId: 'wa-sales', verifyToken: 'verify-token-value'
+  });
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM audit_log
+    WHERE action='read_verify_token' AND target_id='wa-sales'`).get().count, 1);
+
+  const agentSessionToken = 'agent-session-token-that-is-long-enough-for-testing';
+  const agentNow = new Date().toISOString();
+  database.prepare(`INSERT INTO users
+      (user_id,google_sub,email,display_name,email_verified,last_login_at,created_at,updated_at)
+    VALUES ('channel-agent','channel-agent-sub','channel-agent@example.com','Channel agent',1,?,?,?)`)
+    .run(agentNow, agentNow, agentNow);
+  database.prepare(`INSERT INTO memberships
+      (membership_id,workspace_id,user_id,role,status,created_at,updated_at)
+    VALUES ('channel-agent-membership','ws_default','channel-agent','agent','active',?,?)`)
+    .run(agentNow, agentNow);
+  database.prepare(`INSERT INTO sessions
+      (session_id,token_hash,user_id,workspace_id,expires_at,last_seen_at,created_at)
+    VALUES ('channel-agent-session',?,'channel-agent','ws_default',?,?,?)`)
+    .run(await hashToken(agentSessionToken), new Date(Date.now() + 3600000).toISOString(), agentNow, agentNow);
+  const agentDenied = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-sales/verify-token', {
+    headers: { Cookie: `__Host-helixcer_session=${agentSessionToken}` }
+  }), env);
+  assert.equal(agentDenied.status, 403);
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM audit_log
+    WHERE action='read_verify_token' AND target_id='wa-sales'`).get().count, 1);
 
   const duplicateWhatsApp = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
     method: 'POST', headers,
@@ -1147,6 +1223,149 @@ test('Telegram bot identity is reserved before webhook registration', async () =
     assert.equal(setWebhookCalls, 1);
     assert.equal(database.prepare("SELECT json_extract(config_json,'$.verifiedProviderId') AS id FROM channels WHERE channel_id='telegram-one'").get().id,
       '777000');
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('dashboard WhatsApp replies enforce the 24-hour window while templates and attachments use Meta', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const jsonHeaders = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ channelId: 'wa-dashboard', name: 'Dashboard WhatsApp', connectorType: 'whatsapp_cloud',
+      config: { wabaId: '523456789012345', phoneNumberId: '523456789012346', apiVersion: 'v26.0' },
+      credentials: { accessToken: 'dashboard-access-token-value-1234567890',
+        appSecret: '1234567890abcdef1234567890abcdef', verifyToken: 'dashboard-verify-token' } })
+  }), env);
+  assert.equal(created.status, 201);
+
+  const now = new Date().toISOString();
+  database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+    VALUES ('contact-dashboard','Asha',?,?, 'ws_default')`).run(now, now);
+  database.prepare(`INSERT INTO channel_identities
+      (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
+    VALUES ('identity-dashboard','contact-dashboard','wa-dashboard','919999999999','Asha',?,'ws_default')`).run(now);
+  database.prepare(`INSERT INTO conversations
+      (conversation_id,contact_id,channel_id,status,subject,last_message_at,created_at,updated_at,workspace_id)
+    VALUES ('conversation-dashboard','contact-dashboard','wa-dashboard','open','Asha',?,?,?,'ws_default')`).run(now, now, now);
+  database.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
+    VALUES ('inbound-dashboard','conversation-dashboard','contact-dashboard','wa-dashboard','inbound','text','Hello','received',?,'ws_default')`).run(now);
+
+  const conversations = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  const conversation = (await conversations.json()).items.find(item => item.conversationId === 'conversation-dashboard');
+  assert.equal(conversation.connectorType, 'whatsapp_cloud');
+  assert.equal(conversation.freeformAllowed, true);
+  assert.ok(conversation.replyWindowExpiresAt);
+
+  const originalFetch = globalThis.fetch;
+  const providerBodies = [];
+  let mediaUploadCalls = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/media')) {
+      assert.match(init.headers.Authorization, /^Bearer /);
+      const upload = init.body;
+      assert.equal(upload.get('messaging_product'), 'whatsapp');
+      assert.equal(upload.get('type'), 'application/pdf');
+      assert.equal(upload.get('file').name, 'invoice.pdf');
+      mediaUploadCalls++;
+      return new Response(JSON.stringify({ id: 'media-dashboard-1' }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.pathname.endsWith('/messages')) {
+      const body = JSON.parse(init.body);
+      providerBodies.push(body);
+      return new Response(JSON.stringify({ messages: [{ id: `wamid.dashboard-${providerBodies.length}` }] }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return new Response('{}', { status: 404 });
+  };
+  try {
+    const pending = [];
+    const ctx = { waitUntil(promise) { pending.push(promise); } };
+    const templateResponse = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/template', {
+      method: 'POST', headers: jsonHeaders,
+      body: JSON.stringify({ name: 'order_update', language: { code: 'en_US' },
+        components: [{ type: 'body', parameters: [{ type: 'text', text: 'Asha' }] }] })
+    }), env, ctx);
+    assert.equal(templateResponse.status, 202);
+    assert.equal((await templateResponse.json()).item.messageType, 'template');
+    await Promise.all(pending.splice(0));
+    assert.equal(providerBodies[0].type, 'template');
+    assert.equal(providerBodies[0].template.name, 'order_update');
+
+    const uploadBody = new FormData();
+    uploadBody.set('file', new Blob(['invoice data'], { type: 'application/pdf' }), 'invoice.pdf');
+    uploadBody.set('caption', 'Your invoice');
+    const attachmentResponse = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/attachments', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: uploadBody
+    }), env, ctx);
+    assert.equal(attachmentResponse.status, 202);
+    const attachmentItem = (await attachmentResponse.json()).item;
+    assert.equal(attachmentItem.messageType, 'document');
+    assert.equal(attachmentItem.attachment.filename, 'invoice.pdf');
+    await Promise.all(pending.splice(0));
+    assert.equal(mediaUploadCalls, 1);
+    assert.equal(providerBodies[1].type, 'document');
+    assert.equal(providerBodies[1].document.id, 'media-dashboard-1');
+    assert.equal(providerBodies[1].document.filename, 'invoice.pdf');
+
+    const messages = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/messages', {
+      headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    const messageBody = await messages.json();
+    assert.equal(messageBody.freeformAllowed, true);
+    assert.equal(messageBody.items.find(item => item.messageType === 'document').attachment.caption, 'Your invoice');
+
+    const unsupportedBody = new FormData();
+    unsupportedBody.set('file', new Blob(['binary'], { type: 'application/x-msdownload' }), 'unsafe.exe');
+    const unsupported = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/attachments', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: unsupportedBody
+    }), env, ctx);
+    assert.equal(unsupported.status, 415);
+    assert.match((await unsupported.json()).error, /not supported/i);
+    assert.equal(mediaUploadCalls, 1);
+
+    database.prepare("UPDATE messages SET timestamp='2020-01-01T00:00:00.000Z' WHERE message_id='inbound-dashboard'").run();
+    const blockedText = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/messages', {
+      method: 'POST', headers: jsonHeaders, body: JSON.stringify({ text: 'Too late' })
+    }), env);
+    assert.equal(blockedText.status, 409);
+    assert.match((await blockedText.json()).error, /24-hour service window/i);
+
+    const closed = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/messages', {
+      headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal((await closed.json()).freeformAllowed, false);
+
+    const closedAttachmentBody = new FormData();
+    closedAttachmentBody.set('file', new Blob(['late invoice'], { type: 'application/pdf' }), 'late.pdf');
+    const blockedAttachment = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/attachments', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: closedAttachmentBody
+    }), env, ctx);
+    assert.equal(blockedAttachment.status, 409);
+    assert.match((await blockedAttachment.json()).error, /24-hour service window/i);
+    assert.equal(mediaUploadCalls, 1);
+
+    const allowedTemplate = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/template', {
+      method: 'POST', headers: jsonHeaders,
+      body: JSON.stringify({ name: 'reopen_chat', language: { code: 'en_US' } })
+    }), env, ctx);
+    assert.equal(allowedTemplate.status, 202);
+    const allowedTemplateItem = (await allowedTemplate.clone().json()).item;
+    assert.equal(allowedTemplateItem.status, 'pending');
+    assert.equal(database.prepare('SELECT message_type FROM messages WHERE message_id=?').get(allowedTemplateItem.messageId).message_type,
+      'template');
+    await Promise.all(pending.splice(0));
   } finally {
     globalThis.fetch = originalFetch;
     database.close();

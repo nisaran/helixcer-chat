@@ -20,8 +20,25 @@ import {
   resolveTemplate,
   timingSafeEqual,
   validateWhatsAppTemplateRequest,
+  whatsappReplyWindowState,
   verifyMetaSignature
 } from '../src/index.js';
+
+test('WhatsApp free-form replies follow the latest inbound 24-hour window', () => {
+  const now = Date.parse('2026-10-25T12:00:00.000Z');
+  assert.deepEqual(whatsappReplyWindowState('telegram', '', now), {
+    freeformAllowed: true, replyWindowExpiresAt: '', replyWindowReason: ''
+  });
+  const open = whatsappReplyWindowState('whatsapp_cloud', '2026-10-24T13:00:00.000Z', now);
+  assert.equal(open.freeformAllowed, true);
+  assert.equal(open.replyWindowExpiresAt, '2026-10-25T13:00:00.000Z');
+  const closed = whatsappReplyWindowState('whatsapp_cloud', '2026-10-24T11:59:59.000Z', now);
+  assert.equal(closed.freeformAllowed, false);
+  assert.match(closed.replyWindowReason, /approved template/i);
+  const unopened = whatsappReplyWindowState('whatsapp_cloud', '', now);
+  assert.equal(unopened.freeformAllowed, false);
+  assert.equal(unopened.replyWindowExpiresAt, '');
+});
 
 test('normalizes inbound WhatsApp messages and statuses', () => {
   const result = normalizeWhatsApp({ entry: [{ changes: [{ value: {

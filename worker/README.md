@@ -10,7 +10,10 @@ The backend uses Cloudflare Workers, D1, a scheduled D1 outbox, and a Durable Ob
 - Durable Object instances and broadcasts are keyed by `workspace_id`. Each socket carries only server-internal session metadata and is revalidated before events or keepalive replies; logout, disablement, and role changes disconnect affected sockets.
 - WhatsApp, Telegram, and Instagram webhooks retain independent signature/token verification and do not depend on an agent session.
 - Each workspace can own any number of provider connections. Their credentials are encrypted in D1 with AES-256-GCM under one Worker master secret; the browser can replace a secret but can never read one back.
+- Saving a provider connection only validates and encrypts its configuration. Provider verification remains a separate administrator action.
 - Failed outbound messages use the D1 outbox and a one-minute scheduled retry with exponential backoff.
+- WhatsApp free-form text and media are accepted only inside Meta's 24-hour customer-service window. Approved templates use a separate authenticated dashboard endpoint and remain available after that window closes.
+- Dashboard attachments are uploaded directly to Meta before their outbound message is queued; Helixcer stores only message metadata and the encrypted temporary provider payload, not another copy of the file.
 - External applications use revocable, hashed workspace API keys through the Helixcer Messaging API. The currently available WhatsApp template module writes sends to the inbox and outbox atomically; sensitive retry payloads are AES-GCM encrypted and removed after a terminal submission result.
 
 The initial migration seeds one empty workspace, never an administrator. On the first successful Google login, an owner membership is created only if there are no memberships and the verified Google email exactly matches `BOOTSTRAP_OWNER_EMAIL`. Future users require an invitation.
@@ -53,7 +56,7 @@ Create a Google Web OAuth client and register the exact callback configured by `
 https://api.chat.helixcer.com/auth/google/callback
 ```
 
-No Google refresh token is requested or stored; Google is used only to verify identity during sign-in.
+No Google refresh token is requested or stored; Google is used only to verify identity during sign-in. Callback failures clear stale OAuth state and return the browser to the configured app origin with a safe error code and message. If no app origin is configured, the Worker renders a small branded fallback page instead of exposing a raw exception.
 
 ## Database and deployment
 
@@ -104,9 +107,12 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `GET|POST /api/channels`
 - `PATCH|DELETE /api/channels/:channelId`
 - `POST /api/channels/:channelId/verify`
+- `GET /api/channels/:channelId/verify-token` (owner/admin; audited, no-store response)
 - `GET /api/conversations`
 - `PATCH /api/conversations/:id`
 - `GET|POST /api/conversations/:id/messages`
+- `POST /api/conversations/:id/template` (authenticated WhatsApp template send)
+- `POST /api/conversations/:id/attachments` (authenticated WhatsApp multipart upload)
 - `GET|POST /api/contacts`
 - `POST /api/demo/seed`
 - `GET /api/realtime` (WebSocket)
@@ -124,7 +130,7 @@ The public v1 Helixcer Messaging API accepts only server-to-server requests and 
 
 ## Managed channel connections
 
-Owners and administrators create connections through `POST /api/channels` and edit them through `PATCH /api/channels/:channelId`. A PATCH keeps every omitted or blank credential unchanged. API responses expose only non-secret configuration, credential-presence booleans, verification timestamps, and provider identity metadata. Decrypted values exist only for the provider call that needs them.
+Owners and administrators create connections through `POST /api/channels` and edit them through `PATCH /api/channels/:channelId`. Saving never performs provider verification; `POST /api/channels/:channelId/verify` is an explicit follow-up action. A PATCH keeps every omitted or blank credential unchanged. API responses expose only non-secret configuration, credential-presence booleans, verification timestamps, and provider identity metadata. Decrypted values exist only for the provider call that needs them. The one deliberate readback is `GET /api/channels/:channelId/verify-token`: it is restricted to owners and administrators, audited, and returns only that channel's webhook handshake token when the user chooses Copy. Normal channel-list and bootstrap payloads remain secret-free.
 
 Replacing a Meta access token or App Secret invalidates the provider identity check but preserves an already completed callback handshake. Replacing the Verify Token or changing provider configuration requires webhook verification again; historical `lastWebhookAt` is retained unless the provider identity itself changes.
 
@@ -138,7 +144,9 @@ Meta connections default to Graph API `v26.0`. `GET /api/channels` returns the p
 
 Credential rows are encrypted independently with a random nonce and authenticated workspace/channel/field context. Listing channels checks only which credential field rows exist and does not decrypt them. Audit entries contain only the names of credential fields changed, never their values.
 
-Free-form WhatsApp replies remain subject to Meta's customer-service window, and Instagram messaging remains subject to Meta's allowed messaging window and permissions. The external API sends already-approved WhatsApp templates; creating or approving templates remains in Meta's tools.
+For each WhatsApp conversation, list and message responses include `freeformAllowed`, `replyWindowExpiresAt`, and a human-readable reason when the window is closed. The Worker independently rejects free-form text and attachments outside the 24-hour customer-service window; the dashboard cannot bypass this check. `POST /api/conversations/:id/template` sends an already-approved template from the inbox and remains available after the window closes. The external API can also send approved WhatsApp templates. Creating or approving templates remains in Meta's tools, and Instagram messaging remains subject to Meta's own allowed messaging window and permissions.
+
+The attachment endpoint accepts multipart form data with a `file` field and optional `caption`. It supports the WhatsApp media types and limits enforced by this release (up to 16 MiB at the Helixcer edge), uploads the file directly to the configured Meta Phone Number ID, and stores only safe filename/type/size/caption metadata in D1. The provider media ID is kept only in the encrypted temporary outbound payload and removed after terminal submission.
 
 Legacy Generic HTTP and Web Chat paths remain for compatibility. Their old environment-secret resolver is isolated to `generic_http`; managed WhatsApp, Telegram, and Instagram code reads only encrypted D1 credentials and can never fall back to `WA_*`, `BOT_*`, or other per-channel environment variables.
 

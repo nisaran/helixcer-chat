@@ -2,6 +2,7 @@
   "use strict";
 
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
+  const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -25,6 +26,8 @@
     authStatus: "checking",
     api: null,
     disconnectRealtime: null,
+    notificationsEnabled: localStorage.getItem(NOTIFICATION_PREFERENCE_KEY) === "true",
+    lastNotificationAt: new Map(),
     loading: true,
   };
 
@@ -151,6 +154,10 @@
     constructor() {
       this.data = demoSeed();
       this.listener = null;
+      this.verifyTokens = new Map([
+        ["wa-sales", "demo_whatsapp_verify_token"],
+        ["instagram-main", "demo_instagram_verify_token"],
+      ]);
     }
 
     async bootstrap() {
@@ -263,6 +270,17 @@
       return { ok: true, item: clone(item) };
     }
 
+    async sendTemplate(conversationId, payload) {
+      const templateName = payload?.name || "template";
+      return this.sendMessage(conversationId, payload.previewText || `[Template: ${templateName}]`);
+    }
+
+    async sendAttachment(conversationId, formData) {
+      const file = formData.get("file");
+      const caption = String(formData.get("caption") || "").trim();
+      return this.sendMessage(conversationId, caption || `[Attachment: ${file?.name || "file"}]`);
+    }
+
     async updateConversation(conversationId, patch) {
       const item = this.data.conversations.find((entry) => entry.conversationId === conversationId);
       if (!item) throw new Error("Conversation not found");
@@ -314,6 +332,7 @@
         health: Object.values(payload.credentials || {}).some(Boolean) ? "configured" : "setup_required",
       };
       this.data.channels.push(channel);
+      if (payload.credentials?.verifyToken) this.verifyTokens.set(channel.channelId, payload.credentials.verifyToken);
       this.emit({ type: "channel.updated", channelId: channel.channelId });
       return { ok: true, channelId: channel.channelId, item: clone(channel) };
     }
@@ -331,8 +350,16 @@
         channel.health = channel.enabled ? "configured" : "disconnected";
       } else if (!channel.enabled) channel.health = "disconnected";
       else if (channel.health === "disconnected") channel.health = channel.setup?.credentialsPresent ? "configured" : "setup_required";
+      if (payload.credentials?.verifyToken) this.verifyTokens.set(channelId, payload.credentials.verifyToken);
       this.emit({ type: "channel.updated", channelId });
       return { ok: true, channelId, item: clone(channel) };
+    }
+
+    async getVerifyToken(channelId) {
+      await smallDelay(80);
+      const verifyToken = this.verifyTokens.get(channelId);
+      if (!verifyToken) throw new Error("No verify token is saved for this channel.");
+      return { ok: true, channelId, verifyToken };
     }
 
     async verifyChannel(channelId) {
@@ -371,7 +398,8 @@
     async request(path, options = {}) {
       const headers = new Headers(options.headers || {});
       headers.set("Accept", "application/json");
-      if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+      const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+      if (options.body && !isFormData && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
       if (this.recoveryToken) headers.set("Authorization", `Bearer ${this.recoveryToken}`);
       const response = await fetch(`${this.base}${path}`, { ...options, headers, credentials: "include" });
       const contentType = response.headers.get("content-type") || "";
@@ -424,6 +452,24 @@
         });
     }
 
+    sendTemplate(conversationId, payload) {
+      return this.isDemo
+        ? this.demo.sendTemplate(conversationId, payload)
+        : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/template`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+    }
+
+    sendAttachment(conversationId, formData) {
+      return this.isDemo
+        ? this.demo.sendAttachment(conversationId, formData)
+        : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/attachments`, {
+          method: "POST",
+          body: formData,
+        });
+    }
+
     updateConversation(conversationId, patch) {
       return this.isDemo
         ? this.demo.updateConversation(conversationId, patch)
@@ -455,6 +501,12 @@
       return this.isDemo
         ? this.demo.verifyChannel(channelId)
         : this.request(`/api/channels/${encodeURIComponent(channelId)}/verify`, { method: "POST" });
+    }
+
+    getVerifyToken(channelId) {
+      return this.isDemo
+        ? this.demo.getVerifyToken(channelId)
+        : this.request(`/api/channels/${encodeURIComponent(channelId)}/verify-token`);
     }
 
     webhookUrl(channel) {
@@ -606,6 +658,7 @@
   function showSignedOut(message = "") {
     state.authStatus = "signed-out";
     state.currentUser = null;
+    state.recentVerifyTokens.clear();
     if (state.disconnectRealtime) state.disconnectRealtime();
     state.disconnectRealtime = null;
     $("appShell").hidden = true;
@@ -659,6 +712,15 @@
   async function initializeSession() {
     showAuthChecking();
     createApi();
+    const authParams = new URLSearchParams(location.search);
+    const callbackError = String(authParams.get("auth_error") || authParams.get("authError") || "").trim();
+    if (callbackError) {
+      authParams.delete("auth_error");
+      authParams.delete("authError");
+      authParams.delete("auth_error_code");
+      const cleanQuery = authParams.toString();
+      history.replaceState(null, "", `${location.pathname}${cleanQuery ? `?${cleanQuery}` : ""}${location.hash}`);
+    }
     try {
       let authPayload;
       try {
@@ -687,7 +749,7 @@
         : error.status === 401
           ? "Sign in with an approved Google account to continue."
           : "We could not reach the secure session service. Please try again.";
-      showSignedOut(message);
+      showSignedOut(callbackError || message);
     }
   }
 
@@ -712,18 +774,25 @@
   }
 
   function normalizeConversation(raw) {
+    const replyWindow = raw.replyWindow && typeof raw.replyWindow === "object" ? raw.replyWindow : {};
     return {
       ...raw,
       conversationId: String(raw.conversationId || raw.id || ""),
       contactId: String(raw.contactId || raw.contact?.contactId || raw.contact?.id || ""),
       subject: raw.subject || raw.contactName || raw.displayName || raw.contact?.displayName || "Unknown contact",
       channelId: String(raw.channelId || raw.channel?.channelId || raw.channel?.id || "unknown"),
+      connectorType: raw.connectorType || raw.channel?.connectorType || "",
       status: raw.status || "open",
       assignedTo: raw.assignedTo || raw.assignee || "Unassigned",
       unreadCount: Number(raw.unreadCount ?? raw.unread ?? 0),
       lastMessage: raw.lastMessage?.text || raw.lastMessageText || raw.preview || raw.lastMessage || "No messages yet",
       lastMessageAt: raw.lastMessageAt || raw.updatedAt || raw.createdAt || new Date().toISOString(),
       channelProfileId: raw.channelProfileId || raw.contact?.channelProfileId || "",
+      freeformAllowed: typeof raw.freeformAllowed === "boolean"
+        ? raw.freeformAllowed
+        : typeof replyWindow.freeformAllowed === "boolean" ? replyWindow.freeformAllowed : undefined,
+      replyWindowExpiresAt: raw.replyWindowExpiresAt || replyWindow.expiresAt || "",
+      replyWindowReason: raw.replyWindowReason || replyWindow.reason || "",
     };
   }
 
@@ -811,6 +880,7 @@
     populateContactChannelSelect();
     populateAssigneeSelect();
     if (canAdmin()) renderApiKeys();
+    renderNotificationSetting();
     renderSelectedConversation();
   }
 
@@ -906,6 +976,9 @@
       try {
         const data = await state.api.getMessages(conversationId);
         state.messages.set(conversationId, asItems(data).map(normalizeMessage));
+        if (typeof data?.freeformAllowed === "boolean") conversation.freeformAllowed = data.freeformAllowed;
+        if (data?.replyWindowExpiresAt) conversation.replyWindowExpiresAt = data.replyWindowExpiresAt;
+        if (data?.replyWindowReason) conversation.replyWindowReason = data.replyWindowReason;
       } catch (error) {
         state.messages.set(conversationId, []);
         showToast("Messages could not be loaded", error.message, true);
@@ -953,6 +1026,7 @@
     const tags = contact?.tags?.length ? contact.tags : ["No tags"];
     tags.forEach((tag) => tagHost.append(element("span", "tag", tag)));
     renderMessages();
+    renderComposerState();
   }
 
   function renderMessageLoading() {
@@ -974,6 +1048,7 @@
     }
     if (!messages.length) {
       host.append(element("div", "empty-list", "No messages yet. Send the first reply below."));
+      renderComposerState();
       return;
     }
     let dateKey = "";
@@ -1003,7 +1078,60 @@
         row.append(bubble);
         host.append(row);
       });
+    renderComposerState();
     requestAnimationFrame(() => { host.scrollTop = host.scrollHeight; });
+  }
+
+  function isWhatsAppConversation(conversation = selectedConversation()) {
+    if (!conversation) return false;
+    const connectorType = conversation.connectorType || channelFor(conversation.channelId).connectorType;
+    return connectorType === "whatsapp" || connectorType === "whatsapp_cloud";
+  }
+
+  function whatsappReplyWindow(conversation = selectedConversation()) {
+    if (!isWhatsAppConversation(conversation)) return { allowed: true, expiresAt: "" };
+    if (typeof conversation.freeformAllowed === "boolean") {
+      return { allowed: conversation.freeformAllowed, expiresAt: conversation.replyWindowExpiresAt || "" };
+    }
+    const messages = state.messages.get(conversation.conversationId);
+    if (!messages) return { allowed: true, expiresAt: "" };
+    const latestInbound = messages
+      .filter((message) => message.direction === "inbound")
+      .reduce((latest, message) => Math.max(latest, new Date(message.timestamp).getTime() || 0), 0);
+    if (!latestInbound) return { allowed: false, expiresAt: "" };
+    const expiresAt = new Date(latestInbound + 24 * 60 * 60 * 1000).toISOString();
+    return { allowed: Date.now() < new Date(expiresAt).getTime(), expiresAt };
+  }
+
+  function renderComposerState() {
+    const conversation = selectedConversation();
+    const whatsapp = isWhatsAppConversation(conversation);
+    const windowState = whatsappReplyWindow(conversation);
+    const blocked = Boolean(conversation && whatsapp && !windowState.allowed);
+    const input = $("messageInput");
+    const send = $("sendButton");
+    const attach = $("attachmentButton");
+    const greeting = document.querySelector('#messageForm [data-action="insert-greeting"]');
+    const template = $("templateButton");
+    const notice = $("replyWindowNotice");
+    template.hidden = !whatsapp;
+    notice.hidden = !blocked;
+    input.disabled = blocked;
+    send.disabled = blocked;
+    attach.disabled = blocked || !whatsapp;
+    greeting.disabled = blocked;
+    input.placeholder = blocked ? "The WhatsApp reply window is closed" : "Write a reply…";
+    $("messageForm").classList.toggle("is-window-closed", blocked);
+    attach.title = !whatsapp ? "Attachments are currently available for WhatsApp conversations" : blocked ? "Send an approved template to reopen the conversation" : "Attach a file";
+    if (blocked) {
+      const expiry = windowState.expiresAt ? new Date(windowState.expiresAt) : null;
+      const expiryCopy = expiry && !Number.isNaN(expiry.getTime())
+        ? ` The reply window ended ${relativeTime(expiry.toISOString())}.`
+        : "";
+      const reason = conversation.replyWindowReason || "A free-form reply is no longer allowed.";
+      const templatePrompt = /approved template/i.test(reason) ? "" : " Send an approved template to continue.";
+      $("replyWindowMessage").textContent = `${reason}${expiryCopy}${templatePrompt}`;
+    }
   }
 
   function renderContacts() {
@@ -1180,13 +1308,11 @@
       const displayWrap = element("div", "callback-token-display-wrap");
       displayWrap.append(display, status);
       tokenRow.append(displayWrap);
-      if (recentVerifyToken) {
-        const copyToken = element("button", "secondary-button compact-button", "Copy token");
-        copyToken.type = "button";
-        copyToken.dataset.action = "copy-webhook-token";
-        copyToken.dataset.channelId = channel.channelId;
-        tokenRow.append(copyToken);
-      }
+      const copyToken = element("button", "secondary-button compact-button", "Copy token");
+      copyToken.type = "button";
+      copyToken.dataset.action = "copy-webhook-token";
+      copyToken.dataset.channelId = channel.channelId;
+      tokenRow.append(copyToken);
       const replaceToken = element("button", "secondary-button compact-button", storedVerifyToken ? "Replace token" : "Set token");
       replaceToken.type = "button";
       replaceToken.dataset.action = "edit-webhook-token";
@@ -1664,6 +1790,11 @@
     const input = $("messageInput");
     const text = input.value.trim();
     if (!conversation || !text) return;
+    if (isWhatsAppConversation(conversation) && !whatsappReplyWindow(conversation).allowed) {
+      renderComposerState();
+      showToast("Use a WhatsApp template", "The 24-hour reply window is closed for this conversation.", true);
+      return;
+    }
     input.value = "";
     resizeComposer();
     $("sendButton").disabled = true;
@@ -1680,8 +1811,121 @@
       resizeComposer();
       showToast("Message was not sent", error.message, true);
     } finally {
-      $("sendButton").disabled = false;
-      input.focus();
+      renderComposerState();
+      if (!input.disabled) input.focus();
+    }
+  }
+
+  function openTemplateDialog() {
+    const conversation = selectedConversation();
+    if (!conversation || !isWhatsAppConversation(conversation)) {
+      showToast("WhatsApp conversation required", "Templates can currently be sent from WhatsApp conversations only.", true);
+      return;
+    }
+    const form = $("templateForm");
+    form.reset();
+    form.elements.languageCode.value = "en_US";
+    $("templateDialog").showModal();
+    form.elements.name.focus();
+  }
+
+  async function sendCurrentTemplate(form) {
+    const conversation = selectedConversation();
+    if (!conversation || !isWhatsAppConversation(conversation)) return;
+    const values = new FormData(form);
+    const name = String(values.get("name") || "").trim();
+    const languageCode = String(values.get("languageCode") || "").trim();
+    const previewText = String(values.get("previewText") || "").trim();
+    const bodyVariables = String(values.get("bodyVariables") || "")
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!name || !languageCode) return;
+    const template = { name, language: { code: languageCode } };
+    if (bodyVariables.length) {
+      template.components = [{
+        type: "body",
+        parameters: bodyVariables.map((text) => ({ type: "text", text })),
+      }];
+    }
+    const submit = $("templateSubmit");
+    submit.disabled = true;
+    submit.textContent = "Sending…";
+    try {
+      const request = previewText ? { ...template, previewText } : template;
+      const result = await state.api.sendTemplate(conversation.conversationId, request);
+      const fallback = previewText || `[Template: ${name}]`;
+      const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "template" });
+      upsertMessage(conversation.conversationId, message);
+      conversation.lastMessage = message.text || fallback;
+      conversation.lastMessageAt = message.timestamp;
+      $("templateDialog").close();
+      renderMessages();
+      renderConversationList();
+      showToast("Template queued", `${name} is being sent through WhatsApp.`);
+    } catch (error) {
+      showToast("Template was not sent", error.message, true);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = "Send template";
+    }
+  }
+
+  function attachmentSizeLimit(file) {
+    return 16 * 1024 * 1024;
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  async function uploadCurrentAttachment(file) {
+    const conversation = selectedConversation();
+    const status = $("attachmentStatus");
+    if (!conversation || !file) return;
+    if (!isWhatsAppConversation(conversation)) {
+      showToast("WhatsApp conversation required", "File sending is currently available for WhatsApp conversations.", true);
+      return;
+    }
+    if (!whatsappReplyWindow(conversation).allowed) {
+      renderComposerState();
+      showToast("Use a WhatsApp template", "Attachments cannot be sent after the 24-hour reply window closes.", true);
+      return;
+    }
+    const limit = attachmentSizeLimit(file);
+    if (file.size > limit) {
+      showToast("File is too large", `${file.name} is ${formatFileSize(file.size)}. The limit for this file type is ${formatFileSize(limit)}.`, true);
+      return;
+    }
+    const input = $("messageInput");
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+    if (input.value.trim()) formData.append("caption", input.value.trim());
+    status.hidden = false;
+    status.classList.remove("is-error");
+    status.textContent = `Uploading ${file.name} (${formatFileSize(file.size)})…`;
+    $("attachmentButton").disabled = true;
+    try {
+      const result = await state.api.sendAttachment(conversation.conversationId, formData);
+      const fallback = input.value.trim() || `[Attachment: ${file.name}]`;
+      const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "document" });
+      upsertMessage(conversation.conversationId, message);
+      conversation.lastMessage = message.text || fallback;
+      conversation.lastMessageAt = message.timestamp;
+      input.value = "";
+      resizeComposer();
+      status.textContent = `${file.name} sent`;
+      renderMessages();
+      renderConversationList();
+      setTimeout(() => { status.hidden = true; }, 3500);
+    } catch (error) {
+      status.classList.add("is-error");
+      status.textContent = `${file.name} was not sent: ${error.message}`;
+      showToast("Attachment was not sent", error.message, true);
+    } finally {
+      $("attachmentInput").value = "";
+      renderComposerState();
     }
   }
 
@@ -1693,11 +1937,26 @@
     state.messages.set(conversationId, messages);
   }
 
-  function handleRealtimeEvent(event) {
+  async function handleRealtimeEvent(event) {
     const type = event.type || event.event;
     if (type === "webhook.received") {
+      const before = new Map(state.conversations.map((conversation) => [conversation.conversationId, {
+        lastMessageAt: new Date(conversation.lastMessageAt).getTime() || 0,
+        unreadCount: conversation.unreadCount,
+      }]));
       if (state.selectedConversationId) state.messages.delete(state.selectedConversationId);
-      loadAll();
+      await loadAll();
+      state.conversations.forEach((conversation) => {
+        const previous = before.get(conversation.conversationId);
+        const timestamp = new Date(conversation.lastMessageAt).getTime() || 0;
+        const isNewInbound = timestamp > (previous?.lastMessageAt || 0)
+          && (!previous || conversation.unreadCount > previous.unreadCount || conversation.conversationId === state.selectedConversationId);
+        if (isNewInbound) notifyInboundMessage(conversation, {
+          direction: "inbound",
+          text: conversation.lastMessage,
+          timestamp: conversation.lastMessageAt,
+        });
+      });
       return;
     }
     if (type === "message.created" || type === "message.updated") {
@@ -1724,7 +1983,12 @@
       if (conversation) {
         conversation.lastMessage = message.text;
         conversation.lastMessageAt = message.timestamp;
-        if (message.direction === "inbound" && conversationId !== state.selectedConversationId) conversation.unreadCount += 1;
+        if (message.direction === "inbound") {
+          conversation.freeformAllowed = true;
+          conversation.replyWindowExpiresAt = new Date(new Date(message.timestamp).getTime() + 24 * 60 * 60 * 1000).toISOString();
+          if (conversationId !== state.selectedConversationId) conversation.unreadCount += 1;
+          if (type === "message.created" && !existingMessage) notifyInboundMessage(conversation, message);
+        }
       }
       renderCounts();
       renderConversationList();
@@ -1749,10 +2013,83 @@
     if (["channel.updated", "channel.deleted", "bootstrap.changed"].includes(type)) loadAll();
   }
 
+  function notificationSupport() {
+    return typeof window.Notification !== "undefined";
+  }
+
+  function renderNotificationSetting() {
+    const toggle = $("pushNotificationsToggle");
+    const status = $("notificationPermissionStatus");
+    if (!toggle || !status) return;
+    if (!notificationSupport()) {
+      toggle.checked = false;
+      toggle.disabled = true;
+      status.textContent = "This browser does not support notifications.";
+      return;
+    }
+    const permission = Notification.permission;
+    if (permission === "denied") state.notificationsEnabled = false;
+    toggle.checked = state.notificationsEnabled && permission === "granted";
+    toggle.disabled = permission === "denied";
+    status.textContent = permission === "granted"
+      ? (toggle.checked ? "Enabled on this browser." : "Permission granted; alerts are currently off.")
+      : permission === "denied"
+        ? "Blocked in your browser settings. Allow notifications for this site to enable alerts."
+        : "Your browser will ask for permission when you enable this setting.";
+  }
+
+  async function setBrowserNotifications(enabled) {
+    const toggle = $("pushNotificationsToggle");
+    if (!notificationSupport()) {
+      renderNotificationSetting();
+      return;
+    }
+    if (enabled && Notification.permission !== "granted") {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        state.notificationsEnabled = false;
+        localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
+        renderNotificationSetting();
+        showToast("Notifications were not enabled", permission === "denied" ? "Allow notifications for this site in your browser settings." : "Permission was not granted.", true);
+        return;
+      }
+    }
+    state.notificationsEnabled = enabled;
+    localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, String(enabled));
+    renderNotificationSetting();
+    showToast(enabled ? "Notifications enabled" : "Notifications disabled", enabled ? "This browser will alert you to new customer messages while Helixcer Chat is running." : "This browser will no longer show Helixcer message alerts.");
+    toggle.blur();
+  }
+
+  function notifyInboundMessage(conversation, message) {
+    if (!state.notificationsEnabled || !notificationSupport() || Notification.permission !== "granted") return;
+    if (document.visibilityState === "visible" && conversation.conversationId === state.selectedConversationId) return;
+    const timestamp = new Date(message.timestamp || conversation.lastMessageAt).getTime() || Date.now();
+    const previousNotification = state.lastNotificationAt.get(conversation.conversationId) || 0;
+    if (timestamp <= previousNotification) return;
+    state.lastNotificationAt.set(conversation.conversationId, timestamp);
+    const notification = new Notification(`New message from ${conversation.subject}`, {
+      body: message.text || "A new customer message arrived.",
+      icon: "./assets/helixcer-mark.jpg",
+      badge: "./assets/helixcer-mark.jpg",
+      tag: `helixcer-${conversation.conversationId}`,
+    });
+    notification.addEventListener("click", () => {
+      window.focus();
+      setRoute("inbox");
+      selectConversation(conversation.conversationId);
+      notification.close();
+    });
+  }
+
   async function refreshMessages(conversationId) {
     try {
       const data = await state.api.getMessages(conversationId);
       state.messages.set(conversationId, asItems(data).map(normalizeMessage));
+      const conversation = state.conversations.find((item) => item.conversationId === conversationId);
+      if (conversation && typeof data?.freeformAllowed === "boolean") conversation.freeformAllowed = data.freeformAllowed;
+      if (conversation && data?.replyWindowExpiresAt) conversation.replyWindowExpiresAt = data.replyWindowExpiresAt;
+      if (conversation && data?.replyWindowReason) conversation.replyWindowReason = data.replyWindowReason;
       if (conversationId === state.selectedConversationId) renderMessages();
     } catch {
       // A later reconnect or manual refresh will retry without disrupting the agent.
@@ -1768,7 +2105,7 @@
   }
 
   function setRoute(route) {
-    if (!["inbox", "contacts", "channels", "developer", "team"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "channels", "developer", "team", "settings"].includes(route)) route = "inbox";
     if (!canAdmin() && ["channels", "developer", "team"].includes(route)) route = "inbox";
     state.route = route;
     document.querySelectorAll("[data-route-panel]").forEach((panel) => {
@@ -1782,8 +2119,9 @@
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     });
-    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", developer: "Developer API", team: "Team" };
+    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", developer: "Developer API", team: "Team", settings: "Settings" };
     $("pageTitle").textContent = labels[route];
+    if (route === "settings") renderNotificationSetting();
     if (location.hash !== `#${route}`) history.replaceState(null, "", `#${route}`);
     closeMobileMenu();
   }
@@ -1861,21 +2199,33 @@
 
   async function copyWebhookVerifyToken(button) {
     const channelId = String(button?.dataset.channelId || "");
-    const token = state.recentVerifyTokens.get(channelId) || "";
-    if (!token) {
-      showToast("Stored token stays protected", "Choose Replace token to create a new value that can be copied.", true);
-      return;
-    }
+    if (!channelId || !button) return;
+    let token = state.recentVerifyTokens.get(channelId) || "";
+    const previous = button.textContent;
+    button.disabled = true;
+    button.textContent = "Loading…";
     try {
+      if (!token) {
+        const result = await state.api.getVerifyToken(channelId);
+        token = String(result.verifyToken || "");
+        if (!token) throw new Error("No verify token is saved for this channel.");
+      }
       await navigator.clipboard.writeText(token);
       showToast("Verify token copied", "Paste it into Meta's webhook configuration.");
-    } catch {
+    } catch (error) {
       const input = button.closest(".callback-token-row")?.querySelector("input");
-      if (input) {
+      if (input && token) {
+        input.value = token;
+        input.type = "text";
         input.focus();
         input.select();
+        showToast("Copy the selected token", "Your browser blocked automatic clipboard access.");
+      } else {
+        showToast("Verify token could not be copied", error.message, true);
       }
-      showToast("Copy the selected token", "Your browser blocked automatic clipboard access.");
+    } finally {
+      button.disabled = false;
+      button.textContent = previous;
     }
   }
 
@@ -2006,12 +2356,10 @@
     const payload = channelPayload(form);
     const submit = $("channelSubmit");
     let savedChannelId = channelId;
-    let saved = false;
     submit.disabled = true;
     submit.textContent = "Saving…";
     try {
       const result = await (channelId ? state.api.updateChannel(channelId, payload) : state.api.createChannel(payload));
-      saved = true;
       savedChannelId = channelId || String(result.channelId || "");
       if (!savedChannelId) throw new Error("The connection was saved, but its channel ID was not returned.");
       const newVerifyToken = ["whatsapp_cloud", "instagram"].includes(payload.connectorType)
@@ -2025,29 +2373,13 @@
         $("channelProvider").disabled = true;
         $("channelDialogTitle").textContent = `Edit ${payload.name}`;
       }
-      let verification = null;
-      const receiveBeforeVerification = payload.enabled && payload.connectorType === "whatsapp_cloud";
-      if (payload.enabled && !receiveBeforeVerification) {
-        submit.textContent = "Verifying…";
-        verification = await state.api.verifyChannel(savedChannelId);
-      }
       $("channelDialog").close();
       await loadAll();
       setRoute("channels");
       if (!payload.enabled) showToast(channelId ? "Connection updated" : "Connection added", `${payload.name} is saved but disabled.`);
-      else if (receiveBeforeVerification) showToast("Connection saved", `${payload.name} will place valid signed webhook messages in the Inbox now. Verify sending when Meta access is ready.`);
-      else if (verification?.health === "connected") showToast("Connection is live", `${payload.name} is verified and ready for messaging.`);
-      else showToast("Connection verified", `${payload.name} is ready for its provider webhook. Copy the verify token beside the callback URL.`);
+      else showToast("Connection saved", `${payload.name} was saved without running provider verification. Use Verify connection whenever you are ready.`);
     } catch (error) {
-      if (saved) {
-        await loadAll();
-        setRoute("channels");
-        const savedChannel = state.channels.find((item) => item.channelId === savedChannelId);
-        syncChannelForm(payload.connectorType, true, savedChannel?.setup || { credentialsPresent: true });
-        showToast("Connection saved, but verification failed", error.message, true);
-      } else {
-        showToast("Connection was not saved", error.message, true);
-      }
+      showToast("Connection was not saved", error.message, true);
     } finally {
       submit.disabled = false;
       submit.textContent = savedChannelId ? "Save changes" : "Save connection";
@@ -2317,7 +2649,9 @@
           "new-conversation": openContactDialog,
           "new-contact": openContactDialog,
           "close-contact-dialog": () => $("contactDialog").close(),
-          "attachment-info": () => showToast("Attachments are protected", "The zero-cost release keeps media on its source channel."),
+          "choose-attachment": () => $("attachmentInput").click(),
+          "open-template": openTemplateDialog,
+          "close-template": () => $("templateDialog").close(),
           "insert-greeting": () => {
             const input = $("messageInput");
             const name = selectedConversation()?.subject?.split(" ")[0] || "there";
@@ -2402,6 +2736,8 @@
         sendCurrentMessage();
       }
     });
+    $("attachmentInput").addEventListener("change", (event) => uploadCurrentAttachment(event.target.files?.[0]));
+    $("pushNotificationsToggle").addEventListener("change", (event) => setBrowserNotifications(event.target.checked));
 
     $("conversationStatus").addEventListener("change", async (event) => {
       const conversation = selectedConversation();
@@ -2448,6 +2784,7 @@
     });
     $("contactChannelId").addEventListener("change", updateContactIdentityField);
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
+    $("templateForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentTemplate(event.currentTarget); });
     $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
     $("apiKeyForm").addEventListener("submit", (event) => { event.preventDefault(); createDeveloperApiKey(event.currentTarget); });
     $("inviteRole").addEventListener("change", updateInviteRoleHelp);

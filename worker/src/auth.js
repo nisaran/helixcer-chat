@@ -97,6 +97,37 @@ export async function finishGoogleOAuth(request, env, fetchImpl = fetch) {
   });
 }
 
+/**
+ * Browser-facing OAuth callback wrapper.
+ *
+ * The core finishGoogleOAuth function intentionally continues to throw typed
+ * errors so it remains useful to tests and other callers. The HTTP route should
+ * call this wrapper instead: OAuth failures are converted into a safe redirect
+ * back to the app, preventing rejected promises from surfacing as a raw
+ * Cloudflare Worker exception page.
+ */
+export async function finishGoogleOAuthResponse(request, env, fetchImpl = fetch) {
+  try {
+    return await finishGoogleOAuth(request, env, fetchImpl);
+  } catch (error) {
+    const failure = oauthFailureView(error);
+    if (failure.status >= 500) {
+      console.error('oauth_callback_failed', { status: failure.status, message: error?.message || 'Unknown OAuth callback error' });
+    }
+    const target = oauthFailureTarget(env);
+    if (!target) return oauthFailurePage(failure, clearCookieHeader(OAUTH_COOKIE));
+    target.searchParams.set('auth_error', failure.message);
+    target.searchParams.set('auth_error_code', failure.code);
+    const headers = new Headers({
+      Location: target.toString(),
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer'
+    });
+    headers.append('Set-Cookie', clearCookieHeader(OAUTH_COOKIE));
+    return new Response(null, { status: 302, headers });
+  }
+}
+
 export async function authenticateRequest(request, env) {
   const recovery = recoveryPrincipal(request, env);
   if (recovery) return recovery;
@@ -467,6 +498,76 @@ function googleRedirectUri(request, env) {
 
 function requireOAuthConfig(env) {
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) throw authError(503, 'Google OAuth is not configured.');
+}
+
+function oauthFailureView(error) {
+  const status = Number(error?.status) || 500;
+  if (status === 400) {
+    return {
+      status,
+      code: 'invalid_or_expired_sign_in',
+      message: 'This sign-in link is invalid or expired. Please start Google sign-in again.'
+    };
+  }
+  if (status === 401) {
+    return {
+      status,
+      code: 'google_sign_in_failed',
+      message: error?.message === 'Google sign-in was cancelled or denied.'
+        ? 'Google sign-in was cancelled or denied.'
+        : 'Google sign-in could not be completed. Please try again.'
+    };
+  }
+  if (status === 403) {
+    return {
+      status,
+      code: 'workspace_access_denied',
+      message: 'This Google account does not have access to this workspace. Ask the workspace owner to invite it.'
+    };
+  }
+  if (status === 409) {
+    return {
+      status,
+      code: 'google_account_conflict',
+      message: 'This email is already linked to another Google account. Contact the workspace owner.'
+    };
+  }
+  return {
+    status,
+    code: 'google_sign_in_unavailable',
+    message: 'Google sign-in is temporarily unavailable. Please try again.'
+  };
+}
+
+function oauthFailureTarget(env) {
+  const candidates = [env.APP_ORIGIN, ...String(env.ALLOWED_ORIGINS || '').split(',')]
+    .map(value => String(value || '').trim()).filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const target = new URL(candidate);
+      if (target.protocol === 'https:' || target.protocol === 'http:') return target;
+    } catch { /* Try the next configured app origin. */ }
+  }
+  return null;
+}
+
+function oauthFailurePage(failure, expiredCookie) {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Helixcer sign-in</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f5f1;color:#172321;font:16px/1.5 system-ui,sans-serif}.card{width:min(520px,calc(100% - 40px));box-sizing:border-box;padding:36px;border:1px solid #d9dfdb;border-radius:24px;background:#fff;box-shadow:0 20px 55px #17232118}.mark{display:grid;place-items:center;width:52px;height:52px;border-radius:15px;background:linear-gradient(145deg,#263cff,#aa00d6 58%,#ee006a);color:#fff;font-size:28px;font-weight:800}h1{margin:22px 0 10px;font-size:30px;line-height:1.15}p{margin:0;color:#596561}</style></head><body><main class="card"><div class="mark">H</div><h1>Sign-in could not be completed</h1><p>${escapeHtml(failure.message)}</p></main></body></html>`;
+  return new Response(html, {
+    status: failure.status >= 500 ? 503 : failure.status,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'Set-Cookie': expiredCookie
+    }
+  });
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[character]);
 }
 
 function cookieHeader(name, value, maxAge) {

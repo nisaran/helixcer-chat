@@ -9,9 +9,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://lh3.googleusercontent.com; connect-src 'self' https://api.chat.helixcer.com wss://api.chat.helixcer.com; object-src 'none'; base-uri 'none'; form-action 'self'">
   <meta name="helixcer-api-base" content="https://api.chat.helixcer.com">
   <title>Helixcer Chat</title>
-  <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261025-6">
-  <script src="./assets/app.js?v=20261025-6" defer></script>
+  <link rel="icon" href="./assets/helixcer-mark.jpg" type="image/jpeg">
+  <link rel="apple-touch-icon" href="./assets/helixcer-mark.jpg">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261025-7">
+  <script src="./assets/app.js?v=20261025-7" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -20,7 +21,7 @@
     <div class="auth-backdrop" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="auth-card">
       <div class="auth-brand">
-        <span class="brand-mark" aria-hidden="true">H</span>
+        <img class="auth-brand-logo" src="./assets/helixcer-logo.jpg" alt="Helixcer">
         <span>Helixcer <strong>Chat</strong></span>
       </div>
       <div class="auth-checking" id="authChecking" role="status">
@@ -46,7 +47,7 @@
   <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar" aria-label="Primary navigation">
       <a class="brand" href="#inbox" aria-label="Helixcer Chat home">
-        <span class="brand-mark" aria-hidden="true">H</span>
+        <span class="brand-mark" aria-hidden="true"><img src="./assets/helixcer-mark.jpg" alt=""></span>
         <span class="brand-copy">Helixcer <strong>Chat</strong></span>
       </a>
 
@@ -81,6 +82,12 @@
             <svg viewBox="0 0 24 24"><path d="M16 20v-1.6a4.4 4.4 0 0 0-4.4-4.4H6.4A4.4 4.4 0 0 0 2 18.4V20M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8-1a3 3 0 1 0 0-6m5 17v-1.6a4.4 4.4 0 0 0-3.3-4.3"/></svg>
           </span>
           <span>Team</span>
+        </button>
+        <button class="nav-button" type="button" data-route="settings">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+          </span>
+          <span>Settings</span>
         </button>
       </nav>
 
@@ -198,17 +205,23 @@
               <div class="message-thread" id="messageThread" aria-live="polite"></div>
               <div class="typing-row" id="typingIndicator" hidden><span></span><span></span><span></span><em>A customer is typing</em></div>
 
+              <div class="reply-window-notice" id="replyWindowNotice" hidden>
+                <div><strong>The 24-hour WhatsApp reply window is closed</strong><span id="replyWindowMessage">Send an approved WhatsApp template to continue this conversation.</span></div>
+                <button class="secondary-button compact-button" type="button" data-action="open-template">Send template</button>
+              </div>
               <form class="composer" id="messageForm">
                 <div class="composer-box">
                   <textarea id="messageInput" rows="1" maxlength="4000" placeholder="Write a reply…" aria-label="Message"></textarea>
+                  <input class="sr-only" id="attachmentInput" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/3gpp,audio/aac,audio/amr,audio/mpeg,audio/mp4,audio/ogg,application/pdf,text/plain,text/csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv" tabindex="-1">
                   <div class="composer-tools">
                     <div>
-                      <button class="composer-icon" type="button" data-action="attachment-info" aria-label="Attach a file">
+                      <button class="composer-icon" id="attachmentButton" type="button" data-action="choose-attachment" aria-label="Attach a file">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20.5 11.5-8.8 8.8a6 6 0 0 1-8.5-8.5l9.5-9.5a4 4 0 0 1 5.7 5.7l-9.6 9.5a2 2 0 1 1-2.8-2.8l8.8-8.8"/></svg>
                       </button>
                       <button class="composer-icon" type="button" data-action="insert-greeting" aria-label="Insert greeting">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
                       </button>
+                      <button class="template-button" id="templateButton" type="button" data-action="open-template" hidden>Template</button>
                     </div>
                     <div class="send-group">
                       <span class="send-hint">Enter to send</span>
@@ -217,6 +230,7 @@
                       </button>
                     </div>
                   </div>
+                  <div class="attachment-status" id="attachmentStatus" role="status" hidden></div>
                 </div>
               </form>
             </div>
@@ -334,6 +348,21 @@
           <div class="surface-toolbar"><div><strong>Pending invitations</strong><span class="subtle" id="invitationCount">0 pending</span></div></div>
           <div class="invitation-list" id="invitationList"></div>
         </div>
+      </section>
+
+      <section class="route content-route" id="settingsRoute" data-route-panel="settings" aria-labelledby="settingsTitle" hidden>
+        <div class="route-heading">
+          <div><p class="eyebrow">Your preferences</p><h2 id="settingsTitle">Settings</h2><p>Choose how this browser alerts you about new customer messages.</p></div>
+        </div>
+        <section class="surface settings-surface" aria-labelledby="notificationSettingTitle">
+          <div class="setting-row">
+            <div class="setting-copy">
+              <span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span>
+              <div><strong id="notificationSettingTitle">Browser push notifications</strong><span id="notificationSettingHelp">Receive an alert from this browser when a new customer message arrives while Helixcer Chat is open.</span><small id="notificationPermissionStatus">Checking browser permission…</small></div>
+            </div>
+            <label class="switch-control"><input type="checkbox" id="pushNotificationsToggle"><span aria-hidden="true"></span><em>Enable</em></label>
+          </div>
+        </section>
       </section>
     </main>
   </div>
@@ -480,6 +509,26 @@
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-contact-dialog">Cancel</button>
         <button class="primary-button" type="submit">Create conversation</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="templateDialog" aria-labelledby="templateDialogTitle">
+    <form class="modal-card" id="templateForm" autocomplete="off">
+      <div class="modal-head">
+        <div><p class="eyebrow">WhatsApp template</p><h2 id="templateDialogTitle">Send an approved template</h2></div>
+        <button class="icon-button" type="button" data-action="close-template" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="modal-copy">Use the exact template name and language approved in WhatsApp Manager. Add body variables in their approved order.</p>
+      <div class="form-grid">
+        <label class="field-label">Template name<input class="text-field" name="name" required maxlength="512" placeholder="order_confirmation"></label>
+        <label class="field-label">Language code<input class="text-field" name="languageCode" required maxlength="35" value="en_US" placeholder="en_US"></label>
+        <label class="field-label form-span">Body variables <span class="optional-label">one value per line</span><textarea class="text-field template-variables" name="bodyVariables" rows="4" maxlength="4000" placeholder="Nisar&#10;Order 1001&#10;Tomorrow"></textarea></label>
+        <label class="field-label form-span">Conversation preview <span class="optional-label">optional</span><input class="text-field" name="previewText" maxlength="500" placeholder="Order confirmation template"></label>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-template">Cancel</button>
+        <button class="primary-button" id="templateSubmit" type="submit">Send template</button>
       </div>
     </form>
   </dialog>
