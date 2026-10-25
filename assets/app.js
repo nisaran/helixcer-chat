@@ -3,6 +3,8 @@
 
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
+  const PUSH_DEVICE_KEY = "helixcer_push_device_id";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-1";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -32,6 +34,9 @@
     disconnectRealtime: null,
     notificationsEnabled: localStorage.getItem(NOTIFICATION_PREFERENCE_KEY) === "true",
     serviceWorkerRegistration: null,
+    pushConfig: null,
+    pushSubscriptionReady: false,
+    pushSyncPromise: null,
     lastNotificationAt: new Map(),
     loading: true,
   };
@@ -568,6 +573,24 @@
         : this.request(`/api/contacts/${encodeURIComponent(contactId)}`, { method: "PATCH", body: JSON.stringify(payload) });
     }
 
+    getPushConfig() {
+      return this.isDemo
+        ? Promise.resolve({ available: false, publicKey: "" })
+        : this.request("/api/push/config");
+    }
+
+    savePushSubscription(payload) {
+      return this.isDemo
+        ? Promise.resolve({ subscribed: true, deviceId: payload.deviceId })
+        : this.request("/api/push/subscriptions", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    removePushSubscription(payload) {
+      return this.isDemo
+        ? Promise.resolve({ subscribed: false, deviceId: payload.deviceId })
+        : this.request("/api/push/subscriptions", { method: "DELETE", body: JSON.stringify(payload) });
+    }
+
     createChannel(payload) {
       return this.isDemo
         ? this.demo.createChannel(payload)
@@ -825,6 +848,7 @@
         loadAll({ preserveSelection: false }),
         canAdmin() ? loadTeam() : Promise.resolve(),
         canAdmin() ? loadApiKeys() : Promise.resolve(),
+        prepareBrowserPush(),
       ]);
     } catch (error) {
       const message = error.status === 403
@@ -907,6 +931,17 @@
       status: raw.status || (raw.direction === "outbound" ? "sent" : "received"),
       senderName: raw.senderName || raw.sender || "",
     };
+  }
+
+  function outboundDeliveryStatus(value) {
+    const status = String(value || "sent").toLocaleLowerCase();
+    if (status === "failed" || status === "error") return { label: "Failed", className: "message-failed" };
+    if (status === "read" || status === "seen") return { label: "Read ✓✓", className: "delivery-status is-read" };
+    if (status === "delivered") return { label: "Delivered ✓✓", className: "delivery-status is-delivered" };
+    if (status === "retrying") return { label: "Retrying", className: "delivery-status is-pending" };
+    if (status === "pending" || status === "queued") return { label: "Pending", className: "delivery-status is-pending" };
+    if (status === "submitted" || status === "accepted") return { label: "Submitted ✓", className: "delivery-status is-sent" };
+    return { label: "Sent ✓", className: "delivery-status is-sent" };
   }
 
   function deriveContacts(conversations) {
@@ -1158,9 +1193,10 @@
         const foot = element("div", "message-foot");
         foot.append(element("time", "", formatClock(message.timestamp)));
         if (message.direction === "outbound") {
-          const status = element("span", message.status === "failed" ? "message-failed" : "delivery-check");
-          status.textContent = message.status === "failed" ? "Failed" : (message.status === "read" ? "✓✓" : "✓");
-          status.title = message.status;
+          const delivery = outboundDeliveryStatus(message.status);
+          const status = element("span", delivery.className, delivery.label);
+          status.title = `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`;
+          status.setAttribute("aria-label", status.title);
           foot.append(status);
         }
         bubble.append(foot);
@@ -1353,11 +1389,10 @@
     const payload = {
       displayName: String(data.get("displayName") || "").trim(),
       channelId: String($("contactEditChannel").value || "").trim(),
-      channelProfileId: String(data.get("channelProfileId") || "").trim(),
       company: String(data.get("company") || "").trim(),
       tags: String(data.get("tags") || "").split(/[,\n]/).map((tag) => tag.trim()).filter(Boolean),
     };
-    if (!contactId || !payload.displayName || !payload.channelId || !payload.channelProfileId) {
+    if (!contactId || !payload.displayName || !payload.channelId) {
       form.reportValidity();
       return;
     }
@@ -2517,12 +2552,87 @@
     return typeof window.Notification !== "undefined" && "serviceWorker" in navigator;
   }
 
+  function backgroundPushSupport() {
+    return notificationSupport() && "PushManager" in window;
+  }
+
   async function ensureServiceWorkerRegistration() {
     if (!("serviceWorker" in navigator)) return null;
-    if (state.serviceWorkerRegistration) return state.serviceWorkerRegistration;
-    const existing = await navigator.serviceWorker.getRegistration("/");
-    state.serviceWorkerRegistration = existing || await navigator.serviceWorker.register("/sw.js");
+    if (state.serviceWorkerRegistration?.active) return state.serviceWorkerRegistration;
+    await navigator.serviceWorker.register(SERVICE_WORKER_URL, { scope: "/" });
+    state.serviceWorkerRegistration = await navigator.serviceWorker.ready;
     return state.serviceWorkerRegistration;
+  }
+
+  function pushDeviceId() {
+    const saved = localStorage.getItem(PUSH_DEVICE_KEY) || "";
+    if (/^[A-Za-z0-9_-]{16,100}$/.test(saved)) return saved;
+    const generated = crypto.randomUUID();
+    localStorage.setItem(PUSH_DEVICE_KEY, generated);
+    return generated;
+  }
+
+  function applicationServerKey(value) {
+    const padding = "=".repeat((4 - (value.length % 4)) % 4);
+    const decoded = atob(`${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  }
+
+  function subscriptionUsesKey(subscription, expected) {
+    const current = subscription?.options?.applicationServerKey;
+    if (!current) return false;
+    const bytes = new Uint8Array(current);
+    return bytes.length === expected.length && bytes.every((value, index) => value === expected[index]);
+  }
+
+  async function loadPushConfiguration() {
+    if (!state.api || state.api.recoveryToken) {
+      state.pushConfig = { available: false, publicKey: "" };
+      return state.pushConfig;
+    }
+    try {
+      state.pushConfig = await state.api.getPushConfig();
+    } catch {
+      state.pushConfig = { available: false, publicKey: "" };
+    }
+    renderNotificationSetting();
+    return state.pushConfig;
+  }
+
+  async function subscribeBrowserPush() {
+    if (!backgroundPushSupport()) throw new Error("This browser does not support background Web Push.");
+    const config = state.pushConfig || await loadPushConfiguration();
+    if (!config?.available || !config.publicKey) throw new Error("Background Web Push is not configured on the server.");
+    const registration = await ensureServiceWorkerRegistration();
+    const expectedKey = applicationServerKey(config.publicKey);
+    let subscription = await registration.pushManager.getSubscription();
+    if (subscription && !subscriptionUsesKey(subscription, expectedKey)) {
+      await subscription.unsubscribe();
+      subscription = null;
+    }
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: expectedKey });
+    }
+    await state.api.savePushSubscription({ deviceId: pushDeviceId(), subscription: subscription.toJSON() });
+    state.pushSubscriptionReady = true;
+    return registration;
+  }
+
+  async function removeBrowserPushSubscription() {
+    state.pushSubscriptionReady = false;
+    let subscription = null;
+    try {
+      const registration = await ensureServiceWorkerRegistration();
+      subscription = await registration?.pushManager?.getSubscription();
+    } catch { /* Continue with server cleanup. */ }
+    await Promise.allSettled([
+      state.api?.removePushSubscription?.({ deviceId: pushDeviceId() }),
+      subscription?.unsubscribe?.()
+    ]);
+  }
+
+  function androidPermissionHelp() {
+    return "In Android Chrome, tap the site-controls icon beside the address bar, open Permissions, and allow Notifications.";
   }
 
   function renderNotificationSetting() {
@@ -2541,15 +2651,42 @@
       status.textContent = "Notifications are not available in this browser. On mobile, install the app to your Home Screen and open it there.";
       return;
     }
+    if (!backgroundPushSupport()) {
+      toggle.checked = false;
+      toggle.disabled = true;
+      status.textContent = "This browser does not support background Web Push.";
+      return;
+    }
+    if (state.pushConfig === null) {
+      toggle.checked = state.notificationsEnabled;
+      toggle.disabled = true;
+      status.textContent = "Checking the background notification service…";
+      return;
+    }
+    if (!state.pushConfig.available) {
+      toggle.checked = false;
+      toggle.disabled = true;
+      status.textContent = "Background notifications are not configured on the server.";
+      return;
+    }
+    if (!state.serviceWorkerRegistration?.active) {
+      toggle.checked = state.notificationsEnabled;
+      toggle.disabled = true;
+      status.textContent = "Preparing the background notification service…";
+      return;
+    }
     const permission = Notification.permission;
-    if (permission === "denied") state.notificationsEnabled = false;
-    toggle.checked = state.notificationsEnabled && permission === "granted";
-    toggle.disabled = permission === "denied";
+    toggle.checked = state.notificationsEnabled;
+    toggle.disabled = false;
     status.textContent = permission === "granted"
-      ? (toggle.checked ? "Enabled on this browser." : "Permission granted; alerts are currently off.")
+      ? (state.notificationsEnabled
+        ? (state.pushSubscriptionReady ? "Background notifications are enabled on this device." : "Finishing the background notification subscription…")
+        : "Permission granted; background notifications are currently off.")
       : permission === "denied"
-        ? "Blocked in your browser settings. Allow notifications for this site to enable alerts."
-        : "Your browser will ask for permission when you enable this setting.";
+        ? `Enabled in Helixcer, but blocked by Chrome. ${androidPermissionHelp()}`
+        : (state.notificationsEnabled
+          ? `Waiting for Chrome permission. ${androidPermissionHelp()}`
+          : "Chrome will ask for notification permission when you enable this setting.");
   }
 
   async function setBrowserNotifications(enabled) {
@@ -2558,37 +2695,88 @@
       renderNotificationSetting();
       return;
     }
-    if (enabled && Notification.permission !== "granted") {
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        state.notificationsEnabled = false;
-        localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
-        renderNotificationSetting();
-        showToast("Notifications were not enabled", permission === "denied" ? "Allow notifications for this site in your browser settings." : "Permission was not granted.", true);
-        return;
-      }
+    if (!enabled) {
+      state.notificationsEnabled = false;
+      localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
+      await removeBrowserPushSubscription();
+      renderNotificationSetting();
+      showToast("Notifications disabled", "This device will no longer receive Helixcer message alerts.");
+      toggle.blur();
+      return;
     }
-    if (enabled) {
-      try {
-        const registration = await ensureServiceWorkerRegistration();
-        if (!registration?.showNotification) throw new Error("This browser cannot display service-worker notifications.");
-      } catch (error) {
-        state.notificationsEnabled = false;
-        localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
-        renderNotificationSetting();
-        showToast("Notifications were not enabled", `The notification service could not start: ${error.message}`, true);
-        return;
-      }
-    }
-    state.notificationsEnabled = enabled;
-    localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, String(enabled));
+    state.notificationsEnabled = true;
+    localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "true");
     renderNotificationSetting();
-    showToast(enabled ? "Notifications enabled" : "Notifications disabled", enabled ? "This browser will alert you to new customer messages while Helixcer Chat is running." : "This browser will no longer show Helixcer message alerts.");
+    if (enabled && Notification.permission !== "granted") {
+      let permission = "default";
+      try {
+        permission = await Notification.requestPermission();
+      } catch {
+        permission = Notification.permission || "default";
+      }
+      if (permission !== "granted") {
+        renderNotificationSetting();
+        showToast("Chrome permission is still needed", permission === "denied"
+          ? androidPermissionHelp()
+          : `Chrome may show a quiet permission request. ${androidPermissionHelp()}`, true);
+        toggle.blur();
+        return;
+      }
+    }
+    try {
+      const registration = await subscribeBrowserPush();
+      await registration.showNotification("Helixcer notifications enabled", {
+        body: "This device can now receive new customer message alerts in the background.",
+        icon: "/assets/helixcer-mark.jpg",
+        badge: "/assets/helixcer-mark.jpg",
+        tag: "helixcer-notification-test",
+        data: { url: "/#inbox" }
+      });
+    } catch (error) {
+      state.notificationsEnabled = false;
+      state.pushSubscriptionReady = false;
+      localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
+      renderNotificationSetting();
+      showToast("Notifications were not enabled", `The background notification service could not start: ${error.message}`, true);
+      toggle.blur();
+      return;
+    }
+    renderNotificationSetting();
+    showToast("Background notifications enabled", "This device can receive alerts even when Helixcer Chat is closed.");
     toggle.blur();
+  }
+
+  function prepareBrowserPush() {
+    if (state.pushSyncPromise) return state.pushSyncPromise;
+    state.pushSyncPromise = (async () => {
+      await loadPushConfiguration();
+      if (!backgroundPushSupport() || !state.pushConfig?.available) return;
+      try {
+        await ensureServiceWorkerRegistration();
+      } catch {
+        state.pushSubscriptionReady = false;
+        renderNotificationSetting();
+        return;
+      }
+      if (!state.notificationsEnabled || Notification.permission !== "granted") {
+        state.pushSubscriptionReady = false;
+        if (state.notificationsEnabled && Notification.permission === "denied") await removeBrowserPushSubscription();
+        renderNotificationSetting();
+        return;
+      }
+      try {
+        await subscribeBrowserPush();
+      } catch {
+        state.pushSubscriptionReady = false;
+      }
+      renderNotificationSetting();
+    })().finally(() => { state.pushSyncPromise = null; });
+    return state.pushSyncPromise;
   }
 
   async function notifyInboundMessage(conversation, message) {
     if (!state.notificationsEnabled || !notificationSupport() || Notification.permission !== "granted") return;
+    if (state.pushSubscriptionReady && document.visibilityState !== "visible") return;
     if (document.visibilityState === "visible" && conversation.conversationId === state.selectedConversationId) return;
     const timestamp = new Date(message.timestamp || conversation.lastMessageAt).getTime() || Date.now();
     const previousNotification = state.lastNotificationAt.get(conversation.conversationId) || 0;
@@ -2686,6 +2874,11 @@
   }
 
   async function logout() {
+    if (state.notificationsEnabled) {
+      state.notificationsEnabled = false;
+      localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
+      await removeBrowserPushSubscription();
+    }
     try { await state.api.logout(); }
     catch { /* Always clear local recovery state and return to sign-in. */ }
     sessionStorage.removeItem(RECOVERY_TOKEN_KEY);
@@ -3414,6 +3607,7 @@
       if (button) cancelInvitation(button.dataset.cancelInvitation);
     });
     window.addEventListener("hashchange", () => setRoute(location.hash.slice(1)));
+    window.addEventListener("focus", () => prepareBrowserPush().catch(() => {}));
     window.addEventListener("beforeunload", () => state.disconnectRealtime?.());
     window.addEventListener("helixcer:unauthorized", () => showSignedOut("Your session expired. Sign in again to continue."));
     document.addEventListener("keydown", (event) => {
@@ -3424,12 +3618,14 @@
       }
       if (event.key === "Escape") closeMobileMenu();
     });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") prepareBrowserPush().catch(() => {});
+    });
   }
 
   async function init() {
     bindEvents();
     setRoute(location.hash.slice(1) || "inbox");
-    ensureServiceWorkerRegistration().catch(() => {});
     await initializeSession();
   }
 

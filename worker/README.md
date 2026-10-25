@@ -1,6 +1,6 @@
 # Helixcer Chat Cloudflare backend
 
-The backend uses Cloudflare Workers, D1, a scheduled D1 outbox, and a Durable Object WebSocket hub. It has no runtime package dependency and is designed for Cloudflare's free allowances.
+The backend uses Cloudflare Workers, D1, a scheduled D1 outbox, and a Durable Object WebSocket hub. Its small WebCrypto-based Web Push dependency runs in Workers without Node compatibility and the system is designed for Cloudflare's free allowances.
 
 ## Architecture
 
@@ -15,6 +15,7 @@ The backend uses Cloudflare Workers, D1, a scheduled D1 outbox, and a Durable Ob
 - WhatsApp free-form text and media are accepted only inside Meta's 24-hour customer-service window. Approved templates use a separate authenticated dashboard endpoint and remain available after that window closes.
 - Dashboard attachments are uploaded directly to Meta before their outbound message is queued; Helixcer stores only message metadata and the encrypted temporary provider payload, not another copy of the file.
 - External applications use revocable, hashed workspace API keys through the Helixcer Messaging API. The currently available WhatsApp template module writes sends to the inbox and outbox atomically; sensitive retry payloads are AES-GCM encrypted and removed after a terminal submission result.
+- Authenticated browser installations can register a VAPID Web Push subscription. Inbound provider webhooks schedule encrypted background alerts without delaying the provider response; expired browser endpoints are removed automatically.
 
 The initial migration seeds one empty workspace, never an administrator. On the first successful Google login, an owner membership is created only if there are no memberships and the verified Google email exactly matches `BOOTSTRAP_OWNER_EMAIL`. Future users require an invitation.
 
@@ -29,6 +30,7 @@ Public Worker variables in `wrangler.toml`:
 - `RECOVERY_MODE`: leave `false`; set to `true` only for a short, supervised recovery window.
 - `OAUTH_RATE_LIMIT_WINDOW_SECONDS`, `OAUTH_RATE_LIMIT_PER_CLIENT`, and `OAUTH_RATE_LIMIT_GLOBAL`: bound anonymous login starts in the existing Durable Object before D1 is written.
 - `EXTERNAL_API_RATE_LIMIT_WINDOW_SECONDS`, `EXTERNAL_API_RATE_LIMIT_PER_KEY`, and `EXTERNAL_API_RATE_LIMIT_PER_WORKSPACE`: bound server-to-server API traffic in the workspace Durable Object. The checked-in defaults are 60 requests/minute/key and 300 requests/minute/workspace.
+- `VAPID_PUBLIC_KEY` and `VAPID_SUBJECT`: the public half of one stable P-256 VAPID key pair and a `mailto:` or HTTPS contact URI. The public key is returned only to authenticated dashboard sessions.
 
 Configure these as Worker secrets/environment variables; never commit real values:
 
@@ -38,9 +40,12 @@ npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put GOOGLE_REDIRECT_URI
 npx wrangler secret put BOOTSTRAP_OWNER_EMAIL
 npx wrangler secret put CHANNEL_CREDENTIALS_KEY
+npx wrangler secret put VAPID_PRIVATE_KEY
 ```
 
 `CHANNEL_CREDENTIALS_KEY` must be at least 32 bytes of high-entropy material and must remain stable across deployments. It is the only Worker secret used to protect managed channel credentials; do not create `WA_MAIN_*`, per-channel, or per-workspace bindings. Losing this key makes the encrypted provider credentials unreadable, so keep a protected backup.
+
+`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` must belong to the same stable VAPID identity. Keep only the private key in Worker secrets. Rotating the pair requires browsers to subscribe again. Web Push uses each browser vendor's push service directly and does not require a paid notification provider.
 
 `ADMIN_TOKEN` is optional emergency recovery access. It is ignored unless `RECOVERY_MODE=true`, is accepted only through `Authorization: Bearer` or `X-Admin-Token`, and should be rotated or deleted immediately after the incident. Normal browser use relies on the session cookie. There is no email-override header and no URL-token authentication.
 
@@ -75,6 +80,10 @@ Migration `0005_external_template_api.sql` adds workspace API keys, encrypted ou
 
 Migration `0006_contact_profiles.sql` adds contact-level `company` and `tags_json` fields without replacing contact, identity, conversation, or message rows. It seeds each existing contact's tags from its most recent conversation, when available, so the right-side contact editor starts with the tags already visible in the Inbox.
 
+Migration `0007_conversation_uniqueness.sql` merges earlier duplicate conversation rows for the same workspace, contact, and channel into the most recently active thread. It moves all messages, preserves cumulative unread activity and the latest status, then enforces one durable conversation per channel identity. A new inbound message reopens that thread instead of creating another row.
+
+Migration `0008_push_subscriptions.sql` adds workspace/member/device-scoped Web Push subscriptions. Browser-issued endpoints and encryption keys are never returned from list or bootstrap APIs; disabled memberships are excluded from notification delivery.
+
 Deploy the Worker on its `workers.dev` hostname, then deploy the repository's `gateway/` Pages Function with an `API` service binding to this Worker. Associate the Pages project with `api.chat.helixcer.com` and, at the external DNS provider, point only the `api.chat` CNAME to `helixcer-chat-gateway.pages.dev`. Keep the GitHub Pages dashboard at `chat.helixcer.com` and list only the dashboard origin in `ALLOWED_ORIGINS`. The checked-in frontend uses the branded API hostname; browsers never call the `workers.dev` hostname directly because its host-only `SameSite=Lax` cookie would be cross-site.
 
 The gateway holds no Google or channel secret. HTTP and WebSocket requests are passed to the Worker over Cloudflare's internal service binding. Deploy it from `gateway/` with `npx wrangler pages deploy` after the Worker is available.
@@ -84,6 +93,8 @@ The gateway holds no Google or channel secret. HTTP and WebSocket requests are p
 - `GET /auth/google/start?return_to=URL&invite=TOKEN` — begins Google login. `return_to` and the `returnTo` alias are accepted only when their origin exactly matches the allowlist.
 - `GET /auth/google/callback` — consumes code/state/PKCE, verifies the Google ID token, and creates a server session.
 - `GET /api/me` — current verified user, workspace, membership, and role.
+- `GET /api/push/config` — returns Web Push availability and the public VAPID key to a verified browser session.
+- `POST|DELETE /api/push/subscriptions` — registers or removes the current member's browser installation.
 - `POST /api/logout` or `/auth/logout` — revokes the session and clears its cookie.
 - `GET /api/team` — owner/admin member and pending-invitation list.
 - `POST /api/team/invitations` — creates a hashed, email-bound, seven-day invitation and returns its one-time login URL.
@@ -152,7 +163,9 @@ For each WhatsApp conversation, list and message responses include `freeformAllo
 
 `GET /api/conversations/:id/templates` derives the WABA and encrypted access token from that conversation's workspace-scoped channel, requests approved templates from Graph API v26.0 (or the saved channel version), and follows at most three cursor pages. Its response never contains a provider token. Each item contains `templateId`, `name`, `language.code`, `status`, `category`, sanitized component definitions, and a flattened `variables` list for text, media-header, named-parameter, and dynamic URL-button inputs. Meta failures are returned as bounded provider errors.
 
-Contact list, bootstrap, and detail responses include `displayName`/`name`, `company`, `tags`, `channelId`, `channelName`, `connectorType`, and `channelProfileId`. Detail responses also expose `channelEditable`. `PATCH /api/contacts/:contactId` accepts a subset of those editable values, mirrors name and tag changes to existing conversations, and never deletes history. Provider identity edits require a single unambiguous identity and enforce uniqueness. A contact's channel can be corrected while its conversation is still empty; after any message is sent or received, the channel is locked so historical messages cannot be misattributed.
+Contact list, bootstrap, and detail responses include `displayName`/`name`, `company`, `tags`, `channelId`, `channelName`, `connectorType`, and `channelProfileId`. Detail responses also expose `channelEditable`. `PATCH /api/contacts/:contactId` accepts a subset of those editable values, mirrors name and tag changes to existing conversations, and never deletes history. Provider IDs are immutable after creation. A contact's channel can be corrected while its conversation is still empty, retaining the same provider ID; after any message is sent or received, the channel is locked so historical messages cannot be misattributed.
+
+Outbound message status is monotonic: `sent` → `delivered` → `read`, with `failed` retained as terminal. WhatsApp status callbacks, Instagram message echoes/delivery receipts/read watermarks, and configured Generic HTTP status callbacks update the same inbox message and broadcast the change in realtime. Telegram's Bot API confirms a successful send but does not expose recipient delivery/read receipts, so Telegram messages remain accurately labeled `sent` rather than fabricating a receipt.
 
 The attachment endpoint accepts multipart form data with a `file` field and optional `caption`. It supports the WhatsApp media types and limits enforced by this release (up to 16 MiB at the Helixcer edge), uploads the file directly to the configured Meta Phone Number ID, and stores only safe filename/type/size/caption metadata in D1. The provider media ID is kept only in the encrypted temporary outbound payload and removed after terminal submission.
 

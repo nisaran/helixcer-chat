@@ -71,6 +71,8 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0004_multichannel_credentials.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0005_external_template_api.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0006_contact_profiles.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0007_conversation_uniqueness.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0008_push_subscriptions.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -937,6 +939,25 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
     assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 1);
     assert.equal(database.prepare('SELECT unread_count FROM conversations WHERE conversation_id=?').get(conversation.conversation_id).unread_count, 1);
 
+    database.prepare("UPDATE conversations SET status='closed',unread_count=0 WHERE conversation_id=?")
+      .run(conversation.conversation_id);
+    const reopenedPayload = structuredClone(payload);
+    reopenedPayload.entry[0].changes[0].value.messages[0] = {
+      from: '919999999999', id: 'wamid.inbound-reopens', timestamp: '1761360060', type: 'text',
+      text: { body: 'I have another question' }
+    };
+    const reopenedSigned = await sign(reopenedPayload);
+    const reopened = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/whatsapp/${channelId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': reopenedSigned.signature }, body: reopenedSigned.raw
+    }), env);
+    assert.deepEqual(await reopened.json(), { ok: true, received: 1, statuses: 0 });
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM conversations WHERE channel_id=?').get(channelId).count, 1);
+    assert.deepEqual({ ...database.prepare(`SELECT conversation_id,status,unread_count FROM conversations
+      WHERE channel_id=?`).get(channelId) }, {
+      conversation_id: conversation.conversation_id, status: 'open', unread_count: 1
+    });
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 2);
+
     const mismatched = structuredClone(payload);
     mismatched.entry[0].changes[0].value.metadata.phone_number_id = '999999999999999';
     const mismatchedSigned = await sign(mismatched);
@@ -944,7 +965,7 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': mismatchedSigned.signature }, body: mismatchedSigned.raw
     }), env);
     assert.equal(rejected.status, 403);
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 1);
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 2);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();
@@ -1058,6 +1079,35 @@ test('shared Instagram app webhook verifies all matches and routes each account 
   assert.equal(routed.length, 2);
   assert.equal(routed[0].channel_id, 'ig-account-one');
   assert.equal(routed[1].channel_id, 'ig-account-two');
+
+  const firstConversation = database.prepare(`SELECT conversation_id,contact_id FROM conversations
+    WHERE channel_id='ig-account-one'`).get();
+  database.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,provider_message_id,status,timestamp,workspace_id)
+    VALUES ('ig-outbound-internal',?1,?2,'ig-account-one','outbound','text','Reply','ig-provider-outbound','sent',
+      '2025-10-25T02:40:01.000Z','ws_default')`)
+    .run(firstConversation.conversation_id, firstConversation.contact_id);
+  database.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,provider_message_id,status,timestamp,workspace_id)
+    VALUES ('ig-outbound-pending',?1,?2,'ig-account-one','outbound','text','Still queued','ig-provider-pending','pending',
+      '2025-10-25T02:40:01.500Z','ws_default')`)
+    .run(firstConversation.conversation_id, firstConversation.contact_id);
+  const receiptPayload = { object: 'instagram', entry: [{ id: '17841400000000011', messaging: [
+    { sender: { id: '5550001' }, recipient: { id: '17841400000000011' }, timestamp: 1761360002000,
+      delivery: { mids: ['ig-provider-outbound'], watermark: 1761360002000 } },
+    { sender: { id: '5550001' }, recipient: { id: '17841400000000011' }, timestamp: 1761360003000,
+      read: { watermark: 1761360003000 } }
+  ] }] };
+  const receiptRaw = JSON.stringify(receiptPayload);
+  const receiptDigest = await crypto.subtle.sign('HMAC', hmacKey, new TextEncoder().encode(receiptRaw));
+  const receiptSignature = `sha256=${Buffer.from(receiptDigest).toString('hex')}`;
+  const receipt = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/instagram-app/${appId}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': receiptSignature }, body: receiptRaw
+  }), env);
+  assert.equal(receipt.status, 200);
+  assert.deepEqual(await receipt.json(), { ok: true, received: 0, channels: 1 });
+  assert.equal(database.prepare("SELECT status FROM messages WHERE message_id='ig-outbound-internal'").get().status, 'read');
+  assert.equal(database.prepare("SELECT status FROM messages WHERE message_id='ig-outbound-pending'").get().status, 'pending');
 
   const now = new Date().toISOString();
   database.prepare("INSERT INTO workspaces (workspace_id,slug,name,created_at,updated_at) VALUES ('ws_ambiguous','ambiguous','Ambiguous',?,?)").run(now, now);
@@ -1508,7 +1558,7 @@ test('conversation template discovery is authenticated, workspace scoped, pagina
   }
 });
 
-test('contact detail and update APIs preserve conversations, enforce identity uniqueness, and stay workspace scoped', async () => {
+test('contact detail and update APIs preserve conversations, keep provider IDs immutable, and stay workspace scoped', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB, {
     ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
@@ -1579,26 +1629,34 @@ test('contact detail and update APIs preserve conversations, enforce identity un
 
   const updated = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
     method: 'PATCH', headers: agentJsonHeaders,
-    body: JSON.stringify({ name: 'Asha R.', company: 'Acme Retail', tags: ['Priority', 'priority', 'West'],
-      channelProfileId: '+91 99999 99992' })
+    body: JSON.stringify({ name: 'Asha R.', company: 'Acme Retail', tags: ['Priority', 'priority', 'West'] })
   }), env);
   assert.equal(updated.status, 200);
   const updatedBody = await updated.json();
   assert.equal(updatedBody.item.displayName, 'Asha R.');
   assert.equal(updatedBody.item.company, 'Acme Retail');
   assert.deepEqual(updatedBody.item.tags, ['Priority', 'West']);
-  assert.equal(updatedBody.item.channelProfileId, '919999999992');
+  assert.equal(updatedBody.item.channelProfileId, '919999999991');
   const preservedConversation = database.prepare(`SELECT subject,tags_json FROM conversations
     WHERE conversation_id=?`).get(conversationId);
   assert.equal(preservedConversation.subject, 'Asha R.');
   assert.deepEqual(JSON.parse(preservedConversation.tags_json), ['Priority', 'West']);
 
+  const immutableProviderId = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    method: 'PATCH', headers: jsonHeaders,
+    body: JSON.stringify({ channelProfileId: '+91 99999 99992' })
+  }), env);
+  assert.equal(immutableProviderId.status, 400);
+  assert.match((await immutableProviderId.json()).error, /Provider ID cannot be changed/i);
+
   const reassigned = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
     method: 'PATCH', headers: jsonHeaders,
-    body: JSON.stringify({ channelId: 'telegram-contact-api', channelProfileId: '9988776655' })
+    body: JSON.stringify({ channelId: 'telegram-contact-api' })
   }), env);
   assert.equal(reassigned.status, 200);
-  assert.equal((await reassigned.json()).item.channelName, 'Support Telegram');
+  const reassignedBody = await reassigned.json();
+  assert.equal(reassignedBody.item.channelName, 'Support Telegram');
+  assert.equal(reassignedBody.item.channelProfileId, '919999999991');
   assert.equal(database.prepare('SELECT channel_id FROM conversations WHERE conversation_id=?').get(conversationId).channel_id,
     'telegram-contact-api');
 
@@ -1608,7 +1666,7 @@ test('contact detail and update APIs preserve conversations, enforce identity un
     .run(conversationId, contactId, new Date().toISOString());
   const lockedChannel = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
     method: 'PATCH', headers: jsonHeaders,
-    body: JSON.stringify({ channelId: 'wa-contact-api', channelProfileId: '919999999994' })
+    body: JSON.stringify({ channelId: 'wa-contact-api' })
   }), env);
   assert.equal(lockedChannel.status, 409);
   assert.match((await lockedChannel.json()).error, /after messages/i);
@@ -1627,10 +1685,10 @@ test('contact detail and update APIs preserve conversations, enforce identity un
   const conflict = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
     method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ channelProfileId: '919999999993' })
   }), env);
-  assert.equal(conflict.status, 409);
-  assert.match((await conflict.json()).error, /already belongs/i);
+  assert.equal(conflict.status, 400);
+  assert.match((await conflict.json()).error, /Provider ID cannot be changed/i);
   assert.equal(database.prepare('SELECT channel_profile_id FROM channel_identities WHERE contact_id=?').get(contactId).channel_profile_id,
-    '9988776655');
+    '919999999991');
   assert.equal(database.prepare('SELECT count(*) AS count FROM conversations WHERE conversation_id=?').get(conversationId).count, 1);
 
   const invalidTags = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {

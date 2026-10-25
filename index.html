@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261025-8">
-  <script src="./assets/app.js?v=20261025-8" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261026-1">
+  <script src="./assets/app.js?v=20261026-1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -298,7 +298,7 @@
                 <input type="hidden" name="contactId" id="contactEditId">
                 <label class="field-label">Name<input class="text-field" id="contactEditName" name="displayName" required maxlength="100"></label>
                 <label class="field-label">Channel<select class="text-field" id="contactEditChannel" name="channelId" required></select><span class="field-help" id="contactEditChannelHelp"></span></label>
-                <label class="field-label">Provider ID<input class="text-field" id="contactEditProviderId" name="channelProfileId" required maxlength="200"></label>
+                <label class="field-label">Provider ID<input class="text-field read-only-field" id="contactEditProviderId" readonly aria-readonly="true"><span class="field-help">Assigned by the provider and cannot be edited.</span></label>
                 <label class="field-label">Company<input class="text-field" id="contactEditCompany" name="company" maxlength="160" placeholder="Optional company"></label>
                 <label class="field-label">Tags<input class="text-field" id="contactEditTags" name="tags" maxlength="500" placeholder="Priority, Customer"></label>
                 <span class="field-help">Separate tags with commas.</span>
@@ -385,7 +385,7 @@
           <div class="setting-row">
             <div class="setting-copy">
               <span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span>
-              <div><strong id="notificationSettingTitle">Browser notifications</strong><span id="notificationSettingHelp">Receive alerts while Helixcer Chat is running. On iPhone or iPad, add Helixcer to your Home Screen first.</span><small id="notificationPermissionStatus">Checking browser permission…</small></div>
+              <div><strong id="notificationSettingTitle">Push notifications</strong><span id="notificationSettingHelp">Receive background alerts on this device, including when Helixcer Chat is closed. Android Chrome may show permission in Site controls beside the address bar. On iPhone or iPad, add Helixcer to your Home Screen first.</span><small id="notificationPermissionStatus">Checking browser permission…</small></div>
             </div>
             <label class="switch-control"><input type="checkbox" id="pushNotificationsToggle"><span aria-hidden="true"></span><em>Enable</em></label>
           </div>

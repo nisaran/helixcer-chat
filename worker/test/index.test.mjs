@@ -13,6 +13,7 @@ import {
   InboxHub,
   isRetryableWhatsAppStatus,
   normalizeGeneric,
+  normalizeGenericStatuses,
   normalizeInstagram,
   normalizeTelegram,
   normalizeWhatsApp,
@@ -88,6 +89,13 @@ test('normalizes a configured generic event list', () => {
   assert.deepEqual(result[0], {
     channelProfileId: '42', displayName: 'Nia', text: 'Hi', providerMessageId: 'm1', timestamp: '', messageType: 'text'
   });
+  const receiptPayload = { receipts: [{ providerId: 'm1', delivery: 'SEEN', at: '2026-10-25T12:00:00.000Z' }] };
+  assert.deepEqual(normalizeGeneric(receiptPayload, {
+    eventsPath: 'receipts', senderIdPath: 'user.id', textPath: 'body', messageIdPath: 'providerId', statusPath: 'delivery'
+  }), []);
+  assert.deepEqual(normalizeGenericStatuses(receiptPayload, {
+    statusEventsPath: 'receipts', statusMessageIdPath: 'providerId', statusPath: 'delivery', statusTimestampPath: 'at'
+  }), [{ providerMessageId: 'm1', internalMessageId: '', status: 'read', timestamp: '2026-10-25T12:00:00.000Z', error: '' }]);
 });
 
 test('normalizes Telegram bot updates', () => {
@@ -107,17 +115,28 @@ test('normalizes Telegram bot updates', () => {
   } }).providerMessageId);
 });
 
-test('normalizes Instagram messages and ignores outbound echoes', () => {
+test('normalizes Instagram messages, echoes, delivery receipts, and read watermarks', () => {
   const result = normalizeInstagram({ entry: [{ id: '17841400000000000', messaging: [
     { sender: { id: 'customer-1' }, recipient: { id: '17841400000000000' }, timestamp: 1761360000000,
       message: { mid: 'ig-mid-1', text: 'Hello from Instagram' } },
     { sender: { id: '17841400000000000' }, recipient: { id: 'customer-1' }, timestamp: 1761360001000,
-      message: { mid: 'ig-echo', text: 'Reply', is_echo: true } }
+      message: { mid: 'ig-echo', text: 'Reply', is_echo: true } },
+    { sender: { id: 'customer-1' }, recipient: { id: '17841400000000000' }, timestamp: 1761360002000,
+      delivery: { mids: ['ig-outbound-1'], watermark: 1761360002000 } },
+    { sender: { id: 'customer-1' }, recipient: { id: '17841400000000000' }, timestamp: 1761360003000,
+      read: { watermark: 1761360003000 } }
   ] }] });
   assert.equal(result.messages.length, 1);
   assert.equal(result.messages[0].channelProfileId, 'customer-1');
   assert.equal(result.messages[0].providerMessageId, 'ig-mid-1');
   assert.equal(result.messages[0].text, 'Hello from Instagram');
+  assert.deepEqual(result.statuses, [
+    { providerMessageId: 'ig-echo', status: 'sent', timestamp: '2025-10-25T02:40:01.000Z' },
+    { providerMessageId: 'ig-outbound-1', status: 'delivered', timestamp: '2025-10-25T02:40:02.000Z' }
+  ]);
+  assert.deepEqual(result.watermarkStatuses, [
+    { channelProfileId: 'customer-1', status: 'read', timestamp: '2025-10-25T02:40:03.000Z' }
+  ]);
   assert.deepEqual(result.recipientIds, ['17841400000000000']);
 });
 
@@ -238,6 +257,8 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const multichannel = await readFile(new URL('../migrations/0004_multichannel_credentials.sql', import.meta.url), 'utf8');
   const templateApi = await readFile(new URL('../migrations/0005_external_template_api.sql', import.meta.url), 'utf8');
   const contactProfiles = await readFile(new URL('../migrations/0006_contact_profiles.sql', import.meta.url), 'utf8');
+  const conversationUniqueness = await readFile(new URL('../migrations/0007_conversation_uniqueness.sql', import.meta.url), 'utf8');
+  const pushSubscriptions = await readFile(new URL('../migrations/0008_push_subscriptions.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -265,16 +286,30 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   database.exec(multichannel);
   database.exec(templateApi);
   database.exec(contactProfiles);
+  database.exec(`
+    UPDATE conversations SET status='closed',unread_count=2
+      WHERE conversation_id='legacy-conversation';
+    INSERT INTO conversations
+        (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+      VALUES ('legacy-conversation-new','legacy-contact','legacy-channel','open','Latest thread','2026-02-01',3,
+        '2026-02-01','2026-02-01','ws_default');
+    INSERT INTO messages
+        (message_id,conversation_id,contact_id,channel_id,direction,status,timestamp,workspace_id)
+      VALUES ('legacy-message-new','legacy-conversation-new','legacy-contact','legacy-channel','inbound','received',
+        '2026-02-01','ws_default');
+  `);
+  database.exec(conversationUniqueness);
+  database.exec(pushSubscriptions);
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
   for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'channel_credentials',
-    'contacts', 'messages', 'audit_log', 'api_keys', 'outbound_payloads', 'external_api_requests']) {
+    'contacts', 'messages', 'audit_log', 'api_keys', 'outbound_payloads', 'external_api_requests', 'push_subscriptions']) {
     assert.ok(tables.includes(name), `missing table ${name}`);
   }
   for (const [table, idColumn, id] of [
     ['channels', 'channel_id', 'legacy-channel'],
     ['contacts', 'contact_id', 'legacy-contact'],
     ['channel_identities', 'identity_id', 'legacy-identity'],
-    ['conversations', 'conversation_id', 'legacy-conversation'],
+    ['conversations', 'conversation_id', 'legacy-conversation-new'],
     ['messages', 'message_id', 'legacy-message'],
     ['webhook_events', 'event_key', 'legacy-event'],
     ['outbox', 'outbox_id', 'legacy-outbox'],
@@ -290,12 +325,24 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   assert.equal(database.prepare("SELECT provider_type FROM channels WHERE channel_id='legacy-channel'").get().provider_type, 'web_chat');
   assert.equal(database.prepare("SELECT company FROM contacts WHERE contact_id='legacy-contact'").get().company, '');
   assert.equal(database.prepare("SELECT tags_json FROM contacts WHERE contact_id='legacy-contact'").get().tags_json, '[]');
+  const mergedConversation = database.prepare(`SELECT conversation_id,status,unread_count,created_at,last_message_at
+    FROM conversations WHERE contact_id='legacy-contact' AND channel_id='legacy-channel'`).get();
+  assert.deepEqual({ ...mergedConversation }, {
+    conversation_id: 'legacy-conversation-new', status: 'open', unread_count: 5,
+    created_at: '2026-01-01', last_message_at: '2026-02-01'
+  });
+  assert.deepEqual(database.prepare(`SELECT message_id,conversation_id FROM messages
+    WHERE contact_id='legacy-contact' ORDER BY message_id`).all().map(row => ({ ...row })), [
+    { message_id: 'legacy-message', conversation_id: 'legacy-conversation-new' },
+    { message_id: 'legacy-message-new', conversation_id: 'legacy-conversation-new' }
+  ]);
   assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
   const indexes = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(row => row.name));
   for (const name of ['idx_channels_workspace', 'idx_conversations_workspace_activity', 'idx_messages_workspace_conversation',
     'idx_outbox_workspace_due', 'idx_channel_credentials_channel', 'idx_channels_workspace_provider',
     'idx_channels_workspace_whatsapp_phone', 'idx_channels_workspace_instagram_account', 'idx_channels_workspace_telegram_bot',
-    'idx_api_keys_workspace_status', 'idx_outbound_payloads_workspace', 'idx_external_requests_message', 'idx_external_requests_expiry']) {
+    'idx_api_keys_workspace_status', 'idx_outbound_payloads_workspace', 'idx_external_requests_message', 'idx_external_requests_expiry',
+    'idx_conversations_workspace_contact_channel_unique', 'idx_push_subscriptions_workspace', 'idx_push_subscriptions_membership']) {
     assert.ok(indexes.has(name), `missing index ${name}`);
   }
   database.close();
@@ -308,6 +355,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   editedDatabase.exec(multichannel);
   editedDatabase.exec(templateApi);
   editedDatabase.exec(contactProfiles);
+  editedDatabase.exec(conversationUniqueness);
   assert.equal(editedDatabase.prepare("SELECT name FROM channels WHERE channel_id='wa-main'").get().name, 'Edited WhatsApp');
   editedDatabase.close();
 });

@@ -54,7 +54,8 @@ class TestD1 {
 async function fixture() {
   const database = new DatabaseSync(':memory:');
   for (const name of ['0001_initial.sql', '0002_identity_and_workspaces.sql', '0003_whatsapp_channel.sql',
-    '0004_multichannel_credentials.sql', '0005_external_template_api.sql', '0006_contact_profiles.sql']) {
+    '0004_multichannel_credentials.sql', '0005_external_template_api.sql', '0006_contact_profiles.sql',
+    '0007_conversation_uniqueness.sql', '0008_push_subscriptions.sql']) {
     database.exec(await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));
   }
   const now = new Date().toISOString();

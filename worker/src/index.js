@@ -11,8 +11,14 @@ import {
   updateInvitation,
   updateMembership
 } from './auth.js';
+import {
+  pushConfiguration,
+  removePushSubscription,
+  savePushSubscription,
+  sendWorkspacePush
+} from './push.js';
 
-const API_VERSION = '2026-10-25-contact-templates';
+const API_VERSION = '2026-10-26-push-receipts';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
@@ -218,15 +224,15 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(response, cors);
     }
     const whatsappMatch = url.pathname.match(/^\/webhooks\/whatsapp\/([^/]+)$/);
-    if (whatsappMatch) return await handleWhatsAppWebhook(request, env, decodeURIComponent(whatsappMatch[1]));
+    if (whatsappMatch) return await handleWhatsAppWebhook(request, env, decodeURIComponent(whatsappMatch[1]), ctx);
     const telegramMatch = url.pathname.match(/^\/webhooks\/telegram\/([^/]+)$/);
-    if (telegramMatch && request.method === 'POST') return await handleTelegramWebhook(request, env, decodeURIComponent(telegramMatch[1]));
+    if (telegramMatch && request.method === 'POST') return await handleTelegramWebhook(request, env, decodeURIComponent(telegramMatch[1]), ctx);
     const instagramAppMatch = url.pathname.match(/^\/webhooks\/instagram-app\/([^/]+)$/);
-    if (instagramAppMatch) return await handleInstagramAppWebhook(request, env, decodeURIComponent(instagramAppMatch[1]));
+    if (instagramAppMatch) return await handleInstagramAppWebhook(request, env, decodeURIComponent(instagramAppMatch[1]), ctx);
     const instagramMatch = url.pathname.match(/^\/webhooks\/instagram\/([^/]+)$/);
-    if (instagramMatch) return await handleInstagramWebhook(request, env, decodeURIComponent(instagramMatch[1]));
+    if (instagramMatch) return await handleInstagramWebhook(request, env, decodeURIComponent(instagramMatch[1]), ctx);
     const genericMatch = url.pathname.match(/^\/webhooks\/generic\/([^/]+)$/);
-    if (genericMatch && request.method === 'POST') return await handleGenericWebhook(request, env, decodeURIComponent(genericMatch[1]));
+    if (genericMatch && request.method === 'POST') return await handleGenericWebhook(request, env, decodeURIComponent(genericMatch[1]), ctx);
 
     if (url.pathname.startsWith('/api/v1/')) return await handleExternalApi(request, env, ctx, url);
 
@@ -243,6 +249,17 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     const workspaceId = principal.workspace.workspaceId;
     if (url.pathname === '/api/me' && request.method === 'GET') {
       return withCors(json(principalView(principal)), cors);
+    }
+    if (url.pathname === '/api/push/config' && request.method === 'GET') {
+      if (principal.authType !== 'session') return withCors(json({ ok: false, error: 'A verified browser session is required.' }, 403), cors);
+      return withCors(json(pushConfiguration(env)), cors);
+    }
+    if (url.pathname === '/api/push/subscriptions' && request.method === 'POST') {
+      const result = await savePushSubscription(env, principal, await readJson(request), request.headers.get('User-Agent') || '');
+      return withCors(json(result, 201), cors);
+    }
+    if (url.pathname === '/api/push/subscriptions' && request.method === 'DELETE') {
+      return withCors(json(await removePushSubscription(env, principal, await readJson(request))), cors);
     }
     if (url.pathname === '/api/realtime' && request.method === 'GET') {
       if (!cors['Access-Control-Allow-Origin']) return json({ ok: false, error: 'Origin not allowed.' }, 403);
@@ -644,7 +661,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`)
       .bind(externalRequestId, principal.workspaceId, principal.apiKeyId, EXTERNAL_API_OPERATION,
         idempotencyHash, requestHash, messageId, input.clientReference, now, expiresAt),
-    env.DB.prepare(`UPDATE conversations SET last_message_at=?3,updated_at=?3
+    env.DB.prepare(`UPDATE conversations SET status='open',last_message_at=?3,updated_at=?3
       WHERE conversation_id=?1 AND workspace_id=?2`).bind(identity.conversationId, principal.workspaceId, now)
   ];
   try {
@@ -734,16 +751,24 @@ async function ensureWhatsAppConversation(env, workspaceId, channel, recipient, 
     }
   }
   let conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
-    WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3 AND status!='closed'
-    ORDER BY created_at DESC LIMIT 1`).bind(workspaceId, identity.contact_id, channel.channelId).first();
+    WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3
+    ORDER BY last_message_at DESC,created_at DESC LIMIT 1`).bind(workspaceId, identity.contact_id, channel.channelId).first();
   if (!conversation) {
     const conversationId = crypto.randomUUID();
     const subject = String(displayName || recipient).slice(0, 120);
-    await env.DB.prepare(`INSERT INTO conversations
-        (conversation_id,contact_id,channel_id,status,assigned_to,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
-      VALUES (?1,?2,?3,'open','',?4,?5,0,?5,?5,?6)`)
-      .bind(conversationId, identity.contact_id, channel.channelId, subject, now, workspaceId).run();
-    conversation = { conversation_id: conversationId };
+    try {
+      await env.DB.prepare(`INSERT INTO conversations
+          (conversation_id,contact_id,channel_id,status,assigned_to,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+        VALUES (?1,?2,?3,'open','',?4,?5,0,?5,?5,?6)`)
+        .bind(conversationId, identity.contact_id, channel.channelId, subject, now, workspaceId).run();
+      conversation = { conversation_id: conversationId };
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
+        WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3 LIMIT 1`)
+        .bind(workspaceId, identity.contact_id, channel.channelId).first();
+      if (!conversation) throw error;
+    }
   }
   return { contactId: identity.contact_id, conversationId: conversation.conversation_id };
 }
@@ -900,7 +925,7 @@ function apiError(status, code, message) {
   return error;
 }
 
-async function handleWhatsAppWebhook(request, env, channelId) {
+async function handleWhatsAppWebhook(request, env, channelId, ctx) {
   const channel = await getChannel(env, channelId, 'whatsapp_cloud');
   if (!channel) return json({ ok: false, error: 'Unknown or disabled channel.' }, 404);
   const credentials = await readChannelCredentials(env, channel);
@@ -939,24 +964,34 @@ async function handleWhatsAppWebhook(request, env, channelId) {
     webhookVerifiedAt: channel.config?.webhookVerifiedAt || receivedAt
   });
   if (received || normalized.statuses.length) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: normalized.statuses.length });
+  if (received) scheduleInboundPush(ctx, env, channel);
   return json({ ok: true, received, statuses: normalized.statuses.length });
 }
 
-async function handleGenericWebhook(request, env, channelId) {
+async function handleGenericWebhook(request, env, channelId, ctx) {
   const channel = await getChannel(env, channelId, 'generic_http');
   if (!channel) return json({ ok: false, error: 'Unknown or disabled channel.' }, 404);
   const expected = env[`${secretPrefix(channel.secretKey)}_WEBHOOK_TOKEN`];
   if (!expected || !timingSafeEqual(request.headers.get('X-Webhook-Token') || '', expected)) return json({ ok: false, error: 'Invalid webhook token.' }, 401);
   const payload = safeJsonParse(await readBoundedText(request, MAX_RAW_PAYLOAD), null);
   if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
-  const events = normalizeGeneric(payload, channel.config?.inboundMapping || {});
+  const mapping = channel.config?.inboundMapping || {};
+  const events = normalizeGeneric(payload, mapping);
+  const statuses = normalizeGenericStatuses(payload, mapping);
   let received = 0;
   for (const event of events) if (await storeInbound(env, channel, event, payload)) received++;
-  if (received) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received });
+  let updatedStatuses = 0;
+  for (const status of statuses) {
+    if (await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload)) updatedStatuses++;
+  }
+  if (received || updatedStatuses) {
+    await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: updatedStatuses });
+  }
+  if (received) scheduleInboundPush(ctx, env, channel);
   return json({ ok: true, received });
 }
 
-async function handleTelegramWebhook(request, env, channelId) {
+async function handleTelegramWebhook(request, env, channelId, ctx) {
   const channel = await getChannel(env, channelId, 'telegram');
   if (!channel) return json({ ok: false, error: 'Unknown or disabled channel.' }, 404);
   const credentials = await readChannelCredentials(env, channel);
@@ -970,10 +1005,11 @@ async function handleTelegramWebhook(request, env, channelId) {
   const received = event && await storeInbound(env, channel, event, payload) ? 1 : 0;
   await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
   if (received) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received });
+  if (received) scheduleInboundPush(ctx, env, channel);
   return json({ ok: true, received });
 }
 
-async function handleInstagramWebhook(request, env, channelId) {
+async function handleInstagramWebhook(request, env, channelId, ctx) {
   const channel = await getChannel(env, channelId, 'instagram');
   if (!channel) return json({ ok: false, error: 'Unknown or disabled channel.' }, 404);
   const credentials = await readChannelCredentials(env, channel);
@@ -998,18 +1034,29 @@ async function handleInstagramWebhook(request, env, channelId) {
   if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
   const normalized = normalizeInstagram(payload);
   const expectedAccountId = String(channel.config?.instagramAccountId || '');
-  if (normalized.messages.length && (!expectedAccountId || normalized.recipientIds.length === 0 ||
+  const hasEvents = normalized.messages.length || normalized.statuses.length || normalized.watermarkStatuses.length;
+  if (hasEvents && (!expectedAccountId || normalized.recipientIds.length === 0 ||
       normalized.recipientIds.some(id => id !== expectedAccountId))) {
     return json({ ok: false, error: 'Webhook Instagram account does not match this channel.' }, 403);
   }
   let received = 0;
   for (const event of normalized.messages) if (await storeInbound(env, channel, event, payload)) received++;
+  let updatedStatuses = 0;
+  for (const status of normalized.statuses) {
+    if (await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload)) updatedStatuses++;
+  }
+  for (const status of normalized.watermarkStatuses) {
+    if (await applyProviderWatermarkStatus(env, channel.workspaceId, channel.channelId, status, payload)) updatedStatuses++;
+  }
   await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
-  if (received) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received });
+  if (received || updatedStatuses) {
+    await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: updatedStatuses });
+  }
+  if (received) scheduleInboundPush(ctx, env, channel);
   return json({ ok: true, received });
 }
 
-async function handleInstagramAppWebhook(request, env, requestedAppId) {
+async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
   const appId = cleanMetaIdentifier(requestedAppId, 'Meta App ID');
   const channels = await findInstagramAppChannels(env, appId);
   if (!channels.length) return json({ ok: false, error: 'Unknown Instagram app webhook.' }, 404);
@@ -1073,14 +1120,39 @@ async function handleInstagramAppWebhook(request, env, requestedAppId) {
         channelReceived++;
       }
     }
+    let channelStatuses = 0;
+    for (const status of normalized.statuses) {
+      if (await applyProviderStatus(env, route.channel.workspaceId, route.channel.channelId, status, route.payload)) {
+        channelStatuses++;
+      }
+    }
+    for (const status of normalized.watermarkStatuses) {
+      if (await applyProviderWatermarkStatus(env, route.channel.workspaceId, route.channel.channelId, status, route.payload)) {
+        channelStatuses++;
+      }
+    }
     await updateChannelRuntimeConfig(env, route.channel, { lastWebhookAt: now });
-    if (channelReceived) {
+    if (channelReceived || channelStatuses) {
       await broadcast(env, route.channel.workspaceId, {
-        type: 'webhook.received', channelId: route.channel.channelId, received: channelReceived
+        type: 'webhook.received', channelId: route.channel.channelId, received: channelReceived, statuses: channelStatuses
       });
     }
+    if (channelReceived) scheduleInboundPush(ctx, env, route.channel);
   }
   return json({ ok: true, received, channels: routes.length });
+}
+
+function scheduleInboundPush(ctx, env, channel) {
+  const delivery = sendWorkspacePush(env, channel.workspaceId, {
+    title: 'New customer message',
+    body: 'Open Helixcer Chat to reply.',
+    tag: `helixcer-${channel.channelId}`
+  }).catch(error => console.error('push_delivery_failed', {
+    workspaceId: channel.workspaceId,
+    channelId: channel.channelId,
+    message: cleanError(error)
+  }));
+  if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(delivery);
 }
 
 async function findInstagramAppChannels(env, appId) {
@@ -1912,7 +1984,15 @@ async function updateContact(env, workspaceId, contactId, payload, principal) {
   const tags = payload.tags === undefined ? storedContactTags(existing.tags_json) : validateContactTags(payload.tags);
 
   let channelId = existing.channel_id || '';
-  let channelProfileId = existing.channel_profile_id || '';
+  const channelProfileId = existing.channel_profile_id || '';
+  if (payload.channelProfileId !== undefined) {
+    if (typeof payload.channelProfileId !== 'string') throw httpError(400, 'Provider ID must be text.');
+    const suppliedProfileId = payload.channelProfileId.trim();
+    const comparableProfileId = logicalConnectorType(existing) === 'whatsapp_cloud'
+      ? normalizeWhatsAppRecipient(suppliedProfileId)
+      : suppliedProfileId;
+    if (comparableProfileId !== channelProfileId) throw httpError(400, 'Provider ID cannot be changed.');
+  }
   const identityFieldsSupplied = payload.channelId !== undefined || payload.channelProfileId !== undefined;
   if (identityFieldsSupplied) {
     channelId = payload.channelId === undefined ? channelId : cleanId(payload.channelId, 'Channel ID');
@@ -1920,12 +2000,6 @@ async function updateContact(env, workspaceId, contactId, payload, principal) {
       ? { connectorType: logicalConnectorType(existing) }
       : await getChannel(env, channelId, '', workspaceId);
     if (!channel?.connectorType) throw httpError(400, 'Unknown or disabled channel.');
-    const rawProfileId = payload.channelProfileId === undefined
-      ? channelProfileId
-      : cleanRequired(payload.channelProfileId, 'Channel profile ID', 200);
-    channelProfileId = channel.connectorType === 'whatsapp_cloud'
-      ? normalizeWhatsAppRecipient(rawProfileId)
-      : rawProfileId;
   }
   const identityChangeRequested = channelId !== existing.channel_id || channelProfileId !== existing.channel_profile_id;
   if (identityChangeRequested) {
@@ -2818,13 +2892,23 @@ async function storeInbound(env, channel, event, rawPayload) {
     }
   }
   let conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
-    WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3 AND status!='closed' ORDER BY created_at DESC LIMIT 1`)
+    WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3
+    ORDER BY last_message_at DESC,created_at DESC LIMIT 1`)
     .bind(channel.workspaceId, identity.contact_id, channel.channelId).first();
   if (!conversation) {
-    conversation = { conversation_id: crypto.randomUUID() };
-    await env.DB.prepare(`INSERT INTO conversations (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
-      VALUES (?1,?2,?3,'open',?4,?5,0,?6,?6,?7)`).bind(conversation.conversation_id, identity.contact_id, channel.channelId,
-      String(event.displayName || event.channelProfileId).slice(0, 120), timestamp, now, channel.workspaceId).run();
+    const conversationId = crypto.randomUUID();
+    try {
+      await env.DB.prepare(`INSERT INTO conversations (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+        VALUES (?1,?2,?3,'open',?4,?5,0,?6,?6,?7)`).bind(conversationId, identity.contact_id, channel.channelId,
+        String(event.displayName || event.channelProfileId).slice(0, 120), timestamp, now, channel.workspaceId).run();
+      conversation = { conversation_id: conversationId };
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
+        WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3 LIMIT 1`)
+        .bind(channel.workspaceId, identity.contact_id, channel.channelId).first();
+      if (!conversation) throw error;
+    }
   }
   const messageId = crypto.randomUUID();
   await env.DB.batch([
@@ -2832,7 +2916,7 @@ async function storeInbound(env, channel, event, rawPayload) {
       provider_message_id,status,timestamp,payload_json,workspace_id) VALUES (?1,?2,?3,?4,'inbound',?5,?6,?7,'received',?8,?9,?10)`)
       .bind(messageId, conversation.conversation_id, identity.contact_id, channel.channelId, String(event.messageType || 'text').slice(0, 40),
         String(event.text || '').slice(0, MAX_TEXT_LENGTH), String(event.providerMessageId || ''), timestamp, truncateJson(rawPayload), channel.workspaceId),
-    env.DB.prepare('UPDATE conversations SET last_message_at=?3,unread_count=unread_count+1,updated_at=?4 WHERE conversation_id=?1 AND workspace_id=?2')
+    env.DB.prepare("UPDATE conversations SET status='open',last_message_at=?3,unread_count=unread_count+1,updated_at=?4 WHERE conversation_id=?1 AND workspace_id=?2")
       .bind(conversation.conversation_id, channel.workspaceId, timestamp, now)
   ]);
   return true;
@@ -2847,8 +2931,8 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
   const providerMessageId = String(event.providerMessageId || '');
   const internalMessageId = /^[A-Za-z0-9_-]{1,100}$/.test(String(event.internalMessageId || ''))
     ? String(event.internalMessageId) : '';
-  const status = String(event.status || '').toLowerCase();
-  if ((!providerMessageId && !internalMessageId) || !['sent', 'delivered', 'read', 'failed'].includes(status)) return;
+  const status = normalizeDeliveryStatus(event.status);
+  if ((!providerMessageId && !internalMessageId) || !status) return false;
   const key = `${workspaceId}:${channelId}:status:${providerMessageId || internalMessageId}:${status}:${event.timestamp || ''}`;
   const dedupe = await env.DB.prepare(`INSERT OR IGNORE INTO webhook_events (event_key,channel_id,event_type,received_at,workspace_id)
     VALUES (?1,?2,'status',?3,?4)`).bind(key, channelId, new Date().toISOString(), workspaceId).run();
@@ -2886,6 +2970,42 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
       return false;
     }
     return true;
+  } catch (error) {
+    await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
+    throw error;
+  }
+}
+
+async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, rawPayload) {
+  const channelProfileId = String(event.channelProfileId || '');
+  const status = normalizeDeliveryStatus(event.status);
+  const timestamp = normalizeTimestamp(event.timestamp, '');
+  if (!channelProfileId || !timestamp || !['delivered', 'read'].includes(status)) return false;
+  const key = `${workspaceId}:${channelId}:watermark:${channelProfileId}:${status}:${timestamp}`;
+  const dedupe = await env.DB.prepare(`INSERT OR IGNORE INTO webhook_events (event_key,channel_id,event_type,received_at,workspace_id)
+    VALUES (?1,?2,'status',?3,?4)`).bind(key, channelId, new Date().toISOString(), workspaceId).run();
+  if (!dedupe.meta?.changes) return false;
+  try {
+    const updated = await env.DB.prepare(`UPDATE messages SET
+        status=CASE
+          WHEN status='failed' THEN status
+          WHEN status='read' THEN status
+          WHEN status='delivered' AND ?5='delivered' THEN status
+          ELSE ?5
+        END,
+        payload_json=CASE
+          WHEN status='failed' THEN payload_json
+          WHEN status='read' THEN payload_json
+          WHEN status='delivered' AND ?5='delivered' THEN payload_json
+          ELSE ?6
+        END,
+        error=CASE WHEN status='failed' THEN error ELSE '' END
+      WHERE workspace_id=?1 AND channel_id=?2 AND direction='outbound' AND timestamp<=?4
+        AND provider_message_id<>'' AND status IN ('submitted','sent','delivered','read')
+        AND contact_id IN (SELECT contact_id FROM channel_identities
+          WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3)`)
+      .bind(workspaceId, channelId, channelProfileId, timestamp, status, truncateJson(rawPayload)).run();
+    return Boolean(updated.meta?.changes);
   } catch (error) {
     await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
     throw error;
@@ -2985,14 +3105,33 @@ export function isRetryableWhatsAppStatus(status) {
 export function normalizeGeneric(payload, mapping = {}) {
   const rawEvents = mapping.eventsPath ? getPath(payload, mapping.eventsPath) : [payload];
   const events = Array.isArray(rawEvents) ? rawEvents : rawEvents ? [rawEvents] : [];
+  return events.map(event => {
+    const text = getPath(event, mapping.textPath || 'text') || '';
+    const receiptStatus = normalizeDeliveryStatus(getPath(event, mapping.statusPath || 'status'));
+    if (receiptStatus && !text) return null;
+    return {
+      channelProfileId: getPath(event, mapping.senderIdPath || 'from'),
+      displayName: getPath(event, mapping.senderNamePath || 'senderName') || '',
+      text,
+      providerMessageId: getPath(event, mapping.messageIdPath || 'id') || '',
+      timestamp: getPath(event, mapping.timestampPath || 'timestamp') || '',
+      messageType: getPath(event, mapping.messageTypePath || 'type') || 'text'
+    };
+  }).filter(item => item?.channelProfileId);
+}
+
+export function normalizeGenericStatuses(payload, mapping = {}) {
+  const rawEvents = mapping.statusEventsPath
+    ? getPath(payload, mapping.statusEventsPath)
+    : mapping.eventsPath ? getPath(payload, mapping.eventsPath) : [payload];
+  const events = Array.isArray(rawEvents) ? rawEvents : rawEvents ? [rawEvents] : [];
   return events.map(event => ({
-    channelProfileId: getPath(event, mapping.senderIdPath || 'from'),
-    displayName: getPath(event, mapping.senderNamePath || 'senderName') || '',
-    text: getPath(event, mapping.textPath || 'text') || '',
-    providerMessageId: getPath(event, mapping.messageIdPath || 'id') || '',
-    timestamp: getPath(event, mapping.timestampPath || 'timestamp') || '',
-    messageType: getPath(event, mapping.messageTypePath || 'type') || 'text'
-  })).filter(item => item.channelProfileId);
+    providerMessageId: getPath(event, mapping.statusMessageIdPath || mapping.messageIdPath || 'id') || '',
+    internalMessageId: getPath(event, mapping.internalMessageIdPath || 'messageId') || '',
+    status: normalizeDeliveryStatus(getPath(event, mapping.statusPath || 'status')),
+    timestamp: getPath(event, mapping.statusTimestampPath || mapping.timestampPath || 'timestamp') || '',
+    error: getPath(event, mapping.statusErrorPath || 'error') || ''
+  })).filter(item => item.status && (item.providerMessageId || item.internalMessageId));
 }
 
 export function normalizeTelegram(payload) {
@@ -3012,31 +3151,65 @@ export function normalizeTelegram(payload) {
 
 export function normalizeInstagram(payload) {
   const messages = [];
+  const statuses = [];
+  const watermarkStatuses = [];
   const recipientIds = new Set();
   for (const entry of payload?.entry || []) {
     for (const event of entry?.messaging || []) {
-      if (event?.message?.is_echo) continue;
       const senderId = String(event?.sender?.id || '');
       const recipientId = String(event?.recipient?.id || entry?.id || '');
       const message = event?.message || null;
       const postback = event?.postback || null;
+      const timestamp = providerEpochTimestamp(event?.timestamp);
+      if (message?.is_echo) {
+        const accountId = String(entry?.id || event?.sender?.id || '');
+        if (accountId) recipientIds.add(accountId);
+        if (message.mid) statuses.push({ providerMessageId: String(message.mid), status: 'sent', timestamp });
+        continue;
+      }
+      if (event?.delivery) {
+        if (recipientId) recipientIds.add(recipientId);
+        const deliveryTimestamp = providerEpochTimestamp(event.delivery.watermark) || timestamp;
+        const messageIds = Array.isArray(event.delivery.mids) ? event.delivery.mids : [];
+        for (const messageId of messageIds) {
+          if (messageId) statuses.push({ providerMessageId: String(messageId), status: 'delivered', timestamp: deliveryTimestamp });
+        }
+        if (!messageIds.length && senderId && deliveryTimestamp) {
+          watermarkStatuses.push({ channelProfileId: senderId, status: 'delivered', timestamp: deliveryTimestamp });
+        }
+        continue;
+      }
+      if (event?.read) {
+        if (recipientId) recipientIds.add(recipientId);
+        const readTimestamp = providerEpochTimestamp(event.read.watermark) || timestamp;
+        if (event.read.mid) statuses.push({ providerMessageId: String(event.read.mid), status: 'read', timestamp: readTimestamp });
+        else if (senderId && readTimestamp) watermarkStatuses.push({ channelProfileId: senderId, status: 'read', timestamp: readTimestamp });
+        continue;
+      }
       if (!senderId || (!message && !postback)) continue;
       if (recipientId) recipientIds.add(recipientId);
       const attachmentType = String(message?.attachments?.[0]?.type || 'message');
       const text = String(message?.text || postback?.title || postback?.payload ||
         `[Instagram ${attachmentType.replace(/_/g, ' ')} received]`);
-      const timestampNumber = Number(event?.timestamp);
       messages.push({
         channelProfileId: senderId,
         displayName: senderId,
         text,
         providerMessageId: String(message?.mid || postback?.mid || `${entry?.id || recipientId}:${event?.timestamp || ''}:${senderId}`),
-        timestamp: Number.isFinite(timestampNumber) && timestampNumber > 0 ? new Date(timestampNumber).toISOString() : '',
+        timestamp,
         messageType: message?.text || postback ? 'text' : attachmentType
       });
     }
   }
-  return { messages, recipientIds: [...recipientIds] };
+  return { messages, statuses, watermarkStatuses, recipientIds: [...recipientIds] };
+}
+
+function providerEpochTimestamp(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  const milliseconds = numeric < 100000000000 ? numeric * 1000 : numeric;
+  const date = new Date(milliseconds);
+  return Number.isNaN(date.valueOf()) ? '' : date.toISOString();
 }
 
 export function resolveTemplate(value, context, secretResolver = () => undefined) {
@@ -3286,6 +3459,13 @@ function metaApiVersion(value) {
 function isRetryableProviderStatus(status) {
   const code = Number(status);
   return code === 408 || code === 425 || code === 429 || code >= 500;
+}
+
+function normalizeDeliveryStatus(value) {
+  const status = String(value || '').trim().toLowerCase();
+  if (status === 'seen') return 'read';
+  if (status === 'accepted' || status === 'submitted') return 'sent';
+  return ['sent', 'delivered', 'read', 'failed'].includes(status) ? status : '';
 }
 
 function isTerminalProviderStatus(status) {

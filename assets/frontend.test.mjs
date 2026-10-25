@@ -152,12 +152,16 @@ test("settings expose permission-aware browser notifications", () => {
   assert.match(html, /id="settingsRoute" data-route-panel="settings"/);
   assert.match(html, /id="pushNotificationsToggle"/);
   assert.match(app, /Notification\.requestPermission\(\)/);
-  assert.match(app, /navigator\.serviceWorker\.register\("\/sw\.js"\)/);
+  assert.match(app, /navigator\.serviceWorker\.register\(SERVICE_WORKER_URL, \{ scope: "\/" \}\)/);
   assert.match(app, /"serviceWorker" in navigator/);
   assert.match(app, /registration\.showNotification\(title, options\)/);
-  assert.match(app, /if \(!registration\?\.showNotification\) throw new Error/);
+  assert.match(app, /registration\.pushManager\.subscribe\(\{ userVisibleOnly: true, applicationServerKey: expectedKey \}\)/);
+  assert.match(app, /state\.api\.savePushSubscription/);
+  assert.match(app, /\/api\/push\/subscriptions/);
+  assert.match(app, /state\.pushSubscriptionReady && document\.visibilityState !== "visible"/);
   assert.match(app, /Add Helixcer to your Home Screen/);
-  assert.match(html, /Receive alerts while Helixcer Chat is running/);
+  assert.match(html, /Receive background alerts on this device/);
+  assert.match(app, /site-controls icon beside the address bar/);
   assert.match(app, /new Notification\(/);
   assert.match(app, /type === "webhook\.received"[\s\S]*?await loadAll\(\)[\s\S]*?notifyInboundMessage/);
   assert.match(app, /lastNotificationAt: new Map\(\)/);
@@ -180,14 +184,28 @@ test("contacts open in a right-side editor backed by contact detail endpoints", 
   assert.match(html, /id="contactEditName"/);
   assert.match(html, /id="contactEditChannel"/);
   assert.match(html, /id="contactEditChannelHelp"/);
-  assert.match(html, /id="contactEditProviderId"/);
+  assert.match(html, /id="contactEditProviderId"[^>]*readonly[^>]*aria-readonly="true"/);
+  assert.match(html, /Assigned by the provider and cannot be edited/);
   assert.match(html, /id="contactEditCompany"/);
   assert.match(html, /id="contactEditTags"/);
   assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`\)/);
   assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`, \{ method: "PATCH"/);
   assert.match(app, /row\.dataset\.contactId = contact\.contactId/);
   assert.match(app, /Channel is locked because this contact already has message history/);
+  const saveContactBody = app.match(/async function saveContactEdits\(form\) \{([\s\S]*?)\n  \}/)?.[1] || "";
+  assert.doesNotMatch(saveContactBody, /channelProfileId\s*:/);
   assert.match(app, /type === "contact\.updated"[\s\S]*?await loadAll\(\)[\s\S]*?await selectContact/);
+});
+
+test("outbound messages expose sent, delivered, read, retry, and failure states for every provider", () => {
+  assert.match(app, /function outboundDeliveryStatus\(value\)/);
+  assert.match(app, /Delivered ✓✓/);
+  assert.match(app, /Read ✓✓/);
+  assert.match(app, /Submitted ✓/);
+  assert.match(app, /Retrying/);
+  assert.match(app, /Message status:/);
+  assert.match(styles, /\.delivery-status\.is-delivered/);
+  assert.match(styles, /\.delivery-status\.is-read/);
 });
 
 test("pending and closed status updates clear the selected chat only after the server accepts them", () => {

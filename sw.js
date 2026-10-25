@@ -9,10 +9,12 @@ function boundedText(value, fallback, maximumLength) {
 
 function notificationFrom(payload) {
   const source = payload && typeof payload === "object" ? payload : {};
+  const targetUrl = typeof source.url === "string" && source.url.startsWith("/") ? source.url : INBOX_URL;
   const options = {
     body: boundedText(source.body, "You have a new message.", 500),
     icon: DEFAULT_ICON,
-    data: { url: INBOX_URL },
+    badge: DEFAULT_ICON,
+    data: { url: targetUrl },
   };
 
   const tag = boundedText(source.tag, "", 128);
@@ -27,6 +29,12 @@ function notificationFrom(payload) {
 async function show(payload) {
   const notification = notificationFrom(payload);
   await self.registration.showNotification(notification.title, notification.options);
+}
+
+async function showPush(payload) {
+  const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  if (windows.some((client) => client.visibilityState === "visible")) return;
+  await show(payload);
 }
 
 self.addEventListener("install", () => {
@@ -55,7 +63,7 @@ self.addEventListener("push", (event) => {
     }
   }
 
-  event.waitUntil(show(payload));
+  event.waitUntil(showPush(payload));
 });
 
 self.addEventListener("notificationclick", (event) => {
@@ -63,7 +71,7 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(
     (async () => {
-      const targetUrl = new URL(INBOX_URL, self.location.origin).href;
+      const targetUrl = new URL(event.notification.data?.url || INBOX_URL, self.location.origin).href;
       const windows = await self.clients.matchAll({
         type: "window",
         includeUncontrolled: true,

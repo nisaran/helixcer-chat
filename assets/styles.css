@@ -421,9 +421,14 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .message-row.is-outbound .message-bubble { border-color: #e8b9aa; border-radius: 15px 15px 4px 15px; background: #fff1eb; }
 .message-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
 .message-foot { display: flex; justify-content: flex-end; align-items: center; gap: 5px; min-width: 65px; margin-top: 5px; color: #88918f; font-size: 9px; }
-.delivery-check { color: var(--blue); font-size: 11px; font-weight: 800; }
+.delivery-status { font-size: 9px; font-weight: 750; white-space: nowrap; }
+.delivery-status.is-sent, .delivery-status.is-pending { color: #7b8582; }
+.delivery-status.is-delivered { color: #397468; }
+.delivery-status.is-read { color: var(--blue); }
 .message-sender { margin: 0 0 4px; color: var(--brand); font-size: 10px; font-weight: 750; }
 .message-failed { color: #b33326; }
+
+.read-only-field[readonly] { cursor: default; background: #f2f4f1; color: #3f4a47; }
 
 .typing-row { display: flex; align-items: center; gap: 4px; background: rgba(247,246,242,.92); color: var(--muted); padding: 2px 24px 8px; }
 .typing-row span { width: 5px; height: 5px; border-radius: 50%; background: #9da6a3; animation: type-dot 1s infinite alternate; }
