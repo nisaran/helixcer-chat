@@ -4,14 +4,14 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-2";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-3";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
   const $ = (id) => document.getElementById(id);
   const state = {
     route: "inbox",
-    filter: "all",
+    filter: "open",
     search: "",
     contactSearch: "",
     channels: [],

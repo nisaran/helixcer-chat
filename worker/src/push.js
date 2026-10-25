@@ -135,7 +135,7 @@ export async function sendWorkspacePush(env, workspaceId, notification = {}) {
     WHERE p.workspace_id=?1 ORDER BY p.updated_at DESC LIMIT ?2`)
     .bind(workspaceId, MAX_SUBSCRIPTIONS_PER_WORKSPACE).all();
   const rows = result.results || [];
-  const message = { data: safeNotification(notification), options: { ttl: 120, urgency: 'high', topic: 'helixcer-inbox' } };
+  const message = { data: safeNotification(notification), options: { ttl: 120, urgency: 'high' } };
   const totals = { sent: 0, removed: 0, failed: 0, unavailable: false };
   await Promise.all(rows.map(async row => {
     const now = new Date().toISOString();

@@ -10,6 +10,7 @@ import {
   encryptChannelCredential,
   encryptOutboundPayload,
   handleRequest,
+  inboundPushNotification,
   InboxHub,
   isRetryableWhatsAppStatus,
   normalizeGeneric,
@@ -25,6 +26,28 @@ import {
   whatsappReplyWindowState,
   verifyMetaSignature
 } from '../src/index.js';
+
+test('inbound push notifications use the saved sender name and a bounded message preview', () => {
+  const notification = inboundPushNotification({ channelId: 'wa-sales' }, {
+    conversationId: 'conversation-123',
+    senderName: '  Asha   Rao  ',
+    preview: `  Hello\nthere ${'x'.repeat(300)}  `,
+    messageType: 'text'
+  });
+  assert.equal(notification.title, 'Asha Rao');
+  assert.match(notification.body, /^Hello there /);
+  assert.equal(notification.body.length, 240);
+  assert.equal(notification.tag, 'helixcer-conversation-123');
+
+  assert.deepEqual(inboundPushNotification({ channelId: 'telegram-support' }, {
+    conversationId: 'conversation-media', senderName: '', preview: '', messageType: 'image'
+  }), {
+    title: 'Customer', body: 'Sent a photo', tag: 'helixcer-conversation-media'
+  });
+  assert.equal(inboundPushNotification({ channelId: 'wa-sales' }, {
+    senderName: 'Nisar', preview: '[WhatsApp document received]', messageType: 'document'
+  }).body, 'Sent a document');
+});
 
 test('WhatsApp free-form replies follow the latest inbound 24-hour window', () => {
   const now = Date.parse('2026-10-25T12:00:00.000Z');

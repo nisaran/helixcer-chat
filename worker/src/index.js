@@ -18,7 +18,7 @@ import {
   sendWorkspacePush
 } from './push.js';
 
-const API_VERSION = '2026-10-26-realtime-push';
+const API_VERSION = '2026-10-26-push-preview';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
@@ -956,8 +956,15 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
     return json({ ok: false, error: 'Webhook phone number does not match this channel.' }, 403);
   }
   let received = 0;
+  let latestInbound = null;
   const statusChanges = [];
-  for (const event of normalized.messages) if (await storeInbound(env, channel, event, payload)) received++;
+  for (const event of normalized.messages) {
+    const stored = await storeInbound(env, channel, event, payload);
+    if (stored) {
+      received++;
+      latestInbound = stored;
+    }
+  }
   for (const status of normalized.statuses) {
     statusChanges.push(...await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload));
   }
@@ -968,7 +975,7 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
   });
   await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
   if (received || normalized.statuses.length) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: normalized.statuses.length });
-  if (received) scheduleInboundPush(ctx, env, channel);
+  if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
   return json({ ok: true, received, statuses: normalized.statuses.length });
 }
 
@@ -983,7 +990,14 @@ async function handleGenericWebhook(request, env, channelId, ctx) {
   const events = normalizeGeneric(payload, mapping);
   const statuses = normalizeGenericStatuses(payload, mapping);
   let received = 0;
-  for (const event of events) if (await storeInbound(env, channel, event, payload)) received++;
+  let latestInbound = null;
+  for (const event of events) {
+    const stored = await storeInbound(env, channel, event, payload);
+    if (stored) {
+      received++;
+      latestInbound = stored;
+    }
+  }
   let updatedStatuses = 0;
   const statusChanges = [];
   for (const status of statuses) {
@@ -995,7 +1009,7 @@ async function handleGenericWebhook(request, env, channelId, ctx) {
   if (received || updatedStatuses) {
     await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: updatedStatuses });
   }
-  if (received) scheduleInboundPush(ctx, env, channel);
+  if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
   return json({ ok: true, received });
 }
 
@@ -1010,10 +1024,11 @@ async function handleTelegramWebhook(request, env, channelId, ctx) {
   const payload = safeJsonParse(await readBoundedText(request, MAX_RAW_PAYLOAD), null);
   if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
   const event = normalizeTelegram(payload);
-  const received = event && await storeInbound(env, channel, event, payload) ? 1 : 0;
+  const storedInbound = event ? await storeInbound(env, channel, event, payload) : null;
+  const received = storedInbound ? 1 : 0;
   await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
   if (received) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received });
-  if (received) scheduleInboundPush(ctx, env, channel);
+  if (storedInbound) scheduleInboundPush(ctx, env, channel, storedInbound);
   return json({ ok: true, received });
 }
 
@@ -1048,7 +1063,14 @@ async function handleInstagramWebhook(request, env, channelId, ctx) {
     return json({ ok: false, error: 'Webhook Instagram account does not match this channel.' }, 403);
   }
   let received = 0;
-  for (const event of normalized.messages) if (await storeInbound(env, channel, event, payload)) received++;
+  let latestInbound = null;
+  for (const event of normalized.messages) {
+    const stored = await storeInbound(env, channel, event, payload);
+    if (stored) {
+      received++;
+      latestInbound = stored;
+    }
+  }
   let updatedStatuses = 0;
   const statusChanges = [];
   for (const status of normalized.statuses) {
@@ -1066,7 +1088,7 @@ async function handleInstagramWebhook(request, env, channelId, ctx) {
   if (received || updatedStatuses) {
     await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: updatedStatuses });
   }
-  if (received) scheduleInboundPush(ctx, env, channel);
+  if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
   return json({ ok: true, received });
 }
 
@@ -1128,10 +1150,13 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
       throw httpError(400, 'Instagram app webhook account routing is inconsistent.');
     }
     let channelReceived = 0;
+    let latestInbound = null;
     for (const event of normalized.messages) {
-      if (await storeInbound(env, route.channel, event, route.payload)) {
+      const stored = await storeInbound(env, route.channel, event, route.payload);
+      if (stored) {
         received++;
         channelReceived++;
+        latestInbound = stored;
       }
     }
     let channelStatuses = 0;
@@ -1153,22 +1178,47 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
         type: 'webhook.received', channelId: route.channel.channelId, received: channelReceived, statuses: channelStatuses
       });
     }
-    if (channelReceived) scheduleInboundPush(ctx, env, route.channel);
+    if (latestInbound) scheduleInboundPush(ctx, env, route.channel, latestInbound);
   }
   return json({ ok: true, received, channels: routes.length });
 }
 
-function scheduleInboundPush(ctx, env, channel) {
-  const delivery = sendWorkspacePush(env, channel.workspaceId, {
-    title: 'New customer message',
-    body: 'Open Helixcer Chat to reply.',
-    tag: `helixcer-${channel.channelId}`
-  }).catch(error => console.error('push_delivery_failed', {
+function scheduleInboundPush(ctx, env, channel, inbound) {
+  const notification = inboundPushNotification(channel, inbound);
+  const delivery = sendWorkspacePush(env, channel.workspaceId, notification).catch(error => console.error('push_delivery_failed', {
     workspaceId: channel.workspaceId,
     channelId: channel.channelId,
     message: cleanError(error)
   }));
   if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(delivery);
+}
+
+export function inboundPushNotification(channel, inbound = {}) {
+  const title = compactNotificationText(inbound.senderName, 120) || 'Customer';
+  const preview = compactNotificationText(inbound.preview, 240);
+  const syntheticPreview = /^\[(?:WhatsApp|Instagram) .+ received\]$/i.test(preview);
+  const body = preview && !syntheticPreview ? preview : inboundMessageTypeLabel(inbound.messageType);
+  const conversationId = String(inbound.conversationId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 90);
+  return {
+    title,
+    body,
+    tag: `helixcer-${conversationId || String(channel?.channelId || 'inbox').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 90)}`
+  };
+}
+
+function compactNotificationText(value, maximumLength) {
+  const compact = String(value || '').replace(/\s+/g, ' ').trim();
+  return Array.from(compact).slice(0, maximumLength).join('');
+}
+
+function inboundMessageTypeLabel(value) {
+  const type = String(value || 'message').toLowerCase();
+  const labels = {
+    image: 'Sent a photo', video: 'Sent a video', audio: 'Sent an audio message', voice: 'Sent a voice message',
+    document: 'Sent a document', file: 'Sent a file', sticker: 'Sent a sticker', location: 'Shared a location',
+    contact: 'Shared a contact', contacts: 'Shared a contact', reaction: 'Sent a reaction', interactive: 'Sent an interactive message'
+  };
+  return labels[type] || 'Sent a message';
 }
 
 async function findInstagramAppChannels(env, appId) {
@@ -2896,8 +2946,9 @@ async function storeInbound(env, channel, event, rawPayload) {
   try {
   const now = new Date().toISOString();
   const timestamp = normalizeTimestamp(event.timestamp, now);
-  let identity = await env.DB.prepare(`SELECT identity_id,contact_id FROM channel_identities
-    WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3`)
+  let identity = await env.DB.prepare(`SELECT i.identity_id,i.contact_id,c.display_name AS contact_display_name
+    FROM channel_identities i JOIN contacts c ON c.contact_id=i.contact_id AND c.workspace_id=i.workspace_id
+    WHERE i.workspace_id=?1 AND i.channel_id=?2 AND i.channel_profile_id=?3`)
     .bind(channel.workspaceId, channel.channelId, String(event.channelProfileId)).first();
   if (!identity) {
     const contactId = crypto.randomUUID();
@@ -2909,10 +2960,11 @@ async function storeInbound(env, channel, event, rawPayload) {
         env.DB.prepare(`INSERT INTO channel_identities (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
           VALUES (?1,?2,?3,?4,?5,?6,?7)`).bind(identityId, contactId, channel.channelId, String(event.channelProfileId), name, now, channel.workspaceId)
       ]);
-      identity = { identity_id: identityId, contact_id: contactId };
+      identity = { identity_id: identityId, contact_id: contactId, contact_display_name: name };
     } catch (error) {
-      identity = await env.DB.prepare(`SELECT identity_id,contact_id FROM channel_identities
-        WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3`)
+      identity = await env.DB.prepare(`SELECT i.identity_id,i.contact_id,c.display_name AS contact_display_name
+        FROM channel_identities i JOIN contacts c ON c.contact_id=i.contact_id AND c.workspace_id=i.workspace_id
+        WHERE i.workspace_id=?1 AND i.channel_id=?2 AND i.channel_profile_id=?3`)
         .bind(channel.workspaceId, channel.channelId, String(event.channelProfileId)).first();
       if (!identity) throw error;
     }
@@ -2945,7 +2997,13 @@ async function storeInbound(env, channel, event, rawPayload) {
     env.DB.prepare("UPDATE conversations SET status='open',last_message_at=?3,unread_count=unread_count+1,updated_at=?4 WHERE conversation_id=?1 AND workspace_id=?2")
       .bind(conversation.conversation_id, channel.workspaceId, timestamp, now)
   ]);
-  return true;
+  return {
+    messageId,
+    conversationId: conversation.conversation_id,
+    senderName: String(identity.contact_display_name || event.displayName || event.channelProfileId),
+    preview: String(event.text || ''),
+    messageType: String(event.messageType || 'message')
+  };
   } catch (error) {
     // Let a provider retry process the event if storage failed after claiming its dedupe key.
     await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(eventKey).run();

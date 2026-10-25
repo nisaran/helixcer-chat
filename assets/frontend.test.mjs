@@ -227,6 +227,13 @@ test("pending and closed status updates clear the selected chat only after the s
   assert.match(app, /await loadAll\(\);[\s\S]*?refreshed\.status !== previousStatus[\s\S]*?clearSelectedConversation\(\)/);
 });
 
+test("the inbox opens on the Open conversation filter without selecting a chat", () => {
+  assert.match(app, /filter:\s*"open"/);
+  assert.match(html, /class="filter-chip is-active"[^>]*data-filter="open"/);
+  assert.doesNotMatch(html, /class="filter-chip is-active"[^>]*data-filter="all"/);
+  assert.match(app, /selectedConversationId:\s*null/);
+});
+
 test("Helixcer mark brands the login, sidebar, and favicon", () => {
   assert.match(html, /rel="icon" href="\.\/assets\/helixcer-mark\.jpg"/);
   assert.match(html, /class="auth-brand-logo" src="\.\/assets\/helixcer-logo\.jpg" alt="Helixcer"/);
