@@ -950,38 +950,114 @@
     const style = channelStyle(channel);
     const card = element("article", "channel-card whatsapp-card");
     const head = element("div", "channel-card-head");
+    const identity = element("div", "channel-card-identity");
     const logo = element("span", "channel-logo", style.short);
     logo.style.setProperty("--channel-color", style.color);
     logo.style.setProperty("--channel-soft", style.soft);
     const copy = document.createElement("div");
     const health = element("span", `health-dot${healthState.className ? ` ${healthState.className}` : ""}`, healthState.label);
     copy.append(element("h3", "", channel.name), health);
-    head.append(logo, copy);
+    identity.append(logo, copy);
+
+    const metaLink = document.createElement("a");
+    metaLink.className = "secondary-button meta-console-link";
+    metaLink.href = "https://developers.facebook.com/apps/";
+    metaLink.target = "_blank";
+    metaLink.rel = "noopener noreferrer";
+    metaLink.textContent = "Open Meta setup";
+    head.append(identity, metaLink);
 
     const channelConversations = state.conversations.filter((item) => item.channelId === channel.channelId);
     const unreadCount = channelConversations.reduce((sum, item) => sum + item.unreadCount, 0);
     const metrics = element("div", "channel-metrics");
-    metrics.append(metric("Conversations", channelConversations.length), metric("Unread", unreadCount));
+    metrics.append(
+      metric("Conversations", channelConversations.length),
+      metric("Unread", unreadCount),
+      metric("Last webhook", channel.setup?.lastWebhookAt ? relativeTime(channel.setup.lastWebhookAt) : "Waiting")
+    );
 
-    const setup = element("div", "channel-setup");
-    setup.append(element("strong", "", "Meta webhook callback"));
-    setup.append(element("code", "channel-callback", state.api.webhookUrl(channel.channelId)));
-    const setupNote = element("p", "channel-setup-note", healthState.summary);
-    if (channel.setup?.verifiedName || channel.setup?.verifiedPhoneNumber) {
-      setupNote.textContent = `${healthState.summary} ${[channel.setup.verifiedName, channel.setup.verifiedPhoneNumber].filter(Boolean).join(" · ")}`;
-    }
-    setup.append(setupNote);
+    const credentialsReady = Boolean(channel.setup?.credentialsPresent || ["configured", "webhook_required", "connected"].includes(channel.health));
+    const numberVerified = Boolean(channel.setup?.credentialsVerifiedAt || ["webhook_required", "connected"].includes(channel.health));
+    const webhookVerified = Boolean(channel.setup?.webhookVerifiedAt || channel.health === "connected");
+    const completedSteps = [credentialsReady, numberVerified, webhookVerified].filter(Boolean).length;
+    const setup = element("section", "meta-setup-panel");
+    const setupHead = element("div", "meta-setup-head");
+    const setupTitle = document.createElement("div");
+    setupTitle.append(element("span", "meta-setup-kicker", "Meta connection"), element("strong", "", "Complete WhatsApp Cloud API setup"));
+    setupHead.append(setupTitle, element("span", "meta-progress", `${completedSteps} of 3 complete`));
 
-    const actions = element("div", "channel-actions");
-    const verifyButton = element("button", "secondary-button", channel.health === "connected" ? "Recheck connection" : "Check Meta connection");
+    const steps = element("ol", "meta-step-list");
+    const credentialStep = metaSetupStep({
+      number: 1,
+      complete: credentialsReady,
+      current: !credentialsReady,
+      title: credentialsReady ? "Credentials protected" : "Add the Meta credentials",
+      body: credentialsReady
+        ? "The access token, Phone Number ID, verification token, and App Secret are secured in Cloudflare."
+        : "Save the access token, Phone Number ID, verification token, and App Secret in Cloudflare. They are never shown in this dashboard.",
+      status: credentialsReady ? "Done" : "Required",
+    });
+
+    const verifyStep = metaSetupStep({
+      number: 2,
+      complete: numberVerified,
+      current: credentialsReady && !numberVerified,
+      title: numberVerified ? "Business number verified" : "Verify the business number",
+      body: numberVerified
+        ? [channel.setup?.verifiedName, channel.setup?.verifiedPhoneNumber].filter(Boolean).join(" · ") || "Meta accepted the configured WhatsApp number."
+        : "Check that the saved credentials can access the selected WhatsApp business number.",
+      status: numberVerified ? "Done" : credentialsReady ? "Ready" : "Waiting",
+    });
+    const verifyButton = element("button", "secondary-button", numberVerified ? "Recheck number" : "Check Meta connection");
     verifyButton.type = "button";
     verifyButton.dataset.action = "verify-whatsapp";
     verifyButton.dataset.channelId = channel.channelId;
-    verifyButton.disabled = channel.health === "setup_required" || channel.health === "disconnected";
-    actions.append(verifyButton);
+    verifyButton.disabled = !credentialsReady || channel.health === "disconnected";
+    verifyStep.querySelector(".meta-step-content").append(verifyButton);
 
-    card.append(head, element("p", "", "WhatsApp Cloud API routes customer text messages into this shared inbox."), metrics, setup, actions);
+    const callbackUrl = state.api.webhookUrl(channel.channelId);
+    const webhookStep = metaSetupStep({
+      number: 3,
+      complete: webhookVerified,
+      current: numberVerified && !webhookVerified,
+      title: webhookVerified ? "Webhook linked" : "Point Meta to Helixcer",
+      body: webhookVerified
+        ? "Meta verified this callback and the Messages webhook is ready."
+        : "In Meta, open WhatsApp > Configuration, use this callback URL, enter the same verification token, and keep Messages subscribed.",
+      status: webhookVerified ? "Done" : numberVerified ? "Ready" : "Waiting",
+    });
+    const callbackRow = element("div", "meta-callback-row");
+    callbackRow.append(element("code", "channel-callback", callbackUrl));
+    const copyButton = element("button", "secondary-button compact-button", "Copy URL");
+    copyButton.type = "button";
+    copyButton.dataset.action = "copy-webhook-callback";
+    copyButton.dataset.copyValue = callbackUrl;
+    callbackRow.append(copyButton);
+    webhookStep.querySelector(".meta-step-content").append(callbackRow);
+
+    steps.append(credentialStep, verifyStep, webhookStep);
+    const warning = element("div", "meta-webhook-warning");
+    warning.append(
+      element("strong", "", "Before you switch"),
+      element("span", "", "Meta allows one callback for this app. Replacing an existing callback can stop another automation, so switch only when Helixcer is ready.")
+    );
+    const setupNote = element("p", "channel-setup-note", healthState.summary);
+    setup.append(setupHead, setupNote, steps, warning);
+
+    card.append(head, element("p", "", "WhatsApp Cloud API routes customer text messages into this shared inbox."), metrics, setup);
     grid.append(card);
+  }
+
+  function metaSetupStep({ number, complete, current, title, body, status }) {
+    const step = element("li", `meta-step${complete ? " is-complete" : ""}${current ? " is-current" : ""}`);
+    const marker = element("span", "meta-step-marker", complete ? "✓" : String(number));
+    marker.setAttribute("aria-hidden", "true");
+    const content = element("div", "meta-step-content");
+    const heading = element("div", "meta-step-heading");
+    heading.append(element("strong", "", title), element("span", "meta-step-status", status));
+    content.append(heading, element("p", "", body));
+    step.append(marker, content);
+    return step;
   }
 
   function normalizeMember(raw) {
@@ -1406,6 +1482,25 @@
     }
   }
 
+  async function copyWebhookCallback(button) {
+    const value = String(button?.dataset.copyValue || "");
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast("Callback URL copied", "Paste it into Meta's WhatsApp webhook configuration.");
+    } catch {
+      const code = button.closest(".meta-callback-row")?.querySelector("code");
+      if (code) {
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      showToast("Copy the selected URL", "Your browser blocked automatic clipboard access.");
+    }
+  }
+
   async function createContact(form) {
     const formData = new FormData(form);
     const payload = {
@@ -1562,6 +1657,10 @@
       if (actionButton) {
         if (actionButton.dataset.action === "verify-whatsapp") {
           verifyWhatsAppConnection(actionButton.dataset.channelId, actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "copy-webhook-callback") {
+          copyWebhookCallback(actionButton);
           return;
         }
         const actions = {

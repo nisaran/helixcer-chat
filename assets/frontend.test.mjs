@@ -48,7 +48,12 @@ test("production channel UI is WhatsApp-only and hides provider internals", () =
   assert.match(app, /channelId:\s*"wa-main"/);
   assert.match(app, /\/api\/channels\/\$\{encodeURIComponent\(channelId\)\}\/verify/);
   assert.match(app, /webhooks\/whatsapp\/\$\{encodeURIComponent\(channelId\)\}/);
+  assert.match(app, /Complete WhatsApp Cloud API setup/);
+  assert.match(app, /copy-webhook-callback/);
+  assert.match(app, /Open Meta setup/);
+  assert.match(app, /Meta allows one callback for this app/);
   assert.doesNotMatch(html, /channelConnectorType|Secret prefix|Generic API endpoint|Telegram Bot API|Website chat/);
   assert.doesNotMatch(html, /id="channelDialog"|id="channelForm"/);
+  assert.doesNotMatch(html, /name="(?:accessToken|appSecret|verifyToken|phoneNumberId)"/i);
   assert.doesNotMatch(app, /apiVersion:\s*"v23\.0"/);
 });
