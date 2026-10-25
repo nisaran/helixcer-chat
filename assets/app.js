@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-5";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-6";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -21,6 +21,7 @@
     templatesByConversation: new Map(),
     templateConversationId: null,
     pendingConversationId: null,
+    unreadMarker: null,
     recentVerifyTokens: new Map(),
     selectedConversationId: null,
     selectedContactId: null,
@@ -1092,7 +1093,12 @@
   async function selectConversation(conversationId, { markRead = true, updateUrl = true } = {}) {
     const conversation = state.conversations.find((item) => item.conversationId === conversationId);
     if (!conversation) return;
-    const shouldMarkRead = markRead && conversation.unreadCount > 0;
+    const unreadCount = Math.max(0, Number(conversation.unreadCount) || 0);
+    const changingConversation = state.selectedConversationId !== conversationId;
+    if (changingConversation) {
+      state.unreadMarker = markRead && unreadCount > 0 ? { conversationId, count: unreadCount } : null;
+    }
+    const shouldMarkRead = markRead && unreadCount > 0;
     if (shouldMarkRead) {
       conversation.unreadCount = 0;
       renderCounts();
@@ -1182,14 +1188,28 @@
       return;
     }
     let dateKey = "";
-    messages
+    const sortedMessages = messages
       .slice()
-      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-      .forEach((message) => {
+      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const marker = state.unreadMarker?.conversationId === conversation.conversationId ? state.unreadMarker : null;
+    const inboundIndexes = marker
+      ? sortedMessages.map((message, index) => message.direction === "inbound" ? index : -1).filter((index) => index >= 0)
+      : [];
+    const unreadStartIndex = marker
+      ? marker.count > inboundIndexes.length ? 0 : inboundIndexes[inboundIndexes.length - marker.count]
+      : -1;
+    sortedMessages.forEach((message, index) => {
         const currentDate = dateLabel(message.timestamp);
         if (currentDate !== dateKey) {
           host.append(element("div", "date-divider", currentDate));
           dateKey = currentDate;
+        }
+        if (index === unreadStartIndex) {
+          const label = `${marker.count} unread message${marker.count === 1 ? "" : "s"}`;
+          const divider = element("div", "unread-divider", label);
+          divider.setAttribute("role", "separator");
+          divider.setAttribute("aria-label", label);
+          host.append(divider);
         }
         const row = element("div", `message-row${message.direction === "outbound" ? " is-outbound" : ""}`);
         row.dataset.messageId = message.messageId;
@@ -1210,7 +1230,7 @@
         host.append(row);
       });
     renderComposerState();
-    requestAnimationFrame(() => { host.scrollTop = host.scrollHeight; });
+    host.scrollTop = host.scrollHeight;
   }
 
   function isWhatsAppConversation(conversation = selectedConversation()) {
@@ -3365,6 +3385,7 @@
   function clearSelectedConversation({ updateUrl = true } = {}) {
     state.selectedConversationId = null;
     state.pendingConversationId = null;
+    state.unreadMarker = null;
     state.detailsOpen = false;
     $("inboxGrid").classList.remove("chat-open", "has-details");
     renderConversationList();

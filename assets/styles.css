@@ -414,9 +414,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .compact-select { height: 34px; border: 1px solid var(--line); border-radius: 9px; background: white; color: #4d5957; padding: 0 28px 0 10px; font-size: 11px; font-weight: 650; }
 .assignee-select { max-width: 145px; }
 
-.message-thread { min-height: 0; overflow-y: auto; scroll-behavior: smooth; padding: 24px clamp(16px, 3vw, 38px) 18px; scrollbar-color: #d1d5d2 transparent; }
+.message-thread { min-height: 0; overflow-y: auto; scroll-behavior: auto; padding: 24px clamp(16px, 3vw, 38px) 18px; scrollbar-color: #d1d5d2 transparent; }
 .date-divider { display: flex; align-items: center; gap: 10px; margin: 10px 0 20px; color: #88918f; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .date-divider::before, .date-divider::after { content: ""; flex: 1; height: 1px; background: rgba(102,113,109,.15); }
+.unread-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--brand); font-size: 10px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; }
+.unread-divider::before, .unread-divider::after { content: ""; flex: 1; height: 1px; background: rgba(184,74,45,.28); }
 .message-row { display: flex; align-items: flex-end; gap: 8px; margin: 8px 0; }
 .message-row.is-outbound { justify-content: flex-end; }
 .message-bubble { position: relative; max-width: min(72%, 610px); border: 1px solid var(--line); border-radius: 15px 15px 15px 4px; background: white; box-shadow: 0 2px 8px rgba(36,43,40,.035); padding: 10px 12px 7px; }

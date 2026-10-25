@@ -247,11 +247,34 @@ test("pending and closed status updates clear the selected chat only after the s
 
 test("opening a conversation clears its unread badge before the first list render", () => {
   const selectHandler = app.slice(app.indexOf("async function selectConversation"), app.indexOf("function renderSelectedConversation"));
-  assert.match(selectHandler, /const shouldMarkRead = markRead && conversation\.unreadCount > 0/);
+  assert.match(selectHandler, /const shouldMarkRead = markRead && unreadCount > 0/);
   assert.match(selectHandler, /conversation\.unreadCount = 0;[\s\S]*?renderCounts\(\);[\s\S]*?renderConversationList\(\)/);
   assert.ok(selectHandler.indexOf("conversation.unreadCount = 0") < selectHandler.indexOf("renderConversationList()"));
   assert.match(selectHandler, /if \(shouldMarkRead\) \{[\s\S]*?updateConversation\(conversationId, \{ markRead: true \}\)/);
   assert.ok(selectHandler.indexOf("updateConversation(conversationId, { markRead: true })") < selectHandler.indexOf("await state.api.getMessages(conversationId)"));
+});
+
+test("opening unread conversations preserves a WhatsApp-style unread divider until the chat changes", () => {
+  const selectHandler = app.slice(app.indexOf("async function selectConversation"), app.indexOf("function renderSelectedConversation"));
+  const messageRenderer = app.slice(app.indexOf("function renderMessages"), app.indexOf("function isWhatsAppConversation"));
+  const clearHandler = app.slice(app.indexOf("function clearSelectedConversation"), app.indexOf("function contactFor"));
+  assert.match(app, /unreadMarker:\s*null/);
+  assert.match(selectHandler, /const unreadCount = Math\.max\(0, Number\(conversation\.unreadCount\) \|\| 0\)/);
+  assert.match(selectHandler, /changingConversation[\s\S]*?state\.unreadMarker = markRead && unreadCount > 0/);
+  assert.match(messageRenderer, /marker\.count > inboundIndexes\.length \? 0/);
+  assert.match(messageRenderer, /inboundIndexes[\s\S]*?inboundIndexes\.length - marker\.count/);
+  assert.match(messageRenderer, /`\$\{marker\.count\} unread message\$\{marker\.count === 1 \? "" : "s"\}`/);
+  assert.match(messageRenderer, /element\("div", "unread-divider", label\)/);
+  assert.match(clearHandler, /state\.unreadMarker = null/);
+  assert.match(styles, /\.unread-divider \{/);
+});
+
+test("message history opens at the latest message without an animated top-to-bottom flash", () => {
+  const messageRenderer = app.slice(app.indexOf("function renderMessages"), app.indexOf("function isWhatsAppConversation"));
+  assert.match(messageRenderer, /host\.scrollTop = host\.scrollHeight/);
+  assert.doesNotMatch(messageRenderer, /requestAnimationFrame/);
+  assert.match(styles, /\.message-thread \{[^}]*scroll-behavior: auto/);
+  assert.doesNotMatch(styles, /\.message-thread \{[^}]*scroll-behavior: smooth/);
 });
 
 test("the inbox opens on the Open conversation filter without selecting a chat", () => {
