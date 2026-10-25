@@ -116,9 +116,11 @@ Every authenticated business-data query includes the session's `workspace_id`. P
 
 Owners and administrators create connections through `POST /api/channels` and edit them through `PATCH /api/channels/:channelId`. A PATCH keeps every omitted or blank credential unchanged. API responses expose only non-secret configuration, credential-presence booleans, verification timestamps, and provider identity metadata. Decrypted values exist only for the provider call that needs them.
 
+Replacing a Meta access token or App Secret invalidates the provider identity check but preserves an already completed callback handshake. Replacing the Verify Token or changing provider configuration requires webhook verification again; historical `lastWebhookAt` is retained unless the provider identity itself changes.
+
 Provider payloads use these fields:
 
-- WhatsApp Cloud: `config` contains `wabaId`, `phoneNumberId`, and optional `apiVersion`; `credentials` contains `accessToken`, `appSecret`, and `verifyToken`. Verification lists the WABA's phone numbers and requires the configured Phone Number ID to belong to that WABA.
+- WhatsApp Cloud: `config` contains `wabaId`, `phoneNumberId`, and optional `apiVersion`; `credentials` contains `accessToken`, `appSecret`, and `verifyToken`. Verification first requires the configured Phone Number ID to belong to the WABA, then subscribes the app with `POST /{WABA_ID}/subscribed_apps`; it completes only when both operations succeed. The Meta dashboard callback and `messages` webhook field still need to be configured manually.
 - Telegram Bot: `config` is empty; `credentials` contains `botToken` and `webhookSecret`. Verification calls `getMe` and registers the channel-specific webhook with Telegram.
 - Instagram Messaging with Instagram Login: `config` contains `instagramAccountId` and may contain `username`, `appId`, `apiVersion`, and `authMode` (`instagram_login`); `credentials` contains `accessToken`, `appSecret`, and `verifyToken`. A Facebook Page ID is not required.
 

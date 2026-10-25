@@ -631,6 +631,66 @@ test('managed channel CRUD encrypts credentials, preserves blank secrets, and ke
   database.close();
 });
 
+test('WhatsApp credential patches preserve an independent webhook handshake', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId: 'wa-state', name: 'WhatsApp state', connectorType: 'whatsapp_cloud',
+      config: { wabaId: '123456789012345', phoneNumberId: '123456789012346', apiVersion: 'v26.0' },
+      credentials: { accessToken: 'original-access-token-value-1234567890',
+        appSecret: '1234567890abcdef1234567890abcdef', verifyToken: 'original-verify-token' } })
+  }), env);
+  assert.equal(created.status, 201);
+
+  const verifiedAt = '2026-10-25T10:00:00.000Z';
+  const webhookVerifiedAt = '2026-10-25T10:01:00.000Z';
+  const lastWebhookAt = '2026-10-25T10:02:00.000Z';
+  const readConfig = () => JSON.parse(database.prepare("SELECT config_json FROM channels WHERE channel_id='wa-state'").get().config_json);
+  const seedVerificationState = () => {
+    const config = { ...readConfig(), credentialsVerifiedAt: verifiedAt, subscribedAppsAt: verifiedAt,
+      webhookVerifiedAt, lastWebhookAt, verifiedPhoneNumber: '+91 98765 43210',
+      verifiedName: 'Helixcer', verifiedProviderId: '123456789012346' };
+    database.prepare("UPDATE channels SET config_json=? WHERE channel_id='wa-state'").run(JSON.stringify(config));
+  };
+  seedVerificationState();
+
+  const credentialsPatched = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-state', {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ credentials: { accessToken: 'replacement-access-token-value-1234567890',
+      appSecret: 'abcdef1234567890abcdef1234567890' } })
+  }), env);
+  assert.equal(credentialsPatched.status, 200);
+  const afterCredentialPatch = readConfig();
+  assert.equal(afterCredentialPatch.credentialsVerifiedAt, undefined);
+  assert.equal(afterCredentialPatch.subscribedAppsAt, undefined);
+  assert.equal(afterCredentialPatch.verifiedProviderId, undefined);
+  assert.equal(afterCredentialPatch.webhookVerifiedAt, webhookVerifiedAt);
+  assert.equal(afterCredentialPatch.lastWebhookAt, lastWebhookAt);
+
+  const verifyTokenPatched = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-state', {
+    method: 'PATCH', headers, body: JSON.stringify({ credentials: { verifyToken: 'replacement-verify-token' } })
+  }), env);
+  assert.equal(verifyTokenPatched.status, 200);
+  const afterVerifyTokenPatch = readConfig();
+  assert.equal(afterVerifyTokenPatch.webhookVerifiedAt, undefined);
+  assert.equal(afterVerifyTokenPatch.lastWebhookAt, lastWebhookAt);
+
+  seedVerificationState();
+  const providerPatched = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-state', {
+    method: 'PATCH', headers, body: JSON.stringify({ config: { phoneNumberId: '123456789012347' } })
+  }), env);
+  assert.equal(providerPatched.status, 200);
+  const afterProviderPatch = readConfig();
+  assert.equal(afterProviderPatch.webhookVerifiedAt, undefined);
+  assert.equal(afterProviderPatch.lastWebhookAt, undefined);
+  database.close();
+});
+
 test('Instagram verification uses /me and exposes sanitized credential errors', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB, {
@@ -753,7 +813,7 @@ test('shared Instagram app webhook verifies all matches and routes each account 
   database.close();
 });
 
-test('WhatsApp verification requires the phone number to belong to its WABA', async () => {
+test('WhatsApp verification requires WABA ownership and subscribes the app before marking credentials verified', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB, {
     ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
@@ -771,11 +831,28 @@ test('WhatsApp verification requires the phone number to belong to its WABA', as
   const originalFetch = globalThis.fetch;
   let providerPhoneId = '999999999999999';
   let providerUrl;
-  globalThis.fetch = async input => {
-    providerUrl = new URL(String(input));
-    return new Response(JSON.stringify({ data: [{ id: providerPhoneId, display_phone_number: '+91 98765 43210', verified_name: 'Helixcer' }] }), {
-      headers: { 'Content-Type': 'application/json' }
-    });
+  let subscriptionOk = false;
+  let subscriptionCalls = 0;
+  let subscriptionRequest;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/phone_numbers')) {
+      providerUrl = url;
+      return new Response(JSON.stringify({ data: [{ id: providerPhoneId, display_phone_number: '+91 98765 43210', verified_name: 'Helixcer' }] }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (url.pathname.endsWith('/subscribed_apps')) {
+      subscriptionCalls++;
+      subscriptionRequest = { url, init };
+      return new Response(JSON.stringify(subscriptionOk
+        ? { success: true }
+        : { error: { message: 'Application does not have permission to subscribe this WABA.' } }), {
+        status: subscriptionOk ? 200 : 403,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return new Response('{}', { status: 404 });
   };
   try {
     const notOwned = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-verify/verify', {
@@ -784,12 +861,35 @@ test('WhatsApp verification requires the phone number to belong to its WABA', as
     assert.equal(notOwned.status, 422);
     assert.equal(providerUrl.origin, 'https://graph.facebook.com');
     assert.equal(providerUrl.pathname, '/v26.0/123456789012345/phone_numbers');
+    assert.equal(subscriptionCalls, 0);
     providerPhoneId = '123456789012346';
+    const subscriptionRejected = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-verify/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(subscriptionRejected.status, 422);
+    const subscriptionRejectedText = await subscriptionRejected.text();
+    assert.match(JSON.parse(subscriptionRejectedText).error, /permission to subscribe/i);
+    assert.equal(subscriptionRejectedText.includes('whatsapp-access-token-value-1234567890'), false);
+    assert.equal(subscriptionCalls, 1);
+    const rejectedSetup = JSON.parse(database.prepare("SELECT config_json FROM channels WHERE channel_id='wa-verify'").get().config_json);
+    assert.equal(rejectedSetup.credentialsVerifiedAt, undefined);
+    assert.equal(rejectedSetup.subscribedAppsAt, undefined);
+
+    subscriptionOk = true;
     const verified = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-verify/verify', {
       method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
     }), env);
     assert.equal(verified.status, 200);
-    assert.equal((await verified.json()).verifiedName, 'Helixcer');
+    const verifiedBody = await verified.json();
+    assert.equal(verifiedBody.verifiedName, 'Helixcer');
+    assert.equal(verifiedBody.subscribedToWaba, true);
+    assert.equal(subscriptionCalls, 2);
+    assert.equal(subscriptionRequest.url.pathname, '/v26.0/123456789012345/subscribed_apps');
+    assert.equal(subscriptionRequest.init.method, 'POST');
+    assert.equal(new Headers(subscriptionRequest.init.headers).get('Authorization'), 'Bearer whatsapp-access-token-value-1234567890');
+    const storedSetup = JSON.parse(database.prepare("SELECT config_json FROM channels WHERE channel_id='wa-verify'").get().config_json);
+    assert.ok(storedSetup.credentialsVerifiedAt);
+    assert.ok(storedSetup.subscribedAppsAt);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();

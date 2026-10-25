@@ -601,6 +601,7 @@ function channelSetupView(row, config = safeJsonParse(row.config_json, {}), cred
     credentialFields: presence,
     callbackPath,
     credentialsVerifiedAt: config.credentialsVerifiedAt || '',
+    subscribedAppsAt: config.subscribedAppsAt || '',
     webhookVerifiedAt: config.webhookVerifiedAt || '',
     lastWebhookAt: config.lastWebhookAt || '',
     verifiedPhoneNumber: config.verifiedPhoneNumber || '',
@@ -654,10 +655,20 @@ async function verifyWhatsAppChannel(env, channel) {
   }
   const phone = Array.isArray(data.data) ? data.data.find(item => String(item?.id || '') === phoneNumberId) : null;
   if (!phone) throw httpError(422, 'The WhatsApp phone number does not belong to the configured WABA.');
+  const subscriptionEndpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/subscribed_apps`);
+  const subscriptionResponse = await fetch(subscriptionEndpoint, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const subscriptionData = safeJsonParse(await subscriptionResponse.text(), {});
+  if (!subscriptionResponse.ok || subscriptionData.success === false) {
+    throw httpError(422, `Meta could not subscribe this app to the WhatsApp Business Account: ${providerError(subscriptionData, subscriptionResponse.status)}`);
+  }
   const now = new Date().toISOString();
   const config = await updateChannelRuntimeConfig(env, channel, {
     apiVersion: version,
     credentialsVerifiedAt: now,
+    subscribedAppsAt: now,
     verifiedProviderId: phoneNumberId,
     verifiedPhoneNumber: String(phone.display_phone_number || ''),
     verifiedName: String(phone.verified_name || '')
@@ -669,6 +680,8 @@ async function verifyWhatsAppChannel(env, channel) {
     verifiedPhoneNumber: config.verifiedPhoneNumber,
     verifiedName: config.verifiedName,
     credentialsVerifiedAt: config.credentialsVerifiedAt,
+    subscribedToWaba: true,
+    subscribedAppsAt: config.subscribedAppsAt,
     webhookVerifiedAt: config.webhookVerifiedAt || ''
   };
 }
@@ -771,8 +784,8 @@ async function saveChannel(env, workspaceId, payload, principal, forcedChannelId
   await assertUniqueManagedConfig(env, workspaceId, connectorType, channelId, config);
   const credentialUpdates = validateCredentialPayload(connectorType, payload.credentials);
   if (Object.keys(credentialUpdates).length) await importChannelCredentialKey(env.CHANNEL_CREDENTIALS_KEY);
-  const configurationChanged = editableConfigChanged(connectorType, previousConfig, config);
-  if (configurationChanged || Object.keys(credentialUpdates).length) clearChannelVerification(config);
+  const changedConfigFields = editableConfigChanges(connectorType, previousConfig, config);
+  invalidateChannelVerification(connectorType, config, changedConfigFields, Object.keys(credentialUpdates));
   const collision = await env.DB.prepare('SELECT workspace_id FROM channels WHERE channel_id=?1').bind(channelId).first();
   if (collision && collision.workspace_id !== workspaceId) throw httpError(409, 'Channel ID is already used by another workspace.');
   const storageType = connectorType === 'instagram' ? 'generic_http' : connectorType;
@@ -902,14 +915,28 @@ function normalizeChannelConfigValue(key, value) {
   return cleanMetaIdentifier(text, key);
 }
 
-function editableConfigChanged(connectorType, before = {}, after = {}) {
+function editableConfigChanges(connectorType, before = {}, after = {}) {
   const fields = CONNECTOR_DEFINITIONS[connectorType]?.configFields || [];
-  return fields.some(key => String(before[key] || '') !== String(after[key] || ''));
+  return fields.filter(key => String(before[key] || '') !== String(after[key] || ''));
 }
 
-function clearChannelVerification(config) {
-  for (const key of ['credentialsVerifiedAt', 'webhookVerifiedAt', 'lastWebhookAt', 'verifiedPhoneNumber',
-    'verifiedName', 'verifiedUsername', 'verifiedProviderId']) delete config[key];
+function invalidateChannelVerification(connectorType, config, changedConfigFields = [], changedCredentialFields = []) {
+  if (changedConfigFields.length || changedCredentialFields.length) {
+    for (const key of ['credentialsVerifiedAt', 'subscribedAppsAt', 'verifiedPhoneNumber',
+      'verifiedName', 'verifiedUsername', 'verifiedProviderId']) delete config[key];
+  }
+
+  const webhookCredentialChanged = connectorType === 'telegram'
+    ? changedCredentialFields.some(key => key === 'botToken' || key === 'webhookSecret')
+    : changedCredentialFields.includes('verifyToken');
+  if (changedConfigFields.length || webhookCredentialChanged) delete config.webhookVerifiedAt;
+
+  const providerIdentityFields = connectorType === 'whatsapp_cloud'
+    ? new Set(['wabaId', 'phoneNumberId'])
+    : connectorType === 'instagram'
+      ? new Set(['instagramAccountId', 'appId'])
+      : new Set();
+  if (changedConfigFields.some(key => providerIdentityFields.has(key))) delete config.lastWebhookAt;
 }
 
 async function assertUniqueManagedConfig(env, workspaceId, connectorType, channelId, config) {

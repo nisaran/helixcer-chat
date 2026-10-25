@@ -1676,19 +1676,44 @@
     const channelId = $("channelIdInput").value;
     const payload = channelPayload(form);
     const submit = $("channelSubmit");
+    let savedChannelId = channelId;
+    let saved = false;
     submit.disabled = true;
     submit.textContent = "Saving…";
     try {
-      await (channelId ? state.api.updateChannel(channelId, payload) : state.api.createChannel(payload));
+      const result = await (channelId ? state.api.updateChannel(channelId, payload) : state.api.createChannel(payload));
+      saved = true;
+      savedChannelId = channelId || String(result.channelId || "");
+      if (!savedChannelId) throw new Error("The connection was saved, but its channel ID was not returned.");
+      if (!channelId) {
+        $("channelIdInput").value = savedChannelId;
+        $("channelProvider").disabled = true;
+        $("channelDialogTitle").textContent = `Edit ${payload.name}`;
+      }
+      let verification = null;
+      if (payload.enabled) {
+        submit.textContent = "Verifying…";
+        verification = await state.api.verifyChannel(savedChannelId);
+      }
       $("channelDialog").close();
       await loadAll();
       setRoute("channels");
-      showToast(channelId ? "Connection updated" : "Connection added", `${payload.name} is ready for verification.`);
+      if (!payload.enabled) showToast(channelId ? "Connection updated" : "Connection added", `${payload.name} is saved but disabled.`);
+      else if (verification?.health === "connected") showToast("Connection is live", `${payload.name} is verified and ready for messaging.`);
+      else showToast("Connection verified", `${payload.name} is ready for its provider webhook.`);
     } catch (error) {
-      showToast("Connection was not saved", error.message, true);
+      if (saved) {
+        await loadAll();
+        setRoute("channels");
+        const savedChannel = state.channels.find((item) => item.channelId === savedChannelId);
+        syncChannelForm(payload.connectorType, true, savedChannel?.setup || { credentialsPresent: true });
+        showToast("Connection saved, but verification failed", error.message, true);
+      } else {
+        showToast("Connection was not saved", error.message, true);
+      }
     } finally {
       submit.disabled = false;
-      submit.textContent = channelId ? "Save changes" : "Save connection";
+      submit.textContent = savedChannelId ? "Save changes" : "Save connection";
     }
   }
 

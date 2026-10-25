@@ -95,3 +95,19 @@ test("channel secrets are masked, optional on edit, and never prefilled", () => 
   assert.doesNotMatch(html, /type="password"[^>]+value=/);
   assert.doesNotMatch(app, /channel\?\.credentials|channel\.credentials/);
 });
+
+test("saving an enabled channel immediately verifies it without creating duplicates on retry", () => {
+  assert.match(app, /savedChannelId = channelId \|\| String\(result\.channelId \|\| ""\)/);
+  assert.match(app, /\$\("channelIdInput"\)\.value = savedChannelId/);
+  assert.match(app, /if \(payload\.enabled\) \{[\s\S]*?state\.api\.verifyChannel\(savedChannelId\)/);
+  assert.match(app, /Connection saved, but verification failed/);
+  assert.match(app, /syncChannelForm\(payload\.connectorType, true,/);
+  assert.match(app, /savedChannelId \? "Save changes" : "Save connection"/);
+});
+
+test("WhatsApp credential guidance distinguishes the three Meta secrets", () => {
+  assert.match(html, /Paste only the token value from WhatsApp → API setup/);
+  assert.match(html, /App settings → Basic → App secret/);
+  assert.match(html, /not the Client Token/);
+  assert.match(html, /Copy this token into Meta before saving/);
+});
