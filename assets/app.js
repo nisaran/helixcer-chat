@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-4";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-5";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -759,9 +759,8 @@
 
   function showAuthChecking() {
     state.authStatus = "checking";
-    $("authGate").hidden = false;
-    $("authChecking").hidden = false;
-    $("signedOutContent").hidden = true;
+    $("sessionSplash").hidden = false;
+    $("authGate").hidden = true;
     $("appShell").hidden = true;
   }
 
@@ -772,9 +771,8 @@
     if (state.disconnectRealtime) state.disconnectRealtime();
     state.disconnectRealtime = null;
     $("appShell").hidden = true;
+    $("sessionSplash").hidden = true;
     $("authGate").hidden = false;
-    $("authChecking").hidden = true;
-    $("signedOutContent").hidden = false;
     $("googleSignInLink").href = state.api?.loginUrl() || "#";
     const alert = $("authAlert");
     alert.hidden = !message;
@@ -786,6 +784,7 @@
     state.authStatus = "authenticated";
     state.currentUser = auth;
     state.workspace = auth.workspace || state.workspace;
+    $("sessionSplash").hidden = true;
     $("authGate").hidden = true;
     $("appShell").hidden = false;
     renderCurrentUser();
@@ -1093,6 +1092,12 @@
   async function selectConversation(conversationId, { markRead = true, updateUrl = true } = {}) {
     const conversation = state.conversations.find((item) => item.conversationId === conversationId);
     if (!conversation) return;
+    const shouldMarkRead = markRead && conversation.unreadCount > 0;
+    if (shouldMarkRead) {
+      conversation.unreadCount = 0;
+      renderCounts();
+      state.api.updateConversation(conversationId, { markRead: true }).catch(() => {});
+    }
     state.selectedConversationId = conversationId;
     state.pendingConversationId = null;
     if (updateUrl) replaceAppHash(conversationHash(conversationId));
@@ -1111,12 +1116,6 @@
         state.messages.set(conversationId, []);
         showToast("Messages could not be loaded", error.message, true);
       }
-    }
-    if (markRead && conversation.unreadCount > 0) {
-      conversation.unreadCount = 0;
-      state.api.updateConversation(conversationId, { markRead: true }).catch(() => {});
-      renderCounts();
-      renderConversationList();
     }
     renderSelectedConversation();
   }

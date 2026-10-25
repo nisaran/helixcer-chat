@@ -31,6 +31,15 @@ test("normal authentication uses a top-level link and cookie credentials", () =>
   assert.doesNotMatch(app, /STORAGE_KEY|LEGACY_API_BASES/);
 });
 
+test("refresh starts on a neutral session splash without flashing Google sign-in", () => {
+  assert.match(html, /class="session-splash" id="sessionSplash" role="status"/);
+  assert.match(html, /class="auth-gate" id="authGate"[^>]*hidden/);
+  assert.doesNotMatch(html, /id="authChecking"/);
+  assert.match(app, /showAuthChecking\(\)[\s\S]*?sessionSplash"\)\.hidden = false;[\s\S]*?authGate"\)\.hidden = true/);
+  assert.match(app, /showApplication\(auth\)[\s\S]*?sessionSplash"\)\.hidden = true;[\s\S]*?authGate"\)\.hidden = true/);
+  assert.match(styles, /\.session-splash \{/);
+});
+
 test("technical connection and recovery controls are not exposed in the UI", () => {
   assert.match(app, /sessionStorage\.getItem\(RECOVERY_TOKEN_KEY\)/);
   assert.doesNotMatch(html, /id="settingsDialog"|Connection settings|Worker API URL/i);
@@ -234,6 +243,15 @@ test("pending and closed status updates clear the selected chat only after the s
   assert.match(app, /state\.selectedConversationId = null;[\s\S]*?classList\.remove\("chat-open", "has-details"\)/);
   assert.match(app, /event\.conversationId \|\| rawConversation\.conversationId/);
   assert.match(app, /await loadAll\(\);[\s\S]*?refreshed\.status !== previousStatus[\s\S]*?clearSelectedConversation\(\)/);
+});
+
+test("opening a conversation clears its unread badge before the first list render", () => {
+  const selectHandler = app.slice(app.indexOf("async function selectConversation"), app.indexOf("function renderSelectedConversation"));
+  assert.match(selectHandler, /const shouldMarkRead = markRead && conversation\.unreadCount > 0/);
+  assert.match(selectHandler, /conversation\.unreadCount = 0;[\s\S]*?renderCounts\(\);[\s\S]*?renderConversationList\(\)/);
+  assert.ok(selectHandler.indexOf("conversation.unreadCount = 0") < selectHandler.indexOf("renderConversationList()"));
+  assert.match(selectHandler, /if \(shouldMarkRead\) \{[\s\S]*?updateConversation\(conversationId, \{ markRead: true \}\)/);
+  assert.ok(selectHandler.indexOf("updateConversation(conversationId, { markRead: true })") < selectHandler.indexOf("await state.api.getMessages(conversationId)"));
 });
 
 test("the inbox opens on the Open conversation filter without selecting a chat", () => {

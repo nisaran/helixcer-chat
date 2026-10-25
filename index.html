@@ -14,27 +14,28 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261026-4">
-  <script src="./assets/app.js?v=20261026-4" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261026-5">
+  <script src="./assets/app.js?v=20261026-5" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
 
-  <section class="auth-gate" id="authGate" aria-labelledby="authTitle">
+  <section class="session-splash" id="sessionSplash" role="status" aria-live="polite">
+    <img src="./assets/helixcer-mark.jpg" alt="">
+    <span class="auth-spinner" aria-hidden="true"></span>
+    <span class="sr-only">Opening Helixcer Chat…</span>
+  </section>
+
+  <section class="auth-gate" id="authGate" aria-labelledby="signedOutTitle" hidden>
     <div class="auth-backdrop" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="auth-card">
       <div class="auth-brand">
         <img class="auth-brand-logo" src="./assets/helixcer-logo.jpg" alt="Helixcer">
         <span>Helixcer <strong>Chat</strong></span>
       </div>
-      <div class="auth-checking" id="authChecking" role="status">
-        <span class="auth-spinner" aria-hidden="true"></span>
-        <h1 id="authTitle">Opening your workspace</h1>
-        <p>Checking your secure session…</p>
-      </div>
-      <div class="auth-signed-out" id="signedOutContent" hidden>
+      <div class="auth-signed-out" id="signedOutContent">
         <p class="eyebrow">One shared customer inbox</p>
-        <h1>Welcome back</h1>
+        <h1 id="signedOutTitle">Welcome back</h1>
         <p class="auth-copy">Sign in with your approved Google account to continue to the Helixcer workspace.</p>
         <p class="auth-alert" id="authAlert" hidden></p>
         <a class="google-signin" id="googleSignInLink" href="#">

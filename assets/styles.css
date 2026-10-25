@@ -55,13 +55,15 @@ body {
 .auth-backdrop i:nth-child(1) { width: 420px; height: 420px; right: -150px; top: -130px; background: rgba(198,93,61,.14); }
 .auth-backdrop i:nth-child(2) { width: 330px; height: 330px; left: -120px; bottom: -110px; background: rgba(28,116,88,.1); }
 .auth-backdrop i:nth-child(3) { width: 180px; height: 180px; left: 18%; top: 4%; border: 1px solid rgba(184,74,45,.12); }
+.session-splash { position: fixed; z-index: 1000; inset: 0; display: grid; place-content: center; justify-items: center; gap: 17px; background: #f5f6f2; }
+.session-splash img { width: 58px; height: 58px; border-radius: 16px; object-fit: cover; box-shadow: 0 9px 24px rgba(70,22,126,.16); }
 .auth-card { width: min(450px, 100%); border: 1px solid rgba(255,255,255,.8); border-radius: 25px; background: rgba(255,255,255,.93); box-shadow: 0 28px 90px rgba(36,49,45,.15); backdrop-filter: blur(18px); padding: clamp(24px, 5vw, 42px); }
 .auth-brand { display: flex; align-items: center; gap: 13px; margin-bottom: 34px; color: var(--ink); font-size: 18px; letter-spacing: -.35px; }
 .auth-brand strong { color: var(--brand); }
 .auth-brand-logo { display: block; width: 58px; height: 58px; flex: 0 0 58px; border-radius: 16px; object-fit: cover; box-shadow: 0 9px 24px rgba(70,22,126,.2); }
-.auth-checking, .auth-signed-out { text-align: center; }
-.auth-checking h1, .auth-signed-out h1 { margin: 17px 0 8px; font: 650 clamp(31px, 7vw, 42px)/1.05 Georgia, "Times New Roman", serif; letter-spacing: -1px; }
-.auth-checking p, .auth-copy { margin: 0 auto; color: var(--muted); line-height: 1.65; }
+.auth-signed-out { text-align: center; }
+.auth-signed-out h1 { margin: 17px 0 8px; font: 650 clamp(31px, 7vw, 42px)/1.05 Georgia, "Times New Roman", serif; letter-spacing: -1px; }
+.auth-copy { margin: 0 auto; color: var(--muted); line-height: 1.65; }
 .auth-spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid #e4ddd8; border-top-color: var(--brand); border-radius: 50%; animation: spin .75s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .auth-alert { border: 1px solid #f1c3b8; border-radius: 10px; background: #fff1ec; color: #963723; margin: 18px 0 0; padding: 9px 11px; text-align: left; font-size: 11px; }
