@@ -7,9 +7,14 @@ function boundedText(value, fallback, maximumLength) {
   return (text || fallback).slice(0, maximumLength);
 }
 
+function safeNotificationUrl(value) {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  return /^\/#inbox(?:\/[A-Za-z0-9_-]{1,100})?$/.test(candidate) ? candidate : INBOX_URL;
+}
+
 function notificationFrom(payload) {
   const source = payload && typeof payload === "object" ? payload : {};
-  const targetUrl = typeof source.url === "string" && source.url.startsWith("/") ? source.url : INBOX_URL;
+  const targetUrl = safeNotificationUrl(source.url);
   const options = {
     body: boundedText(source.body, "You have a new message.", 500),
     icon: DEFAULT_ICON,
@@ -71,7 +76,7 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(
     (async () => {
-      const targetUrl = new URL(event.notification.data?.url || INBOX_URL, self.location.origin).href;
+      const targetUrl = new URL(safeNotificationUrl(event.notification.data?.url), self.location.origin).href;
       const windows = await self.clients.matchAll({
         type: "window",
         includeUncontrolled: true,

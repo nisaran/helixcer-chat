@@ -38,15 +38,20 @@ test('inbound push notifications use the saved sender name and a bounded message
   assert.match(notification.body, /^Hello there /);
   assert.equal(notification.body.length, 240);
   assert.equal(notification.tag, 'helixcer-conversation-123');
+  assert.equal(notification.url, '/#inbox/conversation-123');
 
   assert.deepEqual(inboundPushNotification({ channelId: 'telegram-support' }, {
     conversationId: 'conversation-media', senderName: '', preview: '', messageType: 'image'
   }), {
-    title: 'Customer', body: 'Sent a photo', tag: 'helixcer-conversation-media'
+    title: 'Customer', body: 'Sent a photo', tag: 'helixcer-conversation-media',
+    url: '/#inbox/conversation-media'
   });
   assert.equal(inboundPushNotification({ channelId: 'wa-sales' }, {
     senderName: 'Nisar', preview: '[WhatsApp document received]', messageType: 'document'
   }).body, 'Sent a document');
+  assert.equal(inboundPushNotification({ channelId: 'wa-sales' }, {
+    conversationId: '../settings', senderName: 'Nisar', preview: 'Hi', messageType: 'text'
+  }).url, '/#inbox');
 });
 
 test('WhatsApp free-form replies follow the latest inbound 24-hour window', () => {

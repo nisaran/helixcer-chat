@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   pushConfiguration,
   removePushSubscription,
+  safePushTarget,
   savePushSubscription,
   sendWorkspacePush,
   validatePushSubscriptionInput
@@ -96,4 +97,13 @@ test('push delivery is a safe no-op until VAPID is configured', async () => {
   assert.deepEqual(await sendWorkspacePush({}, 'ws_test', { title: 'Hello' }), {
     sent: 0, removed: 0, failed: 0, unavailable: true
   });
+});
+
+test('push notification targets allow only inbox conversation deep links', () => {
+  assert.equal(safePushTarget('/#inbox/conversation_123-ABC'), '/#inbox/conversation_123-ABC');
+  assert.equal(safePushTarget('/#inbox'), '/#inbox');
+  assert.equal(safePushTarget('//evil.example/#inbox/conversation'), '/#inbox');
+  assert.equal(safePushTarget('/#settings'), '/#inbox');
+  assert.equal(safePushTarget('/#inbox/conversation%2Fescape'), '/#inbox');
+  assert.equal(safePushTarget('/#inbox/' + 'a'.repeat(101)), '/#inbox');
 });

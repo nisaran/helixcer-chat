@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-3";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-4";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -20,6 +20,7 @@
     messages: new Map(),
     templatesByConversation: new Map(),
     templateConversationId: null,
+    pendingConversationId: null,
     recentVerifyTokens: new Map(),
     selectedConversationId: null,
     selectedContactId: null,
@@ -490,7 +491,9 @@
     loginUrl() {
       if (this.isDemo) return "#";
       const url = new URL("/auth/google/start", this.base);
-      url.searchParams.set("return_to", location.origin);
+      const returnTo = new URL(location.pathname || "/", location.origin);
+      returnTo.hash = location.hash || "#inbox";
+      url.searchParams.set("return_to", returnTo.toString());
       const invite = new URLSearchParams(location.search).get("invite");
       if (invite) url.searchParams.set("invite", invite);
       return url.toString();
@@ -851,6 +854,7 @@
         canAdmin() ? loadApiKeys() : Promise.resolve(),
         prepareBrowserPush(),
       ]);
+      await applyLocationRoute();
     } catch (error) {
       const message = error.status === 403
         ? "Your account does not currently have access to this workspace."
@@ -983,7 +987,7 @@
         state.selectedConversationId = null;
       }
       renderAll();
-      if (state.selectedConversationId) await selectConversation(state.selectedConversationId, { markRead: false });
+      if (state.selectedConversationId) await selectConversation(state.selectedConversationId, { markRead: false, updateUrl: false });
     } catch (error) {
       state.conversations = [];
       renderAll();
@@ -1086,10 +1090,12 @@
     });
   }
 
-  async function selectConversation(conversationId, { markRead = true } = {}) {
+  async function selectConversation(conversationId, { markRead = true, updateUrl = true } = {}) {
     const conversation = state.conversations.find((item) => item.conversationId === conversationId);
     if (!conversation) return;
     state.selectedConversationId = conversationId;
+    state.pendingConversationId = null;
+    if (updateUrl) replaceAppHash(conversationHash(conversationId));
     $("inboxGrid").classList.add("chat-open");
     renderConversationList();
     renderSelectedConversation();
@@ -2814,13 +2820,13 @@
     const previousNotification = state.lastNotificationAt.get(conversation.conversationId) || 0;
     if (timestamp <= previousNotification) return;
     state.lastNotificationAt.set(conversation.conversationId, timestamp);
-    const title = `New message from ${conversation.subject}`;
+    const title = conversation.subject;
     const options = {
       body: message.text || "A new customer message arrived.",
       icon: "/assets/helixcer-mark.jpg",
       badge: "/assets/helixcer-mark.jpg",
       tag: `helixcer-${conversation.conversationId}`,
-      data: { url: "/#inbox", conversationId: conversation.conversationId },
+      data: { url: conversationUrl(conversation.conversationId), conversationId: conversation.conversationId },
     };
     let registration = null;
     try {
@@ -2872,9 +2878,71 @@
     $("connectionText").textContent = labels[status] || "Starting…";
   }
 
-  function setRoute(route) {
+  function validConversationId(value) {
+    return /^[A-Za-z0-9_-]{1,100}$/.test(String(value || ""));
+  }
+
+  function conversationHash(conversationId) {
+    return validConversationId(conversationId) ? `#inbox/${encodeURIComponent(conversationId)}` : "#inbox";
+  }
+
+  function conversationUrl(conversationId) {
+    return `/${conversationHash(conversationId)}`;
+  }
+
+  function replaceAppHash(hash) {
+    if (location.hash !== hash) history.replaceState(null, "", hash);
+  }
+
+  function parseAppHash(value = location.hash) {
+    const raw = String(value || "").replace(/^#/, "");
+    const separator = raw.indexOf("/");
+    const requestedRoute = separator >= 0 ? raw.slice(0, separator) : raw;
+    const allowedRoutes = ["inbox", "contacts", "channels", "developer", "team", "settings"];
+    const route = allowedRoutes.includes(requestedRoute) ? requestedRoute : "inbox";
+    if (route !== "inbox" || separator < 0) return { route, conversationId: "" };
+    let conversationId = "";
+    try { conversationId = decodeURIComponent(raw.slice(separator + 1)); }
+    catch { conversationId = ""; }
+    return { route, conversationId: validConversationId(conversationId) ? conversationId : "" };
+  }
+
+  async function openPendingConversation({ refreshIfMissing = false } = {}) {
+    const conversationId = state.pendingConversationId;
+    if (!conversationId || state.authStatus !== "authenticated") return;
+    let conversation = state.conversations.find((item) => item.conversationId === conversationId);
+    if (!conversation && refreshIfMissing) {
+      await loadAll({ preserveSelection: false });
+      conversation = state.conversations.find((item) => item.conversationId === conversationId);
+    }
+    if (!conversation) {
+      state.pendingConversationId = null;
+      clearSelectedConversation({ updateUrl: false });
+      replaceAppHash("#inbox");
+      return;
+    }
+    await selectConversation(conversationId, { updateUrl: false });
+  }
+
+  async function applyLocationRoute() {
+    const target = parseAppHash();
+    state.pendingConversationId = target.conversationId || null;
+    setRoute(target.route, { preserveLocation: true });
+    if (target.route !== "inbox" || state.authStatus !== "authenticated") return;
+    if (target.conversationId) await openPendingConversation({ refreshIfMissing: true });
+    else {
+      clearSelectedConversation({ updateUrl: false });
+      replaceAppHash("#inbox");
+    }
+  }
+
+  function setRoute(route, { preserveLocation = false } = {}) {
     if (!["inbox", "contacts", "channels", "developer", "team", "settings"].includes(route)) route = "inbox";
     if (!canAdmin() && ["channels", "developer", "team"].includes(route)) route = "inbox";
+    if (!preserveLocation) {
+      state.pendingConversationId = null;
+      if (route === "inbox") clearSelectedConversation({ updateUrl: false });
+    }
     state.route = route;
     document.querySelectorAll("[data-route-panel]").forEach((panel) => {
       const active = panel.dataset.routePanel === route;
@@ -2890,7 +2958,7 @@
     const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", developer: "Developer API", team: "Team", settings: "Settings" };
     $("pageTitle").textContent = labels[route];
     if (route === "settings") renderNotificationSetting();
-    if (location.hash !== `#${route}`) history.replaceState(null, "", `#${route}`);
+    if (!preserveLocation) replaceAppHash(`#${route}`);
     closeMobileMenu();
   }
 
@@ -3295,12 +3363,14 @@
     return state.conversations.find((item) => item.conversationId === state.selectedConversationId) || null;
   }
 
-  function clearSelectedConversation() {
+  function clearSelectedConversation({ updateUrl = true } = {}) {
     state.selectedConversationId = null;
+    state.pendingConversationId = null;
     state.detailsOpen = false;
     $("inboxGrid").classList.remove("chat-open", "has-details");
     renderConversationList();
     renderSelectedConversation();
+    if (updateUrl && state.route === "inbox") replaceAppHash("#inbox");
   }
 
   function contactFor(conversation) {
@@ -3550,7 +3620,7 @@
     $("refreshButton").addEventListener("click", () => loadAll());
     $("mobileMenu").addEventListener("click", openMobileMenu);
     $("mobileScrim").addEventListener("click", closeMobileMenu);
-    $("mobileBack").addEventListener("click", () => $("inboxGrid").classList.remove("chat-open"));
+    $("mobileBack").addEventListener("click", () => clearSelectedConversation());
 
     $("messageForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentMessage(); });
     $("messageInput").addEventListener("input", resizeComposer);
@@ -3638,7 +3708,7 @@
       const button = event.target.closest("[data-cancel-invitation]");
       if (button) cancelInvitation(button.dataset.cancelInvitation);
     });
-    window.addEventListener("hashchange", () => setRoute(location.hash.slice(1)));
+    window.addEventListener("hashchange", () => applyLocationRoute().catch(() => {}));
     window.addEventListener("focus", () => prepareBrowserPush().catch(() => {}));
     window.addEventListener("beforeunload", () => state.disconnectRealtime?.());
     window.addEventListener("helixcer:unauthorized", () => showSignedOut("Your session expired. Sign in again to continue."));
@@ -3657,7 +3727,7 @@
 
   async function init() {
     bindEvents();
-    setRoute(location.hash.slice(1) || "inbox");
+    await applyLocationRoute();
     await initializeSession();
   }
 

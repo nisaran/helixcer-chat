@@ -18,7 +18,7 @@ import {
   sendWorkspacePush
 } from './push.js';
 
-const API_VERSION = '2026-10-26-push-preview';
+const API_VERSION = '2026-10-26-chat-deeplinks';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
@@ -1198,11 +1198,13 @@ export function inboundPushNotification(channel, inbound = {}) {
   const preview = compactNotificationText(inbound.preview, 240);
   const syntheticPreview = /^\[(?:WhatsApp|Instagram) .+ received\]$/i.test(preview);
   const body = preview && !syntheticPreview ? preview : inboundMessageTypeLabel(inbound.messageType);
-  const conversationId = String(inbound.conversationId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 90);
+  const rawConversationId = String(inbound.conversationId || '');
+  const conversationId = /^[A-Za-z0-9_-]{1,100}$/.test(rawConversationId) ? rawConversationId : '';
   return {
     title,
     body,
-    tag: `helixcer-${conversationId || String(channel?.channelId || 'inbox').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 90)}`
+    tag: `helixcer-${conversationId || String(channel?.channelId || 'inbox').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 90)}`,
+    url: conversationId ? `/#inbox/${conversationId}` : '/#inbox'
   };
 }
 

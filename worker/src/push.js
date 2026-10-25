@@ -104,13 +104,18 @@ export async function removePushSubscription(env, principal, input) {
   return { subscribed: false, deviceId };
 }
 
+export function safePushTarget(value) {
+  const candidate = String(value || '').trim();
+  return /^\/#inbox(?:\/[A-Za-z0-9_-]{1,100})?$/.test(candidate) ? candidate : '/#inbox';
+}
+
 function safeNotification(value) {
   const source = value && typeof value === 'object' ? value : {};
   return {
     title: String(source.title || 'New customer message').slice(0, 120),
     body: String(source.body || 'Open Helixcer Chat to reply.').slice(0, 500),
     tag: String(source.tag || 'helixcer-inbox').slice(0, 128),
-    url: '/#inbox'
+    url: safePushTarget(source.url)
   };
 }
 

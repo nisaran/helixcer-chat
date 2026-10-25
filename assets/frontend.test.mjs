@@ -6,6 +6,7 @@ const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
 const apiDocs = await readFile(new URL("../api-docs.html", import.meta.url), "utf8");
+const serviceWorker = await readFile(new URL("../sw.js", import.meta.url), "utf8");
 
 test("all JavaScript DOM id references exist exactly once", () => {
   const htmlIds = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
@@ -20,7 +21,8 @@ test("all JavaScript DOM id references exist exactly once", () => {
 test("normal authentication uses a top-level link and cookie credentials", () => {
   assert.match(html, /<a[^>]+id="googleSignInLink"/);
   assert.match(html, /name="helixcer-api-base" content="https:\/\/api\.chat\.helixcer\.com"/);
-  assert.match(app, /searchParams\.set\("return_to", location\.origin\)/);
+  assert.match(app, /returnTo\.hash = location\.hash \|\| "#inbox"/);
+  assert.match(app, /searchParams\.set\("return_to", returnTo\.toString\(\)\)/);
   assert.match(app, /credentials:\s*"include"/);
   assert.match(app, /request\("\/api\/me"\)/);
   assert.match(app, /meta\[name="helixcer-api-base"\]/);
@@ -172,6 +174,13 @@ test("settings expose permission-aware browser notifications", () => {
   assert.match(app, /lastNotificationAt: new Map\(\)/);
 });
 
+test("notification clicks accept only inbox deep links and navigate an existing app window", () => {
+  assert.match(serviceWorker, /function safeNotificationUrl\(value\)/);
+  assert.match(serviceWorker, /safeNotificationUrl\(source\.url\)/);
+  assert.match(serviceWorker, /await existing\.navigate\(targetUrl\)/);
+  assert.match(serviceWorker, /self\.clients\.openWindow\(targetUrl\)/);
+});
+
 test("channel cards collapse by default and use provider artwork throughout the inbox", () => {
   assert.match(app, /expandedChannelIds: new Set\(\)/);
   assert.match(app, /data\.action = "toggle-channel-details"|dataset\.action = "toggle-channel-details"/);
@@ -232,6 +241,20 @@ test("the inbox opens on the Open conversation filter without selecting a chat",
   assert.match(html, /class="filter-chip is-active"[^>]*data-filter="open"/);
   assert.doesNotMatch(html, /class="filter-chip is-active"[^>]*data-filter="all"/);
   assert.match(app, /selectedConversationId:\s*null/);
+});
+
+test("conversation URLs deep-link safely without auto-selecting plain inbox", () => {
+  assert.match(app, /function conversationHash\(conversationId\)/);
+  assert.match(app, /`#inbox\/\$\{encodeURIComponent\(conversationId\)\}`/);
+  assert.match(app, /function parseAppHash\(value = location\.hash\)/);
+  assert.match(app, /\^\[A-Za-z0-9_-\]\{1,100\}\$/);
+  assert.match(app, /await applyLocationRoute\(\)/);
+  assert.match(app, /selectConversation\(conversationId, \{ updateUrl: false \}\)/);
+  assert.match(app, /data: \{ url: conversationUrl\(conversation\.conversationId\)/);
+  assert.match(app, /const title = conversation\.subject/);
+  assert.match(app, /markRead: false, updateUrl: false/);
+  assert.match(app, /clearSelectedConversation\(\{ updateUrl: false \}\);[\s\S]*?replaceAppHash\("#inbox"\)/);
+  assert.match(app, /mobileBack[\s\S]*?clearSelectedConversation\(\)/);
 });
 
 test("Helixcer mark brands the login, sidebar, and favicon", () => {
