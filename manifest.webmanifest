@@ -1,0 +1,25 @@
+{
+  "id": "/",
+  "name": "Helixcer Chat",
+  "short_name": "Helixcer",
+  "description": "Manage customer conversations across connected channels.",
+  "start_url": "/#inbox",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f7f3",
+  "theme_color": "#8f2e19",
+  "icons": [
+    {
+      "src": "/assets/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/helixcer-mark.jpg",
+      "sizes": "364x361",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}

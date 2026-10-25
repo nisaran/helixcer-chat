@@ -12,7 +12,7 @@ import {
   updateMembership
 } from './auth.js';
 
-const API_VERSION = '2026-10-25-template-api';
+const API_VERSION = '2026-10-25-contact-templates';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
@@ -334,6 +334,11 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       ctx.waitUntil(sendOrQueue(env, result.message.messageId));
       return withCors(json({ ok: true, item: result.message }, 202), cors);
     }
+    const conversationTemplatesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/templates$/);
+    if (conversationTemplatesMatch && request.method === 'GET') {
+      const id = decodeURIComponent(conversationTemplatesMatch[1]);
+      return withCors(json({ items: await listConversationTemplates(env, workspaceId, id) }), cors);
+    }
     const templateMessageMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/template$/);
     if (templateMessageMatch && request.method === 'POST') {
       const id = decodeURIComponent(templateMessageMatch[1]);
@@ -357,6 +362,17 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/contacts' && request.method === 'GET') {
       return withCors(json({ items: await listContacts(env, workspaceId, url) }), cors);
+    }
+    const contactMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)$/);
+    if (contactMatch && request.method === 'GET') {
+      const id = decodeURIComponent(contactMatch[1]);
+      return withCors(json({ item: await getContactDetail(env, workspaceId, id) }), cors);
+    }
+    if (contactMatch && request.method === 'PATCH') {
+      const id = decodeURIComponent(contactMatch[1]);
+      const item = await updateContact(env, workspaceId, id, await readJson(request), principal);
+      await broadcast(env, workspaceId, { type: 'contact.updated', contactId: id });
+      return withCors(json({ ok: true, item }), cors);
     }
     if (url.pathname === '/api/demo/seed' && request.method === 'POST') {
       requireRole(principal, 'admin');
@@ -1786,24 +1802,173 @@ export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Dat
 
 async function listContacts(env, workspaceId, url) {
   const limit = clampInt(url.searchParams.get('contactLimit'), 1, 200, 100);
-  const result = await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.attributes_json,c.updated_at,
-      i.channel_id,i.channel_profile_id,cv.status,cv.tags_json,cv.last_message_at
+  const result = await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
+      i.identity_id,i.channel_id,i.channel_profile_id,ch.name AS channel_name,ch.connector_type,ch.provider_type,
+      cv.status AS conversation_status,cv.last_message_at
     FROM contacts c
     LEFT JOIN channel_identities i ON i.identity_id=(SELECT identity_id FROM channel_identities
       WHERE workspace_id=c.workspace_id AND contact_id=c.contact_id ORDER BY created_at LIMIT 1)
+    LEFT JOIN channels ch ON ch.workspace_id=c.workspace_id AND ch.channel_id=i.channel_id
     LEFT JOIN conversations cv ON cv.conversation_id=(SELECT conversation_id FROM conversations
       WHERE workspace_id=c.workspace_id AND contact_id=c.contact_id ORDER BY last_message_at DESC LIMIT 1)
     WHERE c.workspace_id=?1
     ORDER BY COALESCE(cv.last_message_at,c.updated_at) DESC LIMIT ?2`).bind(workspaceId, limit).all();
-  return result.results.map(row => {
-    const attributes = safeJsonParse(row.attributes_json, {});
-    return {
-      contactId: row.contact_id, displayName: row.display_name, channelId: row.channel_id || '',
-      channelProfileId: row.channel_profile_id || '', email: attributes.email || '',
-      phone: attributes.phone || '', tags: safeJsonParse(row.tags_json, []),
-      status: row.status === 'closed' ? 'inactive' : 'active', lastMessageAt: row.last_message_at || row.updated_at
-    };
+  return (result.results || []).map(contactView);
+}
+
+async function loadContactRow(env, workspaceId, contactId) {
+  return env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
+      i.identity_id,i.channel_id,i.channel_profile_id,ch.name AS channel_name,ch.connector_type,ch.provider_type,
+      cv.status AS conversation_status,cv.last_message_at,
+      (SELECT COUNT(*) FROM channel_identities identities
+        WHERE identities.workspace_id=c.workspace_id AND identities.contact_id=c.contact_id) AS identity_count,
+      (SELECT COUNT(*) FROM conversations conversations
+        WHERE conversations.workspace_id=c.workspace_id AND conversations.contact_id=c.contact_id) AS conversation_count,
+      (SELECT COUNT(*) FROM messages messages
+        JOIN conversations message_conversations
+          ON message_conversations.workspace_id=messages.workspace_id
+          AND message_conversations.conversation_id=messages.conversation_id
+        WHERE messages.workspace_id=c.workspace_id
+          AND message_conversations.contact_id=c.contact_id) AS message_count
+    FROM contacts c
+    LEFT JOIN channel_identities i ON i.identity_id=(SELECT identity_id FROM channel_identities
+      WHERE workspace_id=c.workspace_id AND contact_id=c.contact_id ORDER BY created_at LIMIT 1)
+    LEFT JOIN channels ch ON ch.workspace_id=c.workspace_id AND ch.channel_id=i.channel_id
+    LEFT JOIN conversations cv ON cv.conversation_id=(SELECT conversation_id FROM conversations
+      WHERE workspace_id=c.workspace_id AND contact_id=c.contact_id ORDER BY last_message_at DESC LIMIT 1)
+    WHERE c.workspace_id=?1 AND c.contact_id=?2`).bind(workspaceId, contactId).first();
+}
+
+async function getContactDetail(env, workspaceId, contactId) {
+  const row = await loadContactRow(env, workspaceId, cleanId(contactId, 'Contact ID'));
+  if (!row) throw httpError(404, 'Contact not found.');
+  return contactView(row);
+}
+
+function contactView(row) {
+  const attributes = safeJsonParse(row.attributes_json, {});
+  const displayName = String(row.display_name || '').slice(0, 120);
+  const tags = storedContactTags(row.tags_json);
+  return {
+    contactId: row.contact_id,
+    displayName,
+    name: displayName,
+    company: String(row.company || '').slice(0, 160),
+    tags,
+    channelId: row.channel_id || '',
+    channelName: row.channel_name || '',
+    connectorType: logicalConnectorType(row),
+    channelProfileId: row.channel_profile_id || '',
+    email: typeof attributes.email === 'string' ? attributes.email.slice(0, 254) : '',
+    phone: typeof attributes.phone === 'string' ? attributes.phone.slice(0, 80) : '',
+    status: row.conversation_status === 'closed' ? 'inactive' : 'active',
+    conversationStatus: row.conversation_status || '',
+    channelEditable: Number(row.identity_count ?? 1) === 1 && Number(row.message_count || 0) === 0,
+    lastMessageAt: row.last_message_at || row.updated_at
+  };
+}
+
+function storedContactTags(value) {
+  const tags = safeJsonParse(value, []);
+  if (!Array.isArray(tags)) return [];
+  return tags.filter(tag => typeof tag === 'string').map(tag => tag.trim()).filter(Boolean).slice(0, 20);
+}
+
+function validateContactTags(value) {
+  if (!Array.isArray(value)) throw httpError(400, 'Tags must be an array of text values.');
+  if (value.length > 20) throw httpError(400, 'A contact may have no more than 20 tags.');
+  const tags = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (typeof item !== 'string') throw httpError(400, 'Each tag must be text.');
+    const tag = cleanRequired(item, 'Tag', 40);
+    const key = tag.toLocaleLowerCase('en-US');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tags.push(tag);
+  }
+  return tags;
+}
+
+async function updateContact(env, workspaceId, contactId, payload, principal) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Contact update must be a JSON object.');
+  rejectUnknownKeys(payload, new Set(['displayName', 'name', 'company', 'tags', 'channelId', 'channelProfileId']), 'contact');
+  if (!Object.keys(payload).length) throw httpError(400, 'Provide at least one contact field to update.');
+  if (payload.displayName !== undefined && payload.name !== undefined &&
+      String(payload.displayName).trim() !== String(payload.name).trim()) {
+    throw httpError(400, 'Display name and name must match when both are supplied.');
+  }
+  const id = cleanId(contactId, 'Contact ID');
+  const existing = await loadContactRow(env, workspaceId, id);
+  if (!existing) throw httpError(404, 'Contact not found.');
+  const suppliedName = payload.displayName === undefined ? payload.name : payload.displayName;
+  if (suppliedName !== undefined && typeof suppliedName !== 'string') throw httpError(400, 'Display name must be text.');
+  const displayName = suppliedName === undefined
+    ? existing.display_name
+    : cleanRequired(suppliedName, 'Display name', 120);
+  const company = payload.company === undefined
+    ? String(existing.company || '')
+    : cleanOptionalText(payload.company, 'Company', 160);
+  const tags = payload.tags === undefined ? storedContactTags(existing.tags_json) : validateContactTags(payload.tags);
+
+  let channelId = existing.channel_id || '';
+  let channelProfileId = existing.channel_profile_id || '';
+  const identityFieldsSupplied = payload.channelId !== undefined || payload.channelProfileId !== undefined;
+  if (identityFieldsSupplied) {
+    channelId = payload.channelId === undefined ? channelId : cleanId(payload.channelId, 'Channel ID');
+    const channel = channelId === existing.channel_id
+      ? { connectorType: logicalConnectorType(existing) }
+      : await getChannel(env, channelId, '', workspaceId);
+    if (!channel?.connectorType) throw httpError(400, 'Unknown or disabled channel.');
+    const rawProfileId = payload.channelProfileId === undefined
+      ? channelProfileId
+      : cleanRequired(payload.channelProfileId, 'Channel profile ID', 200);
+    channelProfileId = channel.connectorType === 'whatsapp_cloud'
+      ? normalizeWhatsAppRecipient(rawProfileId)
+      : rawProfileId;
+  }
+  const identityChangeRequested = channelId !== existing.channel_id || channelProfileId !== existing.channel_profile_id;
+  if (identityChangeRequested) {
+    if (!existing.identity_id) throw httpError(409, 'This contact does not have an editable channel identity.');
+    if (Number(existing.identity_count) !== 1) {
+      throw httpError(409, 'This contact has multiple channel identities. Edit a specific identity instead.');
+    }
+    if (channelId !== existing.channel_id && Number(existing.message_count) > 0) {
+      throw httpError(409, 'The channel cannot be changed after messages have been sent or received.');
+    }
+  }
+
+  const now = new Date().toISOString();
+  const statements = [
+    env.DB.prepare(`UPDATE contacts SET display_name=?3,company=?4,tags_json=?5,updated_at=?6
+      WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, id, displayName, company, JSON.stringify(tags), now),
+    env.DB.prepare(`UPDATE channel_identities SET display_name=?3
+      WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, id, displayName),
+    env.DB.prepare(`UPDATE conversations SET subject=?3,tags_json=?4,updated_at=?5
+      WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, id, displayName, JSON.stringify(tags), now)
+  ];
+  if (identityChangeRequested) {
+    statements.push(env.DB.prepare(`UPDATE channel_identities SET channel_id=?4,channel_profile_id=?5,display_name=?6
+      WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`)
+      .bind(workspaceId, id, existing.identity_id, channelId, channelProfileId, displayName));
+    if (channelId !== existing.channel_id) {
+      statements.push(env.DB.prepare(`UPDATE conversations SET channel_id=?3,updated_at=?4
+        WHERE workspace_id=?1 AND contact_id=?2`)
+        .bind(workspaceId, id, channelId, now));
+    }
+  }
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw httpError(409, 'This channel identity already belongs to another contact.');
+    throw error;
+  }
+  const changedFields = [...new Set(Object.keys(payload).map(key => key === 'name' ? 'displayName' : key))];
+  await audit(env, principal, 'update', 'contact', id, {
+    fields: changedFields,
+    identityChanged: identityChangeRequested
   });
+  return getContactDetail(env, workspaceId, id);
 }
 
 async function listMessages(env, workspaceId, conversationId, url) {
@@ -1842,7 +2007,17 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
 }
 
 async function createContact(env, workspaceId, payload, principal) {
-  const displayName = cleanRequired(payload.displayName, 'Display name', 120);
+  if (!isPlainObject(payload)) throw httpError(400, 'Contact must be a JSON object.');
+  rejectUnknownKeys(payload, new Set(['displayName', 'name', 'company', 'tags', 'channelId', 'channelProfileId']), 'contact');
+  if (payload.displayName !== undefined && payload.name !== undefined &&
+      String(payload.displayName).trim() !== String(payload.name).trim()) {
+    throw httpError(400, 'Display name and name must match when both are supplied.');
+  }
+  const suppliedName = payload.displayName === undefined ? payload.name : payload.displayName;
+  if (typeof suppliedName !== 'string') throw httpError(400, 'Display name must be text.');
+  const displayName = cleanRequired(suppliedName, 'Display name', 120);
+  const company = payload.company === undefined ? '' : cleanOptionalText(payload.company, 'Company', 160);
+  const tags = payload.tags === undefined ? [] : validateContactTags(payload.tags);
   const channelId = cleanId(payload.channelId, 'Channel ID');
   const channel = await getChannel(env, channelId, '', workspaceId);
   if (!channel) throw httpError(400, 'Unknown or disabled channel.');
@@ -1863,18 +2038,23 @@ async function createContact(env, workspaceId, payload, principal) {
   const conversationId = crypto.randomUUID();
   try {
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id) VALUES (?1,?2,?3,?3,?4)').bind(contactId, displayName, now, workspaceId),
+      env.DB.prepare(`INSERT INTO contacts
+          (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
+        VALUES (?1,?2,?3,?4,?5,?5,?6)`)
+        .bind(contactId, displayName, company, JSON.stringify(tags), now, workspaceId),
       env.DB.prepare(`INSERT INTO channel_identities (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
         VALUES (?1,?2,?3,?4,?5,?6,?7)`).bind(identityId, contactId, channelId, channelProfileId, displayName, now, workspaceId),
-      env.DB.prepare(`INSERT INTO conversations (conversation_id,contact_id,channel_id,status,assigned_to,subject,last_message_at,created_at,updated_at,workspace_id)
-        VALUES (?1,?2,?3,'open',?4,?5,?6,?6,?6,?7)`).bind(conversationId, contactId, channelId, principal.user.email, displayName, now, workspaceId)
+      env.DB.prepare(`INSERT INTO conversations
+          (conversation_id,contact_id,channel_id,status,assigned_to,subject,last_message_at,tags_json,created_at,updated_at,workspace_id)
+        VALUES (?1,?2,?3,'open',?4,?5,?6,?7,?6,?6,?8)`)
+        .bind(conversationId, contactId, channelId, principal.user.email, displayName, now, JSON.stringify(tags), workspaceId)
     ]);
   } catch (error) {
     if (String(error.message).includes('UNIQUE')) throw httpError(409, 'This channel identity already exists.');
     throw error;
   }
   await audit(env, principal, 'create', 'contact', contactId, { channelId, conversationId });
-  return { ok: true, contactId, conversationId };
+  return { ok: true, contactId, conversationId, item: await getContactDetail(env, workspaceId, contactId) };
 }
 
 async function createOutboundMessage(env, workspaceId, conversationId, payload, principal) {
@@ -1931,6 +2111,216 @@ async function conversationDeliveryTarget(env, workspaceId, conversationId) {
       secretKey: row.secret_key
     }
   };
+}
+
+async function listConversationTemplates(env, workspaceId, conversationId) {
+  const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
+  if (target.connectorType !== 'whatsapp_cloud') {
+    throw httpError(409, 'Templates are available only for WhatsApp conversations.');
+  }
+  if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
+  const wabaId = String(target.channel.config?.wabaId || '').trim();
+  if (!/^\d{5,40}$/.test(wabaId)) throw httpError(409, 'The WhatsApp Business Account ID is not configured.');
+  const credentials = await readChannelCredentials(env, target.channel);
+  if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
+  const version = metaApiVersion(target.channel.config?.apiVersion);
+  const items = [];
+  const seen = new Set();
+  let after = '';
+  for (let page = 0; page < 3 && items.length < 300; page++) {
+    const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/message_templates`);
+    endpoint.searchParams.set('fields', 'id,name,language,status,category,components');
+    endpoint.searchParams.set('status', 'APPROVED');
+    endpoint.searchParams.set('limit', '100');
+    if (after) endpoint.searchParams.set('after', after);
+    let response;
+    try {
+      response = await fetch(endpoint, { headers: { Authorization: `Bearer ${credentials.accessToken}` } });
+    } catch {
+      throw httpError(502, 'Meta could not load approved WhatsApp templates.');
+    }
+    const data = safeJsonParse(await response.text(), {});
+    if (!response.ok) {
+      const detail = redactProviderSecret(providerError(data, response.status), credentials.accessToken);
+      throw httpError(422, `Meta could not load approved WhatsApp templates: ${detail}`);
+    }
+    if (!Array.isArray(data.data)) {
+      throw httpError(502, 'Meta returned an invalid WhatsApp template response.');
+    }
+    for (const value of data.data) {
+      const template = sanitizeWhatsAppTemplateDefinition(value);
+      if (!template || template.status !== 'APPROVED') continue;
+      const key = `${template.name}\n${template.language.code}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push(template);
+      if (items.length >= 300) break;
+    }
+    const next = typeof data.paging?.cursors?.after === 'string'
+      ? data.paging.cursors.after.trim().slice(0, 1024)
+      : '';
+    const hasNext = (typeof data.paging?.next === 'string' && Boolean(data.paging.next.trim())) || data.data.length === 100;
+    if (!hasNext || !next || next === after) break;
+    after = next;
+  }
+  items.sort((left, right) => left.name.localeCompare(right.name) ||
+    left.language.code.localeCompare(right.language.code));
+  return items;
+}
+
+export function sanitizeWhatsAppTemplateDefinition(value) {
+  if (!isPlainObject(value)) return null;
+  const name = providerText(value.name, 512);
+  if (!/^[a-z0-9_]+$/.test(name)) return null;
+  const rawLanguage = isPlainObject(value.language) ? value.language.code : value.language;
+  const languageCode = providerText(rawLanguage, 35);
+  if (!/^[A-Za-z]{2,3}(?:_[A-Za-z0-9]{2,8})?$/.test(languageCode)) return null;
+  const status = providerEnum(value.status, 40);
+  if (!status) return null;
+  const category = providerEnum(value.category, 40);
+  const templateId = providerIdentifier(value.id, 128) || `${name}:${languageCode}`;
+  const components = [];
+  const variables = [];
+  const rawComponents = Array.isArray(value.components) ? value.components.slice(0, 50) : [];
+  for (let componentIndex = 0; componentIndex < rawComponents.length; componentIndex++) {
+    const component = sanitizeWhatsAppTemplateComponent(rawComponents[componentIndex], componentIndex);
+    if (!component) continue;
+    components.push(component.definition);
+    variables.push(...component.variables);
+  }
+  return {
+    templateId,
+    id: templateId,
+    name,
+    language: { code: languageCode },
+    status,
+    category,
+    components,
+    variables
+  };
+}
+
+function sanitizeWhatsAppTemplateComponent(value, componentIndex) {
+  if (!isPlainObject(value)) return null;
+  const type = providerEnum(value.type, 30).toLowerCase();
+  if (!['header', 'body', 'footer', 'buttons'].includes(type)) return null;
+  const definition = { type };
+  const variables = [];
+  const format = providerEnum(value.format, 30).toLowerCase();
+  if (type === 'header' && ['text', 'image', 'video', 'document', 'location'].includes(format)) {
+    definition.format = format;
+  }
+  const text = providerText(value.text, type === 'body' ? 4096 : 1024);
+  if (text) definition.text = text;
+  const example = sanitizeWhatsAppTemplateExample(value.example);
+  if (Object.keys(example).length) definition.example = example;
+  if (type === 'header' && definition.format && definition.format !== 'text') {
+    variables.push({ component: 'header', componentIndex, parameterIndex: 0,
+      key: 'media', kind: definition.format, example: '' });
+  }
+  const examples = type === 'header'
+    ? (example.header_text || [])
+    : (Array.isArray(example.body_text?.[0]) ? example.body_text[0] : []);
+  for (const [parameterIndex, key] of templatePlaceholders(text).entries()) {
+    variables.push({ component: type, componentIndex, parameterIndex, key,
+      kind: 'text', example: examples[parameterIndex] || '' });
+  }
+  if (type === 'body' && Array.isArray(example.body_text_named_params)) {
+    for (const named of example.body_text_named_params) {
+      if (variables.some(variable => variable.key === named.param_name)) continue;
+      variables.push({ component: 'body', componentIndex, parameterIndex: variables.length,
+        key: named.param_name, kind: 'text', example: named.example });
+    }
+  }
+  if (type === 'buttons') {
+    definition.buttons = [];
+    const rawButtons = Array.isArray(value.buttons) ? value.buttons.slice(0, 10) : [];
+    for (let buttonIndex = 0; buttonIndex < rawButtons.length; buttonIndex++) {
+      const button = sanitizeWhatsAppTemplateButton(rawButtons[buttonIndex]);
+      if (!button) continue;
+      definition.buttons.push(button);
+      if (button.type === 'url') {
+        for (const [buttonParameterIndex, key] of templatePlaceholders(button.url || '').entries()) {
+          variables.push({ component: 'button', componentIndex, buttonIndex,
+            parameterIndex: buttonParameterIndex, key, kind: 'url', example: button.example?.[buttonParameterIndex] || '' });
+        }
+      }
+    }
+  }
+  return { definition, variables };
+}
+
+function sanitizeWhatsAppTemplateButton(value) {
+  if (!isPlainObject(value)) return null;
+  const type = providerEnum(value.type, 40).toLowerCase();
+  if (!['quick_reply', 'url', 'phone_number', 'copy_code', 'catalog', 'mpm', 'flow', 'otp'].includes(type)) return null;
+  const button = { type };
+  const text = providerText(value.text, 100);
+  if (text) button.text = text;
+  const url = providerText(value.url, 2048);
+  if (url && /^https:\/\//i.test(url)) button.url = url;
+  const phoneNumber = providerText(value.phone_number, 40);
+  if (phoneNumber) button.phoneNumber = phoneNumber;
+  const example = Array.isArray(value.example)
+    ? value.example.slice(0, 10).map(item => providerText(item, 2048)).filter(Boolean)
+    : [];
+  if (example.length) button.example = example;
+  return button;
+}
+
+function sanitizeWhatsAppTemplateExample(value) {
+  if (!isPlainObject(value)) return {};
+  const result = {};
+  if (Array.isArray(value.header_text)) {
+    result.header_text = value.header_text.slice(0, 20).map(item => providerText(item, 1024));
+  }
+  if (Array.isArray(value.body_text)) {
+    result.body_text = value.body_text.slice(0, 10).map(row => Array.isArray(row)
+      ? row.slice(0, 50).map(item => providerText(item, 1024))
+      : []);
+  }
+  if (Array.isArray(value.body_text_named_params)) {
+    result.body_text_named_params = value.body_text_named_params.slice(0, 50).flatMap(item => {
+      if (!isPlainObject(item)) return [];
+      const paramName = providerIdentifier(item.param_name, 100);
+      if (!paramName) return [];
+      return [{ param_name: paramName, example: providerText(item.example, 1024) }];
+    });
+  }
+  return result;
+}
+
+function templatePlaceholders(value) {
+  const result = [];
+  const seen = new Set();
+  for (const match of String(value || '').matchAll(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g)) {
+    const key = match[1];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+function providerText(value, maximum) {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  return String(value).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, maximum);
+}
+
+function providerIdentifier(value, maximum) {
+  const text = providerText(value, maximum);
+  return /^[A-Za-z0-9_.:-]+$/.test(text) ? text : '';
+}
+
+function providerEnum(value, maximum) {
+  const text = providerText(value, maximum).toUpperCase();
+  return /^[A-Z][A-Z0-9_]*$/.test(text) ? text : '';
+}
+
+function redactProviderSecret(message, secret) {
+  const value = String(message || '');
+  const needle = String(secret || '');
+  return needle ? value.split(needle).join('[redacted]') : value;
 }
 
 async function createConversationTemplateMessage(env, workspaceId, conversationId, payload, principal) {

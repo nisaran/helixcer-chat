@@ -18,6 +18,7 @@ import {
   normalizeWhatsApp,
   normalizeWhatsAppRecipient,
   resolveTemplate,
+  sanitizeWhatsAppTemplateDefinition,
   timingSafeEqual,
   validateWhatsAppTemplateRequest,
   whatsappReplyWindowState,
@@ -163,6 +164,34 @@ test('validates Meta-native template variants without allowing provider envelope
   }), /public HTTPS URL/);
 });
 
+test('sanitizes Meta template definitions while retaining positional, named, media, and button inputs', () => {
+  const template = sanitizeWhatsAppTemplateDefinition({
+    id: '123456789', name: 'order_update', language: 'en_US', status: 'APPROVED', category: 'UTILITY',
+    ignored_secret: 'must not be copied',
+    components: [
+      { type: 'HEADER', format: 'IMAGE', example: { header_handle: ['https://secret.example/signed'] } },
+      { type: 'BODY', text: 'Hello {{customer_name}}, order {{2}} is ready.',
+        example: { body_text: [['Asha', '1001']], body_text_named_params: [
+          { param_name: 'customer_name', example: 'Asha', ignored: 'no' }
+        ] } },
+      { type: 'BUTTONS', buttons: [
+        { type: 'URL', text: 'Track', url: 'https://shop.example/orders/{{1}}', example: ['1001'], extra: 'no' },
+        { type: 'QUICK_REPLY', text: 'Thanks' }
+      ] }
+    ]
+  });
+  assert.equal(template.templateId, '123456789');
+  assert.deepEqual(template.language, { code: 'en_US' });
+  assert.equal(template.components[0].format, 'image');
+  assert.equal(template.components[1].example.body_text_named_params[0].param_name, 'customer_name');
+  assert.deepEqual(template.variables.map(item => [item.component, item.key, item.kind]), [
+    ['header', 'media', 'image'], ['body', 'customer_name', 'text'], ['body', '2', 'text'], ['button', '1', 'url']
+  ]);
+  assert.equal('ignored_secret' in template, false);
+  assert.equal('extra' in template.components[2].buttons[0], false);
+  assert.equal(sanitizeWhatsAppTemplateDefinition({ name: 'Bad Name', language: 'en_US', status: 'APPROVED' }), null);
+});
+
 test('encrypts outbound template payloads with workspace and message binding', async () => {
   const master = 'test-only-master-key-material-'.repeat(2);
   const value = { template: { name: 'hello_world', language: { code: 'en_US' }, components: [] } };
@@ -208,6 +237,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const whatsapp = await readFile(new URL('../migrations/0003_whatsapp_channel.sql', import.meta.url), 'utf8');
   const multichannel = await readFile(new URL('../migrations/0004_multichannel_credentials.sql', import.meta.url), 'utf8');
   const templateApi = await readFile(new URL('../migrations/0005_external_template_api.sql', import.meta.url), 'utf8');
+  const contactProfiles = await readFile(new URL('../migrations/0006_contact_profiles.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -234,6 +264,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   database.exec(whatsapp);
   database.exec(multichannel);
   database.exec(templateApi);
+  database.exec(contactProfiles);
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
   for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'channel_credentials',
     'contacts', 'messages', 'audit_log', 'api_keys', 'outbound_payloads', 'external_api_requests']) {
@@ -257,6 +288,8 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   assert.equal(database.prepare("SELECT name FROM workspaces WHERE workspace_id='ws_default'").get().name, 'Helixcer Chat');
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE channel_id='wa-main'").get().count, 0);
   assert.equal(database.prepare("SELECT provider_type FROM channels WHERE channel_id='legacy-channel'").get().provider_type, 'web_chat');
+  assert.equal(database.prepare("SELECT company FROM contacts WHERE contact_id='legacy-contact'").get().company, '');
+  assert.equal(database.prepare("SELECT tags_json FROM contacts WHERE contact_id='legacy-contact'").get().tags_json, '[]');
   assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
   const indexes = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(row => row.name));
   for (const name of ['idx_channels_workspace', 'idx_conversations_workspace_activity', 'idx_messages_workspace_conversation',
@@ -274,6 +307,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   editedDatabase.prepare("UPDATE channels SET name='Edited WhatsApp' WHERE channel_id='wa-main'").run();
   editedDatabase.exec(multichannel);
   editedDatabase.exec(templateApi);
+  editedDatabase.exec(contactProfiles);
   assert.equal(editedDatabase.prepare("SELECT name FROM channels WHERE channel_id='wa-main'").get().name, 'Edited WhatsApp');
   editedDatabase.close();
 });

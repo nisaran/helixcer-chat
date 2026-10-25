@@ -11,8 +11,11 @@
   <title>Helixcer Chat</title>
   <link rel="icon" href="./assets/helixcer-mark.jpg" type="image/jpeg">
   <link rel="apple-touch-icon" href="./assets/helixcer-mark.jpg">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261025-7">
-  <script src="./assets/app.js?v=20261025-7" defer></script>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261025-8">
+  <script src="./assets/app.js?v=20261025-8" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -181,7 +184,7 @@
                 <div class="chat-person">
                   <h2 id="chatTitle">Conversation</h2>
                   <div class="chat-meta">
-                    <span class="channel-badge" id="chatChannel">Channel</span>
+                    <span class="chat-channel-badge" id="chatChannelBadge"><img id="chatProviderLogo" alt="" src="./assets/provider-whatsapp.svg"><span id="chatChannel">Channel</span></span>
                     <span id="chatPresence">Recently active</span>
                   </div>
                 </div>
@@ -267,21 +270,45 @@
           <div><p class="eyebrow">Audience</p><h2 id="contactsTitle">Contacts</h2><p>Customer identities across every connected channel.</p></div>
           <button class="primary-button" type="button" data-action="new-contact"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add contact</button>
         </div>
-        <div class="surface">
-          <div class="surface-toolbar">
-            <div class="search-wrap compact-search">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-              <label class="sr-only" for="contactSearch">Search contacts</label>
-              <input id="contactSearch" type="search" placeholder="Search contacts…">
+        <div class="contacts-workspace" id="contactsWorkspace">
+          <div class="surface contact-list-surface">
+            <div class="surface-toolbar">
+              <div class="search-wrap compact-search">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+                <label class="sr-only" for="contactSearch">Search contacts</label>
+                <input id="contactSearch" type="search" placeholder="Search contacts…">
+              </div>
+              <span class="subtle" id="contactCount">0 contacts</span>
             </div>
-            <span class="subtle" id="contactCount">0 contacts</span>
+            <div class="contact-table-wrap">
+              <table class="contact-table">
+                <thead><tr><th>Contact</th><th>Channel</th><th>Tags</th><th>Last active</th><th>Status</th></tr></thead>
+                <tbody id="contactTableBody"></tbody>
+              </table>
+            </div>
           </div>
-          <div class="contact-table-wrap">
-            <table class="contact-table">
-              <thead><tr><th>Contact</th><th>Channel</th><th>Tags</th><th>Last active</th><th>Status</th></tr></thead>
-              <tbody id="contactTableBody"></tbody>
-            </table>
-          </div>
+          <aside class="surface contact-editor-panel" id="contactEditor" aria-labelledby="contactEditorTitle" hidden>
+            <form id="contactEditForm" autocomplete="off">
+              <div class="contact-editor-head">
+                <div><p class="eyebrow">Contact details</p><h3 id="contactEditorTitle">Edit contact</h3></div>
+                <button class="icon-button" type="button" data-action="close-contact-editor" aria-label="Close contact details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+              </div>
+              <div class="contact-editor-status" id="contactEditorStatus" role="status">Choose a contact to view the details.</div>
+              <div class="contact-editor-fields" id="contactEditorFields" hidden>
+                <input type="hidden" name="contactId" id="contactEditId">
+                <label class="field-label">Name<input class="text-field" id="contactEditName" name="displayName" required maxlength="100"></label>
+                <label class="field-label">Channel<select class="text-field" id="contactEditChannel" name="channelId" required></select><span class="field-help" id="contactEditChannelHelp"></span></label>
+                <label class="field-label">Provider ID<input class="text-field" id="contactEditProviderId" name="channelProfileId" required maxlength="200"></label>
+                <label class="field-label">Company<input class="text-field" id="contactEditCompany" name="company" maxlength="160" placeholder="Optional company"></label>
+                <label class="field-label">Tags<input class="text-field" id="contactEditTags" name="tags" maxlength="500" placeholder="Priority, Customer"></label>
+                <span class="field-help">Separate tags with commas.</span>
+              </div>
+              <div class="contact-editor-actions" id="contactEditorActions" hidden>
+                <button class="secondary-button" type="button" data-action="cancel-contact-edit">Cancel</button>
+                <button class="primary-button" id="contactEditSubmit" type="submit">Save contact</button>
+              </div>
+            </form>
+          </aside>
         </div>
       </section>
 
@@ -358,7 +385,7 @@
           <div class="setting-row">
             <div class="setting-copy">
               <span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span>
-              <div><strong id="notificationSettingTitle">Browser push notifications</strong><span id="notificationSettingHelp">Receive an alert from this browser when a new customer message arrives while Helixcer Chat is open.</span><small id="notificationPermissionStatus">Checking browser permission…</small></div>
+              <div><strong id="notificationSettingTitle">Browser notifications</strong><span id="notificationSettingHelp">Receive alerts while Helixcer Chat is running. On iPhone or iPad, add Helixcer to your Home Screen first.</span><small id="notificationPermissionStatus">Checking browser permission…</small></div>
             </div>
             <label class="switch-control"><input type="checkbox" id="pushNotificationsToggle"><span aria-hidden="true"></span><em>Enable</em></label>
           </div>
@@ -440,7 +467,7 @@
       </div>
 
       <section class="provider-fields" data-provider-fields="whatsapp_cloud">
-        <div class="provider-form-head"><span class="provider-mark whatsapp">WA</span><div><strong>WhatsApp Cloud API</strong><span>Use the values shown in Meta's WhatsApp API setup.</span></div></div>
+        <div class="provider-form-head"><img class="provider-mark whatsapp" src="./assets/provider-whatsapp.svg" alt=""><div><strong>WhatsApp Cloud API</strong><span>Use the values shown in Meta's WhatsApp API setup.</span></div></div>
         <div class="form-grid channel-form-grid">
           <label class="field-label">WhatsApp Business Account ID <span class="field-hint">Messaging account ID in Meta</span><input class="text-field" name="wabaId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
           <label class="field-label">Phone Number ID <span class="field-hint">Shown directly below the selected From number</span><input class="text-field" name="phoneNumberId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
@@ -450,7 +477,7 @@
       </section>
 
       <section class="provider-fields" data-provider-fields="telegram" hidden>
-        <div class="provider-form-head"><span class="provider-mark telegram">TG</span><div><strong>Telegram Bot API</strong><span>Create a bot with BotFather, then paste its token.</span></div></div>
+        <div class="provider-form-head"><img class="provider-mark telegram" src="./assets/provider-telegram.svg" alt=""><div><strong>Telegram Bot API</strong><span>Create a bot with BotFather, then paste its token.</span></div></div>
         <div class="form-grid channel-form-grid">
           <label class="field-label form-span">Bot token<input class="text-field secret-field" name="telegramBotToken" type="password" maxlength="256" spellcheck="false" placeholder="123456789:AA…" required><span class="field-help secret-help">A green masked value means the token is saved securely; focus the field only to replace it.</span></label>
           <label class="field-label form-span">Webhook secret<div class="inline-field"><input class="text-field secret-field" name="telegramWebhookSecret" type="password" maxlength="256" spellcheck="false" placeholder="Private webhook secret" required><button class="secondary-button generate-button" type="button" data-generate-secret="telegramWebhookSecret">Generate</button></div><span class="field-help">Helixcer sends this to Telegram when registering the webhook. A green masked value means it is saved securely.</span></label>
@@ -458,7 +485,7 @@
       </section>
 
       <section class="provider-fields" data-provider-fields="instagram" hidden>
-        <div class="provider-form-head"><span class="provider-mark instagram">IG</span><div><strong>Instagram Messaging</strong><span>Connect an Instagram Business or Creator account through its Meta app.</span></div></div>
+        <div class="provider-form-head"><img class="provider-mark instagram" src="./assets/provider-instagram.svg" alt=""><div><strong>Instagram Messaging</strong><span>Connect an Instagram Business or Creator account through its Meta app.</span></div></div>
         <div class="form-grid channel-form-grid">
           <label class="field-label">Instagram account ID<input class="text-field" name="instagramAccountId" inputmode="numeric" maxlength="40" placeholder="17841400000000000" required></label>
           <label class="field-label"><span>Meta App ID <span class="optional-label">Optional</span></span><input class="text-field" name="instagramAppId" inputmode="numeric" maxlength="40" placeholder="Your Meta app ID"></label>
@@ -519,11 +546,12 @@
         <div><p class="eyebrow">WhatsApp template</p><h2 id="templateDialogTitle">Send an approved template</h2></div>
         <button class="icon-button" type="button" data-action="close-template" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
-      <p class="modal-copy">Use the exact template name and language approved in WhatsApp Manager. Add body variables in their approved order.</p>
+      <p class="modal-copy">Choose an approved template, then map every required value from this contact or enter it manually.</p>
       <div class="form-grid">
-        <label class="field-label">Template name<input class="text-field" name="name" required maxlength="512" placeholder="order_confirmation"></label>
-        <label class="field-label">Language code<input class="text-field" name="languageCode" required maxlength="35" value="en_US" placeholder="en_US"></label>
-        <label class="field-label form-span">Body variables <span class="optional-label">one value per line</span><textarea class="text-field template-variables" name="bodyVariables" rows="4" maxlength="4000" placeholder="Nisar&#10;Order 1001&#10;Tomorrow"></textarea></label>
+        <label class="field-label form-span">Approved template<select class="text-field" name="templateId" id="templateSelect" required disabled><option value="">Loading templates…</option></select></label>
+        <div class="template-load-state form-span" id="templateLoadStatus" role="status">Loading approved templates from WhatsApp…</div>
+        <div class="template-summary form-span" id="templateSummary" hidden></div>
+        <div class="template-variable-fields form-span" id="templateVariableFields"></div>
         <label class="field-label form-span">Conversation preview <span class="optional-label">optional</span><input class="text-field" name="previewText" maxlength="500" placeholder="Order confirmation template"></label>
       </div>
       <div class="modal-actions">

@@ -70,6 +70,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0003_whatsapp_channel.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0004_multichannel_credentials.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0005_external_template_api.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0006_contact_profiles.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -1370,4 +1371,289 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     globalThis.fetch = originalFetch;
     database.close();
   }
+});
+
+test('conversation template discovery is authenticated, workspace scoped, paginated, sanitized, and provider-safe', async () => {
+  const { database, DB } = await testDatabase();
+  const accessToken = 'template-discovery-access-token-value-1234567890';
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const jsonHeaders = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const denied = await handleRequest(new Request(
+    'https://api.chat.helixcer.com/api/conversations/conversation-template-list/templates'
+  ), env);
+  assert.equal(denied.status, 401);
+
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ channelId: 'wa-template-list', name: 'Template WhatsApp', connectorType: 'whatsapp_cloud',
+      config: { wabaId: '623456789012345', phoneNumberId: '623456789012346', apiVersion: 'v26.0' },
+      credentials: { accessToken, appSecret: 'abcdef1234567890abcdef1234567890', verifyToken: 'template-verify-token' } })
+  }), env);
+  assert.equal(created.status, 201);
+  const now = new Date().toISOString();
+  database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+    VALUES ('contact-template-list','Asha',?,?, 'ws_default')`).run(now, now);
+  database.prepare(`INSERT INTO channel_identities
+      (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
+    VALUES ('identity-template-list','contact-template-list','wa-template-list','919999999991','Asha',?,'ws_default')`).run(now);
+  database.prepare(`INSERT INTO conversations
+      (conversation_id,contact_id,channel_id,status,subject,last_message_at,created_at,updated_at,workspace_id)
+    VALUES ('conversation-template-list','contact-template-list','wa-template-list','open','Asha',?,?,?,'ws_default')`)
+    .run(now, now, now);
+  const agentSessionToken = 'template-agent-session-token-that-is-long-enough';
+  database.prepare(`INSERT INTO users
+      (user_id,google_sub,email,display_name,email_verified,last_login_at,created_at,updated_at)
+    VALUES ('template-agent','template-agent-sub','template-agent@example.com','Template agent',1,?,?,?)`)
+    .run(now, now, now);
+  database.prepare(`INSERT INTO memberships
+      (membership_id,workspace_id,user_id,role,status,created_at,updated_at)
+    VALUES ('template-agent-membership','ws_default','template-agent','agent','active',?,?)`).run(now, now);
+  database.prepare(`INSERT INTO sessions
+      (session_id,token_hash,user_id,workspace_id,expires_at,last_seen_at,created_at)
+    VALUES ('template-agent-session',?,'template-agent','ws_default',?,?,?)`)
+    .run(await hashToken(agentSessionToken), new Date(Date.now() + 3600000).toISOString(), now, now);
+
+  const originalFetch = globalThis.fetch;
+  const providerRequests = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    providerRequests.push({ url, authorization: init.headers?.Authorization || '' });
+    if (!url.searchParams.get('after')) {
+      return new Response(JSON.stringify({
+        data: [
+          { id: 'template-1', name: 'order_update', language: 'en_US', status: 'APPROVED', category: 'UTILITY',
+            provider_only: accessToken,
+            components: [
+              { type: 'BODY', text: 'Hello {{customer_name}}, order {{2}} is ready.',
+                example: { body_text: [['Asha', '1001']], body_text_named_params: [
+                  { param_name: 'customer_name', example: 'Asha' }
+                ] } },
+              { type: 'BUTTONS', buttons: [
+                { type: 'URL', text: 'Track', url: 'https://shop.example/orders/{{1}}', example: ['1001'] }
+              ] }
+            ] },
+          { id: 'template-draft', name: 'draft_only', language: 'en_US', status: 'PENDING', category: 'UTILITY' },
+          { id: 'template-invalid', name: 'Bad Name', language: 'en_US', status: 'APPROVED', category: 'UTILITY' }
+        ],
+        paging: { cursors: { after: 'page-two-cursor' }, next: 'https://graph.facebook.com/next-page' }
+      }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ data: [
+      { id: 'template-2', name: 'invoice_ready', language: 'en_GB', status: 'APPROVED', category: 'UTILITY',
+        components: [
+          { type: 'HEADER', format: 'DOCUMENT' },
+          { type: 'BODY', text: 'Invoice {{1}} is ready.', example: { body_text: [['INV-1001']] } }
+        ] }
+    ] }), { headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const response = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-template-list/templates',
+      { headers: { Cookie: `__Host-helixcer_session=${agentSessionToken}` } }
+    ), env);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.items.map(item => item.name), ['invoice_ready', 'order_update']);
+    assert.deepEqual(body.items[0].variables.map(item => [item.component, item.key, item.kind]), [
+      ['header', 'media', 'document'], ['body', '1', 'text']
+    ]);
+    assert.ok(body.items[1].variables.some(item => item.key === 'customer_name'));
+    assert.ok(body.items[1].variables.some(item => item.component === 'button' && item.kind === 'url'));
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(accessToken));
+    assert.equal(providerRequests.length, 2);
+    assert.equal(providerRequests[0].url.pathname, '/v26.0/623456789012345/message_templates');
+    assert.equal(providerRequests[1].url.searchParams.get('after'), 'page-two-cursor');
+    assert.equal(providerRequests[0].authorization, `Bearer ${accessToken}`);
+
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      error: { message: `(#100) Missing permission for message templates (${accessToken})`, code: 100 }
+    }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    const providerFailure = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-template-list/templates',
+      { headers: { Authorization: 'Bearer recovery-secret' } }
+    ), env);
+    assert.equal(providerFailure.status, 422);
+    const providerFailureBody = await providerFailure.json();
+    assert.match(providerFailureBody.error, /Missing permission for message templates/);
+    assert.doesNotMatch(JSON.stringify(providerFailureBody), new RegExp(accessToken));
+
+    let crossWorkspaceFetches = 0;
+    globalThis.fetch = async () => { crossWorkspaceFetches++; return new Response('{}'); };
+    database.prepare(`INSERT INTO workspaces (workspace_id,slug,name,created_at,updated_at)
+      VALUES ('ws_other','other','Other',?,?)`).run(now, now);
+    database.prepare(`INSERT INTO channels
+        (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+      VALUES ('wa-other','Other WA','whatsapp_cloud','whatsapp_cloud',1,'["text"]','{"wabaId":"723456789012345","phoneNumberId":"723456789012346","apiVersion":"v26.0"}','OTHER',?,?, 'ws_other')`)
+      .run(now, now);
+    database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+      VALUES ('contact-other','Other',?,?, 'ws_other')`).run(now, now);
+    database.prepare(`INSERT INTO channel_identities
+        (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
+      VALUES ('identity-other','contact-other','wa-other','911111111111','Other',?,'ws_other')`).run(now);
+    database.prepare(`INSERT INTO conversations
+        (conversation_id,contact_id,channel_id,status,subject,last_message_at,created_at,updated_at,workspace_id)
+      VALUES ('conversation-other','contact-other','wa-other','open','Other',?,?,?,'ws_other')`).run(now, now, now);
+    const scoped = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-other/templates',
+      { headers: { Authorization: 'Bearer recovery-secret' } }
+    ), env);
+    assert.equal(scoped.status, 404);
+    assert.equal(crossWorkspaceFetches, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('contact detail and update APIs preserve conversations, enforce identity uniqueness, and stay workspace scoped', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const jsonHeaders = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const createdChannel = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ channelId: 'wa-contact-api', name: 'Support WhatsApp', connectorType: 'whatsapp_cloud',
+      config: { wabaId: '823456789012345', phoneNumberId: '823456789012346', apiVersion: 'v26.0' },
+      credentials: { accessToken: 'contact-api-access-token-value-1234567890',
+        appSecret: 'fedcba0987654321fedcba0987654321', verifyToken: 'contact-api-verify-token' } })
+  }), env);
+  assert.equal(createdChannel.status, 201);
+  const config = JSON.parse(database.prepare("SELECT config_json FROM channels WHERE channel_id='wa-contact-api'").get().config_json);
+  config.credentialsVerifiedAt = new Date().toISOString();
+  config.webhookVerifiedAt = new Date().toISOString();
+  database.prepare("UPDATE channels SET config_json=? WHERE channel_id='wa-contact-api'").run(JSON.stringify(config));
+  const createdTelegram = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ channelId: 'telegram-contact-api', name: 'Support Telegram', connectorType: 'telegram',
+      credentials: { botToken: '123456789:abcdefghijklmnopqrstuvwxyz_123456', webhookSecret: 'secret_telegram_contact_api' } })
+  }), env);
+  assert.equal(createdTelegram.status, 201);
+  const agentNow = new Date().toISOString();
+  const agentSessionToken = 'contact-agent-session-token-that-is-long-enough';
+  database.prepare(`INSERT INTO users
+      (user_id,google_sub,email,display_name,email_verified,last_login_at,created_at,updated_at)
+    VALUES ('contact-agent','contact-agent-sub','contact-agent@example.com','Contact agent',1,?,?,?)`)
+    .run(agentNow, agentNow, agentNow);
+  database.prepare(`INSERT INTO memberships
+      (membership_id,workspace_id,user_id,role,status,created_at,updated_at)
+    VALUES ('contact-agent-membership','ws_default','contact-agent','agent','active',?,?)`).run(agentNow, agentNow);
+  database.prepare(`INSERT INTO sessions
+      (session_id,token_hash,user_id,workspace_id,expires_at,last_seen_at,created_at)
+    VALUES ('contact-agent-session',?,'contact-agent','ws_default',?,?,?)`)
+    .run(await hashToken(agentSessionToken), new Date(Date.now() + 3600000).toISOString(), agentNow, agentNow);
+  const agentJsonHeaders = {
+    Cookie: `__Host-helixcer_session=${agentSessionToken}`,
+    Origin: 'https://chat.helixcer.com',
+    'Content-Type': 'application/json'
+  };
+
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/contacts', {
+    method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ displayName: 'Asha Rao', company: 'Acme', tags: ['VIP', 'Retail'],
+      channelId: 'wa-contact-api', channelProfileId: '+91 99999 99991' })
+  }), env);
+  assert.equal(created.status, 201);
+  const createdBody = await created.json();
+  assert.equal(createdBody.item.company, 'Acme');
+  assert.deepEqual(createdBody.item.tags, ['VIP', 'Retail']);
+  assert.equal(createdBody.item.channelName, 'Support WhatsApp');
+  assert.equal(createdBody.item.connectorType, 'whatsapp_cloud');
+  assert.equal(createdBody.item.channelProfileId, '919999999991');
+
+  const contactId = createdBody.contactId;
+  const conversationId = createdBody.conversationId;
+  const denied = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`), env);
+  assert.equal(denied.status, 401);
+  const detail = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    headers: { Cookie: `__Host-helixcer_session=${agentSessionToken}` }
+  }), env);
+  assert.equal(detail.status, 200);
+  const detailBody = await detail.json();
+  assert.equal(detailBody.item.name, 'Asha Rao');
+  assert.equal(detailBody.item.channelEditable, true);
+
+  const updated = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    method: 'PATCH', headers: agentJsonHeaders,
+    body: JSON.stringify({ name: 'Asha R.', company: 'Acme Retail', tags: ['Priority', 'priority', 'West'],
+      channelProfileId: '+91 99999 99992' })
+  }), env);
+  assert.equal(updated.status, 200);
+  const updatedBody = await updated.json();
+  assert.equal(updatedBody.item.displayName, 'Asha R.');
+  assert.equal(updatedBody.item.company, 'Acme Retail');
+  assert.deepEqual(updatedBody.item.tags, ['Priority', 'West']);
+  assert.equal(updatedBody.item.channelProfileId, '919999999992');
+  const preservedConversation = database.prepare(`SELECT subject,tags_json FROM conversations
+    WHERE conversation_id=?`).get(conversationId);
+  assert.equal(preservedConversation.subject, 'Asha R.');
+  assert.deepEqual(JSON.parse(preservedConversation.tags_json), ['Priority', 'West']);
+
+  const reassigned = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    method: 'PATCH', headers: jsonHeaders,
+    body: JSON.stringify({ channelId: 'telegram-contact-api', channelProfileId: '9988776655' })
+  }), env);
+  assert.equal(reassigned.status, 200);
+  assert.equal((await reassigned.json()).item.channelName, 'Support Telegram');
+  assert.equal(database.prepare('SELECT channel_id FROM conversations WHERE conversation_id=?').get(conversationId).channel_id,
+    'telegram-contact-api');
+
+  database.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
+    VALUES ('contact-history',?1,?2,'telegram-contact-api','inbound','text','Hello','received',?3,'ws_default')`)
+    .run(conversationId, contactId, new Date().toISOString());
+  const lockedChannel = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    method: 'PATCH', headers: jsonHeaders,
+    body: JSON.stringify({ channelId: 'wa-contact-api', channelProfileId: '919999999994' })
+  }), env);
+  assert.equal(lockedChannel.status, 409);
+  assert.match((await lockedChannel.json()).error, /after messages/i);
+  const lockedDetail = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  assert.equal((await lockedDetail.json()).item.channelEditable, false);
+
+  const now = new Date().toISOString();
+  database.prepare(`INSERT INTO contacts
+      (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
+    VALUES ('contact-conflict','Conflict','','[]',?,?, 'ws_default')`).run(now, now);
+  database.prepare(`INSERT INTO channel_identities
+      (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
+    VALUES ('identity-conflict','contact-conflict','telegram-contact-api','919999999993','Conflict',?,'ws_default')`).run(now);
+  const conflict = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ channelProfileId: '919999999993' })
+  }), env);
+  assert.equal(conflict.status, 409);
+  assert.match((await conflict.json()).error, /already belongs/i);
+  assert.equal(database.prepare('SELECT channel_profile_id FROM channel_identities WHERE contact_id=?').get(contactId).channel_profile_id,
+    '9988776655');
+  assert.equal(database.prepare('SELECT count(*) AS count FROM conversations WHERE conversation_id=?').get(conversationId).count, 1);
+
+  const invalidTags = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ tags: 'Priority' })
+  }), env);
+  assert.equal(invalidTags.status, 400);
+
+  const list = await handleRequest(new Request('https://api.chat.helixcer.com/api/contacts', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  const listItem = (await list.json()).items.find(item => item.contactId === contactId);
+  assert.equal(listItem.company, 'Acme Retail');
+  assert.equal(listItem.channelName, 'Support Telegram');
+  assert.equal(listItem.connectorType, 'telegram');
+
+  database.prepare(`INSERT INTO workspaces (workspace_id,slug,name,created_at,updated_at)
+    VALUES ('ws_contact_other','contact-other','Other Contacts',?,?)`).run(now, now);
+  database.prepare(`INSERT INTO contacts
+      (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
+    VALUES ('contact-private','Private','Other','["Hidden"]',?,?, 'ws_contact_other')`).run(now, now);
+  const privateContact = await handleRequest(new Request('https://api.chat.helixcer.com/api/contacts/contact-private', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  assert.equal(privateContact.status, 404);
+  database.close();
 });

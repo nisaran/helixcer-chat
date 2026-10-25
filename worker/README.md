@@ -73,6 +73,8 @@ Migration `0004_multichannel_credentials.sql` adds a logical `provider_type` and
 
 Migration `0005_external_template_api.sql` adds workspace API keys, encrypted outbound template payloads, and seven-day idempotency records. It is additive and does not modify existing channel, contact, conversation, or message rows. Apply it before deploying Worker code that references the new tables.
 
+Migration `0006_contact_profiles.sql` adds contact-level `company` and `tags_json` fields without replacing contact, identity, conversation, or message rows. It seeds each existing contact's tags from its most recent conversation, when available, so the right-side contact editor starts with the tags already visible in the Inbox.
+
 Deploy the Worker on its `workers.dev` hostname, then deploy the repository's `gateway/` Pages Function with an `API` service binding to this Worker. Associate the Pages project with `api.chat.helixcer.com` and, at the external DNS provider, point only the `api.chat` CNAME to `helixcer-chat-gateway.pages.dev`. Keep the GitHub Pages dashboard at `chat.helixcer.com` and list only the dashboard origin in `ALLOWED_ORIGINS`. The checked-in frontend uses the branded API hostname; browsers never call the `workers.dev` hostname directly because its host-only `SameSite=Lax` cookie would be cross-site.
 
 The gateway holds no Google or channel secret. HTTP and WebSocket requests are passed to the Worker over Cloudflare's internal service binding. Deploy it from `gateway/` with `npx wrangler pages deploy` after the Worker is available.
@@ -111,9 +113,11 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `GET /api/conversations`
 - `PATCH /api/conversations/:id`
 - `GET|POST /api/conversations/:id/messages`
+- `GET /api/conversations/:id/templates` (approved templates from that conversation's WhatsApp connection)
 - `POST /api/conversations/:id/template` (authenticated WhatsApp template send)
 - `POST /api/conversations/:id/attachments` (authenticated WhatsApp multipart upload)
 - `GET|POST /api/contacts`
+- `GET|PATCH /api/contacts/:contactId`
 - `POST /api/demo/seed`
 - `GET /api/realtime` (WebSocket)
 - `POST /api/v1/whatsapp/template-messages` (server-to-server API key)
@@ -146,6 +150,10 @@ Credential rows are encrypted independently with a random nonce and authenticate
 
 For each WhatsApp conversation, list and message responses include `freeformAllowed`, `replyWindowExpiresAt`, and a human-readable reason when the window is closed. The Worker independently rejects free-form text and attachments outside the 24-hour customer-service window; the dashboard cannot bypass this check. `POST /api/conversations/:id/template` sends an already-approved template from the inbox and remains available after the window closes. The external API can also send approved WhatsApp templates. Creating or approving templates remains in Meta's tools, and Instagram messaging remains subject to Meta's own allowed messaging window and permissions.
 
+`GET /api/conversations/:id/templates` derives the WABA and encrypted access token from that conversation's workspace-scoped channel, requests approved templates from Graph API v26.0 (or the saved channel version), and follows at most three cursor pages. Its response never contains a provider token. Each item contains `templateId`, `name`, `language.code`, `status`, `category`, sanitized component definitions, and a flattened `variables` list for text, media-header, named-parameter, and dynamic URL-button inputs. Meta failures are returned as bounded provider errors.
+
+Contact list, bootstrap, and detail responses include `displayName`/`name`, `company`, `tags`, `channelId`, `channelName`, `connectorType`, and `channelProfileId`. Detail responses also expose `channelEditable`. `PATCH /api/contacts/:contactId` accepts a subset of those editable values, mirrors name and tag changes to existing conversations, and never deletes history. Provider identity edits require a single unambiguous identity and enforce uniqueness. A contact's channel can be corrected while its conversation is still empty; after any message is sent or received, the channel is locked so historical messages cannot be misattributed.
+
 The attachment endpoint accepts multipart form data with a `file` field and optional `caption`. It supports the WhatsApp media types and limits enforced by this release (up to 16 MiB at the Helixcer edge), uploads the file directly to the configured Meta Phone Number ID, and stores only safe filename/type/size/caption metadata in D1. The provider media ID is kept only in the encrypted temporary outbound payload and removed after terminal submission.
 
 Legacy Generic HTTP and Web Chat paths remain for compatibility. Their old environment-secret resolver is isolated to `generic_http`; managed WhatsApp, Telegram, and Instagram code reads only encrypted D1 credentials and can never fall back to `WA_*`, `BOT_*`, or other per-channel environment variables.
@@ -160,4 +168,4 @@ node --check worker/src/auth.js
 node --test worker/test/*.test.mjs
 ```
 
-The tests cover migrations and legacy-row backfill, Google RSA/JWK verification and key rotation, OAuth state/nonce/PKCE and abuse limits, configured-owner bootstrap, hashed sessions, one-time email-bound invitations, role boundaries, last-owner protection, exact origins, realtime session revalidation, workspace-scoped data, API-key lifecycle, template validation and encryption, idempotent external sends, rate limits, fast Meta status webhooks, and cross-key isolation.
+The tests cover migrations and legacy-row backfill, Google RSA/JWK verification and key rotation, OAuth state/nonce/PKCE and abuse limits, configured-owner bootstrap, hashed sessions, one-time email-bound invitations, role boundaries, last-owner protection, exact origins, realtime session revalidation, workspace-scoped data, API-key lifecycle, template validation and encryption, approved-template pagination and sanitization, contact profile updates and identity conflicts, idempotent external sends, rate limits, fast Meta status webhooks, and cross-key isolation.

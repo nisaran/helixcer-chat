@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
+const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
 const apiDocs = await readFile(new URL("../api-docs.html", import.meta.url), "utf8");
 
 test("all JavaScript DOM id references exist exactly once", () => {
@@ -127,11 +128,23 @@ test("WhatsApp inbox supports templates, attachments, and reply-window blocking"
   assert.match(html, /id="attachmentInput" type="file"/);
   assert.match(html, /id="templateDialog"/);
   assert.match(app, /freeformAllowed/);
+  assert.match(app, /\/api\/conversations\/\$\{encodeURIComponent\(conversationId\)\}\/templates/);
   assert.match(app, /\/api\/conversations\/\$\{encodeURIComponent\(conversationId\)\}\/template/);
   assert.match(app, /\/api\/conversations\/\$\{encodeURIComponent\(conversationId\)\}\/attachments/);
   assert.match(app, /The 24-hour reply window is closed/);
-  assert.match(app, /const request = previewText \? \{ \.\.\.template, previewText \} : template/);
+  assert.match(html, /id="templateSelect"/);
+  assert.match(html, /id="templateVariableFields"/);
+  assert.match(app, /parameter_name/);
+  assert.match(app, /sub_type: descriptor\.subType/);
+  assert.match(app, /\[descriptor\.mediaType\]: \{ link: value \}/);
+  assert.match(app, /const request = previewText \? \{ \.\.\.requestTemplate, previewText \} : requestTemplate/);
   assert.match(app, /\/approved template\/i\.test\(reason\)/);
+  assert.match(styles, /#templateDialog\s*\{[^}]*max-height:\s*calc\(100dvh - 24px\)[^}]*overflow-y:\s*auto/);
+  assert.match(app, /\["", "Choose source"\]/);
+  assert.match(app, /suggestedTemplateSource\(descriptor\)/);
+  assert.match(app, /\["customer_name", "displayName"\]/);
+  assert.match(app, /return sources\.get\(name\) \|\| ""/);
+  assert.match(app, /refreshButton\.dataset\.action = "reload-templates"/);
 });
 
 test("settings expose permission-aware browser notifications", () => {
@@ -139,9 +152,52 @@ test("settings expose permission-aware browser notifications", () => {
   assert.match(html, /id="settingsRoute" data-route-panel="settings"/);
   assert.match(html, /id="pushNotificationsToggle"/);
   assert.match(app, /Notification\.requestPermission\(\)/);
+  assert.match(app, /navigator\.serviceWorker\.register\("\/sw\.js"\)/);
+  assert.match(app, /"serviceWorker" in navigator/);
+  assert.match(app, /registration\.showNotification\(title, options\)/);
+  assert.match(app, /if \(!registration\?\.showNotification\) throw new Error/);
+  assert.match(app, /Add Helixcer to your Home Screen/);
+  assert.match(html, /Receive alerts while Helixcer Chat is running/);
   assert.match(app, /new Notification\(/);
   assert.match(app, /type === "webhook\.received"[\s\S]*?await loadAll\(\)[\s\S]*?notifyInboundMessage/);
   assert.match(app, /lastNotificationAt: new Map\(\)/);
+});
+
+test("channel cards collapse by default and use provider artwork throughout the inbox", () => {
+  assert.match(app, /expandedChannelIds: new Set\(\)/);
+  assert.match(app, /data\.action = "toggle-channel-details"|dataset\.action = "toggle-channel-details"/);
+  assert.match(app, /details\.hidden = !expanded/);
+  assert.match(app, /provider-whatsapp\.svg/);
+  assert.match(app, /provider-telegram\.svg/);
+  assert.match(app, /provider-instagram\.svg/);
+  assert.match(html, /id="chatProviderLogo"/);
+  assert.match(app, /\$\("chatChannel"\)\.textContent = channel\?\.name/);
+});
+
+test("contacts open in a right-side editor backed by contact detail endpoints", () => {
+  assert.match(html, /id="contactsWorkspace"/);
+  assert.match(html, /id="contactEditor"/);
+  assert.match(html, /id="contactEditName"/);
+  assert.match(html, /id="contactEditChannel"/);
+  assert.match(html, /id="contactEditChannelHelp"/);
+  assert.match(html, /id="contactEditProviderId"/);
+  assert.match(html, /id="contactEditCompany"/);
+  assert.match(html, /id="contactEditTags"/);
+  assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`\)/);
+  assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`, \{ method: "PATCH"/);
+  assert.match(app, /row\.dataset\.contactId = contact\.contactId/);
+  assert.match(app, /Channel is locked because this contact already has message history/);
+  assert.match(app, /type === "contact\.updated"[\s\S]*?await loadAll\(\)[\s\S]*?await selectContact/);
+});
+
+test("pending and closed status updates clear the selected chat only after the server accepts them", () => {
+  const statusHandler = app.slice(app.indexOf('$("conversationStatus").addEventListener'), app.indexOf('$("conversationAssignee").addEventListener'));
+  assert.match(statusHandler, /await state\.api\.updateConversation/);
+  assert.match(statusHandler, /\["pending", "closed"\]\.includes\(next\)\) clearSelectedConversation\(\)/);
+  assert.ok(statusHandler.indexOf("await state.api.updateConversation") < statusHandler.indexOf("clearSelectedConversation()"));
+  assert.match(app, /state\.selectedConversationId = null;[\s\S]*?classList\.remove\("chat-open", "has-details"\)/);
+  assert.match(app, /event\.conversationId \|\| rawConversation\.conversationId/);
+  assert.match(app, /await loadAll\(\);[\s\S]*?refreshed\.status !== previousStatus[\s\S]*?clearSelectedConversation\(\)/);
 });
 
 test("Helixcer mark brands the login, sidebar, and favicon", () => {

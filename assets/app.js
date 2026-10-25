@@ -16,8 +16,12 @@
     contacts: [],
     conversations: [],
     messages: new Map(),
+    templatesByConversation: new Map(),
+    templateConversationId: null,
     recentVerifyTokens: new Map(),
     selectedConversationId: null,
+    selectedContactId: null,
+    expandedChannelIds: new Set(),
     detailsOpen: false,
     currentUser: null,
     workspace: { name: DEFAULT_WORKSPACE, workspaceId: "default", slug: "helixcer" },
@@ -27,6 +31,7 @@
     api: null,
     disconnectRealtime: null,
     notificationsEnabled: localStorage.getItem(NOTIFICATION_PREFERENCE_KEY) === "true",
+    serviceWorkerRegistration: null,
     lastNotificationAt: new Map(),
     loading: true,
   };
@@ -43,6 +48,15 @@
     instagram: { label: "Instagram", short: "IG", color: "#b6427b", soft: "#f9eaf2" },
     instagram_messaging: { label: "Instagram", short: "IG", color: "#b6427b", soft: "#f9eaf2" },
     generic: { label: "Custom", short: "API", color: "#5e6c69", soft: "#edf0ef" },
+  };
+
+  const providerLogoPaths = {
+    whatsapp_cloud: "./assets/provider-whatsapp.svg",
+    whatsapp: "./assets/provider-whatsapp.svg",
+    telegram: "./assets/provider-telegram.svg",
+    telegram_bot: "./assets/provider-telegram.svg",
+    instagram: "./assets/provider-instagram.svg",
+    instagram_messaging: "./assets/provider-instagram.svg",
   };
 
   const providerProfiles = {
@@ -104,11 +118,11 @@
         { channelId: "instagram-main", name: "Helixcer Instagram", connectorType: "instagram", enabled: true, health: "connected", config: { instagramAccountId: "17841400000000000", appId: "123456789012345", username: "helixcer", authMode: "instagram_login" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(200), webhookVerifiedAt: ago(198), lastWebhookAt: ago(57), verifiedName: "helixcer" } },
       ],
       contacts: [
-        { contactId: "ct-ananya", displayName: "Ananya Sharma", channelId: "wa-sales", channelProfileId: "+91 98••• 1402", phone: "+91 98••• 1402", email: "ananya@example.com", tags: ["Priority", "Returning"] },
-        { contactId: "ct-david", displayName: "David Miller", channelId: "telegram-support", channelProfileId: "@davidm", phone: "—", email: "david@example.com", tags: ["New lead"] },
-        { contactId: "ct-meera", displayName: "Meera Iyer", channelId: "instagram-main", channelProfileId: "17890000000000001", phone: "—", email: "meera@example.com", tags: ["Instagram"] },
-        { contactId: "ct-ravi", displayName: "Ravi Menon", channelId: "wa-sales", channelProfileId: "+91 97••• 7780", phone: "+91 97••• 7780", email: "ravi@example.com", tags: ["Billing"] },
-        { contactId: "ct-lina", displayName: "Lina George", channelId: "telegram-support", channelProfileId: "@linag", phone: "—", email: "lina@example.com", tags: ["Resolved"] },
+        { contactId: "ct-ananya", displayName: "Ananya Sharma", company: "Northwind Retail", channelId: "wa-sales", channelProfileId: "+91 98••• 1402", phone: "+91 98••• 1402", email: "ananya@example.com", tags: ["Priority", "Returning"] },
+        { contactId: "ct-david", displayName: "David Miller", company: "", channelId: "telegram-support", channelProfileId: "@davidm", phone: "—", email: "david@example.com", tags: ["New lead"] },
+        { contactId: "ct-meera", displayName: "Meera Iyer", company: "Acme Studio", channelId: "instagram-main", channelProfileId: "17890000000000001", phone: "—", email: "meera@example.com", tags: ["Instagram"] },
+        { contactId: "ct-ravi", displayName: "Ravi Menon", company: "", channelId: "wa-sales", channelProfileId: "+91 97••• 7780", phone: "+91 97••• 7780", email: "ravi@example.com", tags: ["Billing"] },
+        { contactId: "ct-lina", displayName: "Lina George", company: "", channelId: "telegram-support", channelProfileId: "@linag", phone: "—", email: "lina@example.com", tags: ["Resolved"] },
       ],
       conversations: [
         { conversationId: "cv-ananya", contactId: "ct-ananya", subject: "Ananya Sharma", channelId: "wa-sales", status: "open", assignedTo: "Nisar", priority: "high", unreadCount: 2, lastMessage: "Could you confirm when my order will arrive?", lastMessageAt: ago(3) },
@@ -275,6 +289,20 @@
       return this.sendMessage(conversationId, payload.previewText || `[Template: ${templateName}]`);
     }
 
+    async getTemplates() {
+      await smallDelay(140);
+      return { items: clone([
+        { templateId: "demo-order", name: "order_confirmation", language: { code: "en_US" }, status: "APPROVED", category: "UTILITY", components: [
+          { type: "HEADER", format: "IMAGE" },
+          { type: "BODY", text: "Hi {{customer_name}}, your order {{2}} is confirmed." },
+          { type: "BUTTONS", buttons: [{ type: "URL", text: "View order", url: "https://example.com/orders/{{1}}" }] },
+        ] },
+        { templateId: "demo-welcome", name: "welcome_message", language: { code: "en_US" }, status: "APPROVED", category: "MARKETING", components: [
+          { type: "BODY", text: "Welcome {{1}}. We are happy to help." },
+        ] },
+      ]) };
+    }
+
     async sendAttachment(conversationId, formData) {
       const file = formData.get("file");
       const caption = String(formData.get("caption") || "").trim();
@@ -298,9 +326,10 @@
         displayName: payload.displayName,
         channelId: payload.channelId,
         channelProfileId: payload.channelProfileId,
+        company: payload.company || "",
         phone: payload.channelProfileId,
         email: "—",
-        tags: ["New"],
+        tags: Array.isArray(payload.tags) && payload.tags.length ? payload.tags : ["New"],
       };
       const conversation = {
         conversationId: `cv-${suffix}`,
@@ -318,6 +347,42 @@
       this.data.messages[conversation.conversationId] = [];
       this.emit({ type: "conversation.created", conversation: clone(conversation), item: clone(conversation) });
       return { ok: true, contactId: contact.contactId, conversationId: conversation.conversationId, item: clone(conversation) };
+    }
+
+    async getContact(contactId) {
+      await smallDelay(90);
+      const item = this.data.contacts.find((contact) => contact.contactId === contactId);
+      if (!item) throw new Error("Contact not found.");
+      const channel = this.data.channels.find((entry) => entry.channelId === item.channelId);
+      const hasMessages = this.data.conversations
+        .filter((conversation) => conversation.contactId === contactId)
+        .some((conversation) => (this.data.messages[conversation.conversationId] || []).length > 0);
+      return { item: clone({ ...item, channelName: channel?.name || "", connectorType: channel?.connectorType || "generic", channelEditable: !hasMessages }) };
+    }
+
+    async updateContact(contactId, patch) {
+      await smallDelay(110);
+      const item = this.data.contacts.find((contact) => contact.contactId === contactId);
+      if (!item) throw new Error("Contact not found.");
+      if (patch.channelId && patch.channelId !== item.channelId) {
+        const hasMessages = this.data.conversations
+          .filter((conversation) => conversation.contactId === contactId)
+          .some((conversation) => (this.data.messages[conversation.conversationId] || []).length > 0);
+        if (hasMessages) throw new Error("The channel cannot be changed after messages have been sent or received.");
+      }
+      ["displayName", "company", "channelId", "channelProfileId"].forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(patch, key)) item[key] = patch[key];
+      });
+      if (Array.isArray(patch.tags)) item.tags = clone(patch.tags);
+      this.data.conversations.filter((conversation) => conversation.contactId === contactId).forEach((conversation) => {
+        conversation.subject = item.displayName;
+        conversation.channelId = item.channelId;
+      });
+      const channel = this.data.channels.find((entry) => entry.channelId === item.channelId);
+      const hasMessages = this.data.conversations
+        .filter((conversation) => conversation.contactId === contactId)
+        .some((conversation) => (this.data.messages[conversation.conversationId] || []).length > 0);
+      return { ok: true, item: clone({ ...item, channelName: channel?.name || "", connectorType: channel?.connectorType || "generic", channelEditable: !hasMessages }) };
     }
 
     async createChannel(payload) {
@@ -461,6 +526,12 @@
         });
     }
 
+    getTemplates(conversationId) {
+      return this.isDemo
+        ? this.demo.getTemplates(conversationId)
+        : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/templates`);
+    }
+
     sendAttachment(conversationId, formData) {
       return this.isDemo
         ? this.demo.sendAttachment(conversationId, formData)
@@ -483,6 +554,18 @@
       return this.isDemo
         ? this.demo.createContact(payload)
         : this.request("/api/contacts", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    getContact(contactId) {
+      return this.isDemo
+        ? this.demo.getContact(contactId)
+        : this.request(`/api/contacts/${encodeURIComponent(contactId)}`);
+    }
+
+    updateContact(contactId, payload) {
+      return this.isDemo
+        ? this.demo.updateContact(contactId, payload)
+        : this.request(`/api/contacts/${encodeURIComponent(contactId)}`, { method: "PATCH", body: JSON.stringify(payload) });
     }
 
     createChannel(payload) {
@@ -802,7 +885,11 @@
       contactId: String(raw.contactId || raw.id || ""),
       displayName: raw.displayName || raw.name || "Unknown contact",
       channelId: String(raw.channelId || raw.identities?.[0]?.channelId || "unknown"),
+      channelName: raw.channelName || raw.channel?.name || "",
+      connectorType: raw.connectorType || raw.channel?.connectorType || "",
       channelProfileId: raw.channelProfileId || raw.identity || raw.identities?.[0]?.channelProfileId || "—",
+      company: raw.company || "",
+      channelEditable: raw.channelEditable !== false,
       email: raw.email || "—",
       phone: raw.phone || "—",
       tags: Array.isArray(raw.tags) ? raw.tags : [],
@@ -945,9 +1032,8 @@
       avatar.style.setProperty("--avatar-bg", palette[0]);
       avatar.style.setProperty("--avatar-fg", palette[1]);
       avatarWrap.append(avatar);
-      const mini = element("span", "channel-mini", style.short);
-      mini.style.setProperty("--channel-color", style.color);
-      mini.title = style.label;
+      const mini = providerLogo(channel.connectorType, "channel-mini");
+      mini.title = `${channel.name || style.label} · ${style.label}`;
       avatarWrap.append(mini);
 
       const copy = element("span", "conversation-copy");
@@ -1007,9 +1093,12 @@
     const style = channelStyle(channel);
     $("chatTitle").textContent = conversation.subject;
     $("chatAvatar").textContent = initials(conversation.subject);
-    $("chatChannel").textContent = style.label;
-    $("chatChannel").style.background = style.soft;
-    $("chatChannel").style.color = style.color;
+    $("chatChannel").textContent = channel?.name || style.label;
+    $("chatChannelBadge").title = style.label;
+    const chatLogo = $("chatProviderLogo");
+    const logoPath = providerLogoPaths[channel?.connectorType];
+    chatLogo.hidden = !logoPath;
+    if (logoPath) chatLogo.src = logoPath;
     $("chatPresence").textContent = `Active ${relativeTime(conversation.lastMessageAt)}`;
     $("conversationStatus").value = conversation.status;
     populateAssigneeSelect(conversation);
@@ -1136,7 +1225,7 @@
 
   function renderContacts() {
     const search = state.contactSearch.trim().toLocaleLowerCase();
-    const contacts = state.contacts.filter((contact) => `${contact.displayName} ${contact.email} ${contact.phone} ${contact.channelProfileId}`.toLocaleLowerCase().includes(search));
+    const contacts = state.contacts.filter((contact) => `${contact.displayName} ${contact.email} ${contact.phone} ${contact.channelProfileId} ${contact.company} ${contact.channelName} ${contact.tags.join(" ")}`.toLocaleLowerCase().includes(search));
     $("contactCount").textContent = `${contacts.length} contact${contacts.length === 1 ? "" : "s"}`;
     const tbody = $("contactTableBody");
     tbody.replaceChildren();
@@ -1152,6 +1241,10 @@
     }
     contacts.forEach((contact, index) => {
       const row = document.createElement("tr");
+      row.dataset.contactId = contact.contactId;
+      row.tabIndex = 0;
+      row.classList.toggle("is-selected", contact.contactId === state.selectedContactId);
+      row.setAttribute("aria-label", `View and edit ${contact.displayName}`);
       const identityCell = document.createElement("td");
       const identity = element("div", "contact-cell");
       const avatar = element("span", "avatar", initials(contact.displayName));
@@ -1187,6 +1280,112 @@
     });
   }
 
+  function populateContactEditorChannels(selectedId = "") {
+    const select = $("contactEditChannel");
+    select.replaceChildren();
+    state.channels.filter((channel) => providerProfiles[channel.connectorType]).forEach((channel) => {
+      const option = document.createElement("option");
+      option.value = channel.channelId;
+      option.textContent = `${channel.name} · ${(providerProfiles[channel.connectorType] || {}).label || channel.connectorType}`;
+      option.disabled = channel.enabled === false;
+      select.append(option);
+    });
+    if ([...select.options].some((option) => option.value === selectedId)) select.value = selectedId;
+  }
+
+  function showContactEditor(contact, { loading = false, error = "" } = {}) {
+    const panel = $("contactEditor");
+    const fields = $("contactEditorFields");
+    const actions = $("contactEditorActions");
+    panel.hidden = false;
+    $("contactsWorkspace").classList.add("has-editor");
+    $("contactEditorStatus").hidden = Boolean(contact) && !loading && !error;
+    $("contactEditorStatus").textContent = loading ? "Loading contact details…" : error || "Choose a contact to view the details.";
+    fields.hidden = !contact || loading || Boolean(error);
+    actions.hidden = fields.hidden;
+    if (!contact || fields.hidden) return;
+    const normalized = normalizeContact(contact);
+    $("contactEditorTitle").textContent = normalized.displayName;
+    $("contactEditId").value = normalized.contactId;
+    $("contactEditName").value = normalized.displayName;
+    populateContactEditorChannels(normalized.channelId);
+    $("contactEditChannel").disabled = !normalized.channelEditable;
+    $("contactEditChannelHelp").textContent = normalized.channelEditable
+      ? "You can change the channel until the first message is sent or received."
+      : "Channel is locked because this contact already has message history.";
+    $("contactEditProviderId").value = normalized.channelProfileId === "—" ? "" : normalized.channelProfileId;
+    $("contactEditCompany").value = normalized.company;
+    $("contactEditTags").value = normalized.tags.join(", ");
+  }
+
+  async function selectContact(contactId) {
+    if (!contactId) return;
+    state.selectedContactId = contactId;
+    renderContacts();
+    const cached = state.contacts.find((contact) => contact.contactId === contactId) || null;
+    showContactEditor(cached, { loading: true });
+    try {
+      const result = await state.api.getContact(contactId);
+      if (state.selectedContactId !== contactId) return;
+      const contact = normalizeContact(result.item || result);
+      const index = state.contacts.findIndex((item) => item.contactId === contactId);
+      if (index >= 0) state.contacts[index] = { ...state.contacts[index], ...contact };
+      else state.contacts.push(contact);
+      showContactEditor(contact);
+      renderContacts();
+    } catch (error) {
+      if (state.selectedContactId === contactId) showContactEditor(null, { error: `Contact details could not be loaded: ${error.message}` });
+    }
+  }
+
+  function closeContactEditor() {
+    state.selectedContactId = null;
+    $("contactsWorkspace").classList.remove("has-editor");
+    $("contactEditor").hidden = true;
+    $("contactEditForm").reset();
+    $("contactEditorTitle").textContent = "Edit contact";
+    renderContacts();
+  }
+
+  async function saveContactEdits(form) {
+    const data = new FormData(form);
+    const contactId = String(data.get("contactId") || "");
+    const payload = {
+      displayName: String(data.get("displayName") || "").trim(),
+      channelId: String($("contactEditChannel").value || "").trim(),
+      channelProfileId: String(data.get("channelProfileId") || "").trim(),
+      company: String(data.get("company") || "").trim(),
+      tags: String(data.get("tags") || "").split(/[,\n]/).map((tag) => tag.trim()).filter(Boolean),
+    };
+    if (!contactId || !payload.displayName || !payload.channelId || !payload.channelProfileId) {
+      form.reportValidity();
+      return;
+    }
+    const submit = $("contactEditSubmit");
+    submit.disabled = true;
+    submit.textContent = "Saving…";
+    try {
+      const result = await state.api.updateContact(contactId, payload);
+      const updated = normalizeContact(result.item || { contactId, ...payload });
+      const index = state.contacts.findIndex((contact) => contact.contactId === contactId);
+      if (index >= 0) state.contacts[index] = { ...state.contacts[index], ...updated };
+      state.conversations.filter((conversation) => conversation.contactId === contactId).forEach((conversation) => {
+        conversation.subject = updated.displayName;
+        conversation.channelId = updated.channelId;
+      });
+      showContactEditor(state.contacts[index] || updated);
+      renderContacts();
+      renderConversationList();
+      renderSelectedConversation();
+      showToast("Contact saved", `${updated.displayName} was updated.`);
+    } catch (error) {
+      showToast("Contact was not saved", error.message, true);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = "Save contact";
+    }
+  }
+
   function renderChannels() {
     const channels = state.channels.filter((channel) => providerProfiles[channel.connectorType]);
     const stats = $("channelStats");
@@ -1220,14 +1419,12 @@
 
   function renderChannelCard(channel) {
     const profile = providerProfiles[channel.connectorType] || providerProfiles.whatsapp_cloud;
-    const style = channelStyle(channel);
     const health = channelHealthView(channel);
-    const card = element("article", "channel-card connection-card");
+    const expanded = state.expandedChannelIds.has(channel.channelId);
+    const card = element("article", `channel-card connection-card${expanded ? " is-expanded" : ""}`);
     const head = element("div", "channel-card-head");
     const identity = element("div", "channel-card-identity");
-    const logo = element("span", "channel-logo", style.short);
-    logo.style.setProperty("--channel-color", style.color);
-    logo.style.setProperty("--channel-soft", style.soft);
+    const logo = providerLogo(channel.connectorType, "channel-logo");
     const name = document.createElement("div");
     name.append(element("span", "provider-label", profile.label), element("h3", "", channel.name), element("span", `health-dot${health.className ? ` ${health.className}` : ""}`, health.label));
     identity.append(logo, name);
@@ -1242,7 +1439,13 @@
     edit.type = "button";
     edit.dataset.action = "edit-channel";
     edit.dataset.channelId = channel.channelId;
-    headActions.append(providerLink, edit);
+    const expand = element("button", "secondary-button compact-button channel-expand-button", expanded ? "Collapse" : "Expand");
+    expand.type = "button";
+    expand.dataset.action = "toggle-channel-details";
+    expand.dataset.channelId = channel.channelId;
+    expand.setAttribute("aria-expanded", String(expanded));
+    expand.setAttribute("aria-controls", `channel-details-${channel.channelId}`);
+    headActions.append(providerLink, edit, expand);
     head.append(identity, headActions);
 
     const conversations = state.conversations.filter((item) => item.channelId === channel.channelId);
@@ -1351,7 +1554,13 @@
       setup.append(note);
     }
 
-    card.append(head, body, metrics, setup);
+    const overview = element("div", "channel-overview");
+    overview.append(body, metrics);
+    const details = element("div", "channel-expanded-content");
+    details.id = `channel-details-${channel.channelId}`;
+    details.hidden = !expanded;
+    details.append(overview, setup);
+    card.append(head, details);
     return card;
   }
 
@@ -1816,6 +2025,235 @@
     }
   }
 
+  function templatePlaceholders(text) {
+    const seen = new Set();
+    return [...String(text || "").matchAll(/{{\s*([^{}]+?)\s*}}/g)]
+      .map((match) => match[1].trim())
+      .filter((value) => value && !seen.has(value) && seen.add(value));
+  }
+
+  function templateVariableDescriptors(template) {
+    if (Array.isArray(template?.variables)) {
+      return template.variables.map((variable, index) => {
+        const componentType = String(variable.component || "body").toLowerCase();
+        const sourceKind = String(variable.kind || "text").toLowerCase();
+        const key = String(variable.key || variable.parameterIndex + 1 || index + 1);
+        const media = ["image", "video", "document"].includes(sourceKind);
+        const buttonIndex = Number(variable.buttonIndex ?? 0);
+        return {
+          id: `${componentType}-${variable.componentIndex ?? 0}-${buttonIndex}-${variable.parameterIndex ?? index}-${key.replace(/[^a-z0-9_-]/gi, "-")}`,
+          componentType,
+          subType: componentType === "button" ? "url" : "",
+          buttonIndex,
+          kind: media ? "media" : sourceKind === "location" ? "location" : "text",
+          mediaType: media ? sourceKind : "",
+          parameterName: /^\d+$/.test(key) || key === "media" ? "" : key,
+          label: media
+            ? `${capitalize(sourceKind)} header URL`
+            : sourceKind === "location" ? "Location header" : componentType === "button" ? `Button ${buttonIndex + 1} URL value` : `${capitalize(componentType)} variable ${key}`,
+        };
+      });
+    }
+    const descriptors = [];
+    asItems(template?.components).forEach((component) => {
+      const type = String(component.type || "").toUpperCase();
+      const format = String(component.format || "").toLowerCase();
+      if (type === "HEADER" && ["image", "video", "document"].includes(format)) {
+        descriptors.push({ id: `header-media-${format}`, componentType: "header", kind: "media", mediaType: format, label: `${capitalize(format)} header URL` });
+      }
+      if (type === "HEADER" || type === "BODY") {
+        templatePlaceholders(component.text).forEach((placeholder, index) => descriptors.push({
+          id: `${type.toLowerCase()}-text-${index}-${placeholder.replace(/[^a-z0-9_-]/gi, "-")}`,
+          componentType: type.toLowerCase(),
+          kind: "text",
+          parameterName: /^\d+$/.test(placeholder) ? "" : placeholder,
+          label: `${capitalize(type.toLowerCase())} variable ${placeholder}`,
+        }));
+      }
+      if (type === "BUTTONS") {
+        asItems(component.buttons).forEach((button, buttonIndex) => {
+          if (String(button.type || "").toUpperCase() !== "URL") return;
+          templatePlaceholders(button.url).forEach((placeholder, index) => descriptors.push({
+            id: `button-${buttonIndex}-${index}-${placeholder.replace(/[^a-z0-9_-]/gi, "-")}`,
+            componentType: "button",
+            subType: "url",
+            buttonIndex,
+            kind: "text",
+            parameterName: /^\d+$/.test(placeholder) ? "" : placeholder,
+            label: `${button.text || `Button ${buttonIndex + 1}`} URL value`,
+          }));
+        });
+      }
+    });
+    return descriptors;
+  }
+
+  function currentTemplate() {
+    const templates = state.templatesByConversation.get(state.templateConversationId) || [];
+    return templates.find((template) => template._selectionKey === $("templateSelect").value) || null;
+  }
+
+  function templateSourceValue(source, conversation = selectedConversation()) {
+    const contact = conversation ? contactFor(conversation) : null;
+    const channel = conversation ? channelFor(conversation.channelId) : null;
+    const values = {
+      displayName: contact?.displayName || conversation?.subject || "",
+      channelProfileId: contact?.channelProfileId === "—" ? "" : contact?.channelProfileId || conversation?.channelProfileId || "",
+      company: contact?.company || "",
+      tags: contact?.tags?.join(", ") || "",
+      channelName: channel?.name || "",
+    };
+    return values[source] || "";
+  }
+
+  function suggestedTemplateSource(descriptor) {
+    if (["media", "location"].includes(descriptor.kind)) return "manual";
+    const name = String(descriptor.parameterName || "").toLocaleLowerCase();
+    if (!name) return "";
+    const sources = new Map([
+      ["name", "displayName"],
+      ["customer_name", "displayName"],
+      ["contact_name", "displayName"],
+      ["recipient_name", "displayName"],
+      ["company", "company"],
+      ["company_name", "company"],
+      ["tag", "tags"],
+      ["tags", "tags"],
+      ["channel", "channelName"],
+      ["channel_name", "channelName"],
+      ["phone", "channelProfileId"],
+      ["phone_number", "channelProfileId"],
+      ["provider_id", "channelProfileId"],
+      ["contact_id", "channelProfileId"],
+      ["wa_id", "channelProfileId"]
+    ]);
+    return sources.get(name) || "";
+  }
+
+  function syncTemplateVariableSource(row) {
+    const select = row.querySelector("select");
+    const input = row.querySelector("input");
+    const preview = row.querySelector(".template-source-preview");
+    const manual = select.value === "manual";
+    input.hidden = !manual;
+    input.required = manual;
+    const resolved = manual ? input.value.trim() : templateSourceValue(select.value);
+    preview.hidden = manual;
+    preview.textContent = select.value
+      ? (resolved || "No saved value for this contact")
+      : "Choose a contact field or manual entry";
+    preview.classList.toggle("is-missing", !resolved);
+  }
+
+  function renderTemplateVariables() {
+    const template = currentTemplate();
+    const host = $("templateVariableFields");
+    const summary = $("templateSummary");
+    host.replaceChildren();
+    if (!template) {
+      summary.hidden = true;
+      return;
+    }
+    const languageCode = template.language?.code || template.language || "";
+    summary.hidden = false;
+    summary.textContent = [template.category, languageCode, template.status].filter(Boolean).join(" · ");
+    const descriptors = templateVariableDescriptors(template);
+    if (!descriptors.length) {
+      host.append(element("p", "template-no-variables", "This template does not require any values."));
+      return;
+    }
+    descriptors.forEach((descriptor) => {
+      const row = element("div", "template-variable-row");
+      row.dataset.variableId = descriptor.id;
+      const label = element("label", "field-label", descriptor.label);
+      const source = document.createElement("select");
+      source.className = "text-field template-source-select";
+      source.setAttribute("aria-label", `${descriptor.label} source`);
+      [
+        ["", "Choose source"],
+        ["displayName", "Contact name"],
+        ["channelProfileId", "Provider ID"],
+        ["company", "Company"],
+        ["tags", "Tags"],
+        ["channelName", "Channel name"],
+        ["manual", "Manual entry"],
+      ].forEach(([value, text]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        if (!value) option.disabled = true;
+        source.append(option);
+      });
+      source.value = suggestedTemplateSource(descriptor);
+      label.append(source);
+      const manual = document.createElement("input");
+      manual.className = "text-field template-manual-value";
+      manual.type = descriptor.kind === "media" ? "url" : "text";
+      manual.maxLength = descriptor.kind === "media" ? 2048 : 1000;
+      manual.placeholder = descriptor.kind === "media"
+        ? "https://example.com/media.jpg"
+        : descriptor.kind === "location" ? "12.9716, 77.5946 | Location name | Address" : `Enter ${descriptor.label.toLowerCase()}`;
+      manual.setAttribute("aria-label", `${descriptor.label} manual value`);
+      const preview = element("span", "template-source-preview");
+      row.append(label, manual, preview);
+      host.append(row);
+      syncTemplateVariableSource(row);
+    });
+  }
+
+  async function loadConversationTemplates(conversationId, { refresh = false } = {}) {
+    const select = $("templateSelect");
+    const status = $("templateLoadStatus");
+    const submit = $("templateSubmit");
+    select.disabled = true;
+    submit.disabled = true;
+    status.hidden = false;
+    status.classList.remove("is-error");
+    status.textContent = "Loading approved templates from WhatsApp…";
+    select.replaceChildren(new Option("Loading templates…", ""));
+    $("templateVariableFields").replaceChildren();
+    $("templateSummary").hidden = true;
+    try {
+      let templates = !refresh ? state.templatesByConversation.get(conversationId) : null;
+      if (!templates) {
+        const result = await state.api.getTemplates(conversationId);
+        templates = asItems(result).filter((template) => !template.status || String(template.status).toUpperCase() === "APPROVED");
+        templates = templates.map((template, index) => ({
+          ...template,
+          _selectionKey: `${template.templateId || template.name || index}::${template.language?.code || template.language || ""}::${index}`,
+        }));
+        state.templatesByConversation.set(conversationId, templates);
+      }
+      if (state.templateConversationId !== conversationId) return;
+      select.replaceChildren(new Option(templates.length ? "Choose a template" : "No approved templates found", ""));
+      templates.forEach((template) => {
+        const language = template.language?.code || template.language || "";
+        const option = new Option(`${template.name}${language ? ` · ${language}` : ""}`, template._selectionKey);
+        select.append(option);
+      });
+      select.disabled = !templates.length;
+      submit.disabled = !templates.length;
+      status.textContent = templates.length
+        ? `${templates.length} approved template${templates.length === 1 ? "" : "s"} available.`
+        : "No approved templates are available for this WhatsApp connection.";
+      status.append(document.createTextNode(" "));
+      const refreshButton = element("button", "inline-retry", "Refresh");
+      refreshButton.type = "button";
+      refreshButton.dataset.action = "reload-templates";
+      status.append(refreshButton);
+      if (templates.length) select.focus();
+    } catch (error) {
+      if (state.templateConversationId !== conversationId) return;
+      status.classList.add("is-error");
+      status.replaceChildren(document.createTextNode(`Templates could not be loaded: ${error.message} `));
+      const retry = element("button", "inline-retry", "Retry");
+      retry.type = "button";
+      retry.dataset.action = "reload-templates";
+      status.append(retry);
+      select.replaceChildren(new Option("Templates unavailable", ""));
+    }
+  }
+
   function openTemplateDialog() {
     const conversation = selectedConversation();
     if (!conversation || !isWhatsAppConversation(conversation)) {
@@ -1824,38 +2262,74 @@
     }
     const form = $("templateForm");
     form.reset();
-    form.elements.languageCode.value = "en_US";
+    state.templateConversationId = conversation.conversationId;
     $("templateDialog").showModal();
-    form.elements.name.focus();
+    loadConversationTemplates(conversation.conversationId);
   }
 
   async function sendCurrentTemplate(form) {
     const conversation = selectedConversation();
     if (!conversation || !isWhatsAppConversation(conversation)) return;
     const values = new FormData(form);
-    const name = String(values.get("name") || "").trim();
-    const languageCode = String(values.get("languageCode") || "").trim();
-    const previewText = String(values.get("previewText") || "").trim();
-    const bodyVariables = String(values.get("bodyVariables") || "")
-      .split(/\r?\n/)
-      .map((value) => value.trim())
-      .filter(Boolean);
-    if (!name || !languageCode) return;
-    const template = { name, language: { code: languageCode } };
-    if (bodyVariables.length) {
-      template.components = [{
-        type: "body",
-        parameters: bodyVariables.map((text) => ({ type: "text", text })),
-      }];
+    const template = currentTemplate();
+    if (!template) {
+      showToast("Choose a template", "Select an approved template before sending.", true);
+      return;
     }
+    const name = String(template.name || "").trim();
+    const languageCode = String(template.language?.code || template.language || "").trim();
+    const previewText = String(values.get("previewText") || "").trim();
+    if (!name || !languageCode) return;
+    const descriptors = templateVariableDescriptors(template);
+    const componentMap = new Map();
+    for (const descriptor of descriptors) {
+      const row = $("templateVariableFields").querySelector(`[data-variable-id="${CSS.escape(descriptor.id)}"]`);
+      const source = row?.querySelector("select")?.value || "";
+      const manual = row?.querySelector("input")?.value?.trim() || "";
+      if (!source) {
+        showToast("Choose a template source", `Choose a contact field or manual entry for ${descriptor.label}.`, true);
+        row?.querySelector("select")?.focus();
+        return;
+      }
+      const value = source === "manual" ? manual : templateSourceValue(source, conversation);
+      if (!value) {
+        showToast("Template value required", `${descriptor.label} does not have a value. Choose another source or enter it manually.`, true);
+        row?.querySelector(source === "manual" ? "input" : "select")?.focus();
+        return;
+      }
+      let key = descriptor.componentType;
+      if (descriptor.componentType === "button") key = `button:${descriptor.buttonIndex}`;
+      if (!componentMap.has(key)) componentMap.set(key, descriptor.componentType === "button"
+        ? { type: "button", sub_type: descriptor.subType, index: String(descriptor.buttonIndex), parameters: [] }
+        : { type: descriptor.componentType, parameters: [] });
+      const component = componentMap.get(key);
+      if (descriptor.kind === "media") {
+        component.parameters.push({ type: descriptor.mediaType, [descriptor.mediaType]: { link: value } });
+      } else if (descriptor.kind === "location") {
+        const [coordinates, name = "", address = ""] = value.split("|").map((part) => part.trim());
+        const [latitude, longitude] = coordinates.split(",").map((part) => Number(part.trim()));
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          showToast("Location is invalid", "Enter latitude and longitude separated by a comma, followed by optional name and address.", true);
+          row?.querySelector("input")?.focus();
+          return;
+        }
+        component.parameters.push({ type: "location", location: { latitude, longitude, ...(name ? { name } : {}), ...(address ? { address } : {}) } });
+      } else {
+        const parameter = { type: "text", text: value };
+        if (descriptor.parameterName) parameter.parameter_name = descriptor.parameterName;
+        component.parameters.push(parameter);
+      }
+    }
+    const requestTemplate = { name, language: { code: languageCode } };
+    if (componentMap.size) requestTemplate.components = [...componentMap.values()];
     const submit = $("templateSubmit");
     submit.disabled = true;
     submit.textContent = "Sending…";
     try {
-      const request = previewText ? { ...template, previewText } : template;
+      const request = previewText ? { ...requestTemplate, previewText } : requestTemplate;
       const result = await state.api.sendTemplate(conversation.conversationId, request);
       const fallback = previewText || `[Template: ${name}]`;
-      const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "template" });
+      const message = normalizeMessage(result.item || result.message || { text: fallback, direction: "outbound", status: "pending", messageType: "template" });
       upsertMessage(conversation.conversationId, message);
       conversation.lastMessage = message.text || fallback;
       conversation.lastMessageAt = message.timestamp;
@@ -1997,9 +2471,16 @@
     }
     if (type === "conversation.updated" || type === "conversation.created") {
       const rawConversation = event.conversation || event.item || event.data || {};
-      const existing = state.conversations.find((item) => item.conversationId === String(rawConversation.conversationId || rawConversation.id || ""));
-      if (!existing && !rawConversation.subject) {
-        loadAll();
+      const eventConversationId = String(event.conversationId || rawConversation.conversationId || rawConversation.id || "");
+      const existing = state.conversations.find((item) => item.conversationId === eventConversationId);
+      if (!rawConversation.subject && !rawConversation.status) {
+        const wasSelected = eventConversationId && eventConversationId === state.selectedConversationId;
+        const previousStatus = existing?.status || "";
+        await loadAll();
+        const refreshed = state.conversations.find((item) => item.conversationId === eventConversationId);
+        if (wasSelected && refreshed && refreshed.status !== previousStatus && ["pending", "closed"].includes(refreshed.status)) {
+          clearSelectedConversation();
+        }
         return;
       }
       const incoming = normalizeConversation({ ...existing, ...rawConversation });
@@ -2007,24 +2488,57 @@
       const index = state.conversations.findIndex((item) => item.conversationId === incoming.conversationId);
       if (index >= 0) state.conversations[index] = { ...state.conversations[index], ...incoming };
       else state.conversations.unshift(incoming);
+      if (incoming.conversationId === state.selectedConversationId && ["pending", "closed"].includes(incoming.status)) {
+        clearSelectedConversation();
+      }
       renderAll();
+      return;
+    }
+    if (type === "contact.updated") {
+      const selectedContactId = state.selectedContactId;
+      await loadAll();
+      if (selectedContactId && state.contacts.some((contact) => contact.contactId === selectedContactId)) {
+        await selectContact(selectedContactId);
+      }
       return;
     }
     if (["channel.updated", "channel.deleted", "bootstrap.changed"].includes(type)) loadAll();
   }
 
+  function isIosDevice() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent || "") || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+
+  function isStandaloneApp() {
+    return window.matchMedia?.("(display-mode: standalone)")?.matches || navigator.standalone === true;
+  }
+
   function notificationSupport() {
-    return typeof window.Notification !== "undefined";
+    return typeof window.Notification !== "undefined" && "serviceWorker" in navigator;
+  }
+
+  async function ensureServiceWorkerRegistration() {
+    if (!("serviceWorker" in navigator)) return null;
+    if (state.serviceWorkerRegistration) return state.serviceWorkerRegistration;
+    const existing = await navigator.serviceWorker.getRegistration("/");
+    state.serviceWorkerRegistration = existing || await navigator.serviceWorker.register("/sw.js");
+    return state.serviceWorkerRegistration;
   }
 
   function renderNotificationSetting() {
     const toggle = $("pushNotificationsToggle");
     const status = $("notificationPermissionStatus");
     if (!toggle || !status) return;
+    if (isIosDevice() && !isStandaloneApp()) {
+      toggle.checked = false;
+      toggle.disabled = true;
+      status.textContent = "Add Helixcer to your Home Screen, open it there, then enable notifications.";
+      return;
+    }
     if (!notificationSupport()) {
       toggle.checked = false;
       toggle.disabled = true;
-      status.textContent = "This browser does not support notifications.";
+      status.textContent = "Notifications are not available in this browser. On mobile, install the app to your Home Screen and open it there.";
       return;
     }
     const permission = Notification.permission;
@@ -2054,6 +2568,18 @@
         return;
       }
     }
+    if (enabled) {
+      try {
+        const registration = await ensureServiceWorkerRegistration();
+        if (!registration?.showNotification) throw new Error("This browser cannot display service-worker notifications.");
+      } catch (error) {
+        state.notificationsEnabled = false;
+        localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
+        renderNotificationSetting();
+        showToast("Notifications were not enabled", `The notification service could not start: ${error.message}`, true);
+        return;
+      }
+    }
     state.notificationsEnabled = enabled;
     localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, String(enabled));
     renderNotificationSetting();
@@ -2061,19 +2587,41 @@
     toggle.blur();
   }
 
-  function notifyInboundMessage(conversation, message) {
+  async function notifyInboundMessage(conversation, message) {
     if (!state.notificationsEnabled || !notificationSupport() || Notification.permission !== "granted") return;
     if (document.visibilityState === "visible" && conversation.conversationId === state.selectedConversationId) return;
     const timestamp = new Date(message.timestamp || conversation.lastMessageAt).getTime() || Date.now();
     const previousNotification = state.lastNotificationAt.get(conversation.conversationId) || 0;
     if (timestamp <= previousNotification) return;
     state.lastNotificationAt.set(conversation.conversationId, timestamp);
-    const notification = new Notification(`New message from ${conversation.subject}`, {
+    const title = `New message from ${conversation.subject}`;
+    const options = {
       body: message.text || "A new customer message arrived.",
-      icon: "./assets/helixcer-mark.jpg",
-      badge: "./assets/helixcer-mark.jpg",
+      icon: "/assets/helixcer-mark.jpg",
+      badge: "/assets/helixcer-mark.jpg",
       tag: `helixcer-${conversation.conversationId}`,
-    });
+      data: { url: "/#inbox", conversationId: conversation.conversationId },
+    };
+    let registration = null;
+    try {
+      registration = await ensureServiceWorkerRegistration();
+    } catch {
+      registration = null;
+    }
+    if (registration?.showNotification) {
+      try {
+        await registration.showNotification(title, options);
+        return;
+      } catch {
+        // Desktop browsers can still use the window Notification API as a fallback.
+      }
+    }
+    let notification;
+    try {
+      notification = new Notification(title, options);
+    } catch {
+      return;
+    }
     notification.addEventListener("click", () => {
       window.focus();
       setRoute("inbox");
@@ -2522,6 +3070,14 @@
     return state.conversations.find((item) => item.conversationId === state.selectedConversationId) || null;
   }
 
+  function clearSelectedConversation() {
+    state.selectedConversationId = null;
+    state.detailsOpen = false;
+    $("inboxGrid").classList.remove("chat-open", "has-details");
+    renderConversationList();
+    renderSelectedConversation();
+  }
+
   function contactFor(conversation) {
     return state.contacts.find((contact) => contact.contactId === conversation.contactId) || null;
   }
@@ -2532,6 +3088,22 @@
 
   function channelStyle(channel) {
     return channelStyles[channel?.connectorType] || channelStyles.generic;
+  }
+
+  function providerLogo(connectorType, className = "provider-logo") {
+    const style = channelStyles[connectorType] || channelStyles.generic;
+    const path = providerLogoPaths[connectorType];
+    if (!path) {
+      const fallback = element("span", `${className} provider-logo-fallback`, style.short);
+      fallback.setAttribute("aria-hidden", "true");
+      return fallback;
+    }
+    const image = document.createElement("img");
+    image.className = className;
+    image.src = path;
+    image.alt = "";
+    image.setAttribute("aria-hidden", "true");
+    return image;
   }
 
   function element(tag, className = "", text = null) {
@@ -2622,6 +3194,14 @@
           toggleChannel(actionButton.dataset.channelId, actionButton);
           return;
         }
+        if (actionButton.dataset.action === "toggle-channel-details") {
+          const channelId = actionButton.dataset.channelId;
+          if (state.expandedChannelIds.has(channelId)) state.expandedChannelIds.delete(channelId);
+          else state.expandedChannelIds.add(channelId);
+          renderChannels();
+          document.querySelector(`[data-action="toggle-channel-details"][data-channel-id="${CSS.escape(channelId)}"]`)?.focus();
+          return;
+        }
         if (actionButton.dataset.action === "copy-webhook-callback") {
           copyWebhookCallback(actionButton);
           return;
@@ -2649,9 +3229,16 @@
           "new-conversation": openContactDialog,
           "new-contact": openContactDialog,
           "close-contact-dialog": () => $("contactDialog").close(),
+          "close-contact-editor": closeContactEditor,
+          "cancel-contact-edit": () => {
+            const contact = state.contacts.find((item) => item.contactId === state.selectedContactId);
+            if (contact) showContactEditor(contact);
+            else closeContactEditor();
+          },
           "choose-attachment": () => $("attachmentInput").click(),
           "open-template": openTemplateDialog,
           "close-template": () => $("templateDialog").close(),
+          "reload-templates": () => state.templateConversationId && loadConversationTemplates(state.templateConversationId, { refresh: true }),
           "insert-greeting": () => {
             const input = $("messageInput");
             const name = selectedConversation()?.subject?.split(" ")[0] || "there";
@@ -2713,6 +3300,18 @@
       if (item) selectConversation(item.dataset.conversationId);
     });
 
+    $("contactTableBody").addEventListener("click", (event) => {
+      const row = event.target.closest("[data-contact-id]");
+      if (row) selectContact(row.dataset.contactId);
+    });
+    $("contactTableBody").addEventListener("keydown", (event) => {
+      if (!['Enter', ' '].includes(event.key)) return;
+      const row = event.target.closest("[data-contact-id]");
+      if (!row) return;
+      event.preventDefault();
+      selectContact(row.dataset.contactId);
+    });
+
     $("conversationFilters").addEventListener("click", (event) => {
       const button = event.target.closest("[data-filter]");
       if (!button) return;
@@ -2743,15 +3342,19 @@
       const conversation = selectedConversation();
       if (!conversation) return;
       const previous = conversation.status;
-      conversation.status = event.target.value;
-      renderCounts();
-      renderConversationList();
-      try { await state.api.updateConversation(conversation.conversationId, { status: conversation.status }); }
-      catch (error) {
-        conversation.status = previous;
+      const next = event.target.value;
+      event.target.disabled = true;
+      try {
+        await state.api.updateConversation(conversation.conversationId, { status: next });
+        conversation.status = next;
+        renderCounts();
+        if (["pending", "closed"].includes(next)) clearSelectedConversation();
+        else renderConversationList();
+      } catch (error) {
         event.target.value = previous;
-        renderAll();
         showToast("Status was not updated", error.message, true);
+      } finally {
+        event.target.disabled = false;
       }
     });
 
@@ -2784,6 +3387,16 @@
     });
     $("contactChannelId").addEventListener("change", updateContactIdentityField);
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
+    $("contactEditForm").addEventListener("submit", (event) => { event.preventDefault(); saveContactEdits(event.currentTarget); });
+    $("templateSelect").addEventListener("change", renderTemplateVariables);
+    $("templateVariableFields").addEventListener("change", (event) => {
+      const row = event.target.closest(".template-variable-row");
+      if (row) syncTemplateVariableSource(row);
+    });
+    $("templateVariableFields").addEventListener("input", (event) => {
+      const row = event.target.closest(".template-variable-row");
+      if (row) syncTemplateVariableSource(row);
+    });
     $("templateForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentTemplate(event.currentTarget); });
     $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
     $("apiKeyForm").addEventListener("submit", (event) => { event.preventDefault(); createDeveloperApiKey(event.currentTarget); });
@@ -2816,6 +3429,7 @@
   async function init() {
     bindEvents();
     setRoute(location.hash.slice(1) || "inbox");
+    ensureServiceWorkerRegistration().catch(() => {});
     await initializeSession();
   }
 
