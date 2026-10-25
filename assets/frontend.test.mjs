@@ -42,18 +42,56 @@ test("role-aware single-workspace UI includes team management and no billing sur
   assert.doesNotMatch(html, /data-route="billing"/i);
 });
 
-test("production channel UI is WhatsApp-only and hides provider internals", () => {
-  assert.match(html, /<h2 id="channelsTitle">WhatsApp<\/h2>/);
-  assert.match(html, />WhatsApp number<input/);
-  assert.match(app, /channelId:\s*"wa-main"/);
+test("channel management supports multiple provider accounts without hardcoded credentials", () => {
+  assert.match(html, /<h2 id="channelsTitle">Channels<\/h2>/);
+  assert.match(html, /data-action="open-channel"/);
+  assert.match(html, /id="channelDialog"/);
+  assert.match(html, /id="channelForm"/);
+  assert.match(html, /id="channelProvider"/);
+  assert.match(html, /<option value="whatsapp_cloud">WhatsApp Cloud<\/option>/);
+  assert.match(html, /<option value="telegram">Telegram Bot<\/option>/);
+  assert.match(html, /<option value="instagram">Instagram<\/option>/);
+  assert.match(html, /Instagram Business or Creator account/);
+  assert.match(html, /Instagram User access token/);
+  assert.doesNotMatch(html, /Facebook Page ID|Page access token/);
+  assert.match(html, /id="contactChannelId"/);
+  assert.match(html, /name="channelProfileId"/);
+  assert.match(app, /request\("\/api\/channels", \{ method: "POST"/);
+  assert.match(app, /request\(`\/api\/channels\/\$\{encodeURIComponent\(channelId\)\}`, \{ method: "PATCH"/);
   assert.match(app, /\/api\/channels\/\$\{encodeURIComponent\(channelId\)\}\/verify/);
-  assert.match(app, /webhooks\/whatsapp\/\$\{encodeURIComponent\(channelId\)\}/);
-  assert.match(app, /Complete WhatsApp Cloud API setup/);
+  assert.match(app, /whatsapp_cloud:\s*\{/);
+  assert.match(app, /telegram:\s*\{/);
+  assert.match(app, /instagram:\s*\{/);
+  assert.match(app, /apiVersion:\s*"v26\.0"/);
+  assert.match(app, /authMode:\s*"instagram_login"/);
+  assert.match(app, /data\.action = "verify-channel"|dataset\.action = "verify-channel"/);
   assert.match(app, /copy-webhook-callback/);
-  assert.match(app, /Open Meta setup/);
-  assert.match(app, /Meta allows one callback for this app/);
-  assert.doesNotMatch(html, /channelConnectorType|Secret prefix|Generic API endpoint|Telegram Bot API|Website chat/);
-  assert.doesNotMatch(html, /id="channelDialog"|id="channelForm"/);
-  assert.doesNotMatch(html, /name="(?:accessToken|appSecret|verifyToken|phoneNumberId)"/i);
-  assert.doesNotMatch(app, /apiVersion:\s*"v23\.0"/);
+  assert.match(app, /\/webhooks\/instagram-app\/\$\{encodeURIComponent\(channel\.config\.appId\)\}/);
+  assert.match(app, /Helixcer routes messages by account ID/);
+  assert.match(app, /populateContactChannelSelect/);
+  assert.match(app, /channelId:\s*String\(formData\.get\("channelId"\)/);
+  assert.doesNotMatch(app, /channelId:\s*"wa-main"/);
+  assert.doesNotMatch(`${html}\n${app}`, /WA_MAIN_(?:ACCESS_TOKEN|APP_SECRET|VERIFY_TOKEN|PHONE_NUMBER_ID)/);
+});
+
+test("channel secrets are masked, optional on edit, and never prefilled", () => {
+  assert.match(html, /name="whatsappAccessToken" type="password"/);
+  assert.match(html, /name="whatsappAppSecret" type="password"/);
+  assert.match(html, /name="whatsappVerifyToken" type="password"/);
+  assert.match(html, /name="telegramBotToken" type="password"/);
+  assert.match(html, /name="telegramWebhookSecret" type="password"/);
+  assert.match(html, /name="instagramAccessToken" type="password"/);
+  assert.match(html, /name="instagramAppSecret" type="password"/);
+  assert.match(html, /name="instagramVerifyToken" type="password"/);
+  assert.match(html, /data-generate-secret="whatsappVerifyToken"/);
+  assert.match(html, /data-copy-secret="whatsappVerifyToken"/);
+  assert.match(html, /data-generate-secret="telegramWebhookSecret"/);
+  assert.match(html, /data-generate-secret="instagramVerifyToken"/);
+  assert.match(html, /cannot show it again/);
+  assert.match(app, /setup\.credentialFields/);
+  assert.match(app, /input\.required = active && !saved/);
+  assert.match(app, /input\.dataset\.defaultPlaceholder/);
+  assert.match(app, /\.filter\(\(\[, value\]\) => value\)/);
+  assert.doesNotMatch(html, /type="password"[^>]+value=/);
+  assert.doesNotMatch(app, /channel\?\.credentials|channel\.credentials/);
 });

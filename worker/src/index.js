@@ -12,9 +12,29 @@ import {
   updateMembership
 } from './auth.js';
 
-const API_VERSION = '2026-10-25-whatsapp';
+const API_VERSION = '2026-10-25-multichannel';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
+const MAX_JSON_BODY = 32768;
+const MAX_CREDENTIAL_LENGTH = 4096;
+const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram']);
+const CONNECTOR_DEFINITIONS = {
+  whatsapp_cloud: {
+    label: 'WhatsApp Cloud API', webhookPath: 'whatsapp',
+    configFields: ['wabaId', 'phoneNumberId', 'apiVersion'],
+    requiredConfig: ['wabaId', 'phoneNumberId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret']
+  },
+  telegram: {
+    label: 'Telegram Bot', webhookPath: 'telegram',
+    configFields: [],
+    requiredConfig: [], requiredCredentials: ['botToken', 'webhookSecret']
+  },
+  instagram: {
+    label: 'Instagram Messaging', webhookPath: 'instagram',
+    configFields: ['instagramAccountId', 'username', 'appId', 'apiVersion', 'authMode'],
+    requiredConfig: ['instagramAccountId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret']
+  }
+};
 
 export default {
   fetch(request, env, ctx) {
@@ -155,11 +175,15 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(response, cors);
     }
     const whatsappMatch = url.pathname.match(/^\/webhooks\/whatsapp\/([^/]+)$/);
-    if (whatsappMatch) return handleWhatsAppWebhook(request, env, decodeURIComponent(whatsappMatch[1]));
+    if (whatsappMatch) return await handleWhatsAppWebhook(request, env, decodeURIComponent(whatsappMatch[1]));
     const telegramMatch = url.pathname.match(/^\/webhooks\/telegram\/([^/]+)$/);
-    if (telegramMatch && request.method === 'POST') return handleTelegramWebhook(request, env, decodeURIComponent(telegramMatch[1]));
+    if (telegramMatch && request.method === 'POST') return await handleTelegramWebhook(request, env, decodeURIComponent(telegramMatch[1]));
+    const instagramAppMatch = url.pathname.match(/^\/webhooks\/instagram-app\/([^/]+)$/);
+    if (instagramAppMatch) return await handleInstagramAppWebhook(request, env, decodeURIComponent(instagramAppMatch[1]));
+    const instagramMatch = url.pathname.match(/^\/webhooks\/instagram\/([^/]+)$/);
+    if (instagramMatch) return await handleInstagramWebhook(request, env, decodeURIComponent(instagramMatch[1]));
     const genericMatch = url.pathname.match(/^\/webhooks\/generic\/([^/]+)$/);
-    if (genericMatch && request.method === 'POST') return handleGenericWebhook(request, env, decodeURIComponent(genericMatch[1]));
+    if (genericMatch && request.method === 'POST') return await handleGenericWebhook(request, env, decodeURIComponent(genericMatch[1]));
 
     if (!url.pathname.startsWith('/api/')) return withCors(json({ ok: false, error: 'Not found.' }, 404), cors);
     const mutation = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method);
@@ -194,7 +218,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json({
         appName: env.APP_NAME || 'Helixcer Chat', channels, conversations, contacts, me: principalView(principal),
         connectorTypes: [
-          { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: ['text'] }
+          { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: ['text'] },
+          { value: 'telegram', label: 'Telegram Bot', capabilities: ['text'] },
+          { value: 'instagram', label: 'Instagram Messaging', capabilities: ['text'] }
         ]
       }), cors);
     }
@@ -204,15 +230,30 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/channels' && request.method === 'POST') {
       requireRole(principal, 'admin');
-      const result = await saveChannel(env, workspaceId, await readJson(request), principal);
+      const result = await saveChannel(env, workspaceId, await readJson(request), principal, '');
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId: result.channelId });
       return withCors(json(result, 201), cors);
+    }
+    const channelMatch = url.pathname.match(/^\/api\/channels\/([^/]+)$/);
+    if (channelMatch && request.method === 'PATCH') {
+      requireRole(principal, 'admin');
+      const channelId = decodeURIComponent(channelMatch[1]);
+      const result = await saveChannel(env, workspaceId, await readJson(request), principal, channelId);
+      await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
+      return withCors(json(result), cors);
+    }
+    if (channelMatch && request.method === 'DELETE') {
+      requireRole(principal, 'admin');
+      const channelId = decodeURIComponent(channelMatch[1]);
+      const result = await deleteChannel(env, workspaceId, channelId, principal);
+      await broadcast(env, workspaceId, { type: 'channel.deleted', channelId });
+      return withCors(json(result), cors);
     }
     const channelVerifyMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/verify$/);
     if (channelVerifyMatch && request.method === 'POST') {
       requireRole(principal, 'admin');
       const channelId = decodeURIComponent(channelVerifyMatch[1]);
-      const result = await verifyWhatsAppChannel(env, workspaceId, channelId);
+      const result = await verifyChannel(env, workspaceId, channelId, request);
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
       return withCors(json(result), cors);
     }
@@ -283,10 +324,10 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
 async function handleWhatsAppWebhook(request, env, channelId) {
   const channel = await getChannel(env, channelId, 'whatsapp_cloud');
   if (!channel) return json({ ok: false, error: 'Unknown or disabled channel.' }, 404);
-  const prefix = secretPrefix(channel.secretKey);
+  const credentials = await readChannelCredentials(env, channel);
   if (request.method === 'GET') {
     const url = new URL(request.url);
-    const expected = env[`${prefix}_VERIFY_TOKEN`];
+    const expected = credentials.verifyToken;
     if (url.searchParams.get('hub.mode') === 'subscribe' && expected && timingSafeEqual(url.searchParams.get('hub.verify_token') || '', expected)) {
       await updateChannelRuntimeConfig(env, channel, { webhookVerifiedAt: new Date().toISOString() });
       await broadcast(env, channel.workspaceId, { type: 'channel.updated', channelId });
@@ -295,8 +336,8 @@ async function handleWhatsAppWebhook(request, env, channelId) {
     return new Response('Forbidden', { status: 403 });
   }
   if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed.' }, 405);
-  const raw = await request.text();
-  const appSecret = env[`${prefix}_APP_SECRET`];
+  const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
+  const appSecret = credentials.appSecret;
   if (!appSecret) return json({ ok: false, error: 'Webhook secret is not configured.' }, 503);
   if (!await verifyMetaSignature(raw, request.headers.get('X-Hub-Signature-256') || '', appSecret)) {
     return json({ ok: false, error: 'Invalid signature.' }, 401);
@@ -304,7 +345,7 @@ async function handleWhatsAppWebhook(request, env, channelId) {
   const payload = safeJsonParse(raw, null);
   if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
   const normalized = normalizeWhatsApp(payload);
-  const expectedPhoneNumberId = String(env[`${prefix}_PHONE_NUMBER_ID`] || '');
+  const expectedPhoneNumberId = String(channel.config?.phoneNumberId || '');
   const hasEvents = normalized.messages.length > 0 || normalized.statuses.length > 0;
   if (hasEvents && (!expectedPhoneNumberId || normalized.phoneNumberIds.length === 0 ||
       normalized.phoneNumberIds.some(id => id !== expectedPhoneNumberId))) {
@@ -323,7 +364,7 @@ async function handleGenericWebhook(request, env, channelId) {
   if (!channel) return json({ ok: false, error: 'Unknown or disabled channel.' }, 404);
   const expected = env[`${secretPrefix(channel.secretKey)}_WEBHOOK_TOKEN`];
   if (!expected || !timingSafeEqual(request.headers.get('X-Webhook-Token') || '', expected)) return json({ ok: false, error: 'Invalid webhook token.' }, 401);
-  const payload = safeJsonParse(await request.text(), null);
+  const payload = safeJsonParse(await readBoundedText(request, MAX_RAW_PAYLOAD), null);
   if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
   const events = normalizeGeneric(payload, channel.config?.inboundMapping || {});
   let received = 0;
@@ -335,105 +376,291 @@ async function handleGenericWebhook(request, env, channelId) {
 async function handleTelegramWebhook(request, env, channelId) {
   const channel = await getChannel(env, channelId, 'telegram');
   if (!channel) return json({ ok: false, error: 'Unknown or disabled channel.' }, 404);
-  const expected = env[`${secretPrefix(channel.secretKey)}_WEBHOOK_TOKEN`];
+  const credentials = await readChannelCredentials(env, channel);
+  const expected = credentials.webhookSecret;
   if (!expected || !timingSafeEqual(request.headers.get('X-Telegram-Bot-Api-Secret-Token') || '', expected)) {
     return json({ ok: false, error: 'Invalid webhook token.' }, 401);
   }
-  const payload = safeJsonParse(await request.text(), null);
+  const payload = safeJsonParse(await readBoundedText(request, MAX_RAW_PAYLOAD), null);
   if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
   const event = normalizeTelegram(payload);
   const received = event && await storeInbound(env, channel, event, payload) ? 1 : 0;
+  await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
   if (received) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received });
   return json({ ok: true, received });
 }
 
+async function handleInstagramWebhook(request, env, channelId) {
+  const channel = await getChannel(env, channelId, 'instagram');
+  if (!channel) return json({ ok: false, error: 'Unknown or disabled channel.' }, 404);
+  const credentials = await readChannelCredentials(env, channel);
+  if (request.method === 'GET') {
+    const url = new URL(request.url);
+    const expected = credentials.verifyToken;
+    if (url.searchParams.get('hub.mode') === 'subscribe' && expected &&
+        timingSafeEqual(url.searchParams.get('hub.verify_token') || '', expected)) {
+      await updateChannelRuntimeConfig(env, channel, { webhookVerifiedAt: new Date().toISOString() });
+      await broadcast(env, channel.workspaceId, { type: 'channel.updated', channelId });
+      return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
+    }
+    return new Response('Forbidden', { status: 403 });
+  }
+  if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed.' }, 405);
+  const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
+  if (!credentials.appSecret) return json({ ok: false, error: 'Webhook secret is not configured.' }, 503);
+  if (!await verifyMetaSignature(raw, request.headers.get('X-Hub-Signature-256') || '', credentials.appSecret)) {
+    return json({ ok: false, error: 'Invalid signature.' }, 401);
+  }
+  const payload = safeJsonParse(raw, null);
+  if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
+  const normalized = normalizeInstagram(payload);
+  const expectedAccountId = String(channel.config?.instagramAccountId || '');
+  if (normalized.messages.length && (!expectedAccountId || normalized.recipientIds.length === 0 ||
+      normalized.recipientIds.some(id => id !== expectedAccountId))) {
+    return json({ ok: false, error: 'Webhook Instagram account does not match this channel.' }, 403);
+  }
+  let received = 0;
+  for (const event of normalized.messages) if (await storeInbound(env, channel, event, payload)) received++;
+  await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
+  if (received) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received });
+  return json({ ok: true, received });
+}
+
+async function handleInstagramAppWebhook(request, env, requestedAppId) {
+  const appId = cleanMetaIdentifier(requestedAppId, 'Meta App ID');
+  const channels = await findInstagramAppChannels(env, appId);
+  if (!channels.length) return json({ ok: false, error: 'Unknown Instagram app webhook.' }, 404);
+
+  if (request.method === 'GET') {
+    const url = new URL(request.url);
+    if (url.searchParams.get('hub.mode') !== 'subscribe') return new Response('Forbidden', { status: 403 });
+    const supplied = url.searchParams.get('hub.verify_token') || '';
+    const matches = [];
+    for (const channel of channels) {
+      const credentials = await readChannelCredentials(env, channel);
+      if (credentials.verifyToken && timingSafeEqual(supplied, credentials.verifyToken)) matches.push(channel);
+    }
+    if (!matches.length) return new Response('Forbidden', { status: 403 });
+    const verifiedAt = new Date().toISOString();
+    for (const channel of matches) {
+      await updateChannelRuntimeConfig(env, channel, { webhookVerifiedAt: verifiedAt });
+      await broadcast(env, channel.workspaceId, { type: 'channel.updated', channelId: channel.channelId });
+    }
+    return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
+  }
+
+  if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed.' }, 405);
+  const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
+  const payload = safeJsonParse(raw, null);
+  if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
+  const groups = partitionInstagramAppPayload(payload);
+  const channelsByAccount = new Map();
+  for (const channel of channels) {
+    const accountId = String(channel.config?.instagramAccountId || '');
+    if (!channelsByAccount.has(accountId)) channelsByAccount.set(accountId, []);
+    channelsByAccount.get(accountId).push(channel);
+  }
+  const routes = [];
+  for (const [accountId, groupedPayload] of groups) {
+    const matches = channelsByAccount.get(accountId) || [];
+    if (!matches.length) throw httpError(404, 'No enabled Instagram connection matches this app webhook.');
+    if (matches.length !== 1) throw httpError(409, 'Instagram app webhook routing is ambiguous.');
+    routes.push({ accountId, payload: groupedPayload, channel: matches[0] });
+  }
+
+  const suppliedSignature = request.headers.get('X-Hub-Signature-256') || '';
+  for (const route of routes) {
+    const credentials = await readChannelCredentials(env, route.channel);
+    if (!credentials.appSecret || !await verifyMetaSignature(raw, suppliedSignature, credentials.appSecret)) {
+      return json({ ok: false, error: 'Invalid signature.' }, 401);
+    }
+  }
+
+  let received = 0;
+  const now = new Date().toISOString();
+  for (const route of routes) {
+    const normalized = normalizeInstagram(route.payload);
+    if (normalized.recipientIds.some(id => id !== route.accountId)) {
+      throw httpError(400, 'Instagram app webhook account routing is inconsistent.');
+    }
+    let channelReceived = 0;
+    for (const event of normalized.messages) {
+      if (await storeInbound(env, route.channel, event, route.payload)) {
+        received++;
+        channelReceived++;
+      }
+    }
+    await updateChannelRuntimeConfig(env, route.channel, { lastWebhookAt: now });
+    if (channelReceived) {
+      await broadcast(env, route.channel.workspaceId, {
+        type: 'webhook.received', channelId: route.channel.channelId, received: channelReceived
+      });
+    }
+  }
+  return json({ ok: true, received, channels: routes.length });
+}
+
+async function findInstagramAppChannels(env, appId) {
+  const result = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled,
+      capabilities_json,config_json,secret_key,workspace_id
+    FROM channels
+    WHERE enabled=1 AND provider_type='instagram' AND json_extract(config_json,'$.appId')=?1
+    ORDER BY workspace_id,channel_id`).bind(appId).all();
+  return (result.results || []).map(row => ({
+    channelId: row.channel_id,
+    name: row.name,
+    connectorType: logicalConnectorType(row),
+    capabilities: safeJsonParse(row.capabilities_json, []),
+    config: safeJsonParse(row.config_json, {}),
+    secretKey: row.secret_key,
+    workspaceId: row.workspace_id
+  }));
+}
+
+function partitionInstagramAppPayload(payload) {
+  if (payload?.object && payload.object !== 'instagram') throw httpError(400, 'Unexpected Instagram webhook object.');
+  if (!Array.isArray(payload?.entry) || !payload.entry.length) throw httpError(400, 'Instagram webhook has no entries.');
+  const groups = new Map();
+  const addEntry = (accountId, entry, messaging) => {
+    if (!groups.has(accountId)) groups.set(accountId, { ...payload, entry: [] });
+    groups.get(accountId).entry.push({ ...entry, id: accountId, messaging });
+  };
+  for (const entry of payload.entry) {
+    const entryId = entry?.id ? cleanMetaIdentifier(entry.id, 'Instagram entry account ID') : '';
+    const events = Array.isArray(entry?.messaging) ? entry.messaging : [];
+    if (!events.length) {
+      if (!entryId) throw httpError(400, 'Instagram webhook entry has no account ID.');
+      addEntry(entryId, entry, []);
+      continue;
+    }
+    const eventsByAccount = new Map();
+    for (const event of events) {
+      const recipientId = event?.recipient?.id ? cleanMetaIdentifier(event.recipient.id, 'Instagram recipient account ID') : '';
+      const isEcho = Boolean(event?.message?.is_echo);
+      if (!isEcho && entryId && recipientId && entryId !== recipientId) {
+        throw httpError(400, 'Instagram webhook entry and recipient accounts do not match.');
+      }
+      const accountId = entryId || recipientId;
+      if (!accountId) throw httpError(400, 'Instagram webhook event has no account ID.');
+      if (!eventsByAccount.has(accountId)) eventsByAccount.set(accountId, []);
+      eventsByAccount.get(accountId).push(event);
+    }
+    for (const [accountId, groupedEvents] of eventsByAccount) addEntry(accountId, entry, groupedEvents);
+  }
+  if (!groups.size) throw httpError(400, 'Instagram webhook could not be routed.');
+  return groups;
+}
+
 async function listChannels(env, workspaceId, includeConfiguration = false) {
-  const result = await env.DB.prepare(`SELECT channel_id,name,connector_type,enabled,capabilities_json,config_json,secret_key
-    FROM channels WHERE workspace_id=?1 ORDER BY name COLLATE NOCASE`).bind(workspaceId).all();
+  const [result, storedCredentials] = await Promise.all([
+    env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key
+    FROM channels WHERE workspace_id=?1 ORDER BY name COLLATE NOCASE`).bind(workspaceId).all(),
+    env.DB.prepare('SELECT channel_id,credential_key FROM channel_credentials WHERE workspace_id=?1').bind(workspaceId).all()
+  ]);
+  const fieldsByChannel = new Map();
+  for (const item of storedCredentials.results || []) {
+    if (!fieldsByChannel.has(item.channel_id)) fieldsByChannel.set(item.channel_id, new Set());
+    fieldsByChannel.get(item.channel_id).add(item.credential_key);
+  }
   return result.results.map(row => {
     const config = safeJsonParse(row.config_json, {});
+    const connectorType = logicalConnectorType(row);
+    const credentialFields = fieldsByChannel.get(row.channel_id) || new Set();
     return {
-      channelId: row.channel_id, name: row.name, connectorType: row.connector_type,
+      channelId: row.channel_id, name: row.name, connectorType,
       enabled: Boolean(row.enabled), capabilities: safeJsonParse(row.capabilities_json, []),
-      health: channelHealth(env, row, config),
-      ...(includeConfiguration ? { config, setup: channelSetupView(env, row, config) } : {})
+      health: channelHealth(row, config, credentialFields),
+      ...(includeConfiguration ? { config: publicChannelConfig(connectorType, config), setup: channelSetupView(row, config, credentialFields) } : {})
     };
   });
 }
 
-function channelHealth(env, row, config = safeJsonParse(row.config_json, {})) {
+function channelHealth(row, config = safeJsonParse(row.config_json, {}), credentialFields = new Set()) {
   if (!row.enabled) return 'disconnected';
-  const prefix = secretPrefix(row.secret_key);
-  if (row.connector_type === 'whatsapp_cloud') {
-    const configured = env[`${prefix}_ACCESS_TOKEN`] && env[`${prefix}_PHONE_NUMBER_ID`] &&
-      env[`${prefix}_VERIFY_TOKEN`] && env[`${prefix}_APP_SECRET`];
-    if (!configured) return 'setup_required';
-    if (!config.credentialsVerifiedAt) return 'configured';
-    if (!config.webhookVerifiedAt) return 'webhook_required';
-    return 'connected';
-  }
-  if (row.connector_type === 'telegram') {
-    return env[`${prefix}_BOT_TOKEN`] && env[`${prefix}_WEBHOOK_TOKEN`] ? 'connected' : 'setup_required';
-  }
-  if (row.connector_type === 'generic_http') {
-    return env[`${prefix}_WEBHOOK_TOKEN`] ? 'connected' : 'setup_required';
-  }
+  const connectorType = logicalConnectorType(row);
+  const definition = CONNECTOR_DEFINITIONS[connectorType];
+  if (!definition) return 'connected';
+  const configured = definition.requiredConfig.every(key => Boolean(config[key])) &&
+    definition.requiredCredentials.every(key => credentialFields.has(key));
+  if (!configured) return 'setup_required';
+  if (!config.credentialsVerifiedAt) return 'configured';
+  if (!config.webhookVerifiedAt) return 'webhook_required';
   return 'connected';
 }
 
-function channelSetupView(env, row, config = safeJsonParse(row.config_json, {})) {
-  if (row.connector_type !== 'whatsapp_cloud') return {};
-  const prefix = secretPrefix(row.secret_key);
+function channelSetupView(row, config = safeJsonParse(row.config_json, {}), credentialFields = new Set()) {
+  const connectorType = logicalConnectorType(row);
+  const definition = CONNECTOR_DEFINITIONS[connectorType];
+  if (!definition) return {};
+  const presence = Object.fromEntries(definition.requiredCredentials.map(key => [key, credentialFields.has(key)]));
+  const callbackPath = connectorType === 'instagram' && config.appId
+    ? `/webhooks/instagram-app/${encodeURIComponent(config.appId)}`
+    : `/webhooks/${definition.webhookPath}/${encodeURIComponent(row.channel_id)}`;
   return {
-    credentialsPresent: Boolean(env[`${prefix}_ACCESS_TOKEN`] && env[`${prefix}_PHONE_NUMBER_ID`] &&
-      env[`${prefix}_VERIFY_TOKEN`] && env[`${prefix}_APP_SECRET`]),
+    credentialsPresent: definition.requiredConfig.every(key => Boolean(config[key])) && Object.values(presence).every(Boolean),
+    credentialFields: presence,
+    callbackPath,
     credentialsVerifiedAt: config.credentialsVerifiedAt || '',
     webhookVerifiedAt: config.webhookVerifiedAt || '',
     lastWebhookAt: config.lastWebhookAt || '',
     verifiedPhoneNumber: config.verifiedPhoneNumber || '',
-    verifiedName: config.verifiedName || ''
+    verifiedName: config.verifiedName || '',
+    verifiedUsername: config.verifiedUsername || '',
+    verifiedProviderId: config.verifiedProviderId || ''
   };
 }
 
 async function getChannel(env, id, connectorType = '', workspaceId = '') {
-  const row = await env.DB.prepare(`SELECT channel_id,name,connector_type,enabled,capabilities_json,config_json,secret_key,workspace_id
+  const row = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,workspace_id
     FROM channels WHERE channel_id=?1 AND enabled=1 AND (?2='' OR workspace_id=?2)`).bind(id, workspaceId).first();
-  if (!row || (connectorType && row.connector_type !== connectorType)) return null;
+  const logicalType = row ? logicalConnectorType(row) : '';
+  if (!row || (connectorType && logicalType !== connectorType)) return null;
   return {
-    channelId: row.channel_id, name: row.name, connectorType: row.connector_type,
+    channelId: row.channel_id, name: row.name, connectorType: logicalType,
     capabilities: safeJsonParse(row.capabilities_json, []), config: safeJsonParse(row.config_json, {}),
     secretKey: row.secret_key, workspaceId: row.workspace_id
   };
 }
 
-async function verifyWhatsAppChannel(env, workspaceId, channelId) {
-  const channel = await getChannel(env, channelId, 'whatsapp_cloud', workspaceId);
-  if (!channel) throw httpError(404, 'WhatsApp channel not found.');
-  const prefix = secretPrefix(channel.secretKey);
-  const token = env[`${prefix}_ACCESS_TOKEN`];
-  const phoneNumberId = String(env[`${prefix}_PHONE_NUMBER_ID`] || '');
-  const verifyToken = env[`${prefix}_VERIFY_TOKEN`];
-  const appSecret = env[`${prefix}_APP_SECRET`];
-  if (!token || !phoneNumberId || !verifyToken || !appSecret) {
+async function verifyChannel(env, workspaceId, channelId, request) {
+  const channel = await getChannel(env, channelId, '', workspaceId);
+  if (!channel) throw httpError(404, 'Channel not found.');
+  if (channel.connectorType === 'whatsapp_cloud') return verifyWhatsAppChannel(env, channel);
+  if (channel.connectorType === 'telegram') return verifyTelegramChannel(env, channel, request);
+  if (channel.connectorType === 'instagram') return verifyInstagramChannel(env, channel);
+  throw httpError(400, 'This connector cannot be verified automatically.');
+}
+
+async function verifyWhatsAppChannel(env, channel) {
+  const channelId = channel.channelId;
+  const credentials = await readChannelCredentials(env, channel);
+  const token = credentials.accessToken;
+  const wabaId = String(channel.config?.wabaId || '');
+  const phoneNumberId = String(channel.config?.phoneNumberId || '');
+  const verifyToken = credentials.verifyToken;
+  const appSecret = credentials.appSecret;
+  if (!token || !wabaId || !phoneNumberId || !verifyToken || !appSecret) {
     throw httpError(409, 'Secure WhatsApp credentials have not been fully configured.');
   }
-  const version = String(channel.config?.apiVersion || env.WHATSAPP_API_VERSION || 'v25.0');
-  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneNumberId)}`);
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/phone_numbers`);
   endpoint.searchParams.set('fields', 'id,display_phone_number,verified_name');
+  endpoint.searchParams.set('limit', '100');
   const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } });
   const raw = await response.text();
   const data = safeJsonParse(raw, {});
   if (!response.ok) {
-    const providerMessage = String(data?.error?.message || `HTTP ${response.status}`).slice(0, 240);
-    throw httpError(502, `Meta could not verify this WhatsApp number: ${providerMessage}`);
+    throw httpError(422, `Meta could not verify this WhatsApp number: ${providerError(data, response.status)}`);
   }
-  if (String(data.id || '') !== phoneNumberId) throw httpError(502, 'Meta returned a different WhatsApp phone number.');
+  const phone = Array.isArray(data.data) ? data.data.find(item => String(item?.id || '') === phoneNumberId) : null;
+  if (!phone) throw httpError(422, 'The WhatsApp phone number does not belong to the configured WABA.');
   const now = new Date().toISOString();
   const config = await updateChannelRuntimeConfig(env, channel, {
     apiVersion: version,
     credentialsVerifiedAt: now,
-    verifiedPhoneNumber: String(data.display_phone_number || ''),
-    verifiedName: String(data.verified_name || '')
+    verifiedProviderId: phoneNumberId,
+    verifiedPhoneNumber: String(phone.display_phone_number || ''),
+    verifiedName: String(phone.verified_name || '')
   });
   return {
     ok: true,
@@ -446,6 +673,63 @@ async function verifyWhatsAppChannel(env, workspaceId, channelId) {
   };
 }
 
+async function verifyTelegramChannel(env, channel, request) {
+  const credentials = await readChannelCredentials(env, channel);
+  if (!credentials.botToken || !credentials.webhookSecret) {
+    throw httpError(409, 'Secure Telegram credentials have not been fully configured.');
+  }
+  const base = `https://api.telegram.org/bot${credentials.botToken}`;
+  const identityResponse = await fetch(`${base}/getMe`);
+  const identityData = safeJsonParse(await identityResponse.text(), {});
+  if (!identityResponse.ok || identityData.ok === false) {
+    throw httpError(422, `Telegram could not verify this bot: ${providerError(identityData, identityResponse.status)}`);
+  }
+  const now = new Date().toISOString();
+  const user = identityData.result || {};
+  const botId = String(user.id || '');
+  if (!botId) throw httpError(422, 'Telegram did not return a bot identity.');
+  await assertUniqueVerifiedProviderId(env, channel.workspaceId, 'telegram', channel.channelId, botId);
+  let config = await updateChannelRuntimeConfig(env, channel, {
+    credentialsVerifiedAt: now, verifiedProviderId: botId, verifiedName: String(user.first_name || ''),
+    verifiedUsername: String(user.username || '')
+  });
+  const callbackUrl = `${new URL(request.url).origin}/webhooks/telegram/${encodeURIComponent(channel.channelId)}`;
+  const webhookResponse = await fetch(`${base}/setWebhook`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: callbackUrl, secret_token: credentials.webhookSecret, allowed_updates: ['message', 'edited_message', 'channel_post'] })
+  });
+  const webhookData = safeJsonParse(await webhookResponse.text(), {});
+  if (!webhookResponse.ok || webhookData.ok === false) {
+    throw httpError(422, `Telegram could not set the webhook: ${providerError(webhookData, webhookResponse.status)}`);
+  }
+  config = await updateChannelRuntimeConfig(env, channel, { webhookVerifiedAt: now });
+  return { ok: true, channelId: channel.channelId, health: 'connected', verifiedName: config.verifiedName,
+    verifiedUsername: config.verifiedUsername, credentialsVerifiedAt: now, webhookVerifiedAt: now };
+}
+
+async function verifyInstagramChannel(env, channel) {
+  const credentials = await readChannelCredentials(env, channel);
+  const accountId = String(channel.config?.instagramAccountId || '');
+  if (!credentials.accessToken || !credentials.verifyToken || !credentials.appSecret || !accountId) {
+    throw httpError(409, 'Secure Instagram credentials have not been fully configured.');
+  }
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const endpoint = new URL(`https://graph.instagram.com/${encodeURIComponent(version)}/me`);
+  endpoint.searchParams.set('fields', 'user_id,username');
+  const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${credentials.accessToken}` } });
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) throw httpError(422, `Meta could not verify this Instagram account: ${providerError(data, response.status)}`);
+  if (String(data.user_id || '') !== accountId) throw httpError(422, 'Meta returned a different Instagram account.');
+  const now = new Date().toISOString();
+  const config = await updateChannelRuntimeConfig(env, channel, {
+    apiVersion: version, credentialsVerifiedAt: now, verifiedProviderId: accountId,
+    verifiedName: String(data.username || ''), verifiedUsername: String(data.username || '')
+  });
+  return { ok: true, channelId: channel.channelId, health: config.webhookVerifiedAt ? 'connected' : 'webhook_required',
+    verifiedName: config.verifiedName, verifiedUsername: config.verifiedUsername,
+    credentialsVerifiedAt: now, webhookVerifiedAt: config.webhookVerifiedAt || '' };
+}
+
 async function updateChannelRuntimeConfig(env, channel, patch) {
   const config = { ...(channel.config || {}) };
   for (const [key, value] of Object.entries(patch || {})) {
@@ -453,38 +737,322 @@ async function updateChannelRuntimeConfig(env, channel, patch) {
     else config[key] = value;
   }
   const now = new Date().toISOString();
-  await env.DB.prepare('UPDATE channels SET config_json=?3,updated_at=?4 WHERE channel_id=?1 AND workspace_id=?2')
-    .bind(channel.channelId, channel.workspaceId, JSON.stringify(config), now).run();
+  try {
+    await env.DB.prepare('UPDATE channels SET config_json=?3,updated_at=?4 WHERE channel_id=?1 AND workspace_id=?2')
+      .bind(channel.channelId, channel.workspaceId, JSON.stringify(config), now).run();
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw httpError(409, 'This provider identity is already connected in the workspace.');
+    throw error;
+  }
   channel.config = config;
   return config;
 }
 
-async function saveChannel(env, workspaceId, payload, principal) {
-  const name = cleanRequired(payload.name, 'Channel name', 80);
-  const connectorType = cleanRequired(payload.connectorType, 'Connector type', 40);
-  if (!new Set(['whatsapp_cloud', 'generic_http', 'web_chat', 'telegram']).has(connectorType)) throw httpError(400, 'Unsupported connector type.');
-  const channelId = cleanId(payload.channelId || crypto.randomUUID(), 'Channel ID');
-  const hasExplicitSecretKey = typeof payload.secretKey === 'string' && payload.secretKey.trim() !== '';
-  const requestedPrefix = secretPrefix(cleanRequired(payload.secretKey || `CHANNEL_${channelId}`, 'Secret key', 64));
+async function saveChannel(env, workspaceId, payload, principal, forcedChannelId = '') {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw httpError(400, 'Channel payload is invalid.');
+  const channelId = cleanId(forcedChannelId || payload.channelId || crypto.randomUUID(), 'Channel ID');
+  const existing = await env.DB.prepare('SELECT * FROM channels WHERE channel_id=?1 AND workspace_id=?2')
+    .bind(channelId, workspaceId).first();
+  if (forcedChannelId && !existing) throw httpError(404, 'Channel not found.');
+  if (!forcedChannelId && existing) throw httpError(409, 'Channel ID already exists.');
+  const existingType = existing ? logicalConnectorType(existing) : '';
+  const connectorType = cleanRequired(payload.connectorType || existingType, 'Connector type', 40);
+  if (!MANAGED_CONNECTORS.has(connectorType) && !['generic_http', 'web_chat'].includes(connectorType)) {
+    throw httpError(400, 'Unsupported connector type.');
+  }
+  if (existingType && connectorType !== existingType) throw httpError(400, 'A channel provider cannot be changed after creation.');
+  const name = cleanRequired(payload.name || existing?.name, 'Channel name', 80);
+  if (!MANAGED_CONNECTORS.has(connectorType)) {
+    return saveLegacyChannel(env, workspaceId, payload, principal, existing, channelId, name, connectorType);
+  }
   const now = new Date().toISOString();
-  const config = payload.config && typeof payload.config === 'object' ? payload.config : {};
+  const previousConfig = safeJsonParse(existing?.config_json, {});
+  const config = mergeChannelConfig(connectorType, previousConfig, payload.config);
+  await assertUniqueManagedConfig(env, workspaceId, connectorType, channelId, config);
+  const credentialUpdates = validateCredentialPayload(connectorType, payload.credentials);
+  if (Object.keys(credentialUpdates).length) await importChannelCredentialKey(env.CHANNEL_CREDENTIALS_KEY);
+  const configurationChanged = editableConfigChanged(connectorType, previousConfig, config);
+  if (configurationChanged || Object.keys(credentialUpdates).length) clearChannelVerification(config);
+  const collision = await env.DB.prepare('SELECT workspace_id FROM channels WHERE channel_id=?1').bind(channelId).first();
+  if (collision && collision.workspace_id !== workspaceId) throw httpError(409, 'Channel ID is already used by another workspace.');
+  const storageType = connectorType === 'instagram' ? 'generic_http' : connectorType;
+  const enabled = payload.enabled === undefined ? (existing ? Boolean(existing.enabled) : true) : payload.enabled !== false;
+  let saved;
+  try {
+    saved = await env.DB.prepare(`INSERT INTO channels
+        (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,'DATABASE',?8,?8,?9)
+      ON CONFLICT(channel_id) DO UPDATE SET name=excluded.name,connector_type=excluded.connector_type,
+        provider_type=excluded.provider_type,enabled=excluded.enabled,capabilities_json=excluded.capabilities_json,
+        config_json=excluded.config_json,secret_key='DATABASE',updated_at=excluded.updated_at
+        WHERE channels.workspace_id=excluded.workspace_id`)
+      .bind(channelId, name, storageType, connectorType, enabled ? 1 : 0, JSON.stringify(['text']), JSON.stringify(config), now, workspaceId).run();
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw httpError(409, 'This provider identity is already connected in the workspace.');
+    throw error;
+  }
+  if (!saved.meta?.changes) throw httpError(409, 'Channel ID is already used by another workspace.');
+  if (Object.keys(credentialUpdates).length) {
+    await storeChannelCredentials(env, { workspaceId, channelId, connectorType }, credentialUpdates, principal.user.userId || '');
+  }
+  await audit(env, principal, existing ? 'update' : 'create', 'channel', channelId, {
+    name, connectorType, enabled, updatedCredentialFields: Object.keys(credentialUpdates).sort()
+  });
+  return { ok: true, channelId };
+}
+
+async function saveLegacyChannel(env, workspaceId, payload, principal, existing, channelId, name, connectorType) {
+  const hasConfig = Object.hasOwn(payload, 'config');
+  if (hasConfig && (payload.config === null || typeof payload.config !== 'object' || Array.isArray(payload.config))) {
+    throw httpError(400, 'Channel configuration must be an object.');
+  }
+  const config = hasConfig ? payload.config : safeJsonParse(existing?.config_json, {});
+  if (JSON.stringify(config).length > MAX_JSON_BODY) throw httpError(400, 'Channel configuration is too large.');
   if (connectorType === 'generic_http' && config.endpoint) assertAllowedHttpsEndpoint(config.endpoint, config.allowedHosts || []);
+  const hasExplicitSecretKey = typeof payload.secretKey === 'string' && payload.secretKey.trim() !== '';
+  const requestedPrefix = secretPrefix(cleanRequired(payload.secretKey || existing?.secret_key || `CHANNEL_${channelId}`, 'Secret key', 64));
   const collision = await env.DB.prepare('SELECT workspace_id,secret_key FROM channels WHERE channel_id=?1').bind(channelId).first();
   if (collision && collision.workspace_id !== workspaceId) throw httpError(409, 'Channel ID is already used by another workspace.');
   const prefix = collision && (!hasExplicitSecretKey || secretPrefix(collision.secret_key) === requestedPrefix)
     ? collision.secret_key
     : workspaceSecretPrefix(workspaceId, requestedPrefix);
+  const enabled = payload.enabled === undefined ? (existing ? Boolean(existing.enabled) : true) : payload.enabled !== false;
+  const now = new Date().toISOString();
   const saved = await env.DB.prepare(`INSERT INTO channels
-      (channel_id,name,connector_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
-    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8,?9)
+      (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+    VALUES (?1,?2,?3,?3,?4,?5,?6,?7,?8,?8,?9)
     ON CONFLICT(channel_id) DO UPDATE SET name=excluded.name,connector_type=excluded.connector_type,
-      enabled=excluded.enabled,capabilities_json=excluded.capabilities_json,config_json=excluded.config_json,
-      secret_key=excluded.secret_key,updated_at=excluded.updated_at WHERE channels.workspace_id=excluded.workspace_id`)
-    .bind(channelId, name, connectorType, payload.enabled === false ? 0 : 1,
-      JSON.stringify(Array.isArray(payload.capabilities) ? payload.capabilities : ['text']), JSON.stringify(config), prefix, now, workspaceId).run();
+      provider_type=excluded.provider_type,enabled=excluded.enabled,capabilities_json=excluded.capabilities_json,
+      config_json=excluded.config_json,secret_key=excluded.secret_key,updated_at=excluded.updated_at
+      WHERE channels.workspace_id=excluded.workspace_id`)
+    .bind(channelId, name, connectorType, enabled ? 1 : 0, JSON.stringify(['text']), JSON.stringify(config), prefix, now, workspaceId).run();
   if (!saved.meta?.changes) throw httpError(409, 'Channel ID is already used by another workspace.');
-  await audit(env, principal, 'save', 'channel', channelId, { name, connectorType });
+  await audit(env, principal, existing ? 'update' : 'create', 'channel', channelId, { name, connectorType, enabled });
   return { ok: true, channelId };
+}
+
+async function deleteChannel(env, workspaceId, channelId, principal) {
+  const id = cleanId(channelId, 'Channel ID');
+  const channel = await env.DB.prepare('SELECT name FROM channels WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId).first();
+  if (!channel) throw httpError(404, 'Channel not found.');
+  const linked = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM channel_identities WHERE channel_id=?1 AND workspace_id=?2) +
+      (SELECT COUNT(*) FROM conversations WHERE channel_id=?1 AND workspace_id=?2) +
+      (SELECT COUNT(*) FROM messages WHERE channel_id=?1 AND workspace_id=?2) AS count`)
+    .bind(id, workspaceId).first();
+  if (Number(linked?.count || 0) > 0) throw httpError(409, 'Disable this channel instead; it already has conversation history.');
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM channel_credentials WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM webhook_events WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM channels WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId)
+  ]);
+  await audit(env, principal, 'delete', 'channel', id, { name: channel.name });
+  return { ok: true, channelId: id };
+}
+
+function logicalConnectorType(row) {
+  return String(row?.provider_type || row?.providerType || row?.connector_type || row?.connectorType || '').trim();
+}
+
+function publicChannelConfig(connectorType, config = {}) {
+  const definition = CONNECTOR_DEFINITIONS[connectorType];
+  if (!definition) return {};
+  return Object.fromEntries(definition.configFields
+    .filter(key => config[key] !== undefined && config[key] !== null && config[key] !== '')
+    .map(key => [key, config[key]]));
+}
+
+function mergeChannelConfig(connectorType, previous = {}, supplied) {
+  const definition = CONNECTOR_DEFINITIONS[connectorType];
+  if (!definition) throw httpError(400, 'Unsupported connector type.');
+  if (supplied !== undefined && (supplied === null || typeof supplied !== 'object' || Array.isArray(supplied))) {
+    throw httpError(400, 'Channel configuration must be an object.');
+  }
+  const config = { ...(previous || {}) };
+  if (supplied) {
+    const unknown = Object.keys(supplied).filter(key => !definition.configFields.includes(key));
+    if (unknown.length) throw httpError(400, `Unsupported channel configuration field: ${unknown[0]}.`);
+    for (const key of definition.configFields) {
+      if (!Object.hasOwn(supplied, key)) continue;
+      const value = normalizeChannelConfigValue(key, supplied[key]);
+      if (value) config[key] = value;
+      else delete config[key];
+    }
+  }
+  if ((connectorType === 'whatsapp_cloud' || connectorType === 'instagram') && !config.apiVersion) config.apiVersion = 'v26.0';
+  if (connectorType === 'instagram' && !config.authMode) config.authMode = 'instagram_login';
+  if (JSON.stringify(publicChannelConfig(connectorType, config)).length > 4096) throw httpError(400, 'Channel configuration is too large.');
+  return config;
+}
+
+function normalizeChannelConfigValue(key, value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string' && typeof value !== 'number') throw httpError(400, `${key} must be text.`);
+  const text = String(value).trim();
+  if (!text) return '';
+  if (key === 'apiVersion') return metaApiVersion(text);
+  if (key === 'username') {
+    if (!/^[A-Za-z0-9._]{1,30}$/.test(text)) throw httpError(400, 'Instagram username is invalid.');
+    return text;
+  }
+  if (key === 'authMode') {
+    if (text !== 'instagram_login') throw httpError(400, 'Instagram authentication mode is invalid.');
+    return text;
+  }
+  return cleanMetaIdentifier(text, key);
+}
+
+function editableConfigChanged(connectorType, before = {}, after = {}) {
+  const fields = CONNECTOR_DEFINITIONS[connectorType]?.configFields || [];
+  return fields.some(key => String(before[key] || '') !== String(after[key] || ''));
+}
+
+function clearChannelVerification(config) {
+  for (const key of ['credentialsVerifiedAt', 'webhookVerifiedAt', 'lastWebhookAt', 'verifiedPhoneNumber',
+    'verifiedName', 'verifiedUsername', 'verifiedProviderId']) delete config[key];
+}
+
+async function assertUniqueManagedConfig(env, workspaceId, connectorType, channelId, config) {
+  const field = connectorType === 'whatsapp_cloud' ? 'phoneNumberId'
+    : connectorType === 'instagram' ? 'instagramAccountId' : '';
+  const value = field ? String(config[field] || '') : '';
+  if (!value) return;
+  const jsonPath = field === 'phoneNumberId' ? '$.phoneNumberId' : '$.instagramAccountId';
+  const duplicate = await env.DB.prepare(`SELECT channel_id FROM channels
+    WHERE workspace_id=?1 AND channel_id<>?2 AND provider_type=?3
+      AND json_extract(config_json,?4)=?5 LIMIT 1`)
+    .bind(workspaceId, channelId, connectorType, jsonPath, value).first();
+  if (duplicate) throw httpError(409, `This ${connectorType === 'whatsapp_cloud' ? 'WhatsApp phone number' : 'Instagram account'} is already connected in the workspace.`);
+}
+
+async function assertUniqueVerifiedProviderId(env, workspaceId, connectorType, channelId, providerId) {
+  const duplicate = await env.DB.prepare(`SELECT channel_id FROM channels
+    WHERE workspace_id=?1 AND channel_id<>?2 AND provider_type=?3
+      AND json_extract(config_json,'$.verifiedProviderId')=?4 LIMIT 1`)
+    .bind(workspaceId, channelId, connectorType, providerId).first();
+  if (duplicate) throw httpError(409, 'This Telegram bot is already connected in the workspace.');
+}
+
+function isUniqueConstraintError(error) {
+  return /unique constraint/i.test(String(error?.message || error || ''));
+}
+
+function validateCredentialPayload(connectorType, supplied) {
+  if (supplied === undefined || supplied === null) return {};
+  if (typeof supplied !== 'object' || Array.isArray(supplied)) throw httpError(400, 'Credentials must be an object.');
+  const allowed = CONNECTOR_DEFINITIONS[connectorType]?.requiredCredentials || [];
+  const unknown = Object.keys(supplied).filter(key => !allowed.includes(key));
+  if (unknown.length) throw httpError(400, `Unsupported credential field: ${unknown[0]}.`);
+  const credentials = {};
+  for (const key of allowed) {
+    if (!Object.hasOwn(supplied, key)) continue;
+    if (typeof supplied[key] !== 'string') throw httpError(400, `${credentialLabel(key)} must be text.`);
+    const value = supplied[key].trim();
+    if (!value) continue;
+    if (value.length > MAX_CREDENTIAL_LENGTH) throw httpError(400, `${credentialLabel(key)} is too long.`);
+    if (/[\u0000-\u001f\u007f]/.test(value)) throw httpError(400, `${credentialLabel(key)} contains invalid characters.`);
+    if (key === 'accessToken' && value.length < 16) throw httpError(400, 'Access token is too short.');
+    if (key === 'appSecret' && value.length < 16) throw httpError(400, 'App secret is too short.');
+    if (key === 'verifyToken' && value.length > 256) throw httpError(400, 'Verify token is too long.');
+    if (key === 'botToken' && !/^\d{5,15}:[A-Za-z0-9_-]{20,}$/.test(value)) throw httpError(400, 'Telegram bot token format is invalid.');
+    if (key === 'webhookSecret' && !/^[A-Za-z0-9_-]{1,256}$/.test(value)) {
+      throw httpError(400, 'Telegram webhook secret may contain only letters, numbers, underscores, and hyphens.');
+    }
+    credentials[key] = value;
+  }
+  return credentials;
+}
+
+function credentialLabel(key) {
+  return ({ accessToken: 'Access token', appSecret: 'App secret', verifyToken: 'Verify token',
+    botToken: 'Telegram bot token', webhookSecret: 'Telegram webhook secret' })[key] || 'Credential';
+}
+
+async function storeChannelCredentials(env, channel, credentials, updatedByUserId = '') {
+  const entries = Object.entries(credentials || {});
+  if (!entries.length) return;
+  const now = new Date().toISOString();
+  const statements = [];
+  for (const [credentialKey, value] of entries) {
+    const encryptedValue = await encryptChannelCredential(value, env.CHANNEL_CREDENTIALS_KEY,
+      channel.workspaceId, channel.channelId, credentialKey);
+    statements.push(env.DB.prepare(`INSERT INTO channel_credentials
+        (workspace_id,channel_id,credential_key,encrypted_value,created_at,updated_at,updated_by_user_id)
+      SELECT ?1,?2,?3,?4,?5,?5,?6
+      WHERE EXISTS (SELECT 1 FROM channels WHERE channel_id=?2 AND workspace_id=?1)
+      ON CONFLICT(workspace_id,channel_id,credential_key) DO UPDATE SET
+        encrypted_value=excluded.encrypted_value,updated_at=excluded.updated_at,
+        updated_by_user_id=excluded.updated_by_user_id`)
+      .bind(channel.workspaceId, channel.channelId, credentialKey, encryptedValue, now, String(updatedByUserId || '').slice(0, 100)));
+  }
+  const results = await env.DB.batch(statements);
+  if (results.some(result => !result.meta?.changes)) throw httpError(409, 'Channel credentials could not be saved.');
+}
+
+async function readChannelCredentials(env, channel) {
+  const result = await env.DB.prepare(`SELECT credential_key,encrypted_value FROM channel_credentials
+    WHERE workspace_id=?1 AND channel_id=?2`).bind(channel.workspaceId, channel.channelId).all();
+  if (!result.results?.length) return {};
+  const allowed = new Set(CONNECTOR_DEFINITIONS[channel.connectorType]?.requiredCredentials || []);
+  const credentials = {};
+  try {
+    for (const row of result.results) {
+      if (!allowed.has(row.credential_key)) continue;
+      credentials[row.credential_key] = await decryptChannelCredential(row.encrypted_value,
+        env.CHANNEL_CREDENTIALS_KEY, channel.workspaceId, channel.channelId, row.credential_key);
+    }
+  } catch (error) {
+    if (error?.status === 503) throw error;
+    throw httpError(503, 'Stored channel credentials could not be decrypted.');
+  }
+  return credentials;
+}
+
+export async function encryptChannelCredential(value, masterSecret, workspaceId, channelId, credentialKey) {
+  const plaintext = String(value || '');
+  if (!plaintext || plaintext.length > MAX_CREDENTIAL_LENGTH) throw httpError(400, 'Credential value is invalid.');
+  const key = await importChannelCredentialKey(masterSecret);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const additionalData = channelCredentialAad(workspaceId, channelId, credentialKey);
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData }, key,
+    new TextEncoder().encode(plaintext));
+  return `v1.${base64UrlEncode(iv)}.${base64UrlEncode(new Uint8Array(encrypted))}`;
+}
+
+export async function decryptChannelCredential(packed, masterSecret, workspaceId, channelId, credentialKey) {
+  const parts = String(packed || '').split('.');
+  if (parts.length !== 3 || parts[0] !== 'v1') throw new Error('Unsupported encrypted credential format.');
+  const iv = base64UrlDecode(parts[1]);
+  const ciphertext = base64UrlDecode(parts[2]);
+  if (iv.length !== 12 || !ciphertext.length) throw new Error('Encrypted credential is invalid.');
+  const key = await importChannelCredentialKey(masterSecret);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv,
+    additionalData: channelCredentialAad(workspaceId, channelId, credentialKey) }, key, ciphertext);
+  const plaintext = new TextDecoder().decode(decrypted);
+  if (!plaintext || plaintext.length > MAX_CREDENTIAL_LENGTH) throw new Error('Decrypted credential is invalid.');
+  return plaintext;
+}
+
+async function importChannelCredentialKey(masterSecret) {
+  const bytes = new TextEncoder().encode(String(masterSecret || ''));
+  if (bytes.length < 32) throw httpError(503, 'Channel credential encryption is not configured.');
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+function channelCredentialAad(workspaceId, channelId, credentialKey) {
+  return new TextEncoder().encode(`helixcer-channel-v1\n${workspaceId}\n${channelId}\n${credentialKey}`);
+}
+
+function base64UrlEncode(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlDecode(value) {
+  const input = String(value || '');
+  if (!/^[A-Za-z0-9_-]+$/.test(input)) throw new Error('Encrypted credential encoding is invalid.');
+  const padded = input.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - input.length % 4) % 4);
+  return Uint8Array.from(atob(padded), character => character.charCodeAt(0));
 }
 
 async function listConversations(env, workspaceId, url) {
@@ -570,6 +1138,13 @@ async function createContact(env, workspaceId, payload, principal) {
   const channelId = cleanId(payload.channelId, 'Channel ID');
   const channel = await getChannel(env, channelId, '', workspaceId);
   if (!channel) throw httpError(400, 'Unknown or disabled channel.');
+  if (MANAGED_CONNECTORS.has(channel.connectorType)) {
+    const stored = await env.DB.prepare(`SELECT credential_key FROM channel_credentials
+      WHERE workspace_id=?1 AND channel_id=?2`).bind(workspaceId, channelId).all();
+    const credentialFields = new Set((stored.results || []).map(row => row.credential_key));
+    const health = channelHealth({ enabled: 1, provider_type: channel.connectorType }, channel.config, credentialFields);
+    if (health !== 'connected') throw httpError(409, 'Verify the channel and its webhook before starting a conversation.');
+  }
   const rawChannelProfileId = cleanRequired(payload.channelProfileId, 'Channel profile ID', 200);
   const channelProfileId = channel.connectorType === 'whatsapp_cloud'
     ? normalizeWhatsAppRecipient(rawChannelProfileId)
@@ -640,30 +1215,37 @@ async function sendOrQueue(env, messageId) {
 }
 
 async function dispatchOutbound(env, messageId) {
-  const row = await env.DB.prepare(`SELECT m.*,c.config_json,c.connector_type,c.secret_key,c.enabled,
+  const row = await env.DB.prepare(`SELECT m.*,c.config_json,c.connector_type,c.provider_type,c.secret_key,c.enabled,
       i.channel_profile_id,cv.contact_id FROM messages m JOIN channels c ON c.channel_id=m.channel_id
       AND c.workspace_id=m.workspace_id JOIN conversations cv ON cv.conversation_id=m.conversation_id AND cv.workspace_id=m.workspace_id
       JOIN channel_identities i ON i.contact_id=cv.contact_id AND i.channel_id=cv.channel_id AND i.workspace_id=m.workspace_id
       WHERE m.message_id=?1`).bind(messageId).first();
   if (!row) throw new Error('Outbound message not found.');
   if (!row.enabled) throw new Error('Channel is disabled.');
-  const channel = { connectorType: row.connector_type, config: safeJsonParse(row.config_json, {}), secretKey: row.secret_key };
+  const channel = {
+    channelId: row.channel_id,
+    workspaceId: row.workspace_id,
+    connectorType: logicalConnectorType(row),
+    config: safeJsonParse(row.config_json, {}),
+    secretKey: row.secret_key
+  };
   let result;
   if (channel.connectorType === 'whatsapp_cloud') result = await sendWhatsApp(env, channel, row.channel_profile_id, row.text);
-  else if (channel.connectorType === 'generic_http') result = await sendGeneric(env, channel, row);
   else if (channel.connectorType === 'telegram') result = await sendTelegram(env, channel, row.channel_profile_id, row.text);
+  else if (channel.connectorType === 'instagram') result = await sendInstagram(env, channel, row.channel_profile_id, row.text);
+  else if (channel.connectorType === 'generic_http') result = await sendGeneric(env, channel, row);
   else if (channel.connectorType === 'web_chat') result = { status: 'sent', providerMessageId: row.message_id, httpStatus: 200 };
   else throw new Error(`Outbound connector ${channel.connectorType} is not implemented yet.`);
   return { ...result, workspaceId: row.workspace_id };
 }
 
 async function sendWhatsApp(env, channel, recipient, text) {
-  const prefix = secretPrefix(channel.secretKey);
-  const token = env[`${prefix}_ACCESS_TOKEN`];
-  const phoneNumberId = env[`${prefix}_PHONE_NUMBER_ID`];
-  if (!token || !phoneNumberId) throw new Error('WhatsApp channel secrets are not configured.');
+  const credentials = await readChannelCredentials(env, channel);
+  const token = credentials.accessToken;
+  const phoneNumberId = channel.config?.phoneNumberId;
+  if (!token || !phoneNumberId) throw nonRetryableError('WhatsApp credentials are not configured.');
   const normalizedRecipient = normalizeWhatsAppRecipient(recipient);
-  const version = String(channel.config?.apiVersion || env.WHATSAPP_API_VERSION || 'v25.0');
+  const version = metaApiVersion(channel.config?.apiVersion);
   const response = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneNumberId)}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -708,16 +1290,44 @@ async function sendGeneric(env, channel, row) {
 }
 
 async function sendTelegram(env, channel, chatId, text) {
-  const token = env[`${secretPrefix(channel.secretKey)}_BOT_TOKEN`];
-  if (!token) throw new Error('Telegram bot token is not configured.');
-  const response = await fetch(`https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`, {
+  const credentials = await readChannelCredentials(env, channel);
+  const token = credentials.botToken;
+  if (!token) throw nonRetryableError('Telegram bot token is not configured.');
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text })
   });
   const raw = await response.text();
   const data = safeJsonParse(raw, {});
-  if (!response.ok || data.ok === false) throw new Error(`Telegram API HTTP ${response.status}: ${raw.slice(0, 500)}`);
+  if (!response.ok || data.ok === false) {
+    const error = new Error(`Telegram API: ${providerError(data, response.status)}`);
+    error.retryable = isRetryableProviderStatus(response.status);
+    throw error;
+  }
   return { status: 'sent', providerMessageId: String(data.result?.message_id || ''), httpStatus: response.status };
+}
+
+async function sendInstagram(env, channel, recipient, text) {
+  const credentials = await readChannelCredentials(env, channel);
+  const accountId = String(channel.config?.instagramAccountId || '');
+  if (!credentials.accessToken || !accountId) throw nonRetryableError('Instagram credentials are not configured.');
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const response = await fetch(`https://graph.instagram.com/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${credentials.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipient: { id: String(recipient) }, message: { text } })
+  });
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) {
+    const error = new Error(`Instagram API: ${providerError(data, response.status)}`);
+    error.retryable = isRetryableProviderStatus(response.status);
+    throw error;
+  }
+  return {
+    status: 'submitted',
+    providerMessageId: String(data.message_id || data.id || ''),
+    httpStatus: response.status
+  };
 }
 
 async function markMessageSent(env, messageId, result) {
@@ -938,10 +1548,42 @@ export function normalizeTelegram(payload) {
   const name = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(' ') || message.chat.title || String(message.chat.id);
   return {
     channelProfileId: String(message.chat.id), displayName: name,
-    text: message.text || message.caption || '', providerMessageId: String(message.message_id || payload.update_id || ''),
+    text: message.text || message.caption || '',
+    providerMessageId: payload.update_id !== undefined && payload.update_id !== null
+      ? `update:${payload.update_id}`
+      : `chat:${message.chat.id}:message:${message.message_id || ''}`,
     timestamp: message.date ? new Date(Number(message.date) * 1000).toISOString() : '',
     messageType: message.text ? 'text' : message.photo ? 'image' : message.document ? 'document' : 'message'
   };
+}
+
+export function normalizeInstagram(payload) {
+  const messages = [];
+  const recipientIds = new Set();
+  for (const entry of payload?.entry || []) {
+    for (const event of entry?.messaging || []) {
+      if (event?.message?.is_echo) continue;
+      const senderId = String(event?.sender?.id || '');
+      const recipientId = String(event?.recipient?.id || entry?.id || '');
+      const message = event?.message || null;
+      const postback = event?.postback || null;
+      if (!senderId || (!message && !postback)) continue;
+      if (recipientId) recipientIds.add(recipientId);
+      const attachmentType = String(message?.attachments?.[0]?.type || 'message');
+      const text = String(message?.text || postback?.title || postback?.payload ||
+        `[Instagram ${attachmentType.replace(/_/g, ' ')} received]`);
+      const timestampNumber = Number(event?.timestamp);
+      messages.push({
+        channelProfileId: senderId,
+        displayName: senderId,
+        text,
+        providerMessageId: String(message?.mid || postback?.mid || `${entry?.id || recipientId}:${event?.timestamp || ''}:${senderId}`),
+        timestamp: Number.isFinite(timestampNumber) && timestampNumber > 0 ? new Date(timestampNumber).toISOString() : '',
+        messageType: message?.text || postback ? 'text' : attachmentType
+      });
+    }
+  }
+  return { messages, recipientIds: [...recipientIds] };
 }
 
 export function resolveTemplate(value, context, secretResolver = () => undefined) {
@@ -1079,7 +1721,34 @@ function json(body, status = 200) {
 
 async function readJson(request) {
   if (!(request.headers.get('Content-Type') || '').toLowerCase().includes('application/json')) throw httpError(415, 'Content-Type must be application/json.');
-  try { return await request.json(); } catch { throw httpError(400, 'Invalid JSON body.'); }
+  const raw = await readBoundedText(request, MAX_JSON_BODY);
+  try { return JSON.parse(raw); } catch { throw httpError(400, 'Invalid JSON body.'); }
+}
+
+async function readBoundedText(request, maximumBytes) {
+  const declared = Number(request.headers.get('Content-Length'));
+  if (Number.isFinite(declared) && declared > maximumBytes) throw httpError(413, 'Request body is too large.');
+  if (!request.body) return '';
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maximumBytes) {
+      await reader.cancel().catch(() => {});
+      throw httpError(413, 'Request body is too large.');
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 function safeJsonParse(value, fallback) {
@@ -1100,6 +1769,12 @@ function cleanRequired(value, label, maximum) {
 function cleanId(value, label) {
   const id = cleanRequired(value, label, 100);
   if (!/^[A-Za-z0-9_-]+$/.test(id)) throw httpError(400, `${label} may contain only letters, numbers, underscores, and hyphens.`);
+  return id;
+}
+
+function cleanMetaIdentifier(value, label) {
+  const id = String(value || '').trim();
+  if (!/^\d{4,40}$/.test(id)) throw httpError(400, `${label} must be a numeric Meta identifier.`);
   return id;
 }
 
@@ -1130,6 +1805,28 @@ function truncateJson(value) {
 
 function cleanError(error) {
   return String(error?.message || error || 'Unknown provider error').slice(0, 500);
+}
+
+function providerError(data, status) {
+  return String(data?.error?.message || data?.description || data?.error_description || `HTTP ${status}`)
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 240);
+}
+
+function metaApiVersion(value) {
+  const version = String(value || 'v26.0').trim();
+  if (!/^v\d{1,2}\.\d{1,2}$/.test(version)) throw httpError(400, 'Meta API version is invalid.');
+  return version;
+}
+
+function isRetryableProviderStatus(status) {
+  const code = Number(status);
+  return code === 408 || code === 425 || code === 429 || code >= 500;
+}
+
+function nonRetryableError(message) {
+  const error = new Error(message);
+  error.retryable = false;
+  return error;
 }
 
 function httpError(status, message) {

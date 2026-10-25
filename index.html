@@ -10,8 +10,8 @@
   <meta name="helixcer-api-base" content="https://api.chat.helixcer.com">
   <title>Helixcer Chat</title>
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261025-4">
-  <script src="./assets/app.js?v=20261025-4" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261025-6">
+  <script src="./assets/app.js?v=20261025-6" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -68,7 +68,7 @@
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8m12.8 0a9 9 0 0 0 0-12.8M8.5 8.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7"/></svg>
           </span>
-          <span>WhatsApp</span>
+          <span>Channels</span>
         </button>
         <button class="nav-button" type="button" data-route="team" data-admin-only>
           <span class="nav-icon" aria-hidden="true">
@@ -267,7 +267,8 @@
 
       <section class="route content-route" id="channelsRoute" data-route-panel="channels" aria-labelledby="channelsTitle" hidden>
         <div class="route-heading">
-          <div><p class="eyebrow">Business messaging</p><h2 id="channelsTitle">WhatsApp</h2><p>Receive and reply to WhatsApp customer messages from the shared inbox.</p></div>
+          <div><p class="eyebrow">Business messaging</p><h2 id="channelsTitle">Channels</h2><p>Connect every customer account to one shared inbox.</p></div>
+          <button class="primary-button" type="button" data-action="open-channel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add channel</button>
         </div>
         <div class="stats-grid" id="channelStats"></div>
         <div class="channel-grid" id="channelGrid"></div>
@@ -329,6 +330,58 @@
     </form>
   </dialog>
 
+  <dialog class="modal channel-modal" id="channelDialog" aria-labelledby="channelDialogTitle">
+    <form class="modal-card" id="channelForm" autocomplete="off">
+      <div class="modal-head">
+        <div><p class="eyebrow">Channel connection</p><h2 id="channelDialogTitle">Add a channel</h2></div>
+        <button class="icon-button" type="button" data-action="close-channel-dialog" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="modal-copy">Credentials are encrypted before storage and are never returned to the browser. You can connect multiple accounts of every provider.</p>
+      <input type="hidden" name="channelId" id="channelIdInput">
+      <div class="form-grid channel-form-grid">
+        <label class="field-label">Provider<select class="text-field" name="connectorType" id="channelProvider" required><option value="whatsapp_cloud">WhatsApp Cloud</option><option value="telegram">Telegram Bot</option><option value="instagram">Instagram</option></select></label>
+        <label class="field-label">Connection name<input class="text-field" name="name" id="channelNameInput" required maxlength="80" placeholder="Sales WhatsApp"></label>
+      </div>
+
+      <section class="provider-fields" data-provider-fields="whatsapp_cloud">
+        <div class="provider-form-head"><span class="provider-mark whatsapp">WA</span><div><strong>WhatsApp Cloud API</strong><span>Use the values shown in Meta's WhatsApp API setup.</span></div></div>
+        <div class="form-grid channel-form-grid">
+          <label class="field-label">WhatsApp Business Account ID<input class="text-field" name="wabaId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
+          <label class="field-label">Phone Number ID<input class="text-field" name="phoneNumberId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
+          <label class="field-label form-span">Access token<input class="text-field secret-field" name="whatsappAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a permanent access token" required><span class="field-help secret-help">Stored encrypted. Leave blank while editing to keep the saved value.</span></label>
+          <label class="field-label">Meta App Secret<input class="text-field secret-field" name="whatsappAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required></label>
+          <label class="field-label">Webhook verify token<div class="inline-field"><input class="text-field secret-field" name="whatsappVerifyToken" type="password" maxlength="256" spellcheck="false" placeholder="Create a private token" required><button class="secondary-button generate-button" type="button" data-generate-secret="whatsappVerifyToken">Generate</button><button class="secondary-button generate-button" type="button" data-copy-secret="whatsappVerifyToken">Copy</button></div><span class="field-help">Copy this token into Meta before saving. For security, Helixcer cannot show it again.</span></label>
+        </div>
+      </section>
+
+      <section class="provider-fields" data-provider-fields="telegram" hidden>
+        <div class="provider-form-head"><span class="provider-mark telegram">TG</span><div><strong>Telegram Bot API</strong><span>Create a bot with BotFather, then paste its token.</span></div></div>
+        <div class="form-grid channel-form-grid">
+          <label class="field-label form-span">Bot token<input class="text-field secret-field" name="telegramBotToken" type="password" maxlength="256" spellcheck="false" placeholder="123456789:AA…" required><span class="field-help secret-help">Stored encrypted. Leave blank while editing to keep the saved value.</span></label>
+          <label class="field-label form-span">Webhook secret<div class="inline-field"><input class="text-field secret-field" name="telegramWebhookSecret" type="password" maxlength="256" spellcheck="false" placeholder="Private webhook secret" required><button class="secondary-button generate-button" type="button" data-generate-secret="telegramWebhookSecret">Generate</button></div><span class="field-help">Helixcer sends this to Telegram when registering the webhook.</span></label>
+        </div>
+      </section>
+
+      <section class="provider-fields" data-provider-fields="instagram" hidden>
+        <div class="provider-form-head"><span class="provider-mark instagram">IG</span><div><strong>Instagram Messaging</strong><span>Connect an Instagram Business or Creator account through its Meta app.</span></div></div>
+        <div class="form-grid channel-form-grid">
+          <label class="field-label">Instagram account ID<input class="text-field" name="instagramAccountId" inputmode="numeric" maxlength="40" placeholder="17841400000000000" required></label>
+          <label class="field-label"><span>Meta App ID <span class="optional-label">Optional</span></span><input class="text-field" name="instagramAppId" inputmode="numeric" maxlength="40" placeholder="Your Meta app ID"></label>
+          <label class="field-label form-span"><span>Instagram username <span class="optional-label">Optional</span></span><input class="text-field" name="instagramUsername" maxlength="60" autocomplete="off" placeholder="your_business"></label>
+          <label class="field-label form-span">Instagram User access token<input class="text-field secret-field" name="instagramAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a long-lived Instagram User access token" required><span class="field-help secret-help">Stored encrypted. Leave blank while editing to keep the saved value.</span></label>
+          <label class="field-label">Meta App Secret<input class="text-field secret-field" name="instagramAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required></label>
+          <label class="field-label">Webhook verify token<div class="inline-field"><input class="text-field secret-field" name="instagramVerifyToken" type="password" maxlength="256" spellcheck="false" placeholder="Create a private token" required><button class="secondary-button generate-button" type="button" data-generate-secret="instagramVerifyToken">Generate</button><button class="secondary-button generate-button" type="button" data-copy-secret="instagramVerifyToken">Copy</button></div><span class="field-help">Copy this token into Meta before saving. For security, Helixcer cannot show it again.</span></label>
+        </div>
+      </section>
+
+      <label class="channel-enabled"><input type="checkbox" name="enabled" id="channelEnabledInput" checked><span><strong>Connection enabled</strong><small>Disabled channels keep their history but stop sending and receiving.</small></span></label>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-channel-dialog">Cancel</button>
+        <button class="primary-button" id="channelSubmit" type="submit">Save connection</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog class="modal" id="contactDialog" aria-labelledby="contactDialogTitle">
     <form class="modal-card" id="contactForm">
       <div class="modal-head">
@@ -337,7 +390,8 @@
       </div>
       <div class="form-grid">
         <label class="field-label">Name<input class="text-field" name="displayName" required maxlength="100" placeholder="Customer name"></label>
-        <label class="field-label form-span">WhatsApp number<input class="text-field" name="channelProfileId" required maxlength="20" inputmode="tel" autocomplete="tel" placeholder="919876543210"><span class="field-help">Include the country code. Spaces, +, brackets and hyphens are accepted.</span></label>
+        <label class="field-label">Channel<select class="text-field" name="channelId" id="contactChannelId" required></select></label>
+        <label class="field-label form-span"><span id="contactIdentityLabel">Customer identifier</span><input class="text-field" id="contactChannelProfileId" name="channelProfileId" required maxlength="200" autocomplete="off" placeholder="Customer identifier"><span class="field-help" id="contactIdentityHelp">Choose a channel to see the required identifier.</span></label>
       </div>
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-contact-dialog">Cancel</button>

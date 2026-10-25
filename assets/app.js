@@ -29,12 +29,35 @@
     whatsapp_cloud: { label: "WhatsApp", short: "WA", color: "#168f66", soft: "#e7f6ef" },
     whatsapp: { label: "WhatsApp", short: "WA", color: "#168f66", soft: "#e7f6ef" },
     telegram: { label: "Telegram", short: "TG", color: "#2d8bc0", soft: "#e8f4fa" },
+    telegram_bot: { label: "Telegram", short: "TG", color: "#2d8bc0", soft: "#e8f4fa" },
     webchat: { label: "Web chat", short: "WB", color: "#9a4f37", soft: "#faeee9" },
     web_chat: { label: "Web chat", short: "WB", color: "#9a4f37", soft: "#faeee9" },
     email: { label: "Email", short: "EM", color: "#7b5ba9", soft: "#f0ebf8" },
     gmail: { label: "Gmail", short: "GM", color: "#c44d3b", soft: "#faece9" },
     instagram: { label: "Instagram", short: "IG", color: "#b6427b", soft: "#f9eaf2" },
+    instagram_messaging: { label: "Instagram", short: "IG", color: "#b6427b", soft: "#f9eaf2" },
     generic: { label: "Custom", short: "API", color: "#5e6c69", soft: "#edf0ef" },
+  };
+
+  const providerProfiles = {
+    whatsapp_cloud: {
+      label: "WhatsApp", noun: "WhatsApp number", placeholder: "919876543210",
+      help: "Include the country code. Spaces, +, brackets and hyphens are accepted.",
+      description: "Send and receive WhatsApp Cloud API conversations.",
+      setupUrl: "https://developers.facebook.com/apps/", setupLabel: "Open Meta",
+    },
+    telegram: {
+      label: "Telegram", noun: "Telegram chat ID", placeholder: "123456789",
+      help: "Use the numeric Telegram chat ID for an existing customer conversation.",
+      description: "Route Telegram Bot API messages into the shared inbox.",
+      setupUrl: "https://t.me/BotFather", setupLabel: "Open BotFather",
+    },
+    instagram: {
+      label: "Instagram", noun: "Instagram-scoped user ID", placeholder: "17890000000000001",
+      help: "Use the Instagram-scoped ID supplied by the messaging webhook.",
+      description: "Manage Instagram Business or Creator account messages from the inbox.",
+      setupUrl: "https://developers.facebook.com/apps/", setupLabel: "Open Meta",
+    },
   };
 
   const avatarPalettes = [
@@ -67,22 +90,22 @@
         ],
       },
       channels: [
-        { channelId: "wa-main", name: "Main WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", messagesToday: 86 },
-        { channelId: "telegram-support", name: "Telegram Support", connectorType: "telegram", enabled: true, health: "connected", messagesToday: 31 },
-        { channelId: "web-main", name: "Website Chat", connectorType: "webchat", enabled: true, health: "connected", messagesToday: 18 },
+        { channelId: "wa-sales", name: "Sales WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", config: { wabaId: "123456789012345", phoneNumberId: "123456789012346" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(120), webhookVerifiedAt: ago(118), lastWebhookAt: ago(3), verifiedName: "Helixcer Sales", verifiedPhoneNumber: "+91 98765 43210" } },
+        { channelId: "telegram-support", name: "Support Bot", connectorType: "telegram", enabled: true, health: "connected", config: {}, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(160), webhookVerifiedAt: ago(158), lastWebhookAt: ago(18), verifiedName: "helixcer_support_bot" } },
+        { channelId: "instagram-main", name: "Helixcer Instagram", connectorType: "instagram", enabled: true, health: "connected", config: { instagramAccountId: "17841400000000000", appId: "123456789012345", username: "helixcer", authMode: "instagram_login" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(200), webhookVerifiedAt: ago(198), lastWebhookAt: ago(57), verifiedName: "helixcer" } },
       ],
       contacts: [
-        { contactId: "ct-ananya", displayName: "Ananya Sharma", channelId: "wa-main", channelProfileId: "+91 98••• 1402", phone: "+91 98••• 1402", email: "ananya@example.com", tags: ["Priority", "Returning"] },
+        { contactId: "ct-ananya", displayName: "Ananya Sharma", channelId: "wa-sales", channelProfileId: "+91 98••• 1402", phone: "+91 98••• 1402", email: "ananya@example.com", tags: ["Priority", "Returning"] },
         { contactId: "ct-david", displayName: "David Miller", channelId: "telegram-support", channelProfileId: "@davidm", phone: "—", email: "david@example.com", tags: ["New lead"] },
-        { contactId: "ct-meera", displayName: "Meera Iyer", channelId: "web-main", channelProfileId: "Visitor #8421", phone: "—", email: "meera@example.com", tags: ["Website"] },
-        { contactId: "ct-ravi", displayName: "Ravi Menon", channelId: "wa-main", channelProfileId: "+91 97••• 7780", phone: "+91 97••• 7780", email: "ravi@example.com", tags: ["Billing"] },
+        { contactId: "ct-meera", displayName: "Meera Iyer", channelId: "instagram-main", channelProfileId: "17890000000000001", phone: "—", email: "meera@example.com", tags: ["Instagram"] },
+        { contactId: "ct-ravi", displayName: "Ravi Menon", channelId: "wa-sales", channelProfileId: "+91 97••• 7780", phone: "+91 97••• 7780", email: "ravi@example.com", tags: ["Billing"] },
         { contactId: "ct-lina", displayName: "Lina George", channelId: "telegram-support", channelProfileId: "@linag", phone: "—", email: "lina@example.com", tags: ["Resolved"] },
       ],
       conversations: [
-        { conversationId: "cv-ananya", contactId: "ct-ananya", subject: "Ananya Sharma", channelId: "wa-main", status: "open", assignedTo: "Nisar", priority: "high", unreadCount: 2, lastMessage: "Could you confirm when my order will arrive?", lastMessageAt: ago(3) },
+        { conversationId: "cv-ananya", contactId: "ct-ananya", subject: "Ananya Sharma", channelId: "wa-sales", status: "open", assignedTo: "Nisar", priority: "high", unreadCount: 2, lastMessage: "Could you confirm when my order will arrive?", lastMessageAt: ago(3) },
         { conversationId: "cv-david", contactId: "ct-david", subject: "David Miller", channelId: "telegram-support", status: "open", assignedTo: "Unassigned", unreadCount: 1, lastMessage: "I need help choosing the right plan.", lastMessageAt: ago(18) },
-        { conversationId: "cv-meera", contactId: "ct-meera", subject: "Meera Iyer", channelId: "web-main", status: "pending", assignedTo: "Nisar", unreadCount: 0, lastMessage: "Thank you, that answers my question.", lastMessageAt: ago(57) },
-        { conversationId: "cv-ravi", contactId: "ct-ravi", subject: "Ravi Menon", channelId: "wa-main", status: "open", assignedTo: "Nisar", unreadCount: 0, lastMessage: "The invoice amount looks different.", lastMessageAt: ago(145) },
+        { conversationId: "cv-meera", contactId: "ct-meera", subject: "Meera Iyer", channelId: "instagram-main", status: "pending", assignedTo: "Nisar", unreadCount: 0, lastMessage: "Thank you, that answers my question.", lastMessageAt: ago(57) },
+        { conversationId: "cv-ravi", contactId: "ct-ravi", subject: "Ravi Menon", channelId: "wa-sales", status: "open", assignedTo: "Nisar", unreadCount: 0, lastMessage: "The invoice amount looks different.", lastMessageAt: ago(145) },
         { conversationId: "cv-lina", contactId: "ct-lina", subject: "Lina George", channelId: "telegram-support", status: "closed", assignedTo: "Nisar", unreadCount: 0, lastMessage: "Perfect, everything works now!", lastMessageAt: ago(1450) },
       ],
       messages: {
@@ -242,12 +265,46 @@
       return { ok: true, contactId: contact.contactId, conversationId: conversation.conversationId, item: clone(conversation) };
     }
 
+    async createChannel(payload) {
+      await smallDelay(140);
+      const channel = {
+        channelId: `channel-${Date.now().toString(36)}`,
+        name: payload.name,
+        connectorType: payload.connectorType,
+        enabled: payload.enabled !== false,
+        config: clone(payload.config || {}),
+        setup: { credentialsPresent: Object.values(payload.credentials || {}).some(Boolean) },
+        health: Object.values(payload.credentials || {}).some(Boolean) ? "configured" : "setup_required",
+      };
+      this.data.channels.push(channel);
+      this.emit({ type: "channel.updated", channelId: channel.channelId });
+      return { ok: true, channelId: channel.channelId, item: clone(channel) };
+    }
+
+    async updateChannel(channelId, payload) {
+      await smallDelay(120);
+      const channel = this.data.channels.find((entry) => entry.channelId === channelId);
+      if (!channel) throw new Error("Channel not found.");
+      if (payload.name) channel.name = payload.name;
+      if (payload.connectorType) channel.connectorType = payload.connectorType;
+      if (Object.prototype.hasOwnProperty.call(payload, "enabled")) channel.enabled = payload.enabled !== false;
+      if (payload.config) channel.config = { ...(channel.config || {}), ...clone(payload.config) };
+      if (Object.values(payload.credentials || {}).some(Boolean)) {
+        channel.setup = { ...(channel.setup || {}), credentialsPresent: true, credentialsVerifiedAt: "", webhookVerifiedAt: "" };
+        channel.health = channel.enabled ? "configured" : "disconnected";
+      } else if (!channel.enabled) channel.health = "disconnected";
+      else if (channel.health === "disconnected") channel.health = channel.setup?.credentialsPresent ? "configured" : "setup_required";
+      this.emit({ type: "channel.updated", channelId });
+      return { ok: true, channelId, item: clone(channel) };
+    }
+
     async verifyChannel(channelId) {
       await smallDelay(120);
       const channel = this.data.channels.find((entry) => entry.channelId === channelId);
-      if (!channel) throw new Error("WhatsApp channel not found.");
+      if (!channel) throw new Error("Channel not found.");
       channel.health = "connected";
-      channel.setup = { credentialsPresent: true, credentialsVerifiedAt: new Date().toISOString(), webhookVerifiedAt: new Date().toISOString() };
+      const style = channelStyles[channel.connectorType] || channelStyles.generic;
+      channel.setup = { ...(channel.setup || {}), credentialsPresent: true, credentialsVerifiedAt: new Date().toISOString(), webhookVerifiedAt: new Date().toISOString(), verifiedName: channel.setup?.verifiedName || `${channel.name} ${style.label}` };
       this.emit({ type: "channel.updated", channelId });
       return { ok: true, channelId, health: "connected" };
     }
@@ -345,15 +402,35 @@
         : this.request("/api/contacts", { method: "POST", body: JSON.stringify(payload) });
     }
 
+    createChannel(payload) {
+      return this.isDemo
+        ? this.demo.createChannel(payload)
+        : this.request("/api/channels", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    updateChannel(channelId, payload) {
+      return this.isDemo
+        ? this.demo.updateChannel(channelId, payload)
+        : this.request(`/api/channels/${encodeURIComponent(channelId)}`, { method: "PATCH", body: JSON.stringify(payload) });
+    }
+
     verifyChannel(channelId) {
       return this.isDemo
         ? this.demo.verifyChannel(channelId)
         : this.request(`/api/channels/${encodeURIComponent(channelId)}/verify`, { method: "POST" });
     }
 
-    webhookUrl(channelId) {
-      if (this.isDemo) return "https://api.chat.helixcer.com/webhooks/whatsapp/wa-main";
-      return `${this.base}/webhooks/whatsapp/${encodeURIComponent(channelId)}`;
+    webhookUrl(channel) {
+      const channelId = typeof channel === "string" ? channel : channel?.channelId;
+      const connectorType = typeof channel === "string" ? "whatsapp_cloud" : channel?.connectorType;
+      const provider = connectorType === "whatsapp_cloud" ? "whatsapp" : connectorType === "instagram_messaging" ? "instagram" : connectorType === "telegram_bot" ? "telegram" : connectorType;
+      const base = this.isDemo ? "https://api.chat.helixcer.com" : this.base;
+      const sharedInstagramPath = connectorType === "instagram" && channel?.config?.appId
+        ? `/webhooks/instagram-app/${encodeURIComponent(channel.config.appId)}`
+        : "";
+      const callbackPath = channel?.setup?.callbackPath || sharedInstagramPath ||
+        `/webhooks/${encodeURIComponent(provider || "channel")}/${encodeURIComponent(channelId || "")}`;
+      return `${base}${callbackPath.startsWith("/") ? callbackPath : `/${callbackPath}`}`;
     }
 
     getTeam() {
@@ -571,6 +648,8 @@
       connectorType,
       enabled: raw.enabled !== false,
       health: raw.health || (raw.enabled === false ? "disconnected" : "connected"),
+      config: raw.config && typeof raw.config === "object" ? raw.config : {},
+      setup: raw.setup && typeof raw.setup === "object" ? raw.setup : {},
     };
   }
 
@@ -671,6 +750,7 @@
     renderCounts();
     renderContacts();
     renderChannels();
+    populateContactChannelSelect();
     populateAssigneeSelect();
     renderSelectedConversation();
   }
@@ -921,21 +1001,12 @@
   }
 
   function renderChannels() {
-    const channels = state.channels.filter((channel) => channel.connectorType === "whatsapp_cloud");
-    const channel = channels[0] || null;
-    const healthStates = {
-      setup_required: { label: "Setup required", className: "is-warning", summary: "Secure Meta credentials still need to be added." },
-      configured: { label: "Credentials saved", className: "is-warning", summary: "Verify the WhatsApp number, then subscribe the Meta webhook." },
-      webhook_required: { label: "Webhook required", className: "is-warning", summary: "The WhatsApp number is verified. Complete the Meta webhook subscription." },
-      connected: { label: "Live", className: "", summary: "The Meta number and webhook are verified for live messaging." },
-      disconnected: { label: "Disconnected", className: "is-disconnected", summary: "This WhatsApp connection is disabled." },
-    };
-    const healthState = healthStates[channel?.health] || healthStates.setup_required;
+    const channels = state.channels.filter((channel) => providerProfiles[channel.connectorType]);
     const stats = $("channelStats");
     stats.replaceChildren();
-    const open = state.conversations.filter((item) => item.status !== "closed").length;
-    const unread = state.conversations.reduce((sum, item) => sum + item.unreadCount, 0);
-    [["WhatsApp connection", channel ? healthState.label : "Preparing"], ["Open conversations", open], ["Unread messages", unread]].forEach(([label, value]) => {
+    const live = channels.filter((channel) => channel.health === "connected" && channel.enabled).length;
+    const attention = channels.filter((channel) => channel.health !== "connected" || !channel.enabled).length;
+    [["Connected channels", channels.length], ["Live", live], ["Needs attention", attention]].forEach(([label, value]) => {
       const card = element("div", "stat-card");
       card.append(element("span", "", label), element("strong", "", String(value)));
       stats.append(card);
@@ -943,89 +1014,84 @@
 
     const grid = $("channelGrid");
     grid.replaceChildren();
-    if (!channel) {
-      grid.append(element("div", "empty-list", "The WhatsApp channel is being prepared. Refresh in a moment."));
+    if (!channels.length) {
+      const empty = element("div", "channel-empty-state");
+      empty.append(
+        element("span", "channel-empty-icon", "+"),
+        element("h3", "", "Connect your first messaging account"),
+        element("p", "", "Add WhatsApp, Telegram, or Instagram now. You can connect more accounts at any time.")
+      );
+      const add = element("button", "primary-button", "Add channel");
+      add.type = "button";
+      add.dataset.action = "open-channel";
+      empty.append(add);
+      grid.append(empty);
       return;
     }
+    channels.forEach((channel) => grid.append(renderChannelCard(channel)));
+  }
+
+  function renderChannelCard(channel) {
+    const profile = providerProfiles[channel.connectorType] || providerProfiles.whatsapp_cloud;
     const style = channelStyle(channel);
-    const card = element("article", "channel-card whatsapp-card");
+    const health = channelHealthView(channel);
+    const card = element("article", "channel-card connection-card");
     const head = element("div", "channel-card-head");
     const identity = element("div", "channel-card-identity");
     const logo = element("span", "channel-logo", style.short);
     logo.style.setProperty("--channel-color", style.color);
     logo.style.setProperty("--channel-soft", style.soft);
-    const copy = document.createElement("div");
-    const health = element("span", `health-dot${healthState.className ? ` ${healthState.className}` : ""}`, healthState.label);
-    copy.append(element("h3", "", channel.name), health);
-    identity.append(logo, copy);
+    const name = document.createElement("div");
+    name.append(element("span", "provider-label", profile.label), element("h3", "", channel.name), element("span", `health-dot${health.className ? ` ${health.className}` : ""}`, health.label));
+    identity.append(logo, name);
+    const headActions = element("div", "channel-head-actions");
+    const providerLink = document.createElement("a");
+    providerLink.className = "secondary-button compact-button";
+    providerLink.href = profile.setupUrl;
+    providerLink.target = "_blank";
+    providerLink.rel = "noopener noreferrer";
+    providerLink.textContent = profile.setupLabel;
+    const edit = element("button", "secondary-button compact-button", "Edit");
+    edit.type = "button";
+    edit.dataset.action = "edit-channel";
+    edit.dataset.channelId = channel.channelId;
+    headActions.append(providerLink, edit);
+    head.append(identity, headActions);
 
-    const metaLink = document.createElement("a");
-    metaLink.className = "secondary-button meta-console-link";
-    metaLink.href = "https://developers.facebook.com/apps/";
-    metaLink.target = "_blank";
-    metaLink.rel = "noopener noreferrer";
-    metaLink.textContent = "Open Meta setup";
-    head.append(identity, metaLink);
-
-    const channelConversations = state.conversations.filter((item) => item.channelId === channel.channelId);
-    const unreadCount = channelConversations.reduce((sum, item) => sum + item.unreadCount, 0);
+    const conversations = state.conversations.filter((item) => item.channelId === channel.channelId);
+    const unread = conversations.reduce((sum, item) => sum + item.unreadCount, 0);
     const metrics = element("div", "channel-metrics");
     metrics.append(
-      metric("Conversations", channelConversations.length),
-      metric("Unread", unreadCount),
+      metric("Conversations", conversations.length),
+      metric("Unread", unread),
       metric("Last webhook", channel.setup?.lastWebhookAt ? relativeTime(channel.setup.lastWebhookAt) : "Waiting")
     );
 
+    const body = element("div", "connection-card-body");
+    body.append(element("p", "channel-description", profile.description));
+    const verifiedIdentity = [channel.setup?.verifiedName, channel.setup?.verifiedPhoneNumber].filter(Boolean).join(" · ");
+    if (verifiedIdentity) body.append(element("p", "verified-identity", verifiedIdentity));
+
+    const setup = element("section", "connection-setup");
     const credentialsReady = Boolean(channel.setup?.credentialsPresent || ["configured", "webhook_required", "connected"].includes(channel.health));
-    const numberVerified = Boolean(channel.setup?.credentialsVerifiedAt || ["webhook_required", "connected"].includes(channel.health));
+    const identityVerified = Boolean(channel.setup?.credentialsVerifiedAt || ["webhook_required", "connected"].includes(channel.health));
     const webhookVerified = Boolean(channel.setup?.webhookVerifiedAt || channel.health === "connected");
-    const completedSteps = [credentialsReady, numberVerified, webhookVerified].filter(Boolean).length;
-    const setup = element("section", "meta-setup-panel");
-    const setupHead = element("div", "meta-setup-head");
-    const setupTitle = document.createElement("div");
-    setupTitle.append(element("span", "meta-setup-kicker", "Meta connection"), element("strong", "", "Complete WhatsApp Cloud API setup"));
-    setupHead.append(setupTitle, element("span", "meta-progress", `${completedSteps} of 3 complete`));
+    const progress = [credentialsReady, identityVerified, webhookVerified].filter(Boolean).length;
+    const setupHead = element("div", "connection-setup-head");
+    setupHead.append(element("strong", "", "Connection setup"), element("span", "meta-progress", `${progress}/3 ready`));
+    setup.append(setupHead, element("p", "channel-setup-note", health.summary));
 
-    const steps = element("ol", "meta-step-list");
-    const credentialStep = metaSetupStep({
-      number: 1,
-      complete: credentialsReady,
-      current: !credentialsReady,
-      title: credentialsReady ? "Credentials protected" : "Add the Meta credentials",
-      body: credentialsReady
-        ? "The access token, Phone Number ID, verification token, and App Secret are secured in Cloudflare."
-        : "Save the access token, Phone Number ID, verification token, and App Secret in Cloudflare. They are never shown in this dashboard.",
-      status: credentialsReady ? "Done" : "Required",
-    });
+    const readiness = element("div", "readiness-list");
+    readiness.append(
+      readinessItem("Credentials", credentialsReady),
+      readinessItem("Provider identity", identityVerified),
+      readinessItem("Webhook", webhookVerified)
+    );
+    setup.append(readiness);
 
-    const verifyStep = metaSetupStep({
-      number: 2,
-      complete: numberVerified,
-      current: credentialsReady && !numberVerified,
-      title: numberVerified ? "Business number verified" : "Verify the business number",
-      body: numberVerified
-        ? [channel.setup?.verifiedName, channel.setup?.verifiedPhoneNumber].filter(Boolean).join(" · ") || "Meta accepted the configured WhatsApp number."
-        : "Check that the saved credentials can access the selected WhatsApp business number.",
-      status: numberVerified ? "Done" : credentialsReady ? "Ready" : "Waiting",
-    });
-    const verifyButton = element("button", "secondary-button", numberVerified ? "Recheck number" : "Check Meta connection");
-    verifyButton.type = "button";
-    verifyButton.dataset.action = "verify-whatsapp";
-    verifyButton.dataset.channelId = channel.channelId;
-    verifyButton.disabled = !credentialsReady || channel.health === "disconnected";
-    verifyStep.querySelector(".meta-step-content").append(verifyButton);
-
-    const callbackUrl = state.api.webhookUrl(channel.channelId);
-    const webhookStep = metaSetupStep({
-      number: 3,
-      complete: webhookVerified,
-      current: numberVerified && !webhookVerified,
-      title: webhookVerified ? "Webhook linked" : "Point Meta to Helixcer",
-      body: webhookVerified
-        ? "Meta verified this callback and the Messages webhook is ready."
-        : "In Meta, open WhatsApp > Configuration, use this callback URL, enter the same verification token, and keep Messages subscribed.",
-      status: webhookVerified ? "Done" : numberVerified ? "Ready" : "Waiting",
-    });
+    const callbackUrl = channel.setup?.webhookUrl || state.api.webhookUrl(channel);
+    const callbackBlock = element("div", "callback-block");
+    callbackBlock.append(element("span", "callback-label", "Webhook callback"));
     const callbackRow = element("div", "meta-callback-row");
     callbackRow.append(element("code", "channel-callback", callbackUrl));
     const copyButton = element("button", "secondary-button compact-button", "Copy URL");
@@ -1033,31 +1099,53 @@
     copyButton.dataset.action = "copy-webhook-callback";
     copyButton.dataset.copyValue = callbackUrl;
     callbackRow.append(copyButton);
-    webhookStep.querySelector(".meta-step-content").append(callbackRow);
+    callbackBlock.append(callbackRow);
+    setup.append(callbackBlock);
 
-    steps.append(credentialStep, verifyStep, webhookStep);
-    const warning = element("div", "meta-webhook-warning");
-    warning.append(
-      element("strong", "", "Before you switch"),
-      element("span", "", "Meta allows one callback for this app. Replacing an existing callback can stop another automation, so switch only when Helixcer is ready.")
-    );
-    const setupNote = element("p", "channel-setup-note", healthState.summary);
-    setup.append(setupHead, setupNote, steps, warning);
+    const actions = element("div", "channel-card-actions");
+    const verify = element("button", "primary-button", channel.health === "connected" ? "Recheck connection" : "Verify connection");
+    verify.type = "button";
+    verify.dataset.action = "verify-channel";
+    verify.dataset.channelId = channel.channelId;
+    verify.disabled = !credentialsReady || !channel.enabled;
+    const toggle = element("button", "secondary-button", channel.enabled ? "Disable" : "Enable");
+    toggle.type = "button";
+    toggle.dataset.action = "toggle-channel";
+    toggle.dataset.channelId = channel.channelId;
+    actions.append(toggle, verify);
+    setup.append(actions);
 
-    card.append(head, element("p", "", "WhatsApp Cloud API routes customer text messages into this shared inbox."), metrics, setup);
-    grid.append(card);
+    if ((channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram") && !webhookVerified) {
+      const note = element("div", "meta-webhook-warning");
+      if (channel.connectorType === "instagram" && channel.config?.appId) {
+        note.append(element("strong", "", "Shared Meta app callback"), element("span", "", "Use this URL once for every Instagram account connected through the same Meta App ID. Helixcer routes messages by account ID."));
+      } else {
+        note.append(element("strong", "", "Meta callback"), element("span", "", "Meta allows one callback per app. Replace an existing callback only when this connection is ready."));
+      }
+      setup.append(note);
+    }
+
+    card.append(head, body, metrics, setup);
+    return card;
   }
 
-  function metaSetupStep({ number, complete, current, title, body, status }) {
-    const step = element("li", `meta-step${complete ? " is-complete" : ""}${current ? " is-current" : ""}`);
-    const marker = element("span", "meta-step-marker", complete ? "✓" : String(number));
-    marker.setAttribute("aria-hidden", "true");
-    const content = element("div", "meta-step-content");
-    const heading = element("div", "meta-step-heading");
-    heading.append(element("strong", "", title), element("span", "meta-step-status", status));
-    content.append(heading, element("p", "", body));
-    step.append(marker, content);
-    return step;
+  function channelHealthView(channel) {
+    const states = {
+      setup_required: { label: "Setup required", className: "is-warning", summary: "Add the required provider IDs and credentials." },
+      configured: { label: "Ready to verify", className: "is-warning", summary: "Credentials are encrypted and ready for verification." },
+      webhook_required: { label: "Webhook required", className: "is-warning", summary: "The provider identity is verified. Complete the webhook setup." },
+      connected: { label: "Live", className: "", summary: "This connection is ready for live messaging." },
+      error: { label: "Connection error", className: "is-error", summary: "Review the credentials and verify the connection again." },
+      disconnected: { label: "Disabled", className: "is-disconnected", summary: "The history is preserved, but messaging is paused." },
+    };
+    if (!channel.enabled) return states.disconnected;
+    return states[channel.health] || states.setup_required;
+  }
+
+  function readinessItem(label, complete) {
+    const item = element("span", `readiness-item${complete ? " is-ready" : ""}`);
+    item.append(element("i", "", complete ? "✓" : ""), document.createTextNode(label));
+    return item;
   }
 
   function normalizeMember(raw) {
@@ -1402,7 +1490,7 @@
       renderAll();
       return;
     }
-    if (type === "bootstrap.changed") loadAll();
+    if (["channel.updated", "channel.deleted", "bootstrap.changed"].includes(type)) loadAll();
   }
 
   async function refreshMessages(conversationId) {
@@ -1438,7 +1526,7 @@
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     });
-    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "WhatsApp", team: "Team" };
+    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", team: "Team" };
     $("pageTitle").textContent = labels[route];
     if (location.hash !== `#${route}`) history.replaceState(null, "", `#${route}`);
     closeMobileMenu();
@@ -1487,7 +1575,7 @@
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
-      showToast("Callback URL copied", "Paste it into Meta's WhatsApp webhook configuration.");
+      showToast("Callback URL copied", "Paste it into the provider's webhook configuration.");
     } catch {
       const code = button.closest(".meta-callback-row")?.querySelector("code");
       if (code) {
@@ -1501,11 +1589,167 @@
     }
   }
 
+  function openChannelDialog(channelId = "") {
+    const form = $("channelForm");
+    const channel = state.channels.find((item) => item.channelId === channelId) || null;
+    form.reset();
+    form.querySelectorAll(".secret-field").forEach((input) => {
+      input.value = "";
+      input.type = "password";
+    });
+    $("channelIdInput").value = channel?.channelId || "";
+    $("channelProvider").value = channel?.connectorType || "whatsapp_cloud";
+    $("channelProvider").disabled = Boolean(channel);
+    $("channelNameInput").value = channel?.name || "";
+    $("channelEnabledInput").checked = channel?.enabled !== false;
+    form.elements.wabaId.value = channel?.config?.wabaId || "";
+    form.elements.phoneNumberId.value = channel?.config?.phoneNumberId || "";
+    form.elements.instagramAccountId.value = channel?.config?.instagramAccountId || "";
+    form.elements.instagramAppId.value = channel?.config?.appId || "";
+    form.elements.instagramUsername.value = channel?.config?.username || "";
+    $("channelDialogTitle").textContent = channel ? `Edit ${channel.name}` : "Add a channel";
+    $("channelSubmit").textContent = channel ? "Save changes" : "Save connection";
+    syncChannelForm(channel?.connectorType || "whatsapp_cloud", Boolean(channel), channel?.setup || {});
+    $("channelDialog").showModal();
+  }
+
+  function syncChannelForm(provider, editing = Boolean($("channelIdInput").value), setup = {}) {
+    const credentialKeys = {
+      whatsappAccessToken: "accessToken", whatsappAppSecret: "appSecret", whatsappVerifyToken: "verifyToken",
+      telegramBotToken: "botToken", telegramWebhookSecret: "webhookSecret",
+      instagramAccessToken: "accessToken", instagramAppSecret: "appSecret", instagramVerifyToken: "verifyToken",
+    };
+    document.querySelectorAll("[data-provider-fields]").forEach((section) => {
+      const active = section.dataset.providerFields === provider;
+      section.hidden = !active;
+      section.querySelectorAll("input,select,textarea").forEach((input) => {
+        input.disabled = !active;
+        if (input.classList.contains("secret-field")) {
+          if (!Object.prototype.hasOwnProperty.call(input.dataset, "defaultPlaceholder")) {
+            input.dataset.defaultPlaceholder = input.placeholder;
+          }
+          const key = credentialKeys[input.name];
+          const hasFieldState = key && setup.credentialFields && Object.prototype.hasOwnProperty.call(setup.credentialFields, key);
+          const saved = Boolean(editing && (hasFieldState ? setup.credentialFields[key] : setup.credentialsPresent));
+          input.required = active && !saved;
+          input.placeholder = active && saved ? "Saved — enter only to replace" : input.dataset.defaultPlaceholder;
+        }
+      });
+    });
+    if (!editing && !$("channelNameInput").value.trim()) {
+      $("channelNameInput").value = `${providerProfiles[provider]?.label || "Channel"} connection`;
+    }
+  }
+
+  function generatePrivateToken() {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  }
+
+  function channelPayload(form) {
+    const values = new FormData(form);
+    const connectorType = form.elements.connectorType.value;
+    const config = connectorType === "whatsapp_cloud"
+      ? { wabaId: String(values.get("wabaId") || "").trim(), phoneNumberId: String(values.get("phoneNumberId") || "").trim(), apiVersion: "v26.0" }
+      : connectorType === "instagram"
+        ? { instagramAccountId: String(values.get("instagramAccountId") || "").trim(), appId: String(values.get("instagramAppId") || "").trim(), username: String(values.get("instagramUsername") || "").trim(), authMode: "instagram_login", apiVersion: "v26.0" }
+        : {};
+    const credentialMap = connectorType === "whatsapp_cloud"
+      ? { accessToken: values.get("whatsappAccessToken"), appSecret: values.get("whatsappAppSecret"), verifyToken: values.get("whatsappVerifyToken") }
+      : connectorType === "telegram"
+        ? { botToken: values.get("telegramBotToken"), webhookSecret: values.get("telegramWebhookSecret") }
+        : { accessToken: values.get("instagramAccessToken"), appSecret: values.get("instagramAppSecret"), verifyToken: values.get("instagramVerifyToken") };
+    const credentials = Object.fromEntries(Object.entries(credentialMap)
+      .map(([key, value]) => [key, String(value || "").trim()])
+      .filter(([, value]) => value));
+    return {
+      name: String(values.get("name") || "").trim(),
+      connectorType,
+      enabled: form.elements.enabled.checked,
+      config,
+      credentials,
+    };
+  }
+
+  async function saveChannel(form) {
+    const channelId = $("channelIdInput").value;
+    const payload = channelPayload(form);
+    const submit = $("channelSubmit");
+    submit.disabled = true;
+    submit.textContent = "Saving…";
+    try {
+      await (channelId ? state.api.updateChannel(channelId, payload) : state.api.createChannel(payload));
+      $("channelDialog").close();
+      await loadAll();
+      setRoute("channels");
+      showToast(channelId ? "Connection updated" : "Connection added", `${payload.name} is ready for verification.`);
+    } catch (error) {
+      showToast("Connection was not saved", error.message, true);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = channelId ? "Save changes" : "Save connection";
+    }
+  }
+
+  async function toggleChannel(channelId, button) {
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    if (!channel || !button) return;
+    button.disabled = true;
+    try {
+      await state.api.updateChannel(channelId, { enabled: !channel.enabled });
+      await loadAll();
+      setRoute("channels");
+      showToast(channel.enabled ? "Connection disabled" : "Connection enabled", channel.name);
+    } catch (error) {
+      showToast("Connection was not updated", error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function populateContactChannelSelect(selectedId = "") {
+    const select = $("contactChannelId");
+    if (!select) return;
+    const previous = selectedId || select.value;
+    const available = state.channels.filter((channel) => providerProfiles[channel.connectorType] && channel.enabled && channel.health === "connected");
+    select.replaceChildren();
+    available.forEach((channel) => {
+      const option = document.createElement("option");
+      option.value = channel.channelId;
+      option.textContent = `${channel.name} · ${providerProfiles[channel.connectorType].label}`;
+      select.append(option);
+    });
+    if (available.some((channel) => channel.channelId === previous)) select.value = previous;
+    updateContactIdentityField();
+  }
+
+  function updateContactIdentityField() {
+    const channel = channelFor($("contactChannelId")?.value);
+    const profile = providerProfiles[channel.connectorType] || { noun: "Customer identifier", placeholder: "Customer identifier", help: "Enter the provider-specific customer identifier." };
+    $("contactIdentityLabel").textContent = profile.noun;
+    $("contactChannelProfileId").placeholder = profile.placeholder;
+    $("contactChannelProfileId").inputMode = channel.connectorType === "whatsapp_cloud" ? "tel" : "text";
+    $("contactIdentityHelp").textContent = profile.help;
+  }
+
+  function openContactDialog() {
+    const available = state.channels.filter((channel) => providerProfiles[channel.connectorType] && channel.enabled && channel.health === "connected");
+    if (!available.length) {
+      setRoute(canAdmin() ? "channels" : "inbox");
+      showToast("Connect a channel first", "An enabled messaging channel is required before creating a conversation.", true);
+      return;
+    }
+    $("contactForm").reset();
+    populateContactChannelSelect(available[0].channelId);
+    $("contactDialog").showModal();
+  }
+
   async function createContact(form) {
     const formData = new FormData(form);
     const payload = {
       displayName: String(formData.get("displayName") || "").trim(),
-      channelId: "wa-main",
+      channelId: String(formData.get("channelId") || "").trim(),
       channelProfileId: String(formData.get("channelProfileId") || "").trim(),
     };
     if (!payload.displayName || !payload.channelId || !payload.channelProfileId) return;
@@ -1526,8 +1770,10 @@
     }
   }
 
-  async function verifyWhatsAppConnection(channelId, button) {
+  async function verifyChannelConnection(channelId, button) {
     if (!channelId || !button) return;
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    const label = providerProfiles[channel?.connectorType]?.label || "Channel";
     button.disabled = true;
     const previousLabel = button.textContent;
     button.textContent = "Checking…";
@@ -1535,10 +1781,10 @@
       const result = await state.api.verifyChannel(channelId);
       await loadAll();
       setRoute("channels");
-      showToast(result.health === "connected" ? "WhatsApp is live" : "WhatsApp number verified",
-        result.health === "connected" ? "Meta credentials and webhook are working." : "Complete the Meta webhook subscription to go live.");
+      showToast(result.health === "connected" ? `${label} is live` : `${label} credentials verified`,
+        result.health === "connected" ? "The provider identity and webhook are working." : "Complete the provider webhook setup to go live.");
     } catch (error) {
-      showToast("WhatsApp connection failed", error.message, true);
+      showToast(`${label} connection failed`, error.message, true);
     } finally {
       button.disabled = false;
       button.textContent = previousLabel;
@@ -1655,8 +1901,16 @@
       if (routeButton) { setRoute(routeButton.dataset.route); return; }
       const actionButton = event.target.closest("[data-action]");
       if (actionButton) {
-        if (actionButton.dataset.action === "verify-whatsapp") {
-          verifyWhatsAppConnection(actionButton.dataset.channelId, actionButton);
+        if (actionButton.dataset.action === "verify-channel") {
+          verifyChannelConnection(actionButton.dataset.channelId, actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "edit-channel") {
+          openChannelDialog(actionButton.dataset.channelId);
+          return;
+        }
+        if (actionButton.dataset.action === "toggle-channel") {
+          toggleChannel(actionButton.dataset.channelId, actionButton);
           return;
         }
         if (actionButton.dataset.action === "copy-webhook-callback") {
@@ -1667,8 +1921,10 @@
           "toggle-user-menu": () => toggleUserMenu(),
           "logout": logout,
           "toggle-details": toggleDetails,
-          "new-conversation": () => $("contactDialog").showModal(),
-          "new-contact": () => $("contactDialog").showModal(),
+          "open-channel": () => openChannelDialog(),
+          "close-channel-dialog": () => $("channelDialog").close(),
+          "new-conversation": openContactDialog,
+          "new-contact": openContactDialog,
           "close-contact-dialog": () => $("contactDialog").close(),
           "attachment-info": () => showToast("Attachments are protected", "The zero-cost release keeps media on its source channel."),
           "insert-greeting": () => {
@@ -1683,6 +1939,26 @@
           "copy-invite-link": copyInviteLink,
         };
         actions[actionButton.dataset.action]?.();
+      }
+      const generateButton = event.target.closest("[data-generate-secret]");
+      if (generateButton) {
+        const input = $("channelForm").elements[generateButton.dataset.generateSecret];
+        if (input) {
+          input.value = generatePrivateToken();
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          showToast("Private token generated", "It is masked in the form and will be stored securely when you save.");
+        }
+      }
+      const copySecretButton = event.target.closest("[data-copy-secret]");
+      if (copySecretButton) {
+        const input = $("channelForm").elements[copySecretButton.dataset.copySecret];
+        if (!input?.value) {
+          showToast("Generate or enter a token first", "The token field is currently empty.", true);
+        } else {
+          Promise.resolve().then(() => navigator.clipboard.writeText(input.value))
+            .then(() => showToast("Verify token copied", "Paste it into Meta's webhook setup before saving."))
+            .catch(() => showToast("Copy was blocked", "Select the token and copy it manually.", true));
+        }
       }
       if (!event.target.closest(".user-menu-wrap")) toggleUserMenu(false);
     });
@@ -1750,6 +2026,15 @@
       }
     });
 
+    $("channelForm").addEventListener("submit", (event) => { event.preventDefault(); saveChannel(event.currentTarget); });
+    $("channelProvider").addEventListener("change", (event) => {
+      const nameInput = $("channelNameInput");
+      if (!nameInput.value.trim() || /^(WhatsApp|Telegram|Instagram) connection$/.test(nameInput.value.trim())) {
+        nameInput.value = `${providerProfiles[event.target.value]?.label || "Channel"} connection`;
+      }
+      syncChannelForm(event.target.value, false, {});
+    });
+    $("contactChannelId").addEventListener("change", updateContactIdentityField);
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
     $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
     $("inviteRole").addEventListener("change", updateInviteRoleHelp);

@@ -4,10 +4,13 @@ import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import {
   assertAllowedHttpsEndpoint,
+  decryptChannelCredential,
+  encryptChannelCredential,
   handleRequest,
   InboxHub,
   isRetryableWhatsAppStatus,
   normalizeGeneric,
+  normalizeInstagram,
   normalizeTelegram,
   normalizeWhatsApp,
   normalizeWhatsAppRecipient,
@@ -60,7 +63,38 @@ test('normalizes Telegram bot updates', () => {
   assert.equal(result.channelProfileId, '12345');
   assert.equal(result.displayName, 'Ravi K');
   assert.equal(result.text, 'Need help');
-  assert.equal(result.providerMessageId, '44');
+  assert.equal(result.providerMessageId, 'update:7');
+  const sameMessageNumber = normalizeTelegram({ message: {
+    message_id: 44, date: 1761360000, chat: { id: 99999 }, from: { first_name: 'Other' }, text: 'Different chat'
+  } });
+  assert.equal(sameMessageNumber.providerMessageId, 'chat:99999:message:44');
+  assert.notEqual(sameMessageNumber.providerMessageId, normalizeTelegram({ message: {
+    message_id: 44, chat: { id: 12345 }, text: 'Original chat'
+  } }).providerMessageId);
+});
+
+test('normalizes Instagram messages and ignores outbound echoes', () => {
+  const result = normalizeInstagram({ entry: [{ id: '17841400000000000', messaging: [
+    { sender: { id: 'customer-1' }, recipient: { id: '17841400000000000' }, timestamp: 1761360000000,
+      message: { mid: 'ig-mid-1', text: 'Hello from Instagram' } },
+    { sender: { id: '17841400000000000' }, recipient: { id: 'customer-1' }, timestamp: 1761360001000,
+      message: { mid: 'ig-echo', text: 'Reply', is_echo: true } }
+  ] }] });
+  assert.equal(result.messages.length, 1);
+  assert.equal(result.messages[0].channelProfileId, 'customer-1');
+  assert.equal(result.messages[0].providerMessageId, 'ig-mid-1');
+  assert.equal(result.messages[0].text, 'Hello from Instagram');
+  assert.deepEqual(result.recipientIds, ['17841400000000000']);
+});
+
+test('encrypts channel credentials with workspace and channel binding', async () => {
+  const master = 'test-only-master-key-material-'.repeat(2);
+  const encrypted = await encryptChannelCredential('provider-secret-value', master, 'ws-one', 'channel-one', 'accessToken');
+  assert.match(encrypted, /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  assert.equal(encrypted.includes('provider-secret-value'), false);
+  assert.equal(await decryptChannelCredential(encrypted, master, 'ws-one', 'channel-one', 'accessToken'), 'provider-secret-value');
+  await assert.rejects(() => decryptChannelCredential(encrypted, master, 'ws-two', 'channel-one', 'accessToken'));
+  await assert.rejects(() => decryptChannelCredential(encrypted, `${master}different`, 'ws-one', 'channel-one', 'accessToken'));
 });
 
 test('resolves data and secret templates recursively', () => {
@@ -95,6 +129,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const initial = await readFile(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8');
   const identity = await readFile(new URL('../migrations/0002_identity_and_workspaces.sql', import.meta.url), 'utf8');
   const whatsapp = await readFile(new URL('../migrations/0003_whatsapp_channel.sql', import.meta.url), 'utf8');
+  const multichannel = await readFile(new URL('../migrations/0004_multichannel_credentials.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -119,8 +154,9 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   `);
   database.exec(identity);
   database.exec(whatsapp);
+  database.exec(multichannel);
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
-  for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'contacts', 'messages', 'audit_log']) {
+  for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'channel_credentials', 'contacts', 'messages', 'audit_log']) {
     assert.ok(tables.includes(name), `missing table ${name}`);
   }
   for (const [table, idColumn, id] of [
@@ -139,17 +175,25 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   assert.equal(database.prepare("SELECT actor_email FROM audit_log WHERE audit_id='legacy-audit'").get().actor_email, 'legacy@example.com');
   assert.equal(database.prepare('SELECT count(*) AS count FROM memberships').get().count, 0);
   assert.equal(database.prepare("SELECT name FROM workspaces WHERE workspace_id='ws_default'").get().name, 'Helixcer Chat');
-  const whatsappChannel = database.prepare("SELECT connector_type,capabilities_json,secret_key,workspace_id FROM channels WHERE channel_id='wa-main'").get();
-  assert.equal(whatsappChannel.connector_type, 'whatsapp_cloud');
-  assert.equal(whatsappChannel.capabilities_json, '["text"]');
-  assert.equal(whatsappChannel.secret_key, 'WA_MAIN');
-  assert.equal(whatsappChannel.workspace_id, 'ws_default');
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE channel_id='wa-main'").get().count, 0);
+  assert.equal(database.prepare("SELECT provider_type FROM channels WHERE channel_id='legacy-channel'").get().provider_type, 'web_chat');
   assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
   const indexes = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(row => row.name));
-  for (const name of ['idx_channels_workspace', 'idx_conversations_workspace_activity', 'idx_messages_workspace_conversation', 'idx_outbox_workspace_due']) {
+  for (const name of ['idx_channels_workspace', 'idx_conversations_workspace_activity', 'idx_messages_workspace_conversation',
+    'idx_outbox_workspace_due', 'idx_channel_credentials_channel', 'idx_channels_workspace_provider',
+    'idx_channels_workspace_whatsapp_phone', 'idx_channels_workspace_instagram_account', 'idx_channels_workspace_telegram_bot']) {
     assert.ok(indexes.has(name), `missing index ${name}`);
   }
   database.close();
+
+  const editedDatabase = new DatabaseSync(':memory:');
+  editedDatabase.exec(initial);
+  editedDatabase.exec(identity);
+  editedDatabase.exec(whatsapp);
+  editedDatabase.prepare("UPDATE channels SET name='Edited WhatsApp' WHERE channel_id='wa-main'").run();
+  editedDatabase.exec(multichannel);
+  assert.equal(editedDatabase.prepare("SELECT name FROM channels WHERE channel_id='wa-main'").get().name, 'Edited WhatsApp');
+  editedDatabase.close();
 });
 
 test('health is public with configured CORS and API routes reject missing auth', async () => {

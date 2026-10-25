@@ -8,7 +8,8 @@ The backend uses Cloudflare Workers, D1, a scheduled D1 outbox, and a Durable Ob
 - Google OAuth uses Authorization Code + PKCE + state + nonce. Google ID-token signatures are verified against Google's rotating JWK set with Web Crypto; issuer, audience, expiry, nonce, stable `sub`, and verified email are checked.
 - The browser receives only a random `__Host-helixcer_session` cookie. It is host-only, `HttpOnly`, `Secure`, and `SameSite=Lax`; D1 stores only its SHA-256 hash.
 - Durable Object instances and broadcasts are keyed by `workspace_id`. Each socket carries only server-internal session metadata and is revalidated before events or keepalive replies; logout, disablement, and role changes disconnect affected sockets.
-- WhatsApp, Telegram, and generic provider webhooks retain independent signature/token verification and do not depend on an agent session.
+- WhatsApp, Telegram, and Instagram webhooks retain independent signature/token verification and do not depend on an agent session.
+- Each workspace can own any number of provider connections. Their credentials are encrypted in D1 with AES-256-GCM under one Worker master secret; the browser can replace a secret but can never read one back.
 - Failed outbound messages use the D1 outbox and a one-minute scheduled retry with exponential backoff.
 
 The initial migration seeds one empty workspace, never an administrator. On the first successful Google login, an owner membership is created only if there are no memberships and the verified Google email exactly matches `BOOTSTRAP_OWNER_EMAIL`. Future users require an invitation.
@@ -31,7 +32,10 @@ npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put GOOGLE_REDIRECT_URI
 npx wrangler secret put BOOTSTRAP_OWNER_EMAIL
+npx wrangler secret put CHANNEL_CREDENTIALS_KEY
 ```
+
+`CHANNEL_CREDENTIALS_KEY` must be at least 32 bytes of high-entropy material and must remain stable across deployments. It is the only Worker secret used to protect managed channel credentials; do not create `WA_MAIN_*`, per-channel, or per-workspace bindings. Losing this key makes the encrypted provider credentials unreadable, so keep a protected backup.
 
 `ADMIN_TOKEN` is optional emergency recovery access. It is ignored unless `RECOVERY_MODE=true`, is accepted only through `Authorization: Bearer` or `X-Admin-Token`, and should be rotated or deleted immediately after the incident. Normal browser use relies on the session cookie. There is no email-override header and no URL-token authentication.
 
@@ -59,6 +63,8 @@ npx wrangler deploy
 ```
 
 Migration `0002_identity_and_workspaces.sql` is additive. It preserves existing inbox rows, assigns them to `ws_default`, and creates identity/session/team tables. It does not seed a person or billing data.
+
+Migration `0004_multichannel_credentials.sql` adds a logical `provider_type` and the encrypted `channel_credentials` vault. Instagram is stored physically as `generic_http` only to respect the original table check constraint; runtime routing always uses `provider_type`. The migration deletes `wa-main` only when it is still the exact, unreferenced placeholder inserted by migration 0003. Edited or used rows are preserved.
 
 Deploy the Worker on its `workers.dev` hostname, then deploy the repository's `gateway/` Pages Function with an `API` service binding to this Worker. Associate the Pages project with `api.chat.helixcer.com` and, at the external DNS provider, point only the `api.chat` CNAME to `helixcer-chat-gateway.pages.dev`. Keep the GitHub Pages dashboard at `chat.helixcer.com` and list only the dashboard origin in `ALLOWED_ORIGINS`. The checked-in frontend uses the branded API hostname; browsers never call the `workers.dev` hostname directly because its host-only `SameSite=Lax` cookie would be cross-site.
 
@@ -90,6 +96,8 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `GET /health`
 - `GET /api/bootstrap`
 - `GET|POST /api/channels`
+- `PATCH|DELETE /api/channels/:channelId`
+- `POST /api/channels/:channelId/verify`
 - `GET /api/conversations`
 - `PATCH /api/conversations/:id`
 - `GET|POST /api/conversations/:id/messages`
@@ -98,44 +106,29 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `GET /api/realtime` (WebSocket)
 - `GET|POST /webhooks/whatsapp/:channelId`
 - `POST /webhooks/telegram/:channelId`
+- `GET|POST /webhooks/instagram/:channelId`
+- `GET|POST /webhooks/instagram-app/:appId`
 - `POST /webhooks/generic/:channelId`
 
 Every authenticated business-data query includes the session's `workspace_id`. Provider webhook routing resolves a globally unique channel and carries its workspace through storage and realtime delivery.
 
-## Channel secrets
+## Managed channel connections
 
-The current product exposes one WhatsApp Cloud API channel: `wa-main`, with secret prefix `WA_MAIN`.
-Store all provider values as encrypted Worker secrets:
+Owners and administrators create connections through `POST /api/channels` and edit them through `PATCH /api/channels/:channelId`. A PATCH keeps every omitted or blank credential unchanged. API responses expose only non-secret configuration, credential-presence booleans, verification timestamps, and provider identity metadata. Decrypted values exist only for the provider call that needs them.
 
-```sh
-npx wrangler secret put WA_MAIN_ACCESS_TOKEN
-npx wrangler secret put WA_MAIN_PHONE_NUMBER_ID
-npx wrangler secret put WA_MAIN_VERIFY_TOKEN
-npx wrangler secret put WA_MAIN_APP_SECRET
-```
+Provider payloads use these fields:
 
-Use a production System User access token with `whatsapp_business_messaging` and
-`whatsapp_business_management`, the Meta Phone Number ID, the Meta App Secret, and a random verify token.
-The public callback is:
+- WhatsApp Cloud: `config` contains `wabaId`, `phoneNumberId`, and optional `apiVersion`; `credentials` contains `accessToken`, `appSecret`, and `verifyToken`. Verification lists the WABA's phone numbers and requires the configured Phone Number ID to belong to that WABA.
+- Telegram Bot: `config` is empty; `credentials` contains `botToken` and `webhookSecret`. Verification calls `getMe` and registers the channel-specific webhook with Telegram.
+- Instagram Messaging with Instagram Login: `config` contains `instagramAccountId` and may contain `username`, `appId`, `apiVersion`, and `authMode` (`instagram_login`); `credentials` contains `accessToken`, `appSecret`, and `verifyToken`. A Facebook Page ID is not required.
 
-```text
-https://api.chat.helixcer.com/webhooks/whatsapp/wa-main
-```
+Meta connections default to Graph API `v26.0`. `GET /api/channels` returns the provider callback as `setup.callbackPath`. WhatsApp and Telegram use channel-specific paths. Instagram connections with an `appId` share `/webhooks/instagram-app/:appId`, matching Meta's app-level webhook model; connections without an `appId` retain `/webhooks/instagram/:channelId` for backward compatibility. The shared handler resolves every entry by `appId` plus `instagramAccountId`, rejects missing or ambiguous mappings before storage, and validates the signature with each resolved connection's stored App Secret. Its verification GET matches the supplied verify token across enabled connections for that app and marks every match verified. WhatsApp and Instagram validate `X-Hub-Signature-256`; Telegram validates `X-Telegram-Bot-Api-Secret-Token`.
 
-After saving secrets, use **Check Meta connection** in the dashboard. In Meta, verify the callback with the
-same verify token, subscribe the app to the WABA `messages` webhook field, and confirm the dashboard changes
-to **Live**. The Worker pins Graph API v25.0 by default.
+Credential rows are encrypted independently with a random nonce and authenticated workspace/channel/field context. Listing channels checks only which credential field rows exist and does not decrypt them. Audit entries contain only the names of credential fields changed, never their values.
 
-Free-form replies are subject to WhatsApp's 24-hour customer-service window. An approved template is required
-outside that window; template authoring is intentionally not part of this text-only first release.
+Free-form WhatsApp replies remain subject to Meta's customer-service window, and Instagram messaging remains subject to Meta's allowed messaging window and permissions. Template authoring is outside this text-only release.
 
-Telegram, Generic HTTP, and Web Chat connector code remains dormant for future expansion and is not exposed
-by the current WhatsApp-only product UI. Generic connector `config.allowedHosts` must still explicitly allow
-its HTTPS destination if that code is enabled in a later release.
-
-The current `ws_default` workspace retains simple prefixes such as `WA_MAIN` for compatibility. Any future non-default workspace automatically receives a workspace-derived prefix, so its administrators cannot select another workspace's provider-secret namespace.
-
-For example, a future workspace ID `ws_acme` and requested prefix `WA_MAIN` are stored as `WS_WS_ACME_WA_MAIN`; its access-token binding is therefore `WS_WS_ACME_WA_MAIN_ACCESS_TOKEN`. Provision these bindings as part of the future workspace-creation service, not through a tenant-facing secret-name field.
+Legacy Generic HTTP and Web Chat paths remain for compatibility. Their old environment-secret resolver is isolated to `generic_http`; managed WhatsApp, Telegram, and Instagram code reads only encrypted D1 credentials and can never fall back to `WA_*`, `BOT_*`, or other per-channel environment variables.
 
 The Worker enforces both per-client and global OAuth-start limits in a Durable Object before writing D1. An additional Cloudflare edge rule for `/auth/google/start` is defense in depth when available on the selected plan. OAuth state rows expire after ten minutes, a new attempt replaces the same browser's prior state, and scheduled cleanup removes expired rows.
 

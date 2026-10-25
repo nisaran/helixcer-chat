@@ -66,6 +66,8 @@ async function testDatabase() {
   const database = new DatabaseSync(':memory:');
   database.exec(await readFile(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0002_identity_and_workspaces.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0003_whatsapp_channel.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0004_multichannel_credentials.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -539,4 +541,306 @@ test('cookie writes, logout, and realtime require the exact browser origin', asy
   }), env);
   assert.equal(logoutResponse.status, 200);
   database.close();
+});
+
+test('managed channel CRUD encrypts credentials, preserves blank secrets, and keeps responses secret-free', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const accessToken = 'whatsapp-access-token-value-1234567890';
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      channelId: 'wa-sales', name: 'Sales WhatsApp', connectorType: 'whatsapp_cloud', enabled: true,
+      config: { wabaId: '123456789012345', phoneNumberId: '123456789012346', apiVersion: 'v26.0' },
+      credentials: { accessToken, appSecret: '1234567890abcdef1234567890abcdef', verifyToken: 'verify-token-value' }
+    })
+  }), env);
+  assert.equal(created.status, 201);
+  const channelRow = database.prepare("SELECT connector_type,provider_type,secret_key FROM channels WHERE channel_id='wa-sales'").get();
+  assert.equal(channelRow.connector_type, 'whatsapp_cloud');
+  assert.equal(channelRow.provider_type, 'whatsapp_cloud');
+  assert.equal(channelRow.secret_key, 'DATABASE');
+  const storedAccessToken = database.prepare(`SELECT encrypted_value FROM channel_credentials
+    WHERE channel_id='wa-sales' AND credential_key='accessToken'`).get().encrypted_value;
+  assert.match(storedAccessToken, /^v1\./);
+  assert.equal(storedAccessToken.includes(accessToken), false);
+
+  const listedResponse = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  assert.equal(listedResponse.status, 200);
+  const listedRaw = await listedResponse.text();
+  assert.equal(listedRaw.includes(accessToken), false);
+  const listed = JSON.parse(listedRaw).items.find(item => item.channelId === 'wa-sales');
+  assert.equal(listed.config.wabaId, '123456789012345');
+  assert.equal(listed.setup.credentialsPresent, true);
+  assert.deepEqual(listed.setup.credentialFields, { accessToken: true, verifyToken: true, appSecret: true });
+
+  const duplicateWhatsApp = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId: 'wa-duplicate', name: 'Duplicate WhatsApp', connectorType: 'whatsapp_cloud',
+      config: { wabaId: '999999999999999', phoneNumberId: '123456789012346', apiVersion: 'v26.0' } })
+  }), env);
+  assert.equal(duplicateWhatsApp.status, 409);
+
+  const unverifiedContact = await handleRequest(new Request('https://api.chat.helixcer.com/api/contacts', {
+    method: 'POST', headers,
+    body: JSON.stringify({ displayName: 'Not yet', channelId: 'wa-sales', channelProfileId: '+91 98765 43210' })
+  }), env);
+  assert.equal(unverifiedContact.status, 409);
+
+  const patched = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-sales', {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ name: 'Sales WhatsApp updated', connectorType: 'whatsapp_cloud',
+      config: { wabaId: '123456789012345', phoneNumberId: '123456789012346', apiVersion: 'v26.0' },
+      credentials: { accessToken: '' } })
+  }), env);
+  assert.equal(patched.status, 200);
+  assert.equal(database.prepare(`SELECT encrypted_value FROM channel_credentials
+    WHERE channel_id='wa-sales' AND credential_key='accessToken'`).get().encrypted_value, storedAccessToken);
+
+  const instagram = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      channelId: 'instagram-main', name: 'Instagram', connectorType: 'instagram',
+      config: { instagramAccountId: '17841400000000000', username: 'helixcer', appId: '123456789012345',
+        apiVersion: 'v26.0', authMode: 'instagram_login' },
+      credentials: { accessToken: 'instagram-access-token-value-123456',
+        appSecret: 'abcdef1234567890abcdef1234567890', verifyToken: 'instagram-verify-token' }
+    })
+  }), env);
+  assert.equal(instagram.status, 201);
+  const instagramRow = database.prepare("SELECT connector_type,provider_type FROM channels WHERE channel_id='instagram-main'").get();
+  assert.equal(instagramRow.connector_type, 'generic_http');
+  assert.equal(instagramRow.provider_type, 'instagram');
+  const duplicateInstagram = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId: 'instagram-duplicate', name: 'Duplicate Instagram', connectorType: 'instagram',
+      config: { instagramAccountId: '17841400000000000', apiVersion: 'v26.0' } })
+  }), env);
+  assert.equal(duplicateInstagram.status, 409);
+  const removed = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/instagram-main', {
+    method: 'DELETE', headers
+  }), env);
+  assert.equal(removed.status, 200);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channel_credentials WHERE channel_id='instagram-main'").get().count, 0);
+  database.close();
+});
+
+test('Instagram verification uses /me and exposes sanitized credential errors', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const createInstagram = (channelId, accountId, accessToken) => handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId, name: channelId, connectorType: 'instagram',
+      config: { instagramAccountId: accountId, apiVersion: 'v26.0', authMode: 'instagram_login' },
+      credentials: { accessToken, appSecret: 'abcdef1234567890abcdef1234567890', verifyToken: 'instagram-verify-token' } })
+  }), env);
+  assert.equal((await createInstagram('ig-valid', '17841400000000001', 'valid-instagram-access-token-123456')).status, 201);
+  assert.equal((await createInstagram('ig-invalid', '17841400000000002', 'invalid-instagram-access-token-123')).status, 201);
+  const originalFetch = globalThis.fetch;
+  const providerCalls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    providerCalls.push(url);
+    if (url.pathname !== '/v26.0/me') return new Response('{}', { status: 404 });
+    if (url.searchParams.get('fields') !== 'user_id,username') return new Response('{}', { status: 400 });
+    const authorization = new Headers(init.headers).get('Authorization') || '';
+    if (authorization.includes('invalid-instagram')) {
+      return new Response(JSON.stringify({ error: { message: 'Invalid OAuth access token.' } }), {
+        status: 401, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return new Response(JSON.stringify({ user_id: '17841400000000001', username: 'helixcer' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    });
+  };
+  try {
+    const verified = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/ig-valid/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(verified.status, 200);
+    assert.equal(providerCalls[0].origin, 'https://graph.instagram.com');
+    assert.equal(providerCalls[0].pathname, '/v26.0/me');
+    assert.equal(database.prepare("SELECT json_extract(config_json,'$.verifiedProviderId') AS id FROM channels WHERE channel_id='ig-valid'").get().id,
+      '17841400000000001');
+
+    const rejected = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/ig-invalid/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(rejected.status, 422);
+    assert.match((await rejected.json()).error, /Invalid OAuth access token/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('shared Instagram app webhook verifies all matches and routes each account fail-closed', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const appId = '123456789012345';
+  const appSecret = 'abcdef1234567890abcdef1234567890';
+  const verifyToken = 'shared-instagram-verify-token';
+  for (const [channelId, accountId] of [['ig-account-one', '17841400000000011'], ['ig-account-two', '17841400000000012']]) {
+    const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+      method: 'POST', headers,
+      body: JSON.stringify({ channelId, name: channelId, connectorType: 'instagram',
+        config: { instagramAccountId: accountId, appId, apiVersion: 'v26.0', authMode: 'instagram_login' },
+        credentials: { accessToken: `instagram-access-token-${channelId}`, appSecret, verifyToken } })
+    }), env);
+    assert.equal(created.status, 201);
+  }
+
+  const listed = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  for (const item of (await listed.json()).items.filter(item => item.connectorType === 'instagram')) {
+    assert.equal(item.setup.callbackPath, `/webhooks/instagram-app/${appId}`);
+  }
+
+  const handshake = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/instagram-app/${appId}?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(verifyToken)}&hub.challenge=challenge-123`), env);
+  assert.equal(handshake.status, 200);
+  assert.equal(await handshake.text(), 'challenge-123');
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM channels
+    WHERE provider_type='instagram' AND json_extract(config_json,'$.webhookVerifiedAt')<>''`).get().count, 2);
+
+  const payload = { object: 'instagram', entry: [
+    { id: '17841400000000011', messaging: [{ sender: { id: '5550001' }, recipient: { id: '17841400000000011' },
+      timestamp: 1761360000000, message: { mid: 'ig-app-message-one', text: 'First account' } }] },
+    { id: '17841400000000012', messaging: [{ sender: { id: '5550002' }, recipient: { id: '17841400000000012' },
+      timestamp: 1761360001000, message: { mid: 'ig-app-message-two', text: 'Second account' } }] }
+  ] };
+  const raw = JSON.stringify(payload);
+  const hmacKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(appSecret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const digest = await crypto.subtle.sign('HMAC', hmacKey, new TextEncoder().encode(raw));
+  const signature = `sha256=${Buffer.from(digest).toString('hex')}`;
+  const delivered = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/instagram-app/${appId}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature }, body: raw
+  }), env);
+  assert.equal(delivered.status, 200);
+  assert.deepEqual(await delivered.json(), { ok: true, received: 2, channels: 2 });
+  const routed = database.prepare(`SELECT channel_id,COUNT(*) AS count FROM messages
+    WHERE provider_message_id LIKE 'ig-app-message-%' GROUP BY channel_id ORDER BY channel_id`).all();
+  assert.equal(routed.length, 2);
+  assert.equal(routed[0].channel_id, 'ig-account-one');
+  assert.equal(routed[1].channel_id, 'ig-account-two');
+
+  const now = new Date().toISOString();
+  database.prepare("INSERT INTO workspaces (workspace_id,slug,name,created_at,updated_at) VALUES ('ws_ambiguous','ambiguous','Ambiguous',?,?)").run(now, now);
+  database.prepare(`INSERT INTO channels
+      (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+    VALUES ('ig-ambiguous','Ambiguous','generic_http','instagram',1,'["text"]',?,'DATABASE',?,?, 'ws_ambiguous')`)
+    .run(JSON.stringify({ instagramAccountId: '17841400000000011', appId, apiVersion: 'v26.0', authMode: 'instagram_login' }), now, now);
+  const singlePayload = JSON.stringify({ object: 'instagram', entry: [payload.entry[0]] });
+  const ambiguous = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/instagram-app/${appId}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature }, body: singlePayload
+  }), env);
+  assert.equal(ambiguous.status, 409);
+  database.close();
+});
+
+test('WhatsApp verification requires the phone number to belong to its WABA', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId: 'wa-verify', name: 'WhatsApp verify', connectorType: 'whatsapp_cloud',
+      config: { wabaId: '123456789012345', phoneNumberId: '123456789012346', apiVersion: 'v26.0' },
+      credentials: { accessToken: 'whatsapp-access-token-value-1234567890',
+        appSecret: '1234567890abcdef1234567890abcdef', verifyToken: 'verify-token-value' } })
+  }), env);
+  assert.equal(created.status, 201);
+  const originalFetch = globalThis.fetch;
+  let providerPhoneId = '999999999999999';
+  let providerUrl;
+  globalThis.fetch = async input => {
+    providerUrl = new URL(String(input));
+    return new Response(JSON.stringify({ data: [{ id: providerPhoneId, display_phone_number: '+91 98765 43210', verified_name: 'Helixcer' }] }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+  try {
+    const notOwned = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-verify/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(notOwned.status, 422);
+    assert.equal(providerUrl.origin, 'https://graph.facebook.com');
+    assert.equal(providerUrl.pathname, '/v26.0/123456789012345/phone_numbers');
+    providerPhoneId = '123456789012346';
+    const verified = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-verify/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(verified.status, 200);
+    assert.equal((await verified.json()).verifiedName, 'Helixcer');
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('Telegram bot identity is reserved before webhook registration', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  for (const [channelId, botToken] of [['telegram-one', '123456789:abcdefghijklmnopqrstuvwxyz_123456'],
+    ['telegram-two', '987654321:abcdefghijklmnopqrstuvwxyz_654321']]) {
+    const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+      method: 'POST', headers,
+      body: JSON.stringify({ channelId, name: channelId, connectorType: 'telegram', config: {},
+        credentials: { botToken, webhookSecret: `secret_${channelId.replace('-', '_')}` } })
+    }), env);
+    assert.equal(created.status, 201);
+  }
+  const originalFetch = globalThis.fetch;
+  let setWebhookCalls = 0;
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/getMe')) {
+      return new Response(JSON.stringify({ ok: true, result: { id: 777000, first_name: 'Shared', username: 'shared_bot' } }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (url.pathname.endsWith('/setWebhook')) {
+      setWebhookCalls++;
+      return new Response(JSON.stringify({ ok: true, result: true }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response('{}', { status: 404 });
+  };
+  try {
+    const first = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/telegram-one/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(first.status, 200);
+    const duplicate = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/telegram-two/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(duplicate.status, 409);
+    assert.equal(setWebhookCalls, 1);
+    assert.equal(database.prepare("SELECT json_extract(config_json,'$.verifiedProviderId') AS id FROM channels WHERE channel_id='telegram-one'").get().id,
+      '777000');
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
 });

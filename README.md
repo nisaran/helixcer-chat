@@ -9,7 +9,8 @@ Helixcer Chat is a zero-monthly-cost omnichannel inbox designed for GitHub Pages
 - Team invitations, member enable/disable controls, and protection against removing the last active Owner.
 - REST API backed by indexed D1 tables for contacts, identities, conversations, messages, webhook deduplication, retries, and audit history.
 - Realtime browser refresh through a hibernatable Durable Object WebSocket.
-- WhatsApp Cloud API v25.0 webhooks with Meta signature verification, phone-number binding, inbound text, outbound text, delivery status updates, and encrypted Worker secrets.
+- Any number of WhatsApp Cloud, Telegram Bot, and Instagram Messaging connections per workspace, with provider verification, signed/token-protected webhooks, and inbound/outbound text.
+- Provider credentials encrypted in D1 under one Cloudflare Worker master secret; no per-channel environment bindings or secrets are exposed to the browser.
 - D1 outbox with scheduled exponential-backoff retries. No paid queue is required.
 
 ## Repository layout
@@ -45,11 +46,11 @@ The Worker setup is documented in [`worker/README.md`](worker/README.md). In sum
 1. Create the `helixcer-chat-v2` D1 database and put its ID in `wrangler.toml`.
 2. Deploy `gateway/` as the `helixcer-chat-gateway` Pages project, associate `api.chat.helixcer.com`, and point only that external-DNS subdomain to `helixcer-chat-gateway.pages.dev`. The gateway calls the Worker over a service binding; this same-site hostname is required for the secure login cookie used by `chat.helixcer.com`.
 3. Create a Google Web OAuth client with the exact callback `https://api.chat.helixcer.com/auth/google/callback`.
-4. Configure Google OAuth secrets and set `BOOTSTRAP_OWNER_EMAIL` to the verified Google email that may claim the first Owner membership.
+4. Configure Google OAuth secrets, set `BOOTSTRAP_OWNER_EMAIL` to the verified Google email that may claim the first Owner membership, and create one strong `CHANNEL_CREDENTIALS_KEY` Worker secret.
 5. Export the current D1 database, apply all migrations, deploy the Worker, and deploy the Pages gateway.
 6. Sign in with the configured owner email and verify the inbox, team roles, and realtime connection before publishing the updated GitHub Pages frontend.
-7. Add the WhatsApp Cloud API credentials as encrypted Worker secrets and verify the number from the dashboard.
-8. Subscribe Meta to `https://api.chat.helixcer.com/webhooks/whatsapp/wa-main`, then confirm the dashboard reports **Live** before sending production messages.
+7. Add each WhatsApp, Telegram, or Instagram connection in the dashboard. The Worker encrypts its credentials in D1; do not create `WA_MAIN_*` or other per-channel Worker secrets.
+8. Verify the connection, configure the exact channel-specific callback shown in the dashboard when the provider requires a manual webhook setup, and confirm it reports **Live** before sending production messages. Managed Meta calls default to Graph API v26.0.
 
 Never place Google credentials, provider tokens, signing secrets, the bootstrap owner email, or a recovery token in GitHub.
 
@@ -63,5 +64,5 @@ The application is intended to remain on GitHub Pages and Cloudflare free plans.
 
 ## Safe rollout and rollback
 
-Before migration, export D1 and record the currently deployed Worker version plus the current GitHub Pages commit. Deploy and verify the Worker/custom domain first, then publish the frontend, and switch provider callbacks last. If application behavior regresses, restore the prior Worker version and Pages commit. Migration `0002` is additive and remains compatible with the previous Worker because every new business-table column has a default; restore the D1 export only if data itself was corrupted.
+Before migration, export D1 and record the currently deployed Worker version plus the current GitHub Pages commit. Deploy and verify the Worker/custom domain first, then publish the frontend, and switch provider callbacks last. If application behavior regresses, restore the prior Worker version and Pages commit. Migration `0004` adds the encrypted credential vault and removes only the untouched, unreferenced `wa-main` placeholder; restore the D1 export if this schema migration itself must be rolled back or if data was corrupted.
 
