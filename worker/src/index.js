@@ -12,11 +12,14 @@ import {
   updateMembership
 } from './auth.js';
 
-const API_VERSION = '2026-10-25-inbound-first';
+const API_VERSION = '2026-10-25-template-api';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
+const MAX_EXTERNAL_JSON_BODY = 131072;
 const MAX_CREDENTIAL_LENGTH = 4096;
+const EXTERNAL_API_OPERATION = 'whatsapp.template.send';
+const EXTERNAL_API_IDEMPOTENCY_DAYS = 7;
 const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram']);
 const CONNECTOR_DEFINITIONS = {
   whatsapp_cloud: {
@@ -41,7 +44,7 @@ export default {
     return handleRequest(request, env, ctx);
   },
   scheduled(_event, env, ctx) {
-    ctx.waitUntil(Promise.all([retryDueMessages(env), cleanupExpiredAuth(env)]));
+    ctx.waitUntil(Promise.all([retryDueMessages(env), cleanupExpiredAuth(env), cleanupExpiredExternalRequests(env)]));
   }
 };
 
@@ -53,6 +56,40 @@ export class InboxHub {
 
   async fetch(request) {
     const url = new URL(request.url);
+    if (request.method === 'POST' && url.pathname === '/external-api-rate-limit') {
+      if (!this.state.storage) return json({ ok: false, error: 'Rate limiter unavailable.' }, 503);
+      const input = await request.json().catch(() => ({}));
+      const keyHash = String(input.keyHash || '');
+      if (!/^[a-f0-9]{64}$/.test(keyHash)) return json({ ok: false, error: 'Invalid rate-limit key.' }, 400);
+      const windowSeconds = clampInt(this.env.EXTERNAL_API_RATE_LIMIT_WINDOW_SECONDS, 1, 3600, 60);
+      const perKeyLimit = clampInt(this.env.EXTERNAL_API_RATE_LIMIT_PER_KEY, 1, 10000, 60);
+      const workspaceLimit = clampInt(this.env.EXTERNAL_API_RATE_LIMIT_PER_WORKSPACE, perKeyLimit, 100000, 300);
+      const now = Date.now();
+      const windowMs = windowSeconds * 1000;
+      const windowStart = Math.floor(now / windowMs) * windowMs;
+      const result = await this.state.storage.transaction(async storage => {
+        const stored = await storage.get('external-api-rate-window');
+        const record = stored?.windowStart === windowStart ? stored : { windowStart, total: 0, keys: {} };
+        const keyCount = Number(record.keys?.[keyHash] || 0);
+        const retryAfter = Math.max(1, Math.ceil((windowStart + windowMs - now) / 1000));
+        if (record.total >= workspaceLimit || keyCount >= perKeyLimit) {
+          return { allowed: false, retryAfter, remaining: 0, perKeyLimit };
+        }
+        record.total++;
+        record.keys[keyHash] = keyCount + 1;
+        await storage.put('external-api-rate-window', record);
+        return { allowed: true, retryAfter, remaining: Math.max(0, perKeyLimit - keyCount - 1), perKeyLimit };
+      });
+      return new Response(null, {
+        status: result.allowed ? 204 : 429,
+        headers: {
+          'Cache-Control': 'no-store',
+          'X-RateLimit-Limit': String(result.perKeyLimit),
+          'X-RateLimit-Remaining': String(result.remaining),
+          ...(result.allowed ? {} : { 'Retry-After': String(result.retryAfter) })
+        }
+      });
+    }
     if (request.method === 'POST' && url.pathname === '/oauth-rate-limit') {
       if (!this.state.storage) return json({ ok: false, error: 'Rate limiter unavailable.' }, 503);
       const clientHash = (await request.text()).trim();
@@ -152,6 +189,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
   const url = new URL(request.url);
   const cors = corsHeaders(request.headers.get('Origin') || '', env.ALLOWED_ORIGINS || '');
   if (request.method === 'OPTIONS') {
+    if (url.pathname.startsWith('/api/v1/')) {
+      return json({ ok: false, error: { code: 'server_to_server_only', message: 'This API does not accept browser CORS requests.' } }, 405);
+    }
     if (!cors['Access-Control-Allow-Origin']) return new Response(null, { status: 403 });
     return new Response(null, { status: 204, headers: cors });
   }
@@ -184,6 +224,8 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (instagramMatch) return await handleInstagramWebhook(request, env, decodeURIComponent(instagramMatch[1]));
     const genericMatch = url.pathname.match(/^\/webhooks\/generic\/([^/]+)$/);
     if (genericMatch && request.method === 'POST') return await handleGenericWebhook(request, env, decodeURIComponent(genericMatch[1]));
+
+    if (url.pathname.startsWith('/api/v1/')) return await handleExternalApi(request, env, ctx, url);
 
     if (!url.pathname.startsWith('/api/')) return withCors(json({ ok: false, error: 'Not found.' }, 404), cors);
     const mutation = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method);
@@ -292,6 +334,19 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       await broadcast(env, workspaceId, { type: 'bootstrap.changed' });
       return withCors(json(result, 201), cors);
     }
+    if (url.pathname === '/api/developer/api-keys' && request.method === 'GET') {
+      requireRole(principal, 'admin');
+      return withCors(json({ items: await listApiKeys(env, workspaceId) }), cors);
+    }
+    if (url.pathname === '/api/developer/api-keys' && request.method === 'POST') {
+      requireRole(principal, 'admin');
+      return withCors(json(await createApiKey(env, workspaceId, principal, await readJson(request)), 201), cors);
+    }
+    const apiKeyMatch = url.pathname.match(/^\/api\/developer\/api-keys\/([^/]+)$/);
+    if (apiKeyMatch && request.method === 'DELETE') {
+      requireRole(principal, 'admin');
+      return withCors(json(await revokeApiKey(env, workspaceId, principal, decodeURIComponent(apiKeyMatch[1]))), cors);
+    }
     if (url.pathname === '/api/team' && request.method === 'GET') {
       return withCors(json(await listTeam(env, principal)), cors);
     }
@@ -319,6 +374,489 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (status >= 500) console.error('request_failed', { path: url.pathname, status, message: error.message });
     return withCors(json({ ok: false, error: status >= 500 ? 'The service could not complete the request.' : error.message }, status), cors);
   }
+}
+
+async function listApiKeys(env, workspaceId) {
+  const result = await env.DB.prepare(`SELECT api_key_id,name,key_prefix,scopes_json,allowed_channel_ids_json,status,
+      expires_at,last_used_at,created_at,updated_at,revoked_at
+    FROM api_keys WHERE workspace_id=?1 ORDER BY created_at DESC`).bind(workspaceId).all();
+  return (result.results || []).map(publicApiKeyView);
+}
+
+async function createApiKey(env, workspaceId, principal, payload) {
+  const name = cleanRequired(payload?.name, 'API key name', 120);
+  const suppliedChannels = payload?.allowedChannelIds ?? [];
+  if (!Array.isArray(suppliedChannels) || suppliedChannels.length > 50) {
+    throw httpError(400, 'Allowed channel IDs must be an array with no more than 50 items.');
+  }
+  const allowedChannelIds = [...new Set(suppliedChannels.map(value => cleanId(value, 'Channel ID')))];
+  for (const channelId of allowedChannelIds) {
+    const channel = await getChannel(env, channelId, 'whatsapp_cloud', workspaceId);
+    if (!channel) throw httpError(400, 'An allowed WhatsApp channel was not found in this workspace.');
+  }
+  let expiresAt = null;
+  if (payload?.expiresAt) {
+    const expires = new Date(String(payload.expiresAt));
+    if (Number.isNaN(expires.valueOf()) || expires <= new Date()) throw httpError(400, 'API key expiry must be a future date.');
+    expiresAt = expires.toISOString();
+  }
+  const apiKeyId = crypto.randomUUID();
+  const publicId = base64UrlEncode(crypto.getRandomValues(new Uint8Array(9)));
+  const secret = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+  const keyPrefix = `hxc_live_${publicId}`;
+  const apiKey = `${keyPrefix}.${secret}`;
+  const now = new Date().toISOString();
+  await env.DB.prepare(`INSERT INTO api_keys
+      (api_key_id,workspace_id,name,key_prefix,secret_hash,scopes_json,allowed_channel_ids_json,status,
+       expires_at,created_by_user_id,created_at,updated_at)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,'active',?8,?9,?10,?10)`)
+    .bind(apiKeyId, workspaceId, name, keyPrefix, await hashText(apiKey),
+      JSON.stringify(['whatsapp:template:send', 'messages:read']), JSON.stringify(allowedChannelIds),
+      expiresAt, principal.user.userId || '', now).run();
+  await audit(env, principal, 'create', 'api_key', apiKeyId, { keyPrefix, allowedChannelIds });
+  return {
+    ok: true,
+    apiKey,
+    item: publicApiKeyView({
+      api_key_id: apiKeyId, name, key_prefix: keyPrefix,
+      scopes_json: JSON.stringify(['whatsapp:template:send', 'messages:read']),
+      allowed_channel_ids_json: JSON.stringify(allowedChannelIds), status: 'active', expires_at: expiresAt,
+      last_used_at: null, created_at: now, updated_at: now, revoked_at: null
+    })
+  };
+}
+
+async function revokeApiKey(env, workspaceId, principal, apiKeyId) {
+  const id = cleanId(apiKeyId, 'API key ID');
+  const now = new Date().toISOString();
+  const result = await env.DB.prepare(`UPDATE api_keys SET status='revoked',revoked_at=?3,updated_at=?3
+    WHERE api_key_id=?1 AND workspace_id=?2 AND status='active'`).bind(id, workspaceId, now).run();
+  if (!result.meta?.changes) throw httpError(404, 'Active API key not found.');
+  await audit(env, principal, 'revoke', 'api_key', id, {});
+  return { ok: true, apiKeyId: id, status: 'revoked', revokedAt: now };
+}
+
+function publicApiKeyView(row) {
+  return {
+    apiKeyId: row.api_key_id,
+    name: row.name,
+    keyPrefix: row.key_prefix,
+    scopes: safeJsonParse(row.scopes_json, []),
+    allowedChannelIds: safeJsonParse(row.allowed_channel_ids_json, []),
+    status: row.status,
+    expiresAt: row.expires_at || '',
+    lastUsedAt: row.last_used_at || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    revokedAt: row.revoked_at || ''
+  };
+}
+
+async function handleExternalApi(request, env, ctx, url) {
+  const requestId = crypto.randomUUID();
+  try {
+    if (request.headers.get('Origin')) {
+      throw apiError(403, 'server_to_server_only', 'This API is for server-to-server requests and does not accept browser Origin headers.');
+    }
+    const apiPrincipal = await authenticateApiKey(request, env);
+    const rateLimited = await enforceExternalApiRateLimit(env, apiPrincipal, requestId);
+    if (rateLimited) return rateLimited;
+
+    if (url.pathname === '/api/v1/whatsapp/template-messages' && request.method === 'POST') {
+      requireApiScope(apiPrincipal, 'whatsapp:template:send');
+      const response = await createExternalTemplateMessage(request, env, ctx, url, apiPrincipal, requestId);
+      response.headers.set('X-Request-Id', requestId);
+      return response;
+    }
+    const statusMatch = url.pathname.match(/^\/api\/v1\/messages\/([^/]+)$/);
+    if (statusMatch && request.method === 'GET') {
+      requireApiScope(apiPrincipal, 'messages:read');
+      const item = await getExternalMessageStatus(env, apiPrincipal, decodeURIComponent(statusMatch[1]), url);
+      const response = json({ ok: true, ...item, requestId });
+      response.headers.set('X-Request-Id', requestId);
+      return response;
+    }
+    throw apiError(404, 'route_not_found', 'API route not found.');
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) console.error('external_api_request_failed', { requestId, path: url.pathname, status, message: cleanError(error) });
+    const response = json({
+      ok: false,
+      error: {
+        code: error?.code || (status >= 500 ? 'internal_error' : 'invalid_request'),
+        message: status >= 500 ? 'The service could not complete the request.' : cleanError(error),
+        requestId
+      }
+    }, status);
+    response.headers.set('X-Request-Id', requestId);
+    if (error?.retryAfter) response.headers.set('Retry-After', String(error.retryAfter));
+    return response;
+  }
+}
+
+async function authenticateApiKey(request, env) {
+  const authorization = request.headers.get('Authorization') || '';
+  const match = authorization.match(/^Bearer (hxc_live_([A-Za-z0-9_-]{8,32})\.([A-Za-z0-9_-]{32,128}))$/);
+  if (!match) throw apiError(401, 'invalid_api_key', 'A valid Bearer API key is required.');
+  const token = match[1];
+  const keyPrefix = `hxc_live_${match[2]}`;
+  const row = await env.DB.prepare(`SELECT api_key_id,workspace_id,key_prefix,secret_hash,scopes_json,
+      allowed_channel_ids_json,status,expires_at
+    FROM api_keys WHERE key_prefix=?1 LIMIT 1`).bind(keyPrefix).first();
+  const suppliedHash = await hashText(token);
+  if (!row || !timingSafeEqual(row.secret_hash || '', suppliedHash) || row.status !== 'active' ||
+      (row.expires_at && row.expires_at <= new Date().toISOString())) {
+    throw apiError(401, 'invalid_api_key', 'The API key is invalid, expired, or revoked.');
+  }
+  await env.DB.prepare('UPDATE api_keys SET last_used_at=?2,updated_at=?2 WHERE api_key_id=?1')
+    .bind(row.api_key_id, new Date().toISOString()).run();
+  return {
+    apiKeyId: row.api_key_id,
+    workspaceId: row.workspace_id,
+    keyPrefix: row.key_prefix,
+    keyHash: suppliedHash,
+    scopes: new Set(safeJsonParse(row.scopes_json, [])),
+    allowedChannelIds: new Set(safeJsonParse(row.allowed_channel_ids_json, []))
+  };
+}
+
+function requireApiScope(principal, scope) {
+  if (!principal.scopes.has(scope)) throw apiError(403, 'insufficient_scope', `The API key requires the ${scope} scope.`);
+}
+
+async function enforceExternalApiRateLimit(env, principal, requestId) {
+  if (!env.INBOX_HUB) throw apiError(503, 'rate_limiter_unavailable', 'The API rate limiter is temporarily unavailable.');
+  let response;
+  try {
+    response = await inboxHub(env, principal.workspaceId).fetch('https://hub.internal/external-api-rate-limit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keyHash: principal.keyHash })
+    });
+  } catch {
+    throw apiError(503, 'rate_limiter_unavailable', 'The API rate limiter is temporarily unavailable.');
+  }
+  if (response.status === 204) return null;
+  if (response.status === 429) {
+    const retryAfter = response.headers.get('Retry-After') || '60';
+    const limited = json({ ok: false, error: {
+      code: 'rate_limited', message: 'Too many API requests. Retry after the indicated delay.', requestId
+    } }, 429);
+    limited.headers.set('X-Request-Id', requestId);
+    limited.headers.set('Retry-After', retryAfter);
+    limited.headers.set('X-RateLimit-Limit', response.headers.get('X-RateLimit-Limit') || '60');
+    limited.headers.set('X-RateLimit-Remaining', '0');
+    return limited;
+  }
+  throw apiError(503, 'rate_limiter_unavailable', 'The API rate limiter is temporarily unavailable.');
+}
+
+async function createExternalTemplateMessage(request, env, ctx, url, principal, requestId) {
+  const idempotencyKey = String(request.headers.get('Idempotency-Key') || '');
+  if (!/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) {
+    throw apiError(400, 'invalid_idempotency_key', 'Idempotency-Key is required and must contain 8 to 128 safe ASCII characters.');
+  }
+  const raw = await readExternalJson(request);
+  const input = validateWhatsAppTemplateRequest(raw);
+  const requestHash = await hashText(stableStringify(input));
+  const idempotencyHash = await hashText(idempotencyKey);
+  const existing = await findExternalRequest(env, principal.apiKeyId, idempotencyHash);
+  if (existing) {
+    if (!timingSafeEqual(existing.request_hash, requestHash)) {
+      throw apiError(409, 'idempotency_conflict', 'This Idempotency-Key was already used with a different request.');
+    }
+    return externalMessageResponse(await getExternalMessageStatus(env, principal, existing.message_id, url), requestId, true);
+  }
+  await env.DB.prepare(`DELETE FROM external_api_requests
+    WHERE api_key_id=?1 AND operation=?2 AND idempotency_key_hash=?3 AND expires_at<=?4`)
+    .bind(principal.apiKeyId, EXTERNAL_API_OPERATION, idempotencyHash, new Date().toISOString()).run();
+
+  if (principal.allowedChannelIds.size && !principal.allowedChannelIds.has(input.channelId)) {
+    throw apiError(404, 'channel_not_found', 'WhatsApp channel not found.');
+  }
+  const channel = await getChannel(env, input.channelId, 'whatsapp_cloud', principal.workspaceId);
+  if (!channel) throw apiError(404, 'channel_not_found', 'WhatsApp channel not found.');
+  if (!channel.config?.phoneNumberId) throw apiError(409, 'channel_not_ready', 'The WhatsApp channel is missing its Phone Number ID.');
+  const accessToken = await env.DB.prepare(`SELECT 1 FROM channel_credentials
+    WHERE workspace_id=?1 AND channel_id=?2 AND credential_key='accessToken'`).bind(principal.workspaceId, channel.channelId).first();
+  if (!accessToken) throw apiError(409, 'channel_not_ready', 'The WhatsApp channel is missing its access token.');
+
+  const now = new Date().toISOString();
+  const identity = await ensureWhatsAppConversation(env, principal.workspaceId, channel, input.to, input.contact?.displayName || '', now);
+  const messageId = crypto.randomUUID();
+  const externalRequestId = crypto.randomUUID();
+  const templateLanguage = input.template.language.code;
+  const preview = input.previewText || `Template: ${input.template.name} (${templateLanguage})`;
+  const encryptedPayload = await encryptOutboundPayload({ template: input.template }, env.CHANNEL_CREDENTIALS_KEY,
+    principal.workspaceId, messageId);
+  const expiresAt = new Date(Date.now() + EXTERNAL_API_IDEMPOTENCY_DAYS * 86400000).toISOString();
+  const firstRetryAt = new Date(Date.now() + 30000).toISOString();
+  const statements = [
+    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
+        status,timestamp,payload_json,workspace_id)
+      VALUES (?1,?2,?3,?4,'outbound','template',?5,'pending',?6,'{}',?7)`)
+      .bind(messageId, identity.conversationId, identity.contactId, channel.channelId, preview, now, principal.workspaceId),
+    env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
+      VALUES (?1,?2,?3,?4,?4)`).bind(messageId, principal.workspaceId, encryptedPayload, now),
+    env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,0,6,?3,'pending','',?4,?4,?5)`).bind(crypto.randomUUID(), messageId, firstRetryAt, now, principal.workspaceId),
+    env.DB.prepare(`INSERT INTO external_api_requests
+        (request_id,workspace_id,api_key_id,operation,idempotency_key_hash,request_hash,message_id,client_reference,created_at,expires_at)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`)
+      .bind(externalRequestId, principal.workspaceId, principal.apiKeyId, EXTERNAL_API_OPERATION,
+        idempotencyHash, requestHash, messageId, input.clientReference, now, expiresAt),
+    env.DB.prepare(`UPDATE conversations SET last_message_at=?3,updated_at=?3
+      WHERE conversation_id=?1 AND workspace_id=?2`).bind(identity.conversationId, principal.workspaceId, now)
+  ];
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      const winner = await findExternalRequest(env, principal.apiKeyId, idempotencyHash);
+      if (winner && timingSafeEqual(winner.request_hash, requestHash)) {
+        return externalMessageResponse(await getExternalMessageStatus(env, principal, winner.message_id, url), requestId, true);
+      }
+      if (winner) throw apiError(409, 'idempotency_conflict', 'This Idempotency-Key was already used with a different request.');
+    }
+    throw error;
+  }
+  await auditApiKey(env, principal, 'send_template', 'message', messageId, {
+    channelId: channel.channelId, templateName: input.template.name
+  });
+  await broadcast(env, principal.workspaceId, {
+    type: 'message.created', conversationId: identity.conversationId, messageId
+  });
+  ctx.waitUntil(sendOrQueue(env, messageId));
+  return externalMessageResponse({
+    messageId, conversationId: identity.conversationId, contactId: identity.contactId,
+    channelId: channel.channelId, status: 'pending', providerMessageId: '', error: '',
+    clientReference: input.clientReference, createdAt: now,
+    statusUrl: new URL(`/api/v1/messages/${encodeURIComponent(messageId)}`, url.origin).toString()
+  }, requestId, false);
+}
+
+async function findExternalRequest(env, apiKeyId, idempotencyHash) {
+  return env.DB.prepare(`SELECT request_hash,message_id FROM external_api_requests
+    WHERE api_key_id=?1 AND operation=?2 AND idempotency_key_hash=?3 AND expires_at>?4 LIMIT 1`)
+    .bind(apiKeyId, EXTERNAL_API_OPERATION, idempotencyHash, new Date().toISOString()).first();
+}
+
+async function getExternalMessageStatus(env, principal, messageId, url) {
+  const id = cleanId(messageId, 'Message ID');
+  const row = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.contact_id,m.channel_id,m.status,
+      m.provider_message_id,m.error,m.timestamp,r.client_reference
+    FROM external_api_requests r JOIN messages m ON m.message_id=r.message_id AND m.workspace_id=r.workspace_id
+    WHERE r.api_key_id=?1 AND r.workspace_id=?2 AND r.message_id=?3 LIMIT 1`)
+    .bind(principal.apiKeyId, principal.workspaceId, id).first();
+  if (!row) throw apiError(404, 'message_not_found', 'Message not found.');
+  return {
+    messageId: row.message_id,
+    conversationId: row.conversation_id,
+    contactId: row.contact_id,
+    channelId: row.channel_id,
+    status: row.status,
+    providerMessageId: row.provider_message_id || '',
+    error: row.error || '',
+    clientReference: row.client_reference || '',
+    createdAt: row.timestamp,
+    statusUrl: new URL(`/api/v1/messages/${encodeURIComponent(row.message_id)}`, url.origin).toString()
+  };
+}
+
+function externalMessageResponse(item, requestId, replayed) {
+  const response = json({ ok: true, ...item, requestId }, 202);
+  response.headers.set('Idempotent-Replayed', replayed ? 'true' : 'false');
+  return response;
+}
+
+async function ensureWhatsAppConversation(env, workspaceId, channel, recipient, displayName, now) {
+  let identity = await env.DB.prepare(`SELECT identity_id,contact_id FROM channel_identities
+    WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3 LIMIT 1`)
+    .bind(workspaceId, channel.channelId, recipient).first();
+  if (!identity) {
+    const contactId = crypto.randomUUID();
+    const identityId = crypto.randomUUID();
+    const name = String(displayName || recipient).slice(0, 120);
+    try {
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+          VALUES (?1,?2,?3,?3,?4)`).bind(contactId, name, now, workspaceId),
+        env.DB.prepare(`INSERT INTO channel_identities
+            (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
+          VALUES (?1,?2,?3,?4,?5,?6,?7)`)
+          .bind(identityId, contactId, channel.channelId, recipient, name, now, workspaceId)
+      ]);
+      identity = { identity_id: identityId, contact_id: contactId };
+    } catch (error) {
+      identity = await env.DB.prepare(`SELECT identity_id,contact_id FROM channel_identities
+        WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3 LIMIT 1`)
+        .bind(workspaceId, channel.channelId, recipient).first();
+      if (!identity) throw error;
+    }
+  }
+  let conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
+    WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3 AND status!='closed'
+    ORDER BY created_at DESC LIMIT 1`).bind(workspaceId, identity.contact_id, channel.channelId).first();
+  if (!conversation) {
+    const conversationId = crypto.randomUUID();
+    const subject = String(displayName || recipient).slice(0, 120);
+    await env.DB.prepare(`INSERT INTO conversations
+        (conversation_id,contact_id,channel_id,status,assigned_to,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,?3,'open','',?4,?5,0,?5,?5,?6)`)
+      .bind(conversationId, identity.contact_id, channel.channelId, subject, now, workspaceId).run();
+    conversation = { conversation_id: conversationId };
+  }
+  return { contactId: identity.contact_id, conversationId: conversation.conversation_id };
+}
+
+export function validateWhatsAppTemplateRequest(payload) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Request body must be a JSON object.');
+  rejectUnknownKeys(payload, new Set(['channelId', 'to', 'contact', 'template', 'clientReference', 'previewText']), 'request');
+  const channelId = cleanId(payload.channelId, 'Channel ID');
+  const to = normalizeWhatsAppRecipient(payload.to);
+  let contact = null;
+  if (payload.contact !== undefined && payload.contact !== null) {
+    if (!isPlainObject(payload.contact)) throw httpError(400, 'Contact must be an object.');
+    rejectUnknownKeys(payload.contact, new Set(['displayName']), 'contact');
+    const displayName = cleanRequired(payload.contact.displayName, 'Contact display name', 120);
+    contact = { displayName };
+  }
+  const clientReference = payload.clientReference === undefined ? '' : cleanOptionalText(payload.clientReference, 'Client reference', 200);
+  const previewText = payload.previewText === undefined ? '' : cleanOptionalText(payload.previewText, 'Preview text', MAX_TEXT_LENGTH);
+  const template = validateWhatsAppTemplate(payload.template);
+  return { channelId, to, contact, template, clientReference, previewText };
+}
+
+export function validateWhatsAppTemplate(value) {
+  if (!isPlainObject(value)) throw httpError(400, 'Template must be an object.');
+  rejectUnknownKeys(value, new Set(['name', 'language', 'components']), 'template');
+  const name = cleanRequired(value.name, 'Template name', 512);
+  if (!/^[a-z0-9_]+$/.test(name)) throw httpError(400, 'Template name may contain only lowercase letters, numbers, and underscores.');
+  if (!isPlainObject(value.language)) throw httpError(400, 'Template language must be an object.');
+  rejectUnknownKeys(value.language, new Set(['code', 'policy']), 'template language');
+  const code = cleanRequired(value.language.code, 'Template language code', 35);
+  if (!/^[A-Za-z]{2,3}(?:_[A-Za-z]{2})?$/.test(code)) throw httpError(400, 'Template language code is invalid.');
+  const language = { code };
+  if (value.language.policy !== undefined) language.policy = cleanRequired(value.language.policy, 'Template language policy', 40);
+  const components = value.components === undefined ? [] : value.components;
+  if (!Array.isArray(components) || components.length > 50) throw httpError(400, 'Template components must be an array with no more than 50 items.');
+  const state = { nodes: 0 };
+  const normalizedComponents = components.map((component, index) => {
+    if (!isPlainObject(component)) throw httpError(400, `Template component ${index} must be an object.`);
+    const normalized = normalizeBoundedJson(component, state, 0, `template.components[${index}]`);
+    const type = String(normalized.type || '').trim().toLowerCase();
+    if (!type || type.length > 40 || !/^[a-z_]+$/.test(type)) throw httpError(400, `Template component ${index} has an invalid type.`);
+    normalized.type = type;
+    return normalized;
+  });
+  return { name, language, components: normalizedComponents };
+}
+
+export function buildWhatsAppTemplatePayload(recipient, template, messageId = '') {
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: normalizeWhatsAppRecipient(recipient),
+    type: 'template',
+    template: validateWhatsAppTemplate(template)
+  };
+  if (messageId) payload.biz_opaque_callback_data = String(messageId).slice(0, 512);
+  return payload;
+}
+
+function normalizeBoundedJson(value, state, depth, path) {
+  state.nodes++;
+  if (state.nodes > 1500) throw httpError(400, 'Template payload has too many values.');
+  if (depth > 12) throw httpError(400, 'Template payload is nested too deeply.');
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw httpError(400, `${path} contains an invalid number.`);
+    return value;
+  }
+  if (typeof value === 'string') {
+    if (value.length > 4096) throw httpError(400, `${path} contains text longer than 4096 characters.`);
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > 100) throw httpError(400, `${path} contains too many items.`);
+    return value.map((item, index) => normalizeBoundedJson(item, state, depth + 1, `${path}[${index}]`));
+  }
+  if (!isPlainObject(value)) throw httpError(400, `${path} contains an unsupported value.`);
+  const result = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (['__proto__', 'prototype', 'constructor'].includes(key)) throw httpError(400, `${path} contains a forbidden key.`);
+    if (key.length > 100) throw httpError(400, `${path} contains a key that is too long.`);
+    const normalized = normalizeBoundedJson(item, state, depth + 1, `${path}.${key}`);
+    if (key === 'link') validatePublicHttpsMediaUrl(normalized, path);
+    result[key] = normalized;
+  }
+  return result;
+}
+
+function validatePublicHttpsMediaUrl(value, path) {
+  if (typeof value !== 'string' || value.length > 4096) throw httpError(400, `${path}.link must be an HTTPS URL.`);
+  let url;
+  try { url = new URL(value); } catch { throw httpError(400, `${path}.link must be an HTTPS URL.`); }
+  if (url.protocol !== 'https:' || url.username || url.password) throw httpError(400, `${path}.link must be a public HTTPS URL without credentials.`);
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (isPrivateHostname(host)) throw httpError(400, `${path}.link must not use a local or private host.`);
+}
+
+function isPrivateHostname(host) {
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host === '0.0.0.0' || host === '::1') return true;
+  const match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (match) {
+    const octets = match.slice(1).map(Number);
+    if (octets.some(value => value > 255)) return true;
+    return octets[0] === 0 || octets[0] === 10 || octets[0] === 127 ||
+      (octets[0] === 169 && octets[1] === 254) || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (octets[0] === 192 && octets[1] === 168);
+  }
+  return /^(fc|fd|fe8|fe9|fea|feb)/i.test(host);
+}
+
+function rejectUnknownKeys(value, allowed, label) {
+  const unknown = Object.keys(value).find(key => !allowed.has(key));
+  if (unknown) throw httpError(400, `Unsupported ${label} field: ${unknown}.`);
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value) &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+}
+
+function cleanOptionalText(value, label, maximum) {
+  if (typeof value !== 'string') throw httpError(400, `${label} must be text.`);
+  const text = value.trim();
+  if (text.length > maximum) throw httpError(400, `${label} is too long.`);
+  if (/[\u0000-\u001f\u007f]/.test(text)) throw httpError(400, `${label} contains invalid characters.`);
+  return text;
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (isPlainObject(value)) return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
+async function readExternalJson(request) {
+  if (!(request.headers.get('Content-Type') || '').toLowerCase().includes('application/json')) {
+    throw apiError(415, 'unsupported_media_type', 'Content-Type must be application/json.');
+  }
+  const raw = await readBoundedText(request, MAX_EXTERNAL_JSON_BODY);
+  try { return JSON.parse(raw); } catch { throw apiError(400, 'invalid_json', 'Invalid JSON body.'); }
+}
+
+async function auditApiKey(env, principal, action, targetType, targetId, details) {
+  await env.DB.prepare(`INSERT INTO audit_log
+      (audit_id,actor,action,target_type,target_id,details_json,timestamp,workspace_id,actor_user_id,actor_email)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'',?2)`)
+    .bind(crypto.randomUUID(), `api-key:${principal.keyPrefix}`, action, targetType, targetId,
+      JSON.stringify(details || {}), new Date().toISOString(), principal.workspaceId).run();
+}
+
+function apiError(status, code, message) {
+  const error = httpError(status, message);
+  error.code = code;
+  return error;
 }
 
 async function handleWhatsAppWebhook(request, env, channelId) {
@@ -1082,6 +1620,35 @@ export async function decryptChannelCredential(packed, masterSecret, workspaceId
   return plaintext;
 }
 
+export async function encryptOutboundPayload(value, masterSecret, workspaceId, messageId) {
+  const plaintext = typeof value === 'string' ? value : JSON.stringify(value);
+  if (!plaintext || new TextEncoder().encode(plaintext).byteLength > MAX_EXTERNAL_JSON_BODY) {
+    throw httpError(400, 'Outbound template payload is invalid or too large.');
+  }
+  const key = await importChannelCredentialKey(masterSecret);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const additionalData = outboundPayloadAad(workspaceId, messageId);
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData }, key,
+    new TextEncoder().encode(plaintext));
+  return `v1.${base64UrlEncode(iv)}.${base64UrlEncode(new Uint8Array(encrypted))}`;
+}
+
+export async function decryptOutboundPayload(packed, masterSecret, workspaceId, messageId) {
+  const parts = String(packed || '').split('.');
+  if (parts.length !== 3 || parts[0] !== 'v1') throw new Error('Unsupported encrypted outbound payload format.');
+  const iv = base64UrlDecode(parts[1]);
+  const ciphertext = base64UrlDecode(parts[2]);
+  if (iv.length !== 12 || !ciphertext.length) throw new Error('Encrypted outbound payload is invalid.');
+  const key = await importChannelCredentialKey(masterSecret);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv,
+    additionalData: outboundPayloadAad(workspaceId, messageId) }, key, ciphertext);
+  const plaintext = new TextDecoder().decode(decrypted);
+  if (!plaintext || new TextEncoder().encode(plaintext).byteLength > MAX_EXTERNAL_JSON_BODY) {
+    throw new Error('Decrypted outbound payload is invalid.');
+  }
+  return JSON.parse(plaintext);
+}
+
 async function importChannelCredentialKey(masterSecret) {
   const bytes = new TextEncoder().encode(String(masterSecret || ''));
   if (bytes.length < 32) throw httpError(503, 'Channel credential encryption is not configured.');
@@ -1091,6 +1658,10 @@ async function importChannelCredentialKey(masterSecret) {
 
 function channelCredentialAad(workspaceId, channelId, credentialKey) {
   return new TextEncoder().encode(`helixcer-channel-v1\n${workspaceId}\n${channelId}\n${credentialKey}`);
+}
+
+function outboundPayloadAad(workspaceId, messageId) {
+  return new TextEncoder().encode(`helixcer-outbound-v1\n${workspaceId}\n${messageId}`);
 }
 
 function base64UrlEncode(bytes) {
@@ -1236,15 +1807,37 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
 }
 
 async function sendOrQueue(env, messageId) {
+  const queued = await env.DB.prepare('SELECT outbox_id,status FROM outbox WHERE message_id=?1').bind(messageId).first();
+  if (queued) {
+    const claimed = await env.DB.prepare("UPDATE outbox SET status='processing',updated_at=?2 WHERE message_id=?1 AND status='pending'")
+      .bind(messageId, new Date().toISOString()).run();
+    if (!claimed.meta?.changes) return;
+  }
+  const beforeSend = await env.DB.prepare('SELECT workspace_id,status FROM messages WHERE message_id=?1').bind(messageId).first();
+  if (beforeSend && isTerminalProviderStatus(beforeSend.status)) {
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId),
+      env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(messageId)
+    ]);
+    return;
+  }
   try {
     await markMessageSent(env, messageId, await dispatchOutbound(env, messageId));
   } catch (error) {
-    const message = await env.DB.prepare('SELECT workspace_id FROM messages WHERE message_id=?1').bind(messageId).first();
+    const message = await env.DB.prepare('SELECT workspace_id,status FROM messages WHERE message_id=?1').bind(messageId).first();
     if (!message) throw error;
+    if (isTerminalProviderStatus(message.status)) {
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId),
+        env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(messageId)
+      ]);
+      return;
+    }
     if (error?.retryable === false) {
       await env.DB.batch([
         env.DB.prepare("UPDATE messages SET status='failed',error=?2 WHERE message_id=?1").bind(messageId, cleanError(error)),
-        env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId)
+        env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId),
+        env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(messageId)
       ]);
       await broadcast(env, message.workspace_id, { type: 'message.updated', messageId, status: 'failed' });
       return;
@@ -1279,7 +1872,18 @@ async function dispatchOutbound(env, messageId) {
     secretKey: row.secret_key
   };
   let result;
-  if (channel.connectorType === 'whatsapp_cloud') result = await sendWhatsApp(env, channel, row.channel_profile_id, row.text);
+  if (channel.connectorType === 'whatsapp_cloud' && row.message_type === 'template') {
+    const stored = await env.DB.prepare(`SELECT encrypted_payload FROM outbound_payloads
+      WHERE message_id=?1 AND workspace_id=?2`).bind(messageId, row.workspace_id).first();
+    if (!stored?.encrypted_payload) throw nonRetryableError('The encrypted template payload is unavailable.');
+    let outbound;
+    try {
+      outbound = await decryptOutboundPayload(stored.encrypted_payload, env.CHANNEL_CREDENTIALS_KEY, row.workspace_id, messageId);
+    } catch {
+      throw nonRetryableError('The encrypted template payload could not be decrypted.');
+    }
+    result = await sendWhatsAppTemplate(env, channel, row.channel_profile_id, outbound.template, messageId);
+  } else if (channel.connectorType === 'whatsapp_cloud') result = await sendWhatsApp(env, channel, row.channel_profile_id, row.text);
   else if (channel.connectorType === 'telegram') result = await sendTelegram(env, channel, row.channel_profile_id, row.text);
   else if (channel.connectorType === 'instagram') result = await sendInstagram(env, channel, row.channel_profile_id, row.text);
   else if (channel.connectorType === 'generic_http') result = await sendGeneric(env, channel, row);
@@ -1302,6 +1906,29 @@ async function sendWhatsApp(env, channel, recipient, text) {
   });
   const raw = await response.text();
   const data = safeJsonParse(raw, {});
+  if (!response.ok) {
+    const code = data?.error?.code ? ` (${data.error.code})` : '';
+    const providerMessage = String(data?.error?.message || `HTTP ${response.status}`).slice(0, 300);
+    const error = new Error(`WhatsApp API${code}: ${providerMessage}`);
+    error.retryable = isRetryableWhatsAppStatus(response.status);
+    throw error;
+  }
+  return { status: 'submitted', providerMessageId: data.messages?.[0]?.id || '', httpStatus: response.status };
+}
+
+async function sendWhatsAppTemplate(env, channel, recipient, template, messageId) {
+  const credentials = await readChannelCredentials(env, channel);
+  const token = credentials.accessToken;
+  const phoneNumberId = channel.config?.phoneNumberId;
+  if (!token || !phoneNumberId) throw nonRetryableError('WhatsApp credentials are not configured.');
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const body = buildWhatsAppTemplatePayload(recipient, template, messageId);
+  const response = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneNumberId)}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = safeJsonParse(await response.text(), {});
   if (!response.ok) {
     const code = data?.error?.code ? ` (${data.error.code})` : '';
     const providerMessage = String(data?.error?.message || `HTTP ${response.status}`).slice(0, 300);
@@ -1381,32 +2008,62 @@ async function sendInstagram(env, channel, recipient, text) {
 
 async function markMessageSent(env, messageId, result) {
   await env.DB.batch([
-    env.DB.prepare("UPDATE messages SET status=?2,provider_message_id=?3,payload_json=?4,error='' WHERE message_id=?1")
+    env.DB.prepare(`UPDATE messages SET
+        status=CASE WHEN status IN ('sent','delivered','read','failed') THEN status ELSE ?2 END,
+        provider_message_id=CASE WHEN provider_message_id='' THEN ?3 ELSE provider_message_id END,
+        payload_json=CASE WHEN status IN ('sent','delivered','read','failed') THEN payload_json ELSE ?4 END,
+        error=CASE WHEN status='failed' THEN error ELSE '' END
+      WHERE message_id=?1`)
       .bind(messageId, result.status || 'submitted', result.providerMessageId || '', JSON.stringify(result)),
-    env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId)
+    env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId),
+    env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(messageId)
   ]);
-  await broadcast(env, result.workspaceId, { type: 'message.updated', messageId, status: result.status || 'submitted' });
+  const stored = await env.DB.prepare('SELECT status FROM messages WHERE message_id=?1').bind(messageId).first();
+  await broadcast(env, result.workspaceId, { type: 'message.updated', messageId, status: stored?.status || result.status || 'submitted' });
 }
 
 async function retryDueMessages(env) {
   const now = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  await env.DB.prepare(`UPDATE outbox SET status='pending',next_attempt_at=?1,updated_at=?1
+    WHERE status='processing' AND updated_at<=?2`).bind(now, staleBefore).run();
   const due = await env.DB.prepare(`SELECT outbox_id,message_id,attempts,max_attempts,workspace_id FROM outbox
     WHERE status='pending' AND next_attempt_at<=?1 ORDER BY next_attempt_at LIMIT 25`).bind(now).all();
   for (const job of due.results) {
-    await env.DB.prepare("UPDATE outbox SET status='processing',updated_at=?2 WHERE outbox_id=?1 AND status='pending'").bind(job.outbox_id, now).run();
+    const claimed = await env.DB.prepare("UPDATE outbox SET status='processing',updated_at=?2 WHERE outbox_id=?1 AND status='pending'")
+      .bind(job.outbox_id, now).run();
+    if (!claimed.meta?.changes) continue;
+    const beforeSend = await env.DB.prepare('SELECT status FROM messages WHERE message_id=?1').bind(job.message_id).first();
+    if (beforeSend && isTerminalProviderStatus(beforeSend.status)) {
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(job.message_id),
+        env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(job.message_id)
+      ]);
+      continue;
+    }
     try {
       await markMessageSent(env, job.message_id, await dispatchOutbound(env, job.message_id));
     } catch (error) {
+      const latest = await env.DB.prepare('SELECT status FROM messages WHERE message_id=?1').bind(job.message_id).first();
+      if (latest && isTerminalProviderStatus(latest.status)) {
+        await env.DB.batch([
+          env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(job.message_id),
+          env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(job.message_id)
+        ]);
+        continue;
+      }
       const attempts = Number(job.attempts) + 1;
-      const exhausted = attempts >= Number(job.max_attempts);
+      const exhausted = error?.retryable === false || attempts >= Number(job.max_attempts);
       const delaySeconds = Math.min(3600, 30 * (2 ** Math.min(attempts, 7)));
       const next = new Date(Date.now() + delaySeconds * 1000).toISOString();
-      await env.DB.batch([
+      const statements = [
         env.DB.prepare('UPDATE outbox SET status=?2,attempts=?3,next_attempt_at=?4,last_error=?5,updated_at=?6 WHERE outbox_id=?1')
           .bind(job.outbox_id, exhausted ? 'failed' : 'pending', attempts, next, cleanError(error), now),
         env.DB.prepare('UPDATE messages SET status=?2,error=?3 WHERE message_id=?1')
           .bind(job.message_id, exhausted ? 'failed' : 'retrying', cleanError(error))
-      ]);
+      ];
+      if (exhausted) statements.push(env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(job.message_id));
+      await env.DB.batch(statements);
       await broadcast(env, job.workspace_id, { type: 'message.updated', messageId: job.message_id, status: exhausted ? 'failed' : 'retrying' });
     }
   }
@@ -1469,15 +2126,43 @@ async function storeInbound(env, channel, event, rawPayload) {
 }
 
 async function applyProviderStatus(env, workspaceId, channelId, event, rawPayload) {
-  if (!event.providerMessageId || !event.status) return;
-  const key = `${workspaceId}:${channelId}:status:${event.providerMessageId}:${event.status}:${event.timestamp || ''}`;
+  const providerMessageId = String(event.providerMessageId || '');
+  const internalMessageId = /^[A-Za-z0-9_-]{1,100}$/.test(String(event.internalMessageId || ''))
+    ? String(event.internalMessageId) : '';
+  const status = String(event.status || '').toLowerCase();
+  if ((!providerMessageId && !internalMessageId) || !['sent', 'delivered', 'read', 'failed'].includes(status)) return;
+  const key = `${workspaceId}:${channelId}:status:${providerMessageId || internalMessageId}:${status}:${event.timestamp || ''}`;
   const dedupe = await env.DB.prepare(`INSERT OR IGNORE INTO webhook_events (event_key,channel_id,event_type,received_at,workspace_id)
     VALUES (?1,?2,'status',?3,?4)`).bind(key, channelId, new Date().toISOString(), workspaceId).run();
   if (!dedupe.meta?.changes) return;
   try {
-    const updated = await env.DB.prepare(`UPDATE messages SET status=?4,payload_json=?5,error=?6
-      WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3`)
-      .bind(workspaceId, channelId, event.providerMessageId, event.status, truncateJson(rawPayload), String(event.error || '').slice(0, 500)).run();
+    const updated = await env.DB.prepare(`UPDATE messages SET
+        status=CASE
+          WHEN status='failed' THEN status
+          WHEN ?4='failed' THEN 'failed'
+          WHEN status='read' THEN status
+          WHEN status='delivered' AND ?4='sent' THEN status
+          ELSE ?4
+        END,
+        payload_json=CASE
+          WHEN status='failed' THEN payload_json
+          WHEN ?4='failed' THEN ?5
+          WHEN status='read' THEN payload_json
+          WHEN status='delivered' AND ?4='sent' THEN payload_json
+          ELSE ?5
+        END,
+        error=CASE
+          WHEN status='failed' THEN error
+          WHEN ?4='failed' THEN ?6
+          WHEN status='read' THEN error
+          WHEN status='delivered' AND ?4='sent' THEN error
+          ELSE ?6
+        END,
+        provider_message_id=CASE WHEN provider_message_id='' AND ?3<>'' THEN ?3 ELSE provider_message_id END
+      WHERE workspace_id=?1 AND channel_id=?2
+        AND ((?3<>'' AND provider_message_id=?3) OR (?7<>'' AND message_id=?7))`)
+      .bind(workspaceId, channelId, providerMessageId, status, truncateJson(rawPayload),
+        String(event.error || '').slice(0, 500), internalMessageId).run();
     if (!updated.meta?.changes) {
       await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
       return false;
@@ -1534,14 +2219,15 @@ export function normalizeWhatsApp(payload) {
         statuses.push({
           providerMessageId: String(status.id || ''), status: String(status.status || ''),
           timestamp: status.timestamp ? new Date(Number(status.timestamp) * 1000).toISOString() : '',
-          error: status.errors?.[0]?.title || status.errors?.[0]?.message || ''
+          error: status.errors?.[0]?.title || status.errors?.[0]?.message || '',
+          internalMessageId: String(status.biz_opaque_callback_data || '')
         });
       }
     }
   }
   return {
     messages: messages.filter(item => item.channelProfileId),
-    statuses: statuses.filter(item => item.providerMessageId),
+    statuses: statuses.filter(item => item.providerMessageId || item.internalMessageId),
     phoneNumberIds: [...phoneNumberIds]
   };
 }
@@ -1756,6 +2442,11 @@ async function cleanupExpiredAuth(env) {
   ]);
 }
 
+async function cleanupExpiredExternalRequests(env) {
+  await env.DB.prepare('DELETE FROM external_api_requests WHERE expires_at<=?1')
+    .bind(new Date().toISOString()).run();
+}
+
 function withCors(response, headers) {
   const copy = new Response(response.body, response);
   for (const [key, value] of Object.entries(headers)) copy.headers.set(key, value);
@@ -1877,6 +2568,10 @@ function metaApiVersion(value) {
 function isRetryableProviderStatus(status) {
   const code = Number(status);
   return code === 408 || code === 425 || code === 429 || code >= 500;
+}
+
+function isTerminalProviderStatus(status) {
+  return ['sent', 'delivered', 'read', 'failed'].includes(String(status || '').toLowerCase());
 }
 
 function nonRetryableError(message) {

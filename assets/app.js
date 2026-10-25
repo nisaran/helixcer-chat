@@ -21,6 +21,7 @@
     currentUser: null,
     workspace: { name: DEFAULT_WORKSPACE, workspaceId: "default", slug: "helixcer" },
     team: { members: [], invitations: [] },
+    apiKeys: [],
     authStatus: "checking",
     api: null,
     disconnectRealtime: null,
@@ -91,6 +92,9 @@
           { invitationId: "demo-invite", email: "new.agent@helixcer.example", role: "agent", status: "pending", expiresAt: ago(-10080), createdAt: ago(40) },
         ],
       },
+      apiKeys: [
+        { apiKeyId: "demo-api-key", name: "Order notifications", keyPrefix: "hxc_live_demo…", scopes: ["whatsapp:template:send", "messages:read"], allowedChannelIds: ["wa-sales"], status: "active", createdAt: ago(1440), lastUsedAt: ago(8), expiresAt: "" },
+      ],
       channels: [
         { channelId: "wa-sales", name: "Sales WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", config: { wabaId: "123456789012345", phoneNumberId: "123456789012346" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(120), webhookVerifiedAt: ago(118), lastWebhookAt: ago(3), verifiedName: "Helixcer Sales", verifiedPhoneNumber: "+91 98765 43210" } },
         { channelId: "telegram-support", name: "Support Bot", connectorType: "telegram", enabled: true, health: "connected", config: {}, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(160), webhookVerifiedAt: ago(158), lastWebhookAt: ago(18), verifiedName: "helixcer_support_bot" } },
@@ -173,6 +177,38 @@
     async getTeam() {
       await smallDelay(140);
       return clone(this.data.team);
+    }
+
+    async getApiKeys() {
+      await smallDelay(100);
+      return { items: clone(this.data.apiKeys) };
+    }
+
+    async createApiKey(payload) {
+      await smallDelay(120);
+      const suffix = Date.now().toString(36);
+      const item = {
+        apiKeyId: `key-${suffix}`,
+        name: payload.name,
+        keyPrefix: `hxc_live_${suffix.slice(-8)}…`,
+        scopes: ["whatsapp:template:send", "messages:read"],
+        allowedChannelIds: clone(payload.allowedChannelIds || []),
+        status: "active",
+        createdAt: new Date().toISOString(),
+        lastUsedAt: "",
+        expiresAt: payload.expiresAt || "",
+      };
+      this.data.apiKeys.unshift(item);
+      return { ok: true, item: clone(item), apiKey: `hxc_live_${suffix}.demo-secret-${crypto.randomUUID().replaceAll("-", "")}` };
+    }
+
+    async revokeApiKey(apiKeyId) {
+      await smallDelay(100);
+      const item = this.data.apiKeys.find((entry) => entry.apiKeyId === apiKeyId);
+      if (!item) throw new Error("API key not found.");
+      item.status = "revoked";
+      item.revokedAt = new Date().toISOString();
+      return { ok: true, item: clone(item) };
     }
 
     async inviteMember(payload) {
@@ -343,7 +379,7 @@
       const payload = contentType.includes("application/json") ? await response.json() : await response.text();
       if (!response.ok) {
         const message = typeof payload === "object" && payload
-          ? payload.error || payload.message
+          ? payload.error?.message || payload.error || payload.message
           : String(payload || "");
         const error = new Error(message || `Request failed (${response.status})`);
         error.status = response.status;
@@ -439,6 +475,22 @@
       return this.isDemo ? this.demo.getTeam() : this.request("/api/team");
     }
 
+    getApiKeys() {
+      return this.isDemo ? this.demo.getApiKeys() : this.request("/api/developer/api-keys");
+    }
+
+    createApiKey(payload) {
+      return this.isDemo
+        ? this.demo.createApiKey(payload)
+        : this.request("/api/developer/api-keys", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    revokeApiKey(apiKeyId) {
+      return this.isDemo
+        ? this.demo.revokeApiKey(apiKeyId)
+        : this.request(`/api/developer/api-keys/${encodeURIComponent(apiKeyId)}`, { method: "DELETE" });
+    }
+
     inviteMember(payload) {
       return this.isDemo
         ? this.demo.inviteMember(payload)
@@ -509,6 +561,7 @@
     if (state.disconnectRealtime) state.disconnectRealtime();
     state.disconnectRealtime = null;
     state.api = new ApiClient(initialApiBase(), sessionStorage.getItem(RECOVERY_TOKEN_KEY) || "");
+    $("developerApiBase").textContent = state.api.isDemo ? "https://api.chat.helixcer.com" : state.api.base;
     $("sidebarMode").textContent = state.api.isDemo ? "Demo workspace" : "Live workspace";
     $("googleSignInLink").href = state.api.loginUrl();
   }
@@ -624,7 +677,11 @@
       const auth = normalizeAuth(authPayload);
       if (!auth.authenticated || auth.status !== "active") throw Object.assign(new Error("Your workspace access is not active."), { status: 403 });
       showApplication(auth);
-      await Promise.all([loadAll({ preserveSelection: false }), canAdmin() ? loadTeam() : Promise.resolve()]);
+      await Promise.all([
+        loadAll({ preserveSelection: false }),
+        canAdmin() ? loadTeam() : Promise.resolve(),
+        canAdmin() ? loadApiKeys() : Promise.resolve(),
+      ]);
     } catch (error) {
       const message = error.status === 403
         ? "Your account does not currently have access to this workspace."
@@ -754,6 +811,7 @@
     renderChannels();
     populateContactChannelSelect();
     populateAssigneeSelect();
+    if (canAdmin()) renderApiKeys();
     renderSelectedConversation();
   }
 
@@ -1216,6 +1274,184 @@
       createdAt: raw.createdAt || new Date().toISOString(),
       expiresAt: raw.expiresAt || "",
     };
+  }
+
+  function normalizeApiKey(raw) {
+    const parseList = (value) => {
+      if (Array.isArray(value)) return value.map(String);
+      if (typeof value !== "string" || !value) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.map(String) : [];
+      } catch {
+        return value.split(",").map((item) => item.trim()).filter(Boolean);
+      }
+    };
+    return {
+      ...raw,
+      apiKeyId: String(raw.apiKeyId || raw.id || ""),
+      name: String(raw.name || "API key"),
+      keyPrefix: String(raw.keyPrefix || raw.prefix || "hxc_live_…"),
+      scopes: parseList(raw.scopes || raw.scopesJson),
+      allowedChannelIds: parseList(raw.allowedChannelIds || raw.allowedChannelIdsJson),
+      status: raw.status || (raw.revokedAt ? "revoked" : "active"),
+      createdAt: raw.createdAt || new Date().toISOString(),
+      lastUsedAt: raw.lastUsedAt || "",
+      expiresAt: raw.expiresAt || "",
+      revokedAt: raw.revokedAt || "",
+    };
+  }
+
+  async function loadApiKeys() {
+    if (!canAdmin()) {
+      state.apiKeys = [];
+      renderApiKeys();
+      return;
+    }
+    try {
+      const data = await state.api.getApiKeys();
+      state.apiKeys = asItems(data.apiKeys || data).map(normalizeApiKey);
+      renderApiKeys();
+    } catch (error) {
+      state.apiKeys = [];
+      renderApiKeys();
+      if (error.status !== 403) showToast("API keys could not be loaded", error.message, true);
+    }
+  }
+
+  function renderApiKeys() {
+    const body = $("apiKeyTableBody");
+    body.replaceChildren();
+    if (!state.apiKeys.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      cell.className = "empty-list";
+      cell.textContent = "No API keys have been created.";
+      row.append(cell);
+      body.append(row);
+      return;
+    }
+    state.apiKeys.forEach((apiKey) => {
+      const row = document.createElement("tr");
+      const identityCell = document.createElement("td");
+      const identity = element("div", "api-key-identity");
+      identity.append(element("strong", "", apiKey.name), element("code", "", apiKey.keyPrefix));
+      identityCell.append(identity);
+
+      const accessCell = document.createElement("td");
+      const channelNames = apiKey.allowedChannelIds.map((channelId) => channelFor(channelId).name);
+      accessCell.append(element("span", "api-key-access", channelNames.length ? channelNames.join(", ") : "All WhatsApp connections"));
+
+      const lastUsedCell = tableCell(apiKey.lastUsedAt ? relativeTime(apiKey.lastUsedAt) : "Never");
+      const statusCell = document.createElement("td");
+      const expired = apiKey.expiresAt && new Date(apiKey.expiresAt).getTime() <= Date.now();
+      const status = apiKey.status === "revoked" ? "Revoked" : expired ? "Expired" : "Active";
+      statusCell.append(element("span", `status-chip${status === "Active" ? "" : " is-inactive"}`, status));
+
+      const actionCell = document.createElement("td");
+      if (status === "Active") {
+        const revoke = element("button", "member-action is-danger", "Revoke");
+        revoke.type = "button";
+        revoke.dataset.action = "revoke-api-key";
+        revoke.dataset.revokeApiKey = apiKey.apiKeyId;
+        actionCell.append(revoke);
+      }
+      row.append(identityCell, accessCell, lastUsedCell, statusCell, actionCell);
+      body.append(row);
+    });
+  }
+
+  function renderApiKeyChannelOptions() {
+    const host = $("apiKeyChannelOptions");
+    host.replaceChildren();
+    const channels = state.channels.filter((channel) => channel.connectorType === "whatsapp_cloud");
+    if (!channels.length) {
+      host.append(element("span", "subtle", "No WhatsApp connections are configured yet."));
+      return;
+    }
+    channels.forEach((channel) => {
+      const label = element("label", "api-channel-option");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = "allowedChannelIds";
+      input.value = channel.channelId;
+      const copy = document.createElement("span");
+      copy.append(element("strong", "", channel.name), element("small", "", channel.enabled ? "Enabled" : "Disabled"));
+      label.append(input, copy);
+      host.append(label);
+    });
+  }
+
+  function openApiKeyDialog() {
+    const form = $("apiKeyForm");
+    form.reset();
+    $("apiKeyOutput").value = "";
+    $("apiKeyFields").hidden = false;
+    $("apiKeyResult").hidden = true;
+    $("apiKeySubmit").hidden = false;
+    renderApiKeyChannelOptions();
+    $("apiKeyDialog").showModal();
+  }
+
+  function closeApiKeyDialog() {
+    $("apiKeyOutput").value = "";
+    $("apiKeyDialog").close();
+  }
+
+  async function createDeveloperApiKey(form) {
+    const data = new FormData(form);
+    const name = String(data.get("name") || "").trim();
+    if (!name || !form.elements.name.checkValidity()) {
+      form.elements.name.reportValidity();
+      return;
+    }
+    const expiryDate = String(data.get("expiresAt") || "");
+    const payload = {
+      name,
+      allowedChannelIds: data.getAll("allowedChannelIds").map(String),
+      ...(expiryDate ? { expiresAt: new Date(`${expiryDate}T23:59:59.999Z`).toISOString() } : {}),
+    };
+    $("apiKeySubmit").disabled = true;
+    try {
+      const result = await state.api.createApiKey(payload);
+      const secret = String(result.apiKey || result.key || result.secret || result.token || "");
+      if (!secret) throw new Error("The key was created, but its one-time secret was not returned.");
+      $("apiKeyOutput").value = secret;
+      $("apiKeyFields").hidden = true;
+      $("apiKeyResult").hidden = false;
+      $("apiKeySubmit").hidden = true;
+      await loadApiKeys();
+      showToast("API key created", "Copy the secret now; it will not be shown again.");
+    } catch (error) {
+      showToast("API key could not be created", error.message, true);
+    } finally {
+      $("apiKeySubmit").disabled = false;
+    }
+  }
+
+  async function revokeDeveloperApiKey(apiKeyId, button) {
+    const apiKey = state.apiKeys.find((item) => item.apiKeyId === apiKeyId);
+    if (!apiKey || !window.confirm(`Revoke “${apiKey.name}”? Apps using this key will stop working immediately.`)) return;
+    button.disabled = true;
+    try {
+      await state.api.revokeApiKey(apiKeyId);
+      await loadApiKeys();
+      showToast("API key revoked", apiKey.name);
+    } catch (error) {
+      button.disabled = false;
+      showToast("API key was not revoked", error.message, true);
+    }
+  }
+
+  async function copyDeveloperApiValue(value, title) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast(title, "Copied to the clipboard.");
+    } catch {
+      showToast("Copy was blocked", "Select the value and copy it manually.", true);
+    }
   }
 
   async function loadTeam() {
@@ -2067,6 +2303,10 @@
       if (routeButton) { setRoute(routeButton.dataset.route); return; }
       const actionButton = event.target.closest("[data-action]");
       if (actionButton) {
+        if (actionButton.dataset.revokeApiKey) {
+          revokeDeveloperApiKey(actionButton.dataset.revokeApiKey, actionButton);
+          return;
+        }
         if (actionButton.dataset.action === "verify-channel") {
           verifyChannelConnection(actionButton.dataset.channelId, actionButton);
           return;
@@ -2117,6 +2357,10 @@
           "open-invite": openInviteDialog,
           "close-invite": () => $("inviteDialog").close(),
           "copy-invite-link": copyInviteLink,
+          "open-api-key": openApiKeyDialog,
+          "close-api-key": closeApiKeyDialog,
+          "copy-api-base": () => copyDeveloperApiValue($("developerApiBase").textContent, "API base URL copied"),
+          "copy-api-key": () => copyDeveloperApiValue($("apiKeyOutput").value, "API key copied"),
         };
         actions[actionButton.dataset.action]?.();
       }
@@ -2234,6 +2478,7 @@
     $("contactChannelId").addEventListener("change", updateContactIdentityField);
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
     $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
+    $("apiKeyForm").addEventListener("submit", (event) => { event.preventDefault(); createDeveloperApiKey(event.currentTarget); });
     $("inviteRole").addEventListener("change", updateInviteRoleHelp);
     $("teamTableBody").addEventListener("change", (event) => {
       const select = event.target.closest("[data-member-role]");

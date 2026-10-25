@@ -108,13 +108,31 @@ test("Meta verify tokens live beside their callback and can be safely replaced",
   assert.match(app, /It will be masked again after a refresh/);
 });
 
-test("saving an enabled channel immediately verifies it without creating duplicates on retry", () => {
+test("saving a channel preserves inbound-first WhatsApp setup and avoids duplicate creation", () => {
   assert.match(app, /savedChannelId = channelId \|\| String\(result\.channelId \|\| ""\)/);
   assert.match(app, /\$\("channelIdInput"\)\.value = savedChannelId/);
-  assert.match(app, /if \(payload\.enabled\) \{[\s\S]*?state\.api\.verifyChannel\(savedChannelId\)/);
+  assert.match(app, /const receiveBeforeVerification = payload\.enabled && payload\.connectorType === "whatsapp_cloud"/);
+  assert.match(app, /if \(payload\.enabled && !receiveBeforeVerification\) \{[\s\S]*?state\.api\.verifyChannel\(savedChannelId\)/);
+  assert.match(app, /will place valid signed webhook messages in the Inbox now/);
   assert.match(app, /Connection saved, but verification failed/);
   assert.match(app, /syncChannelForm\(payload\.connectorType, true,/);
   assert.match(app, /savedChannelId \? "Save changes" : "Save connection"/);
+});
+
+test("Developer API keys are managed by admins and shown only once", () => {
+  assert.match(html, /id="developerApiTitle">Developer API</);
+  assert.match(html, /id="apiKeyTableBody"/);
+  assert.match(html, /id="apiKeyDialog"/);
+  assert.match(html, /id="apiKeyOutput"[^>]*readonly/);
+  assert.match(html, /Server-to-server only/);
+  assert.match(html, /complete secret is shown once/i);
+  assert.match(html, /href="api-docs\.html"/);
+  assert.match(app, /request\("\/api\/developer\/api-keys"\)/);
+  assert.match(app, /request\("\/api\/developer\/api-keys", \{ method: "POST"/);
+  assert.match(app, /`\/api\/developer\/api-keys\/\$\{encodeURIComponent\(apiKeyId\)\}`/);
+  assert.match(app, /allowedChannelIds: data\.getAll\("allowedChannelIds"\)/);
+  assert.match(app, /\$\("apiKeyOutput"\)\.value = ""/);
+  assert.doesNotMatch(app, /localStorage\.(?:setItem|getItem)\([^)]*api.?key/i);
 });
 
 test("WhatsApp credential guidance distinguishes the three Meta secrets", () => {

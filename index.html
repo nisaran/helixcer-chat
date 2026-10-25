@@ -296,6 +296,32 @@
           <div class="surface-toolbar"><div><strong>Pending invitations</strong><span class="subtle" id="invitationCount">0 pending</span></div></div>
           <div class="invitation-list" id="invitationList"></div>
         </div>
+        <section class="surface developer-api-surface" aria-labelledby="developerApiTitle">
+          <div class="surface-toolbar developer-api-toolbar">
+            <div>
+              <strong id="developerApiTitle">Developer API</strong>
+              <span class="subtle">Send WhatsApp templates from your own apps and keep every message in this inbox.</span>
+            </div>
+            <button class="primary-button" type="button" data-action="open-api-key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create API key</button>
+          </div>
+          <div class="developer-api-summary">
+            <div>
+              <span class="api-summary-label">API base URL</span>
+              <div class="api-base-row"><code id="developerApiBase">https://api.chat.helixcer.com</code><button class="secondary-button compact-button" type="button" data-action="copy-api-base">Copy</button></div>
+            </div>
+            <div class="api-security-note">
+              <strong>Server-to-server only</strong>
+              <span>Keys can send WhatsApp template messages. The complete secret is shown once and is never displayed again.</span>
+            </div>
+            <a class="secondary-button api-docs-link" href="api-docs.html" target="_blank" rel="noopener">Open API documentation</a>
+          </div>
+          <div class="contact-table-wrap">
+            <table class="contact-table api-key-table">
+              <thead><tr><th>Key</th><th>Access</th><th>Last used</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>
+              <tbody id="apiKeyTableBody"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </main>
   </div>
@@ -326,6 +352,39 @@
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-invite">Close</button>
         <button class="primary-button" id="inviteSubmit" type="submit">Add member</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="apiKeyDialog" aria-labelledby="apiKeyDialogTitle">
+    <form class="modal-card" id="apiKeyForm" autocomplete="off">
+      <div class="modal-head">
+        <div><p class="eyebrow">Developer API</p><h2 id="apiKeyDialogTitle">Create an API key</h2></div>
+        <button class="icon-button" type="button" data-action="close-api-key" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div id="apiKeyFields">
+        <p class="modal-copy">Use this key only in a protected backend or automation. Never place it in browser code, mobile apps, URLs, or screenshots.</p>
+        <div class="form-grid">
+          <label class="field-label form-span">Key name<input class="text-field" name="name" required maxlength="80" placeholder="Order notifications"></label>
+          <label class="field-label form-span">Expiry <span class="optional-label">optional</span><input class="text-field" name="expiresAt" type="date"><span class="field-hint">Leave blank for no automatic expiry. You can revoke the key at any time.</span></label>
+        </div>
+        <fieldset class="api-channel-fieldset">
+          <legend>Allowed WhatsApp connections <span class="optional-label">optional</span></legend>
+          <p>Leave every connection unchecked to allow all WhatsApp connections in this workspace.</p>
+          <div class="api-channel-options" id="apiKeyChannelOptions"></div>
+        </fieldset>
+      </div>
+      <div class="api-key-result" id="apiKeyResult" hidden>
+        <span class="success-mark" aria-hidden="true">✓</span>
+        <h3>API key created</h3>
+        <p>Copy this key now. For security, Helixcer cannot show it again.</p>
+        <label class="field-label" for="apiKeyOutput">Secret API key</label>
+        <div class="inline-field"><input class="text-field secret-field" id="apiKeyOutput" readonly spellcheck="false"><button class="secondary-button" type="button" data-action="copy-api-key">Copy</button></div>
+        <div class="api-key-warning">Store it in your app's secret manager or environment variables. Do not send it through chat or email.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-api-key">Close</button>
+        <button class="primary-button" id="apiKeySubmit" type="submit">Create key</button>
       </div>
     </form>
   </dialog>

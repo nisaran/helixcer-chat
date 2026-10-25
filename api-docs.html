@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Helixcer API documentation for sending WhatsApp template messages from external applications.">
+  <meta name="theme-color" content="#1d292a">
+  <title>WhatsApp Template API · Helixcer</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --brand:#b84a2d; --brand-deep:#8f2e19; --brand-soft:#fff0ea;
+      --ink:#182124; --muted:#667274; --line:#e3e7e3; --line-strong:#cdd4cf;
+      --canvas:#f4f5f2; --panel:#fff; --warm:#fcfbf8; --sidebar:#1d292a;
+      --green:#177a55; --green-soft:#e8f7f0; --blue:#286699; --blue-soft:#eaf3fb;
+      --amber:#986008; --amber-soft:#fff5da; --red:#a63b2a; --red-soft:#fff0ed;
+      --code:#172324; --code-ink:#e6eeeb; --radius:16px;
+      --shadow:0 16px 48px rgba(29,41,42,.08); --sidebar-width:272px;
+      font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    }
+    *{box-sizing:border-box} html{scroll-behavior:smooth;scroll-padding-top:84px}
+    body{margin:0;background:var(--canvas);color:var(--ink);font-size:15px;line-height:1.66;text-rendering:optimizeLegibility}
+    a{color:var(--brand-deep);text-underline-offset:3px} a:hover{color:var(--brand)}
+    button{font:inherit} code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace}
+    .skip{position:fixed;z-index:100;top:-70px;left:16px;border-radius:8px;background:#fff;color:var(--ink);padding:10px 14px;box-shadow:var(--shadow)} .skip:focus{top:12px}
+    .topbar{position:fixed;z-index:50;inset:0 0 auto;display:flex;align-items:center;justify-content:space-between;min-height:64px;border-bottom:1px solid rgba(255,255,255,.09);background:rgba(29,41,42,.97);color:#fff;padding:0 28px;backdrop-filter:blur(14px)}
+    .brand{display:inline-flex;align-items:center;gap:10px;color:#fff;text-decoration:none;font-size:17px;letter-spacing:-.25px}.brand strong{color:#ef8a6b}
+    .brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px 10px 10px 4px;background:linear-gradient(145deg,#d56343,#96341d);box-shadow:0 6px 18px rgba(0,0,0,.2),inset 0 1px rgba(255,255,255,.25);font:750 17px/1 Georgia,serif}
+    .top-meta{display:flex;align-items:center;gap:12px;color:#b9c6c3;font-size:12px}.version{border:1px solid rgba(255,255,255,.15);border-radius:99px;padding:4px 9px;color:#e6ecea}
+    .menu{display:none;border:0;background:transparent;color:#fff;padding:8px;cursor:pointer}.menu svg{display:block;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2}
+    .layout{display:grid;grid-template-columns:var(--sidebar-width) minmax(0,1fr);min-height:100vh;padding-top:64px}
+    .sidebar{position:fixed;z-index:30;top:64px;bottom:0;width:var(--sidebar-width);overflow:auto;border-right:1px solid var(--line);background:#f8f9f6;padding:24px 18px 40px}
+    .nav-label{margin:0 10px 9px;color:#8a9491;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+    .nav-list{display:grid;gap:2px;margin:0 0 24px;padding:0;list-style:none}.nav-list a{display:block;border-radius:9px;color:#52605e;padding:7px 10px;text-decoration:none;font-size:12px;font-weight:650;transition:.16s}.nav-list a:hover{background:#eef1ed;color:var(--ink)}.nav-list a.active{background:var(--brand-soft);color:var(--brand-deep)}
+    .sidebar-card{border:1px solid #dfd9d3;border-radius:12px;background:#fffaf5;padding:13px;color:#6c625b;font-size:11px;line-height:1.55}.sidebar-card strong{display:block;margin-bottom:4px;color:var(--ink);font-size:12px}
+    main{grid-column:2;width:min(1160px,100%);margin:0 auto;padding:46px 48px 90px} section{margin-top:74px} section:first-child{margin-top:0}
+    .eyebrow{margin:0 0 12px;color:var(--brand);font-size:11px;font-weight:850;letter-spacing:.14em;text-transform:uppercase}
+    h1,h2,h3{color:#17201f;scroll-margin-top:84px}h1{max-width:810px;margin:0;font:700 clamp(39px,6vw,68px)/.98 Georgia,"Times New Roman",serif;letter-spacing:-2.3px}h2{margin:0 0 12px;font:700 clamp(27px,4vw,39px)/1.1 Georgia,"Times New Roman",serif;letter-spacing:-1px}h3{margin:32px 0 10px;font-size:17px;line-height:1.3;letter-spacing:-.25px}p{margin:0 0 15px}
+    .lead{max-width:760px;margin:21px 0 26px;color:#52605e;font-size:clamp(17px,2vw,20px);line-height:1.6}.intro{max-width:800px;color:var(--muted)}
+    .hero{position:relative;overflow:hidden;border:1px solid #e3ded8;border-radius:24px;background:radial-gradient(circle at 92% 8%,rgba(184,74,45,.14),transparent 34%),radial-gradient(circle at 72% 95%,rgba(23,122,85,.08),transparent 31%),var(--warm);padding:clamp(32px,6vw,64px);box-shadow:var(--shadow)}
+    .hero:after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.28;background-image:radial-gradient(circle at 1px 1px,rgba(35,54,50,.15) 1px,transparent 0);background-size:22px 22px;mask-image:linear-gradient(90deg,transparent 50%,#000)}.hero>*{position:relative;z-index:1}
+    .actions{display:flex;flex-wrap:wrap;gap:10px}.button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;border:1px solid var(--brand);border-radius:10px;background:var(--brand);color:#fff;padding:9px 15px;text-decoration:none;font-size:12px;font-weight:800}.button:hover{background:var(--brand-deep);color:#fff}.button.secondary{border-color:var(--line-strong);background:#fff;color:var(--ink)}
+    .quick-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:27px}.quick-card{border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.86);padding:16px}.quick-card small{display:block;margin-bottom:5px;color:#83908d;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.quick-card code{color:#263532;font-size:11px;font-weight:650;overflow-wrap:anywhere}
+    .notice{display:grid;grid-template-columns:auto 1fr;gap:11px;border:1px solid #ead7a9;border-radius:12px;background:var(--amber-soft);margin:24px 0;padding:14px 16px;color:#68501f;font-size:13px}.notice p{margin:0}.notice strong{color:#49350c}.notice-mark{display:grid;place-items:center;width:23px;height:23px;border-radius:50%;background:#efdca6;color:#68470a;font-size:12px;font-weight:900}.notice.info{border-color:#c9ddeb;background:var(--blue-soft);color:#3e5e73}.notice.info .notice-mark{background:#cfe5f5;color:var(--blue)}
+    .two-col{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,.92fr);align-items:start;gap:34px}.three-col{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+    .card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:22px;box-shadow:0 5px 20px rgba(29,41,42,.035)}.card h3{margin-top:0}.card p:last-child{margin-bottom:0}.number{display:grid;place-items:center;width:29px;height:29px;border-radius:9px;background:var(--brand-soft);color:var(--brand-deep);margin-bottom:14px;font-size:12px;font-weight:900}.muted{color:var(--muted)}
+    .callout{border-left:3px solid var(--green);background:var(--green-soft);padding:15px 17px;color:#365f50;font-size:13px}.callout strong{color:#164c38}
+    .endpoint{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;background:#fff;margin:18px 0;padding:12px 14px;overflow:auto}.method{flex:0 0 auto;border-radius:7px;background:var(--green-soft);color:var(--green);padding:4px 8px;font-size:10px;font-weight:900;letter-spacing:.06em}.method.get{background:var(--blue-soft);color:var(--blue)}.endpoint code{white-space:nowrap;color:#33413f;font-size:12px}
+    .code-card{overflow:hidden;border:1px solid #263637;border-radius:14px;background:var(--code);box-shadow:0 10px 30px rgba(23,35,36,.12)}.code-head{display:flex;align-items:center;justify-content:space-between;gap:15px;min-height:42px;border-bottom:1px solid rgba(255,255,255,.08);padding:7px 10px 7px 16px;color:#8fa3a0;font-size:10px;font-weight:750;letter-spacing:.07em;text-transform:uppercase}.copy{border:1px solid rgba(255,255,255,.13);border-radius:7px;background:rgba(255,255,255,.05);color:#c6d1ce;padding:5px 9px;cursor:pointer;font-size:10px;font-weight:750;text-transform:none;letter-spacing:0}.copy:hover{background:rgba(255,255,255,.1);color:#fff}
+    pre{margin:0;overflow:auto;padding:19px;color:var(--code-ink);font-size:12px;line-height:1.65;tab-size:2}pre code{font:inherit}.plain{border:1px solid var(--line);border-radius:8px;background:#f6f7f4;color:#394643;padding:2px 6px;font-size:.88em}
+    .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:#fff}table{width:100%;border-collapse:collapse;min-width:670px}th,td{border-bottom:1px solid var(--line);padding:13px 15px;text-align:left;vertical-align:top}th{background:#f7f8f5;color:#5c6966;font-size:10px;letter-spacing:.08em;text-transform:uppercase}td{color:#56625f;font-size:12px}tr:last-child td{border-bottom:0}td code{color:#253532;font-weight:700}.yes{color:var(--green);font-weight:800}.recommended{color:var(--amber);font-weight:800}
+    .examples{display:grid;gap:14px;margin-top:25px}details{overflow:hidden;border:1px solid var(--line);border-radius:14px;background:#fff}summary{display:flex;align-items:center;gap:12px;min-height:60px;padding:13px 17px;cursor:pointer;list-style:none;font-weight:800}summary::-webkit-details-marker{display:none}summary:before{content:"+";display:grid;place-items:center;width:27px;height:27px;flex:0 0 27px;border-radius:8px;background:#f0f2ef;color:#60706c;font-size:17px;font-weight:500}details[open] summary:before{content:"−";background:var(--brand-soft);color:var(--brand)}details[open] summary{border-bottom:1px solid var(--line)}.detail{padding:19px}.detail>p{color:var(--muted);font-size:13px}.detail>p:first-child{margin-top:0}.tag{margin-left:auto;border-radius:99px;background:#f2f4f1;color:#71807c;padding:4px 8px;font-size:9px;font-weight:850;letter-spacing:.06em;text-transform:uppercase}
+    .status-line{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:24px 0}.pill{border:1px solid var(--line);border-radius:99px;background:#fff;color:#53615e;padding:7px 11px;font-size:11px;font-weight:800}.pill.good{border-color:#bbe1d1;background:var(--green-soft);color:var(--green)}.arrow{color:#9ba5a2}
+    .response-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:22px 0}.response{border:1px solid var(--line);border-radius:14px;background:#fff;padding:17px}.response-code{display:inline-block;border-radius:7px;margin-bottom:10px;padding:4px 8px;font-size:11px;font-weight:900}.response h3{margin:0 0 6px;font-size:14px}.response p{margin:0;color:var(--muted);font-size:11px}.created .response-code{background:var(--green-soft);color:var(--green)}.queued .response-code{background:var(--blue-soft);color:var(--blue)}.failed .response-code{background:var(--red-soft);color:var(--red)}
+    .flow{display:grid;grid-template-columns:repeat(7,auto);align-items:center;justify-content:start;gap:10px;margin:28px 0;overflow:auto;padding:4px 0 10px}.flow-node{min-width:122px;border:1px solid var(--line);border-radius:12px;background:#fff;padding:13px;text-align:center}.flow-node strong{display:block;font-size:12px}.flow-node small{color:var(--muted);font-size:9px}.flow-arrow{color:var(--brand);font-size:18px}
+    .checklist{display:grid;gap:9px;margin:20px 0 0;padding:0;list-style:none}.checklist li{position:relative;border-bottom:1px solid var(--line);padding:0 0 9px 29px;color:#53615e;font-size:13px}.checklist li:before{content:"✓";position:absolute;left:0;top:0;display:grid;place-items:center;width:19px;height:19px;border-radius:6px;background:var(--green-soft);color:var(--green);font-size:11px;font-weight:900}.checklist li:last-child{border:0}
+    .official{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:22px}.official a{display:block;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);padding:14px 16px;text-decoration:none}.official a:hover{border-color:#c9a99d;box-shadow:0 8px 24px rgba(29,41,42,.06);color:var(--brand-deep)}.official strong{display:block;font-size:12px}.official span{color:var(--muted);font-size:10px}
+    footer{border-top:1px solid var(--line);margin-top:76px;padding-top:24px;color:#7a8783;font-size:11px}
+    @media(max-width:1000px){.quick-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.two-col{grid-template-columns:1fr}.response-grid{grid-template-columns:1fr}}
+    @media(max-width:780px){html{scroll-padding-top:74px}.topbar{min-height:58px;padding:0 17px}.top-meta{display:none}.menu{display:block}.layout{display:block;padding-top:58px}.sidebar{top:58px;width:min(310px,88vw);transform:translateX(-105%);transition:transform .2s;box-shadow:18px 0 50px rgba(29,41,42,.14)}.sidebar.open{transform:translateX(0)}main{width:100%;padding:28px 18px 64px}h1{font-size:clamp(37px,13vw,53px)}.hero{padding:30px 23px;border-radius:18px}section{margin-top:59px}.three-col,.official{grid-template-columns:1fr}.flow{grid-template-columns:1fr;justify-items:stretch}.flow-arrow{transform:rotate(90deg);text-align:center}}
+    @media(max-width:520px){.quick-grid{grid-template-columns:1fr}.actions .button{width:100%}.tag{display:none}summary{align-items:flex-start}pre{font-size:11px;padding:15px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition-duration:.01ms!important}}
+  </style>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to documentation</a>
+  <header class="topbar">
+    <a class="brand" href="#overview" aria-label="Helixcer API documentation"><span class="brand-mark" aria-hidden="true">H</span><span>Helixcer <strong>API</strong></span></a>
+    <div class="top-meta"><span>WhatsApp Template Messages</span><span class="version">v1</span></div>
+    <button class="menu" type="button" aria-label="Open documentation navigation" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <p class="nav-label">Start</p>
+      <nav>
+        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li><li><a href="#send">Send a template</a></li></ul>
+        <p class="nav-label">Templates</p>
+        <ul class="nav-list"><li><a href="#examples">Examples</a></li><li><a href="#advanced">Advanced pass-through</a></li></ul>
+        <p class="nav-label">Operations</p>
+        <ul class="nav-list"><li><a href="#responses">Responses</a></li><li><a href="#idempotency">Idempotency</a></li><li><a href="#status">Message status</a></li><li><a href="#webhooks">Chatbox &amp; webhooks</a></li><li><a href="#errors">Errors</a></li><li><a href="#security">Security checklist</a></li><li><a href="#meta">Meta references</a></li></ul>
+      </nav>
+      <div class="sidebar-card"><strong>One API, one inbox</strong>External sends appear beside agent messages, inbound replies, and delivery updates.</div>
+    </aside>
+    <main id="content">
+      <section class="hero" id="overview">
+        <p class="eyebrow">Server-to-server API</p>
+        <h1>Send WhatsApp templates. Keep the full conversation.</h1>
+        <p class="lead">Use your Helixcer channel from an ERP, CRM, store, or custom app. Every outbound template is written to the Helixcer inbox and updated as Meta reports its delivery status.</p>
+        <div class="actions"><a class="button" href="#quickstart">Send your first request</a><a class="button secondary" href="docs/whatsapp-template-api.md">Read as Markdown</a></div>
+        <div class="quick-grid" aria-label="API summary">
+          <div class="quick-card"><small>Base URL</small><code>api.chat.helixcer.com</code></div>
+          <div class="quick-card"><small>Authentication</small><code>Bearer hxc_live_…</code></div>
+          <div class="quick-card"><small>Format</small><code>application/json</code></div>
+          <div class="quick-card"><small>Retry safety</small><code>Idempotency-Key</code></div>
+        </div>
+      </section>
+      <div class="notice" role="note"><span class="notice-mark" aria-hidden="true">!</span><p><strong>Live delivery requirements.</strong> The selected channel needs a valid Meta access token and an approved template whose name, language, components, and parameters match the request.</p></div>
+
+      <section id="quickstart">
+        <p class="eyebrow">Quickstart</p><h2>One request from your server</h2>
+        <p class="intro">Choose a saved WhatsApp channel, provide the recipient and approved Meta template, then retain the returned Helixcer message ID.</p>
+        <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/template-messages</code></div>
+        <div class="code-card">
+          <div class="code-head"><span>cURL · simple template</span><button class="copy" type="button">Copy</button></div>
+          <pre><code>curl --request POST \
+  --url https://api.chat.helixcer.com/api/v1/whatsapp/template-messages \
+  --header 'Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY' \
+  --header 'Content-Type: application/json' \
+  --header 'Idempotency-Key: welcome-customer-4082-v1' \
+  --data '{
+    "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+    "to": "919999999999",
+    "contact": { "displayName": "Asha" },
+    "clientReference": "customer-4082",
+    "previewText": "Welcome to Helixcer",
+    "template": {
+      "name": "hello_world",
+      "language": { "code": "en_US" }
+    }
+  }'</code></pre>
+        </div>
+        <div class="three-col" style="margin-top:18px">
+          <article class="card"><span class="number">1</span><h3>Select the channel</h3><p class="muted">Use a Helixcer <code class="plain">channelId</code>. Credentials stay encrypted on the connection.</p></article>
+          <article class="card"><span class="number">2</span><h3>Send Meta-native data</h3><p class="muted">Name, locale, components, parameter types, and indexes must match the approved template.</p></article>
+          <article class="card"><span class="number">3</span><h3>Track the message</h3><p class="muted">Save <code class="plain">messageId</code>. Poll its status or use the inbox and status webhooks.</p></article>
+        </div>
+      </section>
+
+      <section id="authentication">
+        <div class="two-col">
+          <div><p class="eyebrow">Authentication</p><h2>Your key stays on your server</h2><p class="intro">Create a workspace key in Helixcer and include it as a Bearer token. Sending requires <code class="plain">whatsapp:template:send</code>; reading status requires <code class="plain">messages:read</code>. Keys can use only their workspace and allowed channels.</p><div class="callout"><strong>A Helixcer key is not a Meta token.</strong> External applications never receive the Meta token, WABA ID, or phone-number ID saved on the channel.</div></div>
+          <div class="code-card"><div class="code-head"><span>Required headers</span><button class="copy" type="button">Copy</button></div><pre><code>Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
+Idempotency-Key: order-1001-confirmation-v1
+Content-Type: application/json</code></pre></div>
+        </div>
+        <p style="margin-top:20px">An API key is shown once. Store it in a server-side secret manager or environment variable. Never place it in browser JavaScript, a mobile app, logs, screenshots, support messages, or a source repository. Revoke and replace it immediately if it may have leaked.</p>
+      </section>
+
+      <section id="send">
+        <p class="eyebrow">Request contract</p><h2>Send a template message</h2>
+        <p class="intro">Helixcer validates the outer envelope, finds the channel's encrypted credentials, records the outbound message, and submits a Meta-compatible template payload.</p>
+        <div class="code-card" style="margin:22px 0"><div class="code-head"><span>JSON request body</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "to": "919999999999",
+  "contact": { "displayName": "Asha" },
+  "clientReference": "order-1001",
+  "previewText": "Order ORD-1001 confirmed",
+  "template": {
+    "name": "order_confirmation",
+    "language": { "code": "en_US" },
+    "components": [
+      {
+        "type": "body",
+        "parameters": [
+          { "type": "text", "text": "Asha" },
+          { "type": "text", "text": "ORD-1001" }
+        ]
+      }
+    ]
+  }
+}</code></pre></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>channelId</code></td><td class="yes">Yes</td><td>Helixcer ID of the saved WhatsApp channel that sends the message.</td></tr>
+            <tr><td><code>to</code></td><td class="yes">Yes</td><td>Recipient's WhatsApp number in international digits-only format, for example <code>919999999999</code>.</td></tr>
+            <tr><td><code>contact.displayName</code></td><td>No</td><td>Name used when Helixcer creates a previously unseen contact. Existing names are not overwritten automatically.</td></tr>
+            <tr><td><code>clientReference</code></td><td>No</td><td>Your order, ticket, campaign, or transaction ID. It is stored with and returned on the message.</td></tr>
+            <tr><td><code>previewText</code></td><td class="recommended">Recommended</td><td>Readable chatbox summary. It helps agents understand variable or media templates and does not alter the WhatsApp payload.</td></tr>
+            <tr><td><code>template</code></td><td class="yes">Yes</td><td>Meta-native template object. <code>name</code> and <code>language.code</code> are required; add <code>components</code> when expected.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p><strong>Do not send connection credentials.</strong> Meta access token, WABA ID, phone-number ID, Graph version, <code>messaging_product</code>, and <code>recipient_type</code> belong to the selected Helixcer channel.</p></div>
+      </section>
+
+      <section id="examples">
+        <p class="eyebrow">Template patterns</p><h2>Use the components Meta approved</h2>
+        <p class="intro">Each panel shows the template portion of a request. Add the same top-level <code class="plain">channelId</code>, <code class="plain">to</code>, contact/reference fields, and required headers shown above.</p>
+        <div class="examples">
+          <details open>
+            <summary>Simple template with no variables <span class="tag">No components</span></summary>
+            <div class="detail"><p>Omit <code class="plain">components</code> when the approved template contains no runtime values.</p>
+              <div class="code-card"><div class="code-head"><span>template</span><button class="copy" type="button">Copy</button></div><pre><code>"template": {
+  "name": "hello_world",
+  "language": { "code": "en_US" }
+}</code></pre></div>
+            </div>
+          </details>
+          <details>
+            <summary>Positional and named body variables <span class="tag">Body</span></summary>
+            <div class="detail"><p>Positional values map to <code class="plain">{{1}}</code>, <code class="plain">{{2}}</code>, and so on by array order.</p>
+              <div class="code-card"><div class="code-head"><span>Positional parameters</span><button class="copy" type="button">Copy</button></div><pre><code>"components": [
+  {
+    "type": "body",
+    "parameters": [
+      { "type": "text", "text": "ORD-1001" },
+      { "type": "text", "text": "28 October" }
+    ]
+  }
+]</code></pre></div>
+              <p style="margin-top:18px">For named variables, include each approved <code class="plain">parameter_name</code>. Do not mix named and positional values in one component.</p>
+              <div class="code-card"><div class="code-head"><span>Named parameters</span><button class="copy" type="button">Copy</button></div><pre><code>"components": [
+  {
+    "type": "body",
+    "parameters": [
+      {
+        "type": "text",
+        "parameter_name": "customer_name",
+        "text": "Asha"
+      },
+      {
+        "type": "text",
+        "parameter_name": "order_number",
+        "text": "ORD-1001"
+      }
+    ]
+  }
+]</code></pre></div>
+            </div>
+          </details>
+          <details>
+            <summary>Text header variable <span class="tag">Header</span></summary>
+            <div class="detail"><p>Use a header component only when the approved header contains a runtime text variable.</p>
+              <div class="code-card"><div class="code-head"><span>Text header</span><button class="copy" type="button">Copy</button></div><pre><code>"components": [
+  {
+    "type": "header",
+    "parameters": [
+      { "type": "text", "text": "ORD-1001" }
+    ]
+  },
+  {
+    "type": "body",
+    "parameters": [
+      { "type": "text", "text": "Asha" }
+    ]
+  }
+]</code></pre></div>
+            </div>
+          </details>
+          <details>
+            <summary>Image, video, and document headers <span class="tag">Media</span></summary>
+            <div class="detail"><p>The media type must match the approved header. Supply exactly one source: a public HTTPS <code class="plain">link</code> or uploaded Meta media <code class="plain">id</code>.</p>
+              <div class="code-card"><div class="code-head"><span>Image · URL</span><button class="copy" type="button">Copy</button></div><pre><code>"components": [{
+  "type": "header",
+  "parameters": [{
+    "type": "image",
+    "image": {
+      "link": "https://cdn.example.com/products/item-1001.jpg"
+    }
+  }]
+}]</code></pre></div>
+              <div class="code-card" style="margin-top:12px"><div class="code-head"><span>Video · media ID</span><button class="copy" type="button">Copy</button></div><pre><code>"components": [{
+  "type": "header",
+  "parameters": [{
+    "type": "video",
+    "video": { "id": "META_MEDIA_ID" }
+  }]
+}]</code></pre></div>
+              <div class="code-card" style="margin-top:12px"><div class="code-head"><span>Document · URL</span><button class="copy" type="button">Copy</button></div><pre><code>"components": [{
+  "type": "header",
+  "parameters": [{
+    "type": "document",
+    "document": {
+      "link": "https://cdn.example.com/invoices/INV-1001.pdf",
+      "filename": "INV-1001.pdf"
+    }
+  }]
+}]</code></pre></div>
+            </div>
+          </details>
+          <details>
+            <summary>Currency and date/time parameters <span class="tag">Typed values</span></summary>
+            <div class="detail"><p>Use Meta's native typed parameters. <code class="plain">amount_1000</code> is the amount multiplied by 1,000. Always provide a readable fallback.</p>
+              <div class="code-card"><div class="code-head"><span>Currency + date/time</span><button class="copy" type="button">Copy</button></div><pre><code>"components": [{
+  "type": "body",
+  "parameters": [
+    {
+      "type": "currency",
+      "currency": {
+        "fallback_value": "INR 1,499.00",
+        "code": "INR",
+        "amount_1000": 1499000
+      }
+    },
+    {
+      "type": "date_time",
+      "date_time": {
+        "fallback_value": "31 October 2026"
+      }
+    }
+  ]
+}]</code></pre></div>
+            </div>
+          </details>
+          <details>
+            <summary>Static and dynamic call-to-action buttons <span class="tag">CTA</span></summary>
+            <div class="detail"><p><strong>Static CTA:</strong> When a phone number or URL is fully static in the approved template, omit its button component at send time. Meta renders it automatically.</p>
+              <p><strong>Dynamic URL:</strong> Send only the approved variable value. The index is a zero-based string.</p>
+              <div class="code-card"><div class="code-head"><span>Dynamic URL suffix</span><button class="copy" type="button">Copy</button></div><pre><code>"components": [{
+  "type": "button",
+  "sub_type": "url",
+  "index": "0",
+  "parameters": [
+    { "type": "text", "text": "ORD-1001" }
+  ]
+}]</code></pre></div>
+              <p style="margin-top:14px">For an approved URL ending <code class="plain">/orders/{{1}}</code>, this supplies only <code class="plain">ORD-1001</code>.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Quick-reply button <span class="tag">Interactive</span></summary>
+            <div class="detail"><p>The payload returns with the customer's response and can drive your automation.</p>
+              <div class="code-card"><div class="code-head"><span>Quick reply</span><button class="copy" type="button">Copy</button></div><pre><code>"components": [{
+  "type": "button",
+  "sub_type": "quick_reply",
+  "index": "0",
+  "parameters": [{
+    "type": "payload",
+    "payload": "CONFIRM_ORDER_1001"
+  }]
+}]</code></pre></div>
+            </div>
+          </details>
+          <details>
+            <summary>Copy-code and authentication templates <span class="tag">Code / OTP</span></summary>
+            <div class="detail"><p>A copy-code button commonly uses a coupon code parameter.</p>
+              <div class="code-card"><div class="code-head"><span>Copy code</span><button class="copy" type="button">Copy</button></div><pre><code>"components": [{
+  "type": "button",
+  "sub_type": "copy_code",
+  "index": "0",
+  "parameters": [{
+    "type": "coupon_code",
+    "coupon_code": "SAVE20"
+  }]
+}]</code></pre></div>
+              <p style="margin-top:14px">Authentication templates can include an OTP, copy-code button, and/or autofill or zero-tap URL. Pass exactly what Meta approved. Never place an OTP in an idempotency key, reference, or log.</p>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section id="advanced">
+        <div class="two-col">
+          <div><p class="eyebrow">Future-compatible</p><h2>Advanced components pass through</h2><p class="intro">Helixcer keeps <code class="plain">template.components</code> Meta-native. Supported catalog/product, Flow, carousel/card, limited-time offer, and authentication components pass through without a second Helixcer-specific schema.</p><p>Helixcer validates the outer envelope and security boundary. Meta remains the authority on whether a component matches an approved template and whether the selected account can use it.</p></div>
+          <div class="code-card"><div class="code-head"><span>Illustrative catalog button</span><button class="copy" type="button">Copy</button></div><pre><code>"template": {
+  "name": "recommended_products",
+  "language": { "code": "en_US" },
+  "components": [
+    {
+      "type": "body",
+      "parameters": [
+        { "type": "text", "text": "Asha" }
+      ]
+    },
+    {
+      "type": "button",
+      "sub_type": "catalog",
+      "index": "0",
+      "parameters": []
+    }
+  ]
+}</code></pre></div>
+        </div>
+        <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p>This is illustrative, not a universal schema. Copy the exact structure, types, indexes, and values required by your approved template and the current Meta Cloud API.</p></div>
+      </section>
+      <section id="responses">
+        <p class="eyebrow">Accepted response</p><h2>Every valid send is asynchronous</h2>
+        <p class="intro">Helixcer first records the message and queues provider delivery. New sends and idempotent replays therefore return <code class="plain">202 Accepted</code>. The first status is normally <code class="plain">pending</code>; Meta submission happens just after the response.</p>
+        <div class="response-grid">
+          <article class="response queued"><span class="response-code">202 Accepted</span><h3>Stored and queued</h3><p>The message exists in the inbox and provider delivery is running asynchronously.</p></article>
+          <article class="response created"><span class="response-code">GET 200</span><h3>Current state</h3><p>The status route returns the latest stored result using the same flat shape.</p></article>
+          <article class="response failed"><span class="response-code">4xx / 5xx</span><h3>Request rejected</h3><p>Read the stable error code and decide whether the request is safe to retry.</p></article>
+        </div>
+        <div class="code-card"><div class="code-head"><span>202 · accepted for async delivery</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "ok": true,
+  "messageId": "594798db-1c00-481f-adab-137d1c80b2d8",
+  "conversationId": "9e9411e9-c1a7-4a66-a46f-e6e31d9577da",
+  "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "status": "pending",
+  "providerMessageId": "",
+  "error": "",
+  "clientReference": "order-1001",
+  "createdAt": "2026-10-25T10:30:12.442Z",
+  "statusUrl": "https://api.chat.helixcer.com/api/v1/messages/594798db-1c00-481f-adab-137d1c80b2d8",
+  "requestId": "96fe6806-a769-451e-918a-034b33d06dc1"
+}</code></pre></div>
+        <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p>The response includes <code>Idempotent-Replayed: false</code> for a newly created operation and <code>Idempotent-Replayed: true</code> when the same key and body replay its existing message. <code>X-Request-Id</code> matches the body <code>requestId</code>.</p></div>
+      </section>
+
+      <section id="idempotency">
+        <div class="two-col">
+          <div><p class="eyebrow">Safe retries</p><h2>One operation, one key</h2><p class="intro">A timeout can occur after Helixcer records a message. The required <code class="plain">Idempotency-Key</code> prevents a network retry from sending it twice.</p>
+            <ul class="checklist">
+              <li>Use 8–128 safe ASCII characters: letters, numbers, period, underscore, colon, or hyphen.</li>
+              <li>Generate one unique key per logical send operation.</li>
+              <li>Retry the identical JSON body with the same key after a timeout, <code>429</code>, or retryable <code>5xx</code>.</li>
+              <li>Same key plus same body returns the existing message with <code>Idempotent-Replayed: true</code>.</li>
+              <li>Same key plus a different body returns <code>409 idempotency_conflict</code>.</li>
+              <li>Use a new key only when you intentionally want another message.</li>
+            </ul>
+            <p class="muted" style="margin-top:14px">Idempotency records are retained for seven days. Do not intentionally reuse an old key after that period.</p>
+          </div>
+          <article class="card"><h3>Good keys</h3><p><code class="plain">order-1001-confirmation-v1</code></p><p><code class="plain">38aa7b1a-8468-4f26-a473-c627e720704e</code></p><h3>Not the same as</h3><p class="muted"><code class="plain">clientReference</code> is stored and returned as business metadata. It does not protect against duplicate sends.</p></article>
+        </div>
+      </section>
+
+      <section id="status">
+        <p class="eyebrow">Status API</p><h2>Read the current message state</h2>
+        <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/messages/{messageId}</code></div>
+        <p class="intro">Use the same Bearer key. The key requires the message-read scope and can read only messages it created.</p>
+        <div class="status-line" aria-label="Typical message status progression">
+          <span class="pill">pending</span><span class="arrow">→</span><span class="pill">retrying</span><span class="arrow">→</span><span class="pill">submitted</span><span class="arrow">→</span><span class="pill">sent</span><span class="arrow">→</span><span class="pill good">delivered</span><span class="arrow">→</span><span class="pill good">read</span>
+        </div>
+        <p class="intro">A message can move to <code class="plain">failed</code>. Status updates are asynchronous, and some recipients or devices may not produce every intermediate event.</p>
+        <div class="code-card" style="margin-top:22px"><div class="code-head"><span>200 · current status</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "ok": true,
+  "messageId": "594798db-1c00-481f-adab-137d1c80b2d8",
+  "conversationId": "9e9411e9-c1a7-4a66-a46f-e6e31d9577da",
+  "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "status": "delivered",
+  "providerMessageId": "wamid.HBgMOTE5OTk5OTk5OTk5FQIAERgS...",
+  "error": "",
+  "clientReference": "order-1001",
+  "createdAt": "2026-10-25T10:30:12.442Z",
+  "statusUrl": "https://api.chat.helixcer.com/api/v1/messages/594798db-1c00-481f-adab-137d1c80b2d8",
+  "requestId": "f2baa47a-97e6-47c8-a200-7a235cad5d92"
+}</code></pre></div>
+      </section>
+
+      <section id="webhooks">
+        <p class="eyebrow">Unified inbox</p><h2>External sends stay in the conversation</h2>
+        <p class="intro">Helixcer resolves the WhatsApp identity, creates a contact and open conversation when needed, and records the outbound template before provider delivery runs.</p>
+        <div class="flow" aria-label="Message and status flow">
+          <div class="flow-node"><strong>Your app</strong><small>template request</small></div><span class="flow-arrow">→</span>
+          <div class="flow-node"><strong>Helixcer</strong><small>record in chatbox</small></div><span class="flow-arrow">→</span>
+          <div class="flow-node"><strong>Meta</strong><small>WhatsApp delivery</small></div><span class="flow-arrow">→</span>
+          <div class="flow-node"><strong>Customer</strong><small>message &amp; reply</small></div>
+        </div>
+        <p>Meta sends asynchronous status webhooks to the connected channel. Helixcer applies <code class="plain">sent</code>, <code class="plain">delivered</code>, <code class="plain">read</code>, or <code class="plain">failed</code> to the same item. Replies join the same contact and conversation, so agents see the complete thread.</p>
+        <div class="callout"><strong>Machine-to-machine status:</strong> poll the GET endpoint or use the chatbox today. When Helixcer outbound status webhooks are enabled, consumers should verify signatures, acknowledge quickly, deduplicate event IDs, expect retries and out-of-order events, and reconcile through GET.</div>
+      </section>
+
+      <section id="errors">
+        <p class="eyebrow">Error handling</p><h2>Stable codes for application logic</h2>
+        <p class="intro">Use <code class="plain">error.code</code>, not the human-readable message. Include <code class="plain">requestId</code> or the matching <code class="plain">X-Request-Id</code> response header when contacting support.</p>
+        <div class="code-card" style="margin:22px 0"><div class="code-head"><span>Standard error</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "ok": false,
+  "error": {
+    "code": "channel_not_ready",
+    "message": "The WhatsApp channel is missing its access token.",
+    "requestId": "96fe6806-a769-451e-918a-034b33d06dc1"
+  }
+}</code></pre></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Status</th><th>Meaning</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td><code>400</code></td><td>Malformed JSON, missing/unknown field, invalid parameter, or invalid idempotency key.</td><td>Correct the request; do not retry unchanged.</td></tr>
+            <tr><td><code>401</code></td><td>Missing, invalid, expired, or revoked API key.</td><td>Replace the key and ensure it is not logged.</td></tr>
+            <tr><td><code>403</code></td><td>Browser-origin request or key lacks the required scope.</td><td>Send server-to-server; check key permissions.</td></tr>
+            <tr><td><code>404</code></td><td>Channel, message, or API route was not found for this key.</td><td>Check the ID, workspace, and key channel restrictions.</td></tr>
+            <tr><td><code>409</code></td><td>Channel is not ready, or an idempotency key was reused with a different body.</td><td>Read <code>error.code</code>; fix channel setup or use the original request.</td></tr>
+            <tr><td><code>429</code></td><td>Rate limit exceeded.</td><td>Wait for <code>Retry-After</code>; retry with the same idempotency key.</td></tr>
+            <tr><td><code>5xx</code></td><td>Temporary Helixcer, rate-limiter, or upstream failure.</td><td>Back off and retry with the same key.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section id="security">
+        <p class="eyebrow">Before production</p><h2>Security and reliability checklist</h2>
+        <div class="card"><ul class="checklist">
+          <li>The WhatsApp channel is enabled and has a valid Meta access token and Phone Number ID.</li>
+          <li>The template name, locale, components, indexes, and parameters exactly match Meta's approved template.</li>
+          <li>Recipient numbers use international digits-only format.</li>
+          <li>The API key is stored only on your server and rotated periodically.</li>
+          <li>Every send uses a stable, unique <code>Idempotency-Key</code>.</li>
+          <li>Your application treats <code>202</code> as recorded and queued, not delivered.</li>
+          <li>Retries use exponential backoff and retain the original idempotency key.</li>
+          <li>Logs exclude keys, OTPs, sensitive message content, and unnecessary personal data.</li>
+          <li>Status processing is idempotent and can reconcile through the GET endpoint.</li>
+        </ul></div>
+      </section>
+      <section id="meta">
+        <p class="eyebrow">Source of truth</p><h2>Official Meta references</h2>
+        <p class="intro">Meta controls template approval, names, locales, component schemas, parameter types, limits, and feature availability by account and region. Use the current official payload for advanced components.</p>
+        <div class="official">
+          <a href="https://www.postman.com/meta/whatsapp-business-platform/documentation/wlk6lh4/whatsapp-cloud-api" target="_blank" rel="noopener"><strong>WhatsApp Cloud API collection</strong><span>Official Meta Postman documentation</span></a>
+          <a href="https://www.postman.com/meta/whatsapp-business-platform/request/lwtlz1k/send-message-template-interactive" target="_blank" rel="noopener"><strong>Interactive template request</strong><span>Official Meta example</span></a>
+          <a href="https://github.com/fbsamples/whatsapp-api-examples" target="_blank" rel="noopener"><strong>WhatsApp API examples</strong><span>Meta's official GitHub samples</span></a>
+          <a href="https://github.com/fbsamples/whatsapp-api-examples/blob/main/send-messages-flight-app-python/message_helper.py" target="_blank" rel="noopener"><strong>Document-header helper</strong><span>Official Meta sample implementation</span></a>
+          <a href="https://www.postman.com/meta/whatsapp-business-platform/request/cn89g66/send-catalog-template-message" target="_blank" rel="noopener"><strong>Catalog template request</strong><span>Official Meta example</span></a>
+          <a href="https://www.postman.com/meta/whatsapp-business-platform/request/cgamr2u/send-flow-template-message" target="_blank" rel="noopener"><strong>Flow template request</strong><span>Official Meta example</span></a>
+        </div>
+      </section>
+
+      <footer>Helixcer WhatsApp Template API · v1 · Last updated October 2026</footer>
+    </main>
+  </div>
+  <script>
+    (function(){
+      var menu=document.querySelector('.menu'),sidebar=document.querySelector('.sidebar');
+      var links=Array.prototype.slice.call(document.querySelectorAll('.nav-list a'));
+      menu.addEventListener('click',function(){var open=sidebar.classList.toggle('open');menu.setAttribute('aria-expanded',String(open))});
+      links.forEach(function(link){link.addEventListener('click',function(){sidebar.classList.remove('open');menu.setAttribute('aria-expanded','false')})});
+      document.addEventListener('click',function(e){if(window.innerWidth<=780&&sidebar.classList.contains('open')&&!sidebar.contains(e.target)&&!menu.contains(e.target)){sidebar.classList.remove('open');menu.setAttribute('aria-expanded','false')}});
+      document.querySelectorAll('.copy').forEach(function(button){button.addEventListener('click',function(){var code=button.closest('.code-card').querySelector('code').textContent;navigator.clipboard.writeText(code).then(function(){var original=button.textContent;button.textContent='Copied';setTimeout(function(){button.textContent=original},1300)}).catch(function(){button.textContent='Select & copy'})})});
+      if('IntersectionObserver' in window){var observer=new IntersectionObserver(function(entries){entries.forEach(function(entry){if(!entry.isIntersecting)return;links.forEach(function(link){link.classList.toggle('active',link.getAttribute('href')==='#'+entry.target.id)})})},{rootMargin:'-18% 0px -72% 0px'});document.querySelectorAll('main section[id]').forEach(function(section){observer.observe(section)})}
+    }());
+  </script>
+</body>
+</html>

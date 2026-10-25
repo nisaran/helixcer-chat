@@ -4,8 +4,11 @@ import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import {
   assertAllowedHttpsEndpoint,
+  buildWhatsAppTemplatePayload,
+  decryptOutboundPayload,
   decryptChannelCredential,
   encryptChannelCredential,
+  encryptOutboundPayload,
   handleRequest,
   InboxHub,
   isRetryableWhatsAppStatus,
@@ -16,6 +19,7 @@ import {
   normalizeWhatsAppRecipient,
   resolveTemplate,
   timingSafeEqual,
+  validateWhatsAppTemplateRequest,
   verifyMetaSignature
 } from '../src/index.js';
 
@@ -27,12 +31,13 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
       { id: 'wamid.1', from: '919999999999', timestamp: '1761360000', type: 'text', text: { body: 'Hello' } },
       { id: 'wamid.2', from: '919999999999', timestamp: '1761360002', type: 'image', image: {} }
     ],
-    statuses: [{ id: 'wamid.out', status: 'delivered', timestamp: '1761360001' }]
+    statuses: [{ id: 'wamid.out', status: 'delivered', timestamp: '1761360001', biz_opaque_callback_data: 'internal-message-1' }]
   } }] }] });
   assert.equal(result.messages[0].displayName, 'Asha');
   assert.equal(result.messages[0].text, 'Hello');
   assert.equal(result.messages[1].text, '[WhatsApp image received]');
   assert.equal(result.statuses[0].status, 'delivered');
+  assert.equal(result.statuses[0].internalMessageId, 'internal-message-1');
   assert.deepEqual(result.phoneNumberIds, ['123456789']);
 });
 
@@ -108,6 +113,50 @@ test('encrypts channel credentials with workspace and channel binding', async ()
   await assert.rejects(() => decryptChannelCredential(encrypted, `${master}different`, 'ws-one', 'channel-one', 'accessToken'));
 });
 
+test('validates Meta-native template variants without allowing provider envelope overrides', () => {
+  const normalized = validateWhatsAppTemplateRequest({
+    channelId: 'wa-sales',
+    to: '+91 98765 43210',
+    contact: { displayName: 'Asha' },
+    clientReference: 'order-1001',
+    template: {
+      name: 'order_update',
+      language: { code: 'en_US' },
+      components: [
+        { type: 'header', parameters: [{ type: 'image', image: { link: 'https://cdn.example.com/order.jpg' } }] },
+        { type: 'body', parameters: [{ type: 'text', text: 'Asha' }, { type: 'currency', currency: { fallback_value: '₹100', code: 'INR', amount_1000: 100000 } }] },
+        { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'track-1001' }] },
+        { type: 'button', sub_type: 'quick_reply', index: '1', parameters: [{ type: 'payload', payload: 'CONFIRM_1001' }] }
+      ]
+    }
+  });
+  assert.equal(normalized.to, '919876543210');
+  assert.equal(normalized.template.components[0].parameters[0].image.link, 'https://cdn.example.com/order.jpg');
+  const provider = buildWhatsAppTemplatePayload(normalized.to, normalized.template, 'message-1');
+  assert.equal(provider.messaging_product, 'whatsapp');
+  assert.equal(provider.recipient_type, 'individual');
+  assert.equal(provider.type, 'template');
+  assert.equal(provider.biz_opaque_callback_data, 'message-1');
+  assert.equal(provider.template.components[2].sub_type, 'url');
+  assert.throws(() => validateWhatsAppTemplateRequest({ ...normalized, messaging_product: 'other' }), /Unsupported request field/);
+  assert.throws(() => validateWhatsAppTemplateRequest({ ...normalized, template: { ...normalized.template, name: 'Bad Name' } }), /Template name/);
+  assert.throws(() => validateWhatsAppTemplateRequest({
+    ...normalized,
+    template: { ...normalized.template, components: [{ type: 'header', parameters: [{ type: 'image', image: { link: 'http://localhost/private' } }] }] }
+  }), /public HTTPS URL/);
+});
+
+test('encrypts outbound template payloads with workspace and message binding', async () => {
+  const master = 'test-only-master-key-material-'.repeat(2);
+  const value = { template: { name: 'hello_world', language: { code: 'en_US' }, components: [] } };
+  const encrypted = await encryptOutboundPayload(value, master, 'ws-one', 'message-one');
+  assert.match(encrypted, /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  assert.equal(encrypted.includes('hello_world'), false);
+  assert.deepEqual(await decryptOutboundPayload(encrypted, master, 'ws-one', 'message-one'), value);
+  await assert.rejects(() => decryptOutboundPayload(encrypted, master, 'ws-two', 'message-one'));
+  await assert.rejects(() => decryptOutboundPayload(encrypted, master, 'ws-one', 'message-two'));
+});
+
 test('resolves data and secret templates recursively', () => {
   const result = resolveTemplate({ Authorization: 'Bearer {{secret:TOKEN}}', body: '{{message.text}}' },
     { message: { text: 'hello' } }, name => name === 'TOKEN' ? 'abc' : undefined);
@@ -141,6 +190,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const identity = await readFile(new URL('../migrations/0002_identity_and_workspaces.sql', import.meta.url), 'utf8');
   const whatsapp = await readFile(new URL('../migrations/0003_whatsapp_channel.sql', import.meta.url), 'utf8');
   const multichannel = await readFile(new URL('../migrations/0004_multichannel_credentials.sql', import.meta.url), 'utf8');
+  const templateApi = await readFile(new URL('../migrations/0005_external_template_api.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -166,8 +216,10 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   database.exec(identity);
   database.exec(whatsapp);
   database.exec(multichannel);
+  database.exec(templateApi);
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
-  for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'channel_credentials', 'contacts', 'messages', 'audit_log']) {
+  for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'channel_credentials',
+    'contacts', 'messages', 'audit_log', 'api_keys', 'outbound_payloads', 'external_api_requests']) {
     assert.ok(tables.includes(name), `missing table ${name}`);
   }
   for (const [table, idColumn, id] of [
@@ -192,7 +244,8 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const indexes = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(row => row.name));
   for (const name of ['idx_channels_workspace', 'idx_conversations_workspace_activity', 'idx_messages_workspace_conversation',
     'idx_outbox_workspace_due', 'idx_channel_credentials_channel', 'idx_channels_workspace_provider',
-    'idx_channels_workspace_whatsapp_phone', 'idx_channels_workspace_instagram_account', 'idx_channels_workspace_telegram_bot']) {
+    'idx_channels_workspace_whatsapp_phone', 'idx_channels_workspace_instagram_account', 'idx_channels_workspace_telegram_bot',
+    'idx_api_keys_workspace_status', 'idx_outbound_payloads_workspace', 'idx_external_requests_message', 'idx_external_requests_expiry']) {
     assert.ok(indexes.has(name), `missing index ${name}`);
   }
   database.close();
@@ -203,6 +256,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   editedDatabase.exec(whatsapp);
   editedDatabase.prepare("UPDATE channels SET name='Edited WhatsApp' WHERE channel_id='wa-main'").run();
   editedDatabase.exec(multichannel);
+  editedDatabase.exec(templateApi);
   assert.equal(editedDatabase.prepare("SELECT name FROM channels WHERE channel_id='wa-main'").get().name, 'Edited WhatsApp');
   editedDatabase.close();
 });
@@ -284,6 +338,33 @@ test('OAuth start limiter enforces per-client and global windows before D1 work'
   const perClient = await attempt('a');
   assert.equal(perClient.status, 429);
   assert.ok(Number(perClient.headers.get('Retry-After')) > 0);
+  assert.equal((await attempt('b')).status, 204);
+  assert.equal((await attempt('c')).status, 429);
+});
+
+test('external API limiter enforces per-key and per-workspace windows', async () => {
+  const values = new Map();
+  const storageApi = {
+    get: async key => values.get(key),
+    put: async (key, value) => values.set(key, structuredClone(value))
+  };
+  const hub = new InboxHub({
+    storage: { transaction: callback => callback(storageApi) },
+    getWebSockets: () => []
+  }, {
+    EXTERNAL_API_RATE_LIMIT_WINDOW_SECONDS: '60',
+    EXTERNAL_API_RATE_LIMIT_PER_KEY: '2',
+    EXTERNAL_API_RATE_LIMIT_PER_WORKSPACE: '3'
+  });
+  const attempt = character => hub.fetch(new Request('https://hub.internal/external-api-rate-limit', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keyHash: character.repeat(64) })
+  }));
+  assert.equal((await attempt('a')).status, 204);
+  assert.equal((await attempt('a')).status, 204);
+  const keyLimited = await attempt('a');
+  assert.equal(keyLimited.status, 429);
+  assert.ok(Number(keyLimited.headers.get('Retry-After')) > 0);
   assert.equal((await attempt('b')).status, 204);
   assert.equal((await attempt('c')).status, 429);
 });
