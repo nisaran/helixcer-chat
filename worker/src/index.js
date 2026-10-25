@@ -377,7 +377,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
 }
 
 async function listApiKeys(env, workspaceId) {
-  const result = await env.DB.prepare(`SELECT api_key_id,name,key_prefix,scopes_json,allowed_channel_ids_json,status,
+  const result = await env.DB.prepare(`SELECT api_key_id,name,key_prefix,scopes_json,status,
       expires_at,last_used_at,created_at,updated_at,revoked_at
     FROM api_keys WHERE workspace_id=?1 ORDER BY created_at DESC`).bind(workspaceId).all();
   return (result.results || []).map(publicApiKeyView);
@@ -385,15 +385,6 @@ async function listApiKeys(env, workspaceId) {
 
 async function createApiKey(env, workspaceId, principal, payload) {
   const name = cleanRequired(payload?.name, 'API key name', 120);
-  const suppliedChannels = payload?.allowedChannelIds ?? [];
-  if (!Array.isArray(suppliedChannels) || suppliedChannels.length > 50) {
-    throw httpError(400, 'Allowed channel IDs must be an array with no more than 50 items.');
-  }
-  const allowedChannelIds = [...new Set(suppliedChannels.map(value => cleanId(value, 'Channel ID')))];
-  for (const channelId of allowedChannelIds) {
-    const channel = await getChannel(env, channelId, 'whatsapp_cloud', workspaceId);
-    if (!channel) throw httpError(400, 'An allowed WhatsApp channel was not found in this workspace.');
-  }
   let expiresAt = null;
   if (payload?.expiresAt) {
     const expires = new Date(String(payload.expiresAt));
@@ -411,16 +402,16 @@ async function createApiKey(env, workspaceId, principal, payload) {
        expires_at,created_by_user_id,created_at,updated_at)
     VALUES (?1,?2,?3,?4,?5,?6,?7,'active',?8,?9,?10,?10)`)
     .bind(apiKeyId, workspaceId, name, keyPrefix, await hashText(apiKey),
-      JSON.stringify(['whatsapp:template:send', 'messages:read']), JSON.stringify(allowedChannelIds),
+      JSON.stringify(['whatsapp:template:send', 'messages:read']), '[]',
       expiresAt, principal.user.userId || '', now).run();
-  await audit(env, principal, 'create', 'api_key', apiKeyId, { keyPrefix, allowedChannelIds });
+  await audit(env, principal, 'create', 'api_key', apiKeyId, { keyPrefix });
   return {
     ok: true,
     apiKey,
     item: publicApiKeyView({
       api_key_id: apiKeyId, name, key_prefix: keyPrefix,
       scopes_json: JSON.stringify(['whatsapp:template:send', 'messages:read']),
-      allowed_channel_ids_json: JSON.stringify(allowedChannelIds), status: 'active', expires_at: expiresAt,
+      status: 'active', expires_at: expiresAt,
       last_used_at: null, created_at: now, updated_at: now, revoked_at: null
     })
   };
@@ -442,7 +433,6 @@ function publicApiKeyView(row) {
     name: row.name,
     keyPrefix: row.key_prefix,
     scopes: safeJsonParse(row.scopes_json, []),
-    allowedChannelIds: safeJsonParse(row.allowed_channel_ids_json, []),
     status: row.status,
     expiresAt: row.expires_at || '',
     lastUsedAt: row.last_used_at || '',
@@ -501,7 +491,7 @@ async function authenticateApiKey(request, env) {
   const token = match[1];
   const keyPrefix = `hxc_live_${match[2]}`;
   const row = await env.DB.prepare(`SELECT api_key_id,workspace_id,key_prefix,secret_hash,scopes_json,
-      allowed_channel_ids_json,status,expires_at
+      status,expires_at
     FROM api_keys WHERE key_prefix=?1 LIMIT 1`).bind(keyPrefix).first();
   const suppliedHash = await hashText(token);
   if (!row || !timingSafeEqual(row.secret_hash || '', suppliedHash) || row.status !== 'active' ||
@@ -515,8 +505,7 @@ async function authenticateApiKey(request, env) {
     workspaceId: row.workspace_id,
     keyPrefix: row.key_prefix,
     keyHash: suppliedHash,
-    scopes: new Set(safeJsonParse(row.scopes_json, [])),
-    allowedChannelIds: new Set(safeJsonParse(row.allowed_channel_ids_json, []))
+    scopes: new Set(safeJsonParse(row.scopes_json, []))
   };
 }
 
@@ -569,9 +558,6 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
     WHERE api_key_id=?1 AND operation=?2 AND idempotency_key_hash=?3 AND expires_at<=?4`)
     .bind(principal.apiKeyId, EXTERNAL_API_OPERATION, idempotencyHash, new Date().toISOString()).run();
 
-  if (principal.allowedChannelIds.size && !principal.allowedChannelIds.has(input.channelId)) {
-    throw apiError(404, 'channel_not_found', 'WhatsApp channel not found.');
-  }
   const channel = await getChannel(env, input.channelId, 'whatsapp_cloud', principal.workspaceId);
   if (!channel) throw apiError(404, 'channel_not_found', 'WhatsApp channel not found.');
   if (!channel.config?.phoneNumberId) throw apiError(409, 'channel_not_ready', 'The WhatsApp channel is missing its Phone Number ID.');

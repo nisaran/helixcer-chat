@@ -602,7 +602,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .invitation-item strong, .invitation-item span { display: block; }
 .invitation-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .invitation-item span { color: var(--muted); font-size: 10px; text-transform: capitalize; }
-.developer-api-surface { margin-top: 14px; }
+.developer-api-surface { margin-top: 0; }
 .developer-api-toolbar > div { display: grid; gap: 2px; }
 .developer-api-toolbar > div strong { font-size: 13px; }
 .developer-api-toolbar > div span { max-width: 660px; line-height: 1.45; }
@@ -618,16 +618,6 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .api-key-identity strong, .api-key-identity code { display: block; }
 .api-key-identity strong { color: var(--ink); }
 .api-key-identity code { color: var(--muted); margin-top: 3px; font-size: 9px; }
-.api-key-access { display: block; max-width: 290px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.api-channel-fieldset { border: 1px solid var(--line); border-radius: 12px; margin: 16px 0 0; padding: 13px; }
-.api-channel-fieldset legend { color: #3f4b49; padding: 0 4px; font-size: 11px; font-weight: 700; }
-.api-channel-fieldset > p { color: var(--muted); margin: 0 0 10px; font-size: 9px; line-height: 1.45; }
-.api-channel-options { display: grid; gap: 7px; }
-.api-channel-option { display: flex; align-items: flex-start; gap: 9px; border: 1px solid #e4e7e3; border-radius: 9px; background: #fafbf9; padding: 9px 10px; cursor: pointer; }
-.api-channel-option input { width: 15px; height: 15px; flex: 0 0 auto; accent-color: var(--green); margin: 1px 0 0; }
-.api-channel-option strong, .api-channel-option small { display: block; }
-.api-channel-option strong { color: var(--ink); font-size: 10px; }
-.api-channel-option small { color: var(--muted); margin-top: 1px; font-size: 9px; }
 .api-key-result { display: grid; justify-items: center; margin-top: 15px; text-align: center; }
 .api-key-result .success-mark { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 15px; background: var(--green-soft); color: var(--green); font-size: 21px; font-weight: 800; }
 .api-key-result h3 { margin: 11px 0 3px; font-family: Georgia, "Times New Roman", serif; font-size: 20px; }
@@ -765,7 +755,6 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   .invitation-item { grid-template-columns: minmax(0, 1fr) auto; }
   .invitation-item time { display: none; }
   .developer-api-toolbar { align-items: stretch; flex-direction: column; }
-  .developer-api-toolbar .primary-button { align-self: flex-start; }
   .developer-api-summary { grid-template-columns: 1fr; }
   .api-docs-link { justify-self: start; }
 }

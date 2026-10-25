@@ -11,7 +11,7 @@ The backend uses Cloudflare Workers, D1, a scheduled D1 outbox, and a Durable Ob
 - WhatsApp, Telegram, and Instagram webhooks retain independent signature/token verification and do not depend on an agent session.
 - Each workspace can own any number of provider connections. Their credentials are encrypted in D1 with AES-256-GCM under one Worker master secret; the browser can replace a secret but can never read one back.
 - Failed outbound messages use the D1 outbox and a one-minute scheduled retry with exponential backoff.
-- External applications use revocable, hashed workspace API keys. WhatsApp template sends are written to the inbox and outbox atomically; sensitive retry payloads are AES-GCM encrypted and removed after a terminal submission result.
+- External applications use revocable, hashed workspace API keys through the Helixcer Messaging API. The currently available WhatsApp template module writes sends to the inbox and outbox atomically; sensitive retry payloads are AES-GCM encrypted and removed after a terminal submission result.
 
 The initial migration seeds one empty workspace, never an administrator. On the first successful Google login, an owner membership is created only if there are no memberships and the verified Google email exactly matches `BOOTSTRAP_OWNER_EMAIL`. Future users require an invitation.
 
@@ -120,7 +120,7 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 
 Every authenticated business-data query includes the session's `workspace_id`. Provider webhook routing resolves a globally unique channel and carries its workspace through storage and realtime delivery.
 
-The public v1 API accepts only server-to-server requests and rejects browser `Origin` headers. It derives the workspace from a `hxc_live_...` key, requires an `Idempotency-Key` for every send, and never accepts Meta credentials or provider envelope fields from the caller. See [`../api-docs.html`](../api-docs.html) or [`../docs/whatsapp-template-api.md`](../docs/whatsapp-template-api.md) for the complete contract.
+The public v1 Helixcer Messaging API accepts only server-to-server requests and rejects browser `Origin` headers. Its currently available external-send module is WhatsApp templates; Telegram and Instagram external-send endpoints are not enabled yet. It derives the workspace from a `hxc_live_...` key, which applies to the workspace's WhatsApp connections; each send selects one with `channelId`. It requires an `Idempotency-Key` for every send and never accepts Meta credentials or provider envelope fields from the caller. See [`../api-docs.html`](../api-docs.html) or [`../docs/whatsapp-template-api.md`](../docs/whatsapp-template-api.md) for the complete contract.
 
 ## Managed channel connections
 

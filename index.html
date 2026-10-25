@@ -70,6 +70,12 @@
           </span>
           <span>Channels</span>
         </button>
+        <button class="nav-button" type="button" data-route="developer" data-admin-only>
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m8 5-6 7 6 7m8-14 6 7-6 7M14 3l-4 18"/></svg>
+          </span>
+          <span>Developer API</span>
+        </button>
         <button class="nav-button" type="button" data-route="team" data-admin-only>
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M16 20v-1.6a4.4 4.4 0 0 0-4.4-4.4H6.4A4.4 4.4 0 0 0 2 18.4V20M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8-1a3 3 0 1 0 0-6m5 17v-1.6a4.4 4.4 0 0 0-3.3-4.3"/></svg>
@@ -274,6 +280,38 @@
         <div class="channel-grid" id="channelGrid"></div>
       </section>
 
+      <section class="route content-route" id="developerRoute" data-route-panel="developer" aria-labelledby="developerApiTitle" hidden>
+        <div class="route-heading">
+          <div><p class="eyebrow">External messaging</p><h2 id="developerApiTitle">Developer API</h2><p>Connect your own apps and keep their messaging activity in this workspace.</p></div>
+          <button class="primary-button" type="button" data-action="open-api-key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create API key</button>
+        </div>
+        <section class="surface developer-api-surface" aria-labelledby="apiKeysTitle">
+          <div class="surface-toolbar developer-api-toolbar">
+            <div>
+              <strong id="apiKeysTitle">Workspace API keys</strong>
+              <span class="subtle">Manage secure credentials for apps that connect to this workspace.</span>
+            </div>
+          </div>
+          <div class="developer-api-summary">
+            <div>
+              <span class="api-summary-label">API base URL</span>
+              <div class="api-base-row"><code id="developerApiBase">https://api.chat.helixcer.com</code><button class="secondary-button compact-button" type="button" data-action="copy-api-base">Copy</button></div>
+            </div>
+            <div class="api-security-note">
+              <strong>Server-to-server only</strong>
+              <span>Use keys to call supported messaging endpoints. The complete secret is shown once and is never displayed again.</span>
+            </div>
+            <a class="secondary-button api-docs-link" href="api-docs.html" target="_blank" rel="noopener">Open API documentation</a>
+          </div>
+          <div class="contact-table-wrap">
+            <table class="contact-table api-key-table">
+              <thead><tr><th>Key</th><th>Last used</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>
+              <tbody id="apiKeyTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
       <section class="route content-route" id="teamRoute" data-route-panel="team" aria-labelledby="teamTitle" hidden>
         <div class="route-heading">
           <div><p class="eyebrow">Workspace access</p><h2 id="teamTitle">Team</h2><p>Control who can enter this workspace and what they can manage.</p></div>
@@ -296,32 +334,6 @@
           <div class="surface-toolbar"><div><strong>Pending invitations</strong><span class="subtle" id="invitationCount">0 pending</span></div></div>
           <div class="invitation-list" id="invitationList"></div>
         </div>
-        <section class="surface developer-api-surface" aria-labelledby="developerApiTitle">
-          <div class="surface-toolbar developer-api-toolbar">
-            <div>
-              <strong id="developerApiTitle">Developer API</strong>
-              <span class="subtle">Send WhatsApp templates from your own apps and keep every message in this inbox.</span>
-            </div>
-            <button class="primary-button" type="button" data-action="open-api-key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create API key</button>
-          </div>
-          <div class="developer-api-summary">
-            <div>
-              <span class="api-summary-label">API base URL</span>
-              <div class="api-base-row"><code id="developerApiBase">https://api.chat.helixcer.com</code><button class="secondary-button compact-button" type="button" data-action="copy-api-base">Copy</button></div>
-            </div>
-            <div class="api-security-note">
-              <strong>Server-to-server only</strong>
-              <span>Keys can send WhatsApp template messages. The complete secret is shown once and is never displayed again.</span>
-            </div>
-            <a class="secondary-button api-docs-link" href="api-docs.html" target="_blank" rel="noopener">Open API documentation</a>
-          </div>
-          <div class="contact-table-wrap">
-            <table class="contact-table api-key-table">
-              <thead><tr><th>Key</th><th>Access</th><th>Last used</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>
-              <tbody id="apiKeyTableBody"></tbody>
-            </table>
-          </div>
-        </section>
       </section>
     </main>
   </div>
@@ -368,11 +380,6 @@
           <label class="field-label form-span">Key name<input class="text-field" name="name" required maxlength="80" placeholder="Order notifications"></label>
           <label class="field-label form-span">Expiry <span class="optional-label">optional</span><input class="text-field" name="expiresAt" type="date"><span class="field-hint">Leave blank for no automatic expiry. You can revoke the key at any time.</span></label>
         </div>
-        <fieldset class="api-channel-fieldset">
-          <legend>Allowed WhatsApp connections <span class="optional-label">optional</span></legend>
-          <p>Leave every connection unchecked to allow all WhatsApp connections in this workspace.</p>
-          <div class="api-channel-options" id="apiKeyChannelOptions"></div>
-        </fieldset>
       </div>
       <div class="api-key-result" id="apiKeyResult" hidden>
         <span class="success-mark" aria-hidden="true">✓</span>

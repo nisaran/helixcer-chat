@@ -12,14 +12,14 @@ Helixcer Chat is a zero-monthly-cost omnichannel inbox designed for GitHub Pages
 - Any number of WhatsApp Cloud, Telegram Bot, and Instagram Messaging connections per workspace, with provider verification, signed/token-protected webhooks, and inbound/outbound text.
 - Provider credentials encrypted in D1 under one Cloudflare Worker master secret; no per-channel environment bindings or secrets are exposed to the browser.
 - D1 outbox with scheduled exponential-backoff retries. No paid queue is required.
-- Workspace API keys and a server-to-server WhatsApp Template API that records each external send in the shared inbox before dispatching it to Meta.
+- Workspace API keys and a server-to-server Helixcer Messaging API. Its first available module sends WhatsApp templates and records each external send in the shared inbox before dispatching it to Meta.
 - Built-in API documentation for simple templates, variables, media headers, static and dynamic buttons, authentication, Flow, catalog, carousel, and future Meta-native components.
 
 ## Repository layout
 
 ```text
 index.html                 GitHub Pages entry point
-api-docs.html              Browser-friendly WhatsApp Template API reference
+api-docs.html              Browser-friendly Helixcer Developer API reference
 assets/                    Dashboard JavaScript and styles
 docs/                      Markdown API reference
 worker/src/index.js        Cloudflare Worker API
@@ -55,7 +55,7 @@ The Worker setup is documented in [`worker/README.md`](worker/README.md). In sum
 6. Sign in with the configured owner email and verify the inbox, team roles, and realtime connection before publishing the updated GitHub Pages frontend.
 7. Add each WhatsApp, Telegram, or Instagram connection in the dashboard. The Worker encrypts its credentials in D1; do not create `WA_MAIN_*` or other per-channel Worker secrets.
 8. Configure the exact channel-specific callback shown in the dashboard. WhatsApp starts placing correctly signed inbound webhook messages in the Inbox as soon as they arrive, without waiting for API/provider verification. Complete **Verify sending** before relying on outbound replies. Managed Meta calls default to Graph API v26.0.
-9. In **Team → Developer API**, create a one-time workspace API key for each external backend or automation. Use [`api-docs.html`](api-docs.html) for the request contract and template examples.
+9. Open **Developer API** from the sidebar and create a one-time workspace API key for each external backend or automation. Each key belongs to the workspace, and each request selects the appropriate connection with `channelId`. The currently available external-send module is WhatsApp templates; use [`api-docs.html`](api-docs.html) for its request contract and examples.
 
 Never place Google credentials, provider tokens, signing secrets, the bootstrap owner email, or a recovery token in GitHub.
 

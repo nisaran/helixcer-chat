@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Helixcer API documentation for sending WhatsApp template messages from external applications.">
+  <meta name="description" content="Helixcer Developer and Messaging API documentation. Available now: WhatsApp template messages from external applications.">
   <meta name="theme-color" content="#1d292a">
-  <title>WhatsApp Template API · Helixcer</title>
+  <title>Developer API · Helixcer</title>
   <style>
     :root {
       color-scheme: light;
@@ -66,27 +66,27 @@
   <a class="skip" href="#content">Skip to documentation</a>
   <header class="topbar">
     <a class="brand" href="#overview" aria-label="Helixcer API documentation"><span class="brand-mark" aria-hidden="true">H</span><span>Helixcer <strong>API</strong></span></a>
-    <div class="top-meta"><span>WhatsApp Template Messages</span><span class="version">v1</span></div>
+    <div class="top-meta"><span>Messaging API</span><span class="version">v1</span></div>
     <button class="menu" type="button" aria-label="Open documentation navigation" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   </header>
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <p class="nav-label">Start</p>
       <nav>
-        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li><li><a href="#send">Send a template</a></li></ul>
-        <p class="nav-label">Templates</p>
+        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li><li><a href="#send">WhatsApp templates</a></li></ul>
+        <p class="nav-label">Available now</p>
         <ul class="nav-list"><li><a href="#examples">Examples</a></li><li><a href="#advanced">Advanced pass-through</a></li></ul>
         <p class="nav-label">Operations</p>
         <ul class="nav-list"><li><a href="#responses">Responses</a></li><li><a href="#idempotency">Idempotency</a></li><li><a href="#status">Message status</a></li><li><a href="#webhooks">Chatbox &amp; webhooks</a></li><li><a href="#errors">Errors</a></li><li><a href="#security">Security checklist</a></li><li><a href="#meta">Meta references</a></li></ul>
       </nav>
-      <div class="sidebar-card"><strong>One API, one inbox</strong>External sends appear beside agent messages, inbound replies, and delivery updates.</div>
+      <div class="sidebar-card"><strong>Helixcer Messaging API</strong>Available now: WhatsApp template sends that appear beside agent messages, inbound replies, and delivery updates.</div>
     </aside>
     <main id="content">
       <section class="hero" id="overview">
-        <p class="eyebrow">Server-to-server API</p>
-        <h1>Send WhatsApp templates. Keep the full conversation.</h1>
-        <p class="lead">Use your Helixcer channel from an ERP, CRM, store, or custom app. Every outbound template is written to the Helixcer inbox and updated as Meta reports its delivery status.</p>
-        <div class="actions"><a class="button" href="#quickstart">Send your first request</a><a class="button secondary" href="docs/whatsapp-template-api.md">Read as Markdown</a></div>
+        <p class="eyebrow">Helixcer Developer API</p>
+        <h1>Connect your apps to the Helixcer inbox.</h1>
+        <p class="lead">The Helixcer Messaging API gives external systems one secure path into the shared inbox. Available now: send approved WhatsApp templates from an ERP, CRM, store, or custom app and track Meta delivery on the same conversation.</p>
+        <div class="actions"><a class="button" href="#quickstart">Send your first request</a><a class="button secondary" href="docs/whatsapp-template-api.md">WhatsApp module as Markdown</a></div>
         <div class="quick-grid" aria-label="API summary">
           <div class="quick-card"><small>Base URL</small><code>api.chat.helixcer.com</code></div>
           <div class="quick-card"><small>Authentication</small><code>Bearer hxc_live_…</code></div>
@@ -94,10 +94,10 @@
           <div class="quick-card"><small>Retry safety</small><code>Idempotency-Key</code></div>
         </div>
       </section>
-      <div class="notice" role="note"><span class="notice-mark" aria-hidden="true">!</span><p><strong>Live delivery requirements.</strong> The selected channel needs a valid Meta access token and an approved template whose name, language, components, and parameters match the request.</p></div>
+      <div class="notice" role="note"><span class="notice-mark" aria-hidden="true">!</span><p><strong>Available now: WhatsApp template messages.</strong> Telegram and Instagram external-send endpoints are not enabled yet. Live WhatsApp delivery requires a valid Meta access token and an approved template whose name, language, components, and parameters match the request.</p></div>
 
       <section id="quickstart">
-        <p class="eyebrow">Quickstart</p><h2>One request from your server</h2>
+        <p class="eyebrow">Quickstart · WhatsApp</p><h2>Send a template from your server</h2>
         <p class="intro">Choose a saved WhatsApp channel, provide the recipient and approved Meta template, then retain the returned Helixcer message ID.</p>
         <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/template-messages</code></div>
         <div class="code-card">
@@ -128,7 +128,7 @@
 
       <section id="authentication">
         <div class="two-col">
-          <div><p class="eyebrow">Authentication</p><h2>Your key stays on your server</h2><p class="intro">Create a workspace key in Helixcer and include it as a Bearer token. Sending requires <code class="plain">whatsapp:template:send</code>; reading status requires <code class="plain">messages:read</code>. Keys can use only their workspace and allowed channels.</p><div class="callout"><strong>A Helixcer key is not a Meta token.</strong> External applications never receive the Meta token, WABA ID, or phone-number ID saved on the channel.</div></div>
+          <div><p class="eyebrow">Authentication</p><h2>Your key stays on your server</h2><p class="intro">Create a workspace key in Helixcer and include it as a Bearer token. Sending requires <code class="plain">whatsapp:template:send</code>; reading status requires <code class="plain">messages:read</code>. The key applies to the workspace's WhatsApp connections, and each send selects one with <code class="plain">channelId</code>.</p><div class="callout"><strong>A Helixcer key is not a Meta token.</strong> External applications never receive the Meta token, WABA ID, or phone-number ID saved on the channel.</div></div>
           <div class="code-card"><div class="code-head"><span>Required headers</span><button class="copy" type="button">Copy</button></div><pre><code>Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
 Idempotency-Key: order-1001-confirmation-v1
 Content-Type: application/json</code></pre></div>
@@ -459,7 +459,7 @@ Content-Type: application/json</code></pre></div>
             <tr><td><code>400</code></td><td>Malformed JSON, missing/unknown field, invalid parameter, or invalid idempotency key.</td><td>Correct the request; do not retry unchanged.</td></tr>
             <tr><td><code>401</code></td><td>Missing, invalid, expired, or revoked API key.</td><td>Replace the key and ensure it is not logged.</td></tr>
             <tr><td><code>403</code></td><td>Browser-origin request or key lacks the required scope.</td><td>Send server-to-server; check key permissions.</td></tr>
-            <tr><td><code>404</code></td><td>Channel, message, or API route was not found for this key.</td><td>Check the ID, workspace, and key channel restrictions.</td></tr>
+            <tr><td><code>404</code></td><td>Channel, message, or API route was not found for this key.</td><td>Check the ID and confirm the channel belongs to the key's workspace.</td></tr>
             <tr><td><code>409</code></td><td>Channel is not ready, or an idempotency key was reused with a different body.</td><td>Read <code>error.code</code>; fix channel setup or use the original request.</td></tr>
             <tr><td><code>429</code></td><td>Rate limit exceeded.</td><td>Wait for <code>Retry-After</code>; retry with the same idempotency key.</td></tr>
             <tr><td><code>5xx</code></td><td>Temporary Helixcer, rate-limiter, or upstream failure.</td><td>Back off and retry with the same key.</td></tr>
@@ -494,7 +494,7 @@ Content-Type: application/json</code></pre></div>
         </div>
       </section>
 
-      <footer>Helixcer WhatsApp Template API · v1 · Last updated October 2026</footer>
+      <footer>Helixcer Developer API · Messaging v1 · Last updated October 2026</footer>
     </main>
   </div>
   <script>

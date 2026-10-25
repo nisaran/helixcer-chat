@@ -117,6 +117,8 @@ test('external template API persists once, dispatches, replays safely, and scope
   const { database, env } = await fixture();
   const token = `hxc_live_public123.${'s'.repeat(43)}`;
   await insertKey(database, token, 'key-one', 'hxc_live_public123');
+  database.prepare('UPDATE api_keys SET allowed_channel_ids_json=? WHERE api_key_id=?')
+    .run('["legacy-restricted-channel"]', 'key-one');
   const waits = [];
   let releaseMeta;
   const originalFetch = globalThis.fetch;
@@ -243,26 +245,41 @@ test('API key management reveals a secret once, stores only its hash, lists meta
     const createdResponse = await handleRequest(new Request('https://api.chat.helixcer.com/api/developer/api-keys', {
       method: 'POST',
       headers: { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Order system', allowedChannelIds: ['wa-sales'] })
+      body: JSON.stringify({ name: 'Order system' })
     }), env);
     assert.equal(createdResponse.status, 201);
     const created = await createdResponse.json();
     assert.match(created.apiKey, /^hxc_live_[A-Za-z0-9_-]{8,32}\.[A-Za-z0-9_-]{32,128}$/);
     assert.equal(created.item.name, 'Order system');
-    assert.deepEqual(created.item.allowedChannelIds, ['wa-sales']);
-    const stored = database.prepare('SELECT key_prefix,secret_hash FROM api_keys WHERE api_key_id=?').get(created.item.apiKeyId);
+    assert.equal(Object.hasOwn(created.item, 'allowedChannelIds'), false);
+    const stored = database.prepare('SELECT key_prefix,secret_hash,allowed_channel_ids_json FROM api_keys WHERE api_key_id=?').get(created.item.apiKeyId);
     assert.equal(stored.key_prefix, created.item.keyPrefix);
     assert.equal(stored.secret_hash, await sha256(created.apiKey));
+    assert.equal(stored.allowed_channel_ids_json, '[]');
     assert.equal(JSON.stringify(stored).includes(created.apiKey), false);
+
+    const legacyResponse = await handleRequest(new Request('https://api.chat.helixcer.com/api/developer/api-keys', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Legacy client key', allowedChannelIds: ['wa-sales'] })
+    }), env);
+    assert.equal(legacyResponse.status, 201);
+    const legacyCreated = await legacyResponse.json();
+    assert.equal(Object.hasOwn(legacyCreated.item, 'allowedChannelIds'), false);
+    assert.equal(database.prepare('SELECT allowed_channel_ids_json FROM api_keys WHERE api_key_id=?')
+      .get(legacyCreated.item.apiKeyId).allowed_channel_ids_json, '[]');
 
     const listedResponse = await handleRequest(new Request('https://api.chat.helixcer.com/api/developer/api-keys', {
       headers: { Authorization: 'Bearer recovery-secret' }
     }), env);
     assert.equal(listedResponse.status, 200);
     const listed = await listedResponse.json();
-    assert.equal(listed.items.length, 1);
-    assert.equal(Object.hasOwn(listed.items[0], 'apiKey'), false);
-    assert.equal(Object.hasOwn(listed.items[0], 'secretHash'), false);
+    assert.equal(listed.items.length, 2);
+    for (const item of listed.items) {
+      assert.equal(Object.hasOwn(item, 'apiKey'), false);
+      assert.equal(Object.hasOwn(item, 'secretHash'), false);
+      assert.equal(Object.hasOwn(item, 'allowedChannelIds'), false);
+    }
 
     const revokedResponse = await handleRequest(new Request(
       `https://api.chat.helixcer.com/api/developer/api-keys/${created.item.apiKeyId}`,

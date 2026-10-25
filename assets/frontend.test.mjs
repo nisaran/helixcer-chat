@@ -36,6 +36,7 @@ test("technical connection and recovery controls are not exposed in the UI", () 
 
 test("role-aware single-workspace UI includes team management and no billing surface", () => {
   assert.match(html, /data-route="team"/);
+  assert.match(html, /data-route="developer" data-admin-only/);
   assert.match(html, /id="teamTableBody"/);
   assert.match(html, /id="inviteForm"/);
   assert.doesNotMatch(html, /id="inviteRole"[^>]*>[\s\S]*?<option value="owner"/);
@@ -121,6 +122,7 @@ test("saving a channel preserves inbound-first WhatsApp setup and avoids duplica
 
 test("Developer API keys are managed by admins and shown only once", () => {
   assert.match(html, /id="developerApiTitle">Developer API</);
+  assert.match(html, /id="developerRoute" data-route-panel="developer"/);
   assert.match(html, /id="apiKeyTableBody"/);
   assert.match(html, /id="apiKeyDialog"/);
   assert.match(html, /id="apiKeyOutput"[^>]*readonly/);
@@ -130,7 +132,13 @@ test("Developer API keys are managed by admins and shown only once", () => {
   assert.match(app, /request\("\/api\/developer\/api-keys"\)/);
   assert.match(app, /request\("\/api\/developer\/api-keys", \{ method: "POST"/);
   assert.match(app, /`\/api\/developer\/api-keys\/\$\{encodeURIComponent\(apiKeyId\)\}`/);
-  assert.match(app, /allowedChannelIds: data\.getAll\("allowedChannelIds"\)/);
+  assert.match(app, /developer: "Developer API"/);
+  assert.doesNotMatch(html, /Allowed WhatsApp connections|apiKeyChannelOptions/);
+  assert.doesNotMatch(app, /allowedChannelIds|renderApiKeyChannelOptions/);
+  const developerRoute = html.match(/<section class="route content-route" id="developerRoute"[\s\S]*?<\/section>\s*<section class="route content-route" id="teamRoute"/)?.[0] || "";
+  const apiKeyDialog = html.match(/<dialog class="modal" id="apiKeyDialog"[\s\S]*?<\/dialog>/)?.[0] || "";
+  assert.doesNotMatch(developerRoute, /WhatsApp/i);
+  assert.doesNotMatch(apiKeyDialog, /WhatsApp/i);
   assert.match(app, /\$\("apiKeyOutput"\)\.value = ""/);
   assert.doesNotMatch(app, /localStorage\.(?:setItem|getItem)\([^)]*api.?key/i);
 });

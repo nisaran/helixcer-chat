@@ -1,6 +1,8 @@
-# Helixcer WhatsApp Template API
+# WhatsApp Templates | Helixcer Messaging API
 
-Send approved WhatsApp templates from your server while keeping every outbound message, delivery update, and reply in the Helixcer inbox.
+This is the WhatsApp Templates module of the Helixcer Developer and Messaging API. It lets your server send approved WhatsApp templates while keeping every outbound message, delivery update, and reply in the Helixcer inbox.
+
+> **Available now:** The external Messaging API currently supports WhatsApp template messages. Telegram and Instagram external-send endpoints are not enabled yet.
 
 > **Delivery readiness:** Live delivery requires an enabled WhatsApp channel, a valid Meta access token, and an approved template whose name, language, components, and parameters match the request.
 
@@ -29,7 +31,7 @@ Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
 
 An API key is shown once. Store it in a server-side secret manager or environment variable. Never place it in browser JavaScript, a mobile app, logs, screenshots, support messages, or a Git repository. A Helixcer API key is not a Meta access token.
 
-Keys are bound to a workspace and permissions. Sending requires the `whatsapp:template:send` scope; reading status requires `messages:read`. A send is allowed only when the selected `channelId` belongs to the key's workspace and allowed-channel set. Revoke and replace a key immediately if it may have leaked; rotate production keys periodically.
+Keys are bound to one workspace and apply to its WhatsApp connections. Sending requires the `whatsapp:template:send` scope; reading status requires `messages:read`. Every send still selects the required workspace connection with `channelId`. Revoke and replace a key immediately if it may have leaked; rotate production keys periodically.
 
 ## Send a template message
 
@@ -526,7 +528,7 @@ Errors use a stable machine-readable code plus a human-readable message:
 | `400` | Malformed JSON, missing/unknown field, invalid parameter, or invalid idempotency key. | Correct the request; do not retry unchanged. |
 | `401` | Missing, invalid, expired, or revoked API key. | Replace the key. Do not log it. |
 | `403` | Browser-origin request or key lacks the required scope. | Send server-to-server and check key permissions. |
-| `404` | Channel, message, or route was not found for this key. | Check the identifier, workspace, and key channel restrictions. |
+| `404` | Channel, message, or route was not found for this key. | Check the identifier and confirm the channel belongs to the key's workspace. |
 | `409` | Channel is not ready, or the idempotency key was reused with a different body. | Read `error.code`; fix channel setup or use the original request. |
 | `429` | Rate limit exceeded. | Wait for `Retry-After`, then retry with the same idempotency key. |
 | `5xx` | Temporary Helixcer, rate-limiter, or upstream failure. | Retry with exponential backoff and the same idempotency key. |

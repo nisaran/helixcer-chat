@@ -93,7 +93,7 @@
         ],
       },
       apiKeys: [
-        { apiKeyId: "demo-api-key", name: "Order notifications", keyPrefix: "hxc_live_demo…", scopes: ["whatsapp:template:send", "messages:read"], allowedChannelIds: ["wa-sales"], status: "active", createdAt: ago(1440), lastUsedAt: ago(8), expiresAt: "" },
+        { apiKeyId: "demo-api-key", name: "Order notifications", keyPrefix: "hxc_live_demo…", scopes: ["whatsapp:template:send", "messages:read"], status: "active", createdAt: ago(1440), lastUsedAt: ago(8), expiresAt: "" },
       ],
       channels: [
         { channelId: "wa-sales", name: "Sales WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", config: { wabaId: "123456789012345", phoneNumberId: "123456789012346" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(120), webhookVerifiedAt: ago(118), lastWebhookAt: ago(3), verifiedName: "Helixcer Sales", verifiedPhoneNumber: "+91 98765 43210" } },
@@ -192,7 +192,6 @@
         name: payload.name,
         keyPrefix: `hxc_live_${suffix.slice(-8)}…`,
         scopes: ["whatsapp:template:send", "messages:read"],
-        allowedChannelIds: clone(payload.allowedChannelIds || []),
         status: "active",
         createdAt: new Date().toISOString(),
         lastUsedAt: "",
@@ -654,7 +653,7 @@
     const admin = canAdmin();
     document.querySelectorAll("[data-admin-only]").forEach((node) => { node.hidden = !admin; });
     document.querySelectorAll("[data-owner-only]").forEach((node) => { node.hidden = !isOwner(); node.disabled = !isOwner(); });
-    if (!admin && ["channels", "team"].includes(state.route)) setRoute("inbox");
+    if (!admin && ["channels", "developer", "team"].includes(state.route)) setRoute("inbox");
   }
 
   async function initializeSession() {
@@ -1293,7 +1292,6 @@
       name: String(raw.name || "API key"),
       keyPrefix: String(raw.keyPrefix || raw.prefix || "hxc_live_…"),
       scopes: parseList(raw.scopes || raw.scopesJson),
-      allowedChannelIds: parseList(raw.allowedChannelIds || raw.allowedChannelIdsJson),
       status: raw.status || (raw.revokedAt ? "revoked" : "active"),
       createdAt: raw.createdAt || new Date().toISOString(),
       lastUsedAt: raw.lastUsedAt || "",
@@ -1325,7 +1323,7 @@
     if (!state.apiKeys.length) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
-      cell.colSpan = 5;
+      cell.colSpan = 4;
       cell.className = "empty-list";
       cell.textContent = "No API keys have been created.";
       row.append(cell);
@@ -1338,10 +1336,6 @@
       const identity = element("div", "api-key-identity");
       identity.append(element("strong", "", apiKey.name), element("code", "", apiKey.keyPrefix));
       identityCell.append(identity);
-
-      const accessCell = document.createElement("td");
-      const channelNames = apiKey.allowedChannelIds.map((channelId) => channelFor(channelId).name);
-      accessCell.append(element("span", "api-key-access", channelNames.length ? channelNames.join(", ") : "All WhatsApp connections"));
 
       const lastUsedCell = tableCell(apiKey.lastUsedAt ? relativeTime(apiKey.lastUsedAt) : "Never");
       const statusCell = document.createElement("td");
@@ -1357,29 +1351,8 @@
         revoke.dataset.revokeApiKey = apiKey.apiKeyId;
         actionCell.append(revoke);
       }
-      row.append(identityCell, accessCell, lastUsedCell, statusCell, actionCell);
+      row.append(identityCell, lastUsedCell, statusCell, actionCell);
       body.append(row);
-    });
-  }
-
-  function renderApiKeyChannelOptions() {
-    const host = $("apiKeyChannelOptions");
-    host.replaceChildren();
-    const channels = state.channels.filter((channel) => channel.connectorType === "whatsapp_cloud");
-    if (!channels.length) {
-      host.append(element("span", "subtle", "No WhatsApp connections are configured yet."));
-      return;
-    }
-    channels.forEach((channel) => {
-      const label = element("label", "api-channel-option");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.name = "allowedChannelIds";
-      input.value = channel.channelId;
-      const copy = document.createElement("span");
-      copy.append(element("strong", "", channel.name), element("small", "", channel.enabled ? "Enabled" : "Disabled"));
-      label.append(input, copy);
-      host.append(label);
     });
   }
 
@@ -1390,7 +1363,6 @@
     $("apiKeyFields").hidden = false;
     $("apiKeyResult").hidden = true;
     $("apiKeySubmit").hidden = false;
-    renderApiKeyChannelOptions();
     $("apiKeyDialog").showModal();
   }
 
@@ -1409,7 +1381,6 @@
     const expiryDate = String(data.get("expiresAt") || "");
     const payload = {
       name,
-      allowedChannelIds: data.getAll("allowedChannelIds").map(String),
       ...(expiryDate ? { expiresAt: new Date(`${expiryDate}T23:59:59.999Z`).toISOString() } : {}),
     };
     $("apiKeySubmit").disabled = true;
@@ -1797,8 +1768,8 @@
   }
 
   function setRoute(route) {
-    if (!["inbox", "contacts", "channels", "team"].includes(route)) route = "inbox";
-    if (!canAdmin() && ["channels", "team"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "channels", "developer", "team"].includes(route)) route = "inbox";
+    if (!canAdmin() && ["channels", "developer", "team"].includes(route)) route = "inbox";
     state.route = route;
     document.querySelectorAll("[data-route-panel]").forEach((panel) => {
       const active = panel.dataset.routePanel === route;
@@ -1811,7 +1782,7 @@
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     });
-    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", team: "Team" };
+    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", developer: "Developer API", team: "Team" };
     $("pageTitle").textContent = labels[route];
     if (location.hash !== `#${route}`) history.replaceState(null, "", `#${route}`);
     closeMobileMenu();
