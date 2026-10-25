@@ -672,12 +672,18 @@ test('WhatsApp credential patches preserve an independent webhook handshake', as
   assert.equal(afterCredentialPatch.webhookVerifiedAt, webhookVerifiedAt);
   assert.equal(afterCredentialPatch.lastWebhookAt, lastWebhookAt);
 
+  seedVerificationState();
   const verifyTokenPatched = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-state', {
     method: 'PATCH', headers, body: JSON.stringify({ credentials: { verifyToken: 'replacement-verify-token' } })
   }), env);
   assert.equal(verifyTokenPatched.status, 200);
   const afterVerifyTokenPatch = readConfig();
   assert.equal(afterVerifyTokenPatch.webhookVerifiedAt, undefined);
+  assert.equal(afterVerifyTokenPatch.credentialsVerifiedAt, verifiedAt);
+  assert.equal(afterVerifyTokenPatch.subscribedAppsAt, verifiedAt);
+  assert.equal(afterVerifyTokenPatch.verifiedProviderId, '123456789012346');
+  assert.equal(afterVerifyTokenPatch.verifiedPhoneNumber, '+91 98765 43210');
+  assert.equal(afterVerifyTokenPatch.verifiedName, 'Helixcer');
   assert.equal(afterVerifyTokenPatch.lastWebhookAt, lastWebhookAt);
 
   seedVerificationState();

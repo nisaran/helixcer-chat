@@ -3,6 +3,7 @@
 
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
+  const SAVED_SECRET_MASK = "••••••••••••••••";
 
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -14,6 +15,7 @@
     contacts: [],
     conversations: [],
     messages: new Map(),
+    recentVerifyTokens: new Map(),
     selectedConversationId: null,
     detailsOpen: false,
     currentUser: null,
@@ -1100,6 +1102,45 @@
     copyButton.dataset.copyValue = callbackUrl;
     callbackRow.append(copyButton);
     callbackBlock.append(callbackRow);
+
+    if (channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram") {
+      const storedVerifyToken = Boolean(channel.setup?.credentialFields?.verifyToken || channel.setup?.credentialsPresent);
+      const recentVerifyToken = state.recentVerifyTokens.get(channel.channelId) || "";
+      const tokenBlock = element("div", "callback-token-block");
+      tokenBlock.append(element("span", "callback-label", "Webhook verify token"));
+      const tokenRow = element("div", "callback-token-row");
+      const display = document.createElement("input");
+      display.className = "text-field callback-token-display";
+      display.type = "password";
+      display.readOnly = true;
+      display.value = recentVerifyToken || (storedVerifyToken ? SAVED_SECRET_MASK : "");
+      display.placeholder = "No verify token saved";
+      display.setAttribute("aria-label", recentVerifyToken
+        ? "New webhook verify token ready to copy"
+        : storedVerifyToken ? "Webhook verify token saved securely" : "No webhook verify token saved");
+      const status = element("span", `saved-secret-status${recentVerifyToken || storedVerifyToken ? " is-saved" : ""}`,
+        recentVerifyToken ? "New token ready to copy" : storedVerifyToken ? "Saved securely" : "Not set");
+      const displayWrap = element("div", "callback-token-display-wrap");
+      displayWrap.append(display, status);
+      tokenRow.append(displayWrap);
+      if (recentVerifyToken) {
+        const copyToken = element("button", "secondary-button compact-button", "Copy token");
+        copyToken.type = "button";
+        copyToken.dataset.action = "copy-webhook-token";
+        copyToken.dataset.channelId = channel.channelId;
+        tokenRow.append(copyToken);
+      }
+      const replaceToken = element("button", "secondary-button compact-button", storedVerifyToken ? "Replace token" : "Set token");
+      replaceToken.type = "button";
+      replaceToken.dataset.action = "edit-webhook-token";
+      replaceToken.dataset.channelId = channel.channelId;
+      tokenRow.append(replaceToken);
+      tokenBlock.append(tokenRow, element("span", "callback-token-help",
+        recentVerifyToken ? "Copy this value into Meta now. It will be masked again after a refresh."
+          : storedVerifyToken ? "The saved value stays masked. Replace it only when you also update Meta."
+            : "Set this to the same private value used in Meta's webhook configuration."));
+      callbackBlock.append(tokenBlock);
+    }
     setup.append(callbackBlock);
 
     const actions = element("div", "channel-card-actions");
@@ -1589,6 +1630,62 @@
     }
   }
 
+  function openWebhookTokenDialog(channelId) {
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    if (!channel || !["whatsapp_cloud", "instagram"].includes(channel.connectorType)) return;
+    const form = $("webhookTokenForm");
+    form.reset();
+    $("webhookTokenChannelId").value = channel.channelId;
+    $("webhookTokenDialogTitle").textContent = `${channel.setup?.credentialFields?.verifyToken || channel.setup?.credentialsPresent ? "Replace" : "Set"} verify token`;
+    $("webhookTokenDialogCopy").textContent = channel.setup?.credentialFields?.verifyToken || channel.setup?.credentialsPresent
+      ? "The current token remains encrypted and cannot be displayed. Create a replacement only when you are ready to update Meta."
+      : "Create the private token that Meta will use when verifying this webhook callback.";
+    $("webhookTokenDialog").showModal();
+    $("webhookTokenInput").focus();
+  }
+
+  async function copyWebhookVerifyToken(button) {
+    const channelId = String(button?.dataset.channelId || "");
+    const token = state.recentVerifyTokens.get(channelId) || "";
+    if (!token) {
+      showToast("Stored token stays protected", "Choose Replace token to create a new value that can be copied.", true);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(token);
+      showToast("Verify token copied", "Paste it into Meta's webhook configuration.");
+    } catch {
+      const input = button.closest(".callback-token-row")?.querySelector("input");
+      if (input) {
+        input.focus();
+        input.select();
+      }
+      showToast("Copy the selected token", "Your browser blocked automatic clipboard access.");
+    }
+  }
+
+  async function saveWebhookVerifyToken(form) {
+    const channelId = String(new FormData(form).get("channelId") || "");
+    const verifyToken = String(new FormData(form).get("verifyToken") || "").trim();
+    if (!channelId || !verifyToken) return;
+    const submit = $("webhookTokenSubmit");
+    submit.disabled = true;
+    submit.textContent = "Saving…";
+    try {
+      await state.api.updateChannel(channelId, { credentials: { verifyToken } });
+      state.recentVerifyTokens.set(channelId, verifyToken);
+      $("webhookTokenDialog").close();
+      await loadAll();
+      setRoute("channels");
+      showToast("Verify token saved", "Copy the new token beside the callback URL, then update Meta.");
+    } catch (error) {
+      showToast("Verify token was not saved", error.message, true);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = "Save token";
+    }
+  }
+
   function openChannelDialog(channelId = "") {
     const form = $("channelForm");
     const channel = state.channels.find((item) => item.channelId === channelId) || null;
@@ -1596,8 +1693,11 @@
     form.querySelectorAll(".secret-field").forEach((input) => {
       input.value = "";
       input.type = "password";
+      input.classList.remove("is-saved");
+      delete input.dataset.savedCredential;
     });
     $("channelIdInput").value = channel?.channelId || "";
+    $("channelMetaVerifyToken").value = channel ? "" : generatePrivateToken();
     $("channelProvider").value = channel?.connectorType || "whatsapp_cloud";
     $("channelProvider").disabled = Boolean(channel);
     $("channelNameInput").value = channel?.name || "";
@@ -1615,9 +1715,9 @@
 
   function syncChannelForm(provider, editing = Boolean($("channelIdInput").value), setup = {}) {
     const credentialKeys = {
-      whatsappAccessToken: "accessToken", whatsappAppSecret: "appSecret", whatsappVerifyToken: "verifyToken",
+      whatsappAccessToken: "accessToken", whatsappAppSecret: "appSecret",
       telegramBotToken: "botToken", telegramWebhookSecret: "webhookSecret",
-      instagramAccessToken: "accessToken", instagramAppSecret: "appSecret", instagramVerifyToken: "verifyToken",
+      instagramAccessToken: "accessToken", instagramAppSecret: "appSecret",
     };
     document.querySelectorAll("[data-provider-fields]").forEach((section) => {
       const active = section.dataset.providerFields === provider;
@@ -1631,8 +1731,18 @@
           const key = credentialKeys[input.name];
           const hasFieldState = key && setup.credentialFields && Object.prototype.hasOwnProperty.call(setup.credentialFields, key);
           const saved = Boolean(editing && (hasFieldState ? setup.credentialFields[key] : setup.credentialsPresent));
+          const showingSaved = Boolean(active && saved && (!input.value || input.value === SAVED_SECRET_MASK));
           input.required = active && !saved;
-          input.placeholder = active && saved ? "Saved — enter only to replace" : input.dataset.defaultPlaceholder;
+          input.placeholder = input.dataset.defaultPlaceholder;
+          input.classList.toggle("is-saved", showingSaved);
+          if (showingSaved) {
+            input.value = SAVED_SECRET_MASK;
+            input.dataset.savedCredential = "true";
+            input.setAttribute("aria-label", `${input.name} is saved securely. Focus this field to replace it.`);
+          } else if (!saved) {
+            delete input.dataset.savedCredential;
+            input.removeAttribute("aria-label");
+          }
         }
       });
     });
@@ -1649,6 +1759,10 @@
 
   function channelPayload(form) {
     const values = new FormData(form);
+    const credentialValue = (name) => {
+      const value = String(values.get(name) || "").trim();
+      return value === SAVED_SECRET_MASK ? "" : value;
+    };
     const connectorType = form.elements.connectorType.value;
     const config = connectorType === "whatsapp_cloud"
       ? { wabaId: String(values.get("wabaId") || "").trim(), phoneNumberId: String(values.get("phoneNumberId") || "").trim(), apiVersion: "v26.0" }
@@ -1656,10 +1770,10 @@
         ? { instagramAccountId: String(values.get("instagramAccountId") || "").trim(), appId: String(values.get("instagramAppId") || "").trim(), username: String(values.get("instagramUsername") || "").trim(), authMode: "instagram_login", apiVersion: "v26.0" }
         : {};
     const credentialMap = connectorType === "whatsapp_cloud"
-      ? { accessToken: values.get("whatsappAccessToken"), appSecret: values.get("whatsappAppSecret"), verifyToken: values.get("whatsappVerifyToken") }
+      ? { accessToken: credentialValue("whatsappAccessToken"), appSecret: credentialValue("whatsappAppSecret"), verifyToken: credentialValue("metaVerifyToken") }
       : connectorType === "telegram"
-        ? { botToken: values.get("telegramBotToken"), webhookSecret: values.get("telegramWebhookSecret") }
-        : { accessToken: values.get("instagramAccessToken"), appSecret: values.get("instagramAppSecret"), verifyToken: values.get("instagramVerifyToken") };
+        ? { botToken: credentialValue("telegramBotToken"), webhookSecret: credentialValue("telegramWebhookSecret") }
+        : { accessToken: credentialValue("instagramAccessToken"), appSecret: credentialValue("instagramAppSecret"), verifyToken: credentialValue("metaVerifyToken") };
     const credentials = Object.fromEntries(Object.entries(credentialMap)
       .map(([key, value]) => [key, String(value || "").trim()])
       .filter(([, value]) => value));
@@ -1685,6 +1799,12 @@
       saved = true;
       savedChannelId = channelId || String(result.channelId || "");
       if (!savedChannelId) throw new Error("The connection was saved, but its channel ID was not returned.");
+      const newVerifyToken = ["whatsapp_cloud", "instagram"].includes(payload.connectorType)
+        ? String(payload.credentials?.verifyToken || "") : "";
+      if (newVerifyToken) {
+        state.recentVerifyTokens.set(savedChannelId, newVerifyToken);
+        $("channelMetaVerifyToken").value = "";
+      }
       if (!channelId) {
         $("channelIdInput").value = savedChannelId;
         $("channelProvider").disabled = true;
@@ -1700,7 +1820,7 @@
       setRoute("channels");
       if (!payload.enabled) showToast(channelId ? "Connection updated" : "Connection added", `${payload.name} is saved but disabled.`);
       else if (verification?.health === "connected") showToast("Connection is live", `${payload.name} is verified and ready for messaging.`);
-      else showToast("Connection verified", `${payload.name} is ready for its provider webhook.`);
+      else showToast("Connection verified", `${payload.name} is ready for its provider webhook. Copy the verify token beside the callback URL.`);
     } catch (error) {
       if (saved) {
         await loadAll();
@@ -1817,13 +1937,24 @@
   }
 
   function showToast(title, message = "", isError = false) {
+    const region = $("toastRegion");
+    const openDialog = document.querySelector("dialog[open]");
+    const modalCard = openDialog?.querySelector(".modal-card");
+    if (modalCard) {
+      region.classList.add("is-modal-toast");
+      modalCard.prepend(region);
+    } else {
+      region.classList.remove("is-modal-toast");
+      document.body.append(region);
+    }
     const toast = element("div", `toast${isError ? " is-error" : ""}`);
+    toast.setAttribute("role", isError ? "alert" : "status");
     const copy = document.createElement("div");
     copy.append(element("strong", "", title));
     if (message) copy.append(element("span", "", message));
     toast.append(copy);
-    $("toastRegion").append(toast);
-    setTimeout(() => toast.remove(), 4500);
+    region.append(toast);
+    setTimeout(() => toast.remove(), isError ? 12000 : 4500);
   }
 
   function openMobileMenu() {
@@ -1942,12 +2073,26 @@
           copyWebhookCallback(actionButton);
           return;
         }
+        if (actionButton.dataset.action === "copy-webhook-token") {
+          copyWebhookVerifyToken(actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "edit-webhook-token") {
+          openWebhookTokenDialog(actionButton.dataset.channelId);
+          return;
+        }
         const actions = {
           "toggle-user-menu": () => toggleUserMenu(),
           "logout": logout,
           "toggle-details": toggleDetails,
           "open-channel": () => openChannelDialog(),
           "close-channel-dialog": () => $("channelDialog").close(),
+          "close-webhook-token": () => $("webhookTokenDialog").close(),
+          "generate-webhook-token": () => {
+            const input = $("webhookTokenInput");
+            input.value = generatePrivateToken();
+            input.focus();
+          },
           "new-conversation": openContactDialog,
           "new-contact": openContactDialog,
           "close-contact-dialog": () => $("contactDialog").close(),
@@ -1986,6 +2131,22 @@
         }
       }
       if (!event.target.closest(".user-menu-wrap")) toggleUserMenu(false);
+    });
+
+    document.addEventListener("focusin", (event) => {
+      const input = event.target.closest?.(".secret-field[data-saved-credential='true']");
+      if (!input || input.value !== SAVED_SECRET_MASK) return;
+      input.value = "";
+      input.classList.remove("is-saved");
+      input.placeholder = "Paste a replacement value";
+    });
+
+    document.addEventListener("focusout", (event) => {
+      const input = event.target.closest?.(".secret-field[data-saved-credential='true']");
+      if (!input || input.value) return;
+      input.value = SAVED_SECRET_MASK;
+      input.classList.add("is-saved");
+      input.placeholder = input.dataset.defaultPlaceholder || "";
     });
 
     $("conversationList").addEventListener("click", (event) => {
@@ -2052,6 +2213,7 @@
     });
 
     $("channelForm").addEventListener("submit", (event) => { event.preventDefault(); saveChannel(event.currentTarget); });
+    $("webhookTokenForm").addEventListener("submit", (event) => { event.preventDefault(); saveWebhookVerifyToken(event.currentTarget); });
     $("channelProvider").addEventListener("change", (event) => {
       const nameInput = $("channelNameInput");
       if (!nameInput.value.trim() || /^(WhatsApp|Telegram|Instagram) connection$/.test(nameInput.value.trim())) {

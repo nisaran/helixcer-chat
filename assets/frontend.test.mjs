@@ -77,23 +77,35 @@ test("channel management supports multiple provider accounts without hardcoded c
 test("channel secrets are masked, optional on edit, and never prefilled", () => {
   assert.match(html, /name="whatsappAccessToken" type="password"/);
   assert.match(html, /name="whatsappAppSecret" type="password"/);
-  assert.match(html, /name="whatsappVerifyToken" type="password"/);
   assert.match(html, /name="telegramBotToken" type="password"/);
   assert.match(html, /name="telegramWebhookSecret" type="password"/);
   assert.match(html, /name="instagramAccessToken" type="password"/);
   assert.match(html, /name="instagramAppSecret" type="password"/);
-  assert.match(html, /name="instagramVerifyToken" type="password"/);
-  assert.match(html, /data-generate-secret="whatsappVerifyToken"/);
-  assert.match(html, /data-copy-secret="whatsappVerifyToken"/);
   assert.match(html, /data-generate-secret="telegramWebhookSecret"/);
-  assert.match(html, /data-generate-secret="instagramVerifyToken"/);
-  assert.match(html, /cannot show it again/);
+  assert.doesNotMatch(html, /name="(?:whatsapp|instagram)VerifyToken"/);
+  assert.match(html, /id="webhookTokenDialog"/);
+  assert.match(html, /id="webhookTokenInput" name="verifyToken" type="password"/);
   assert.match(app, /setup\.credentialFields/);
   assert.match(app, /input\.required = active && !saved/);
   assert.match(app, /input\.dataset\.defaultPlaceholder/);
+  assert.match(app, /const SAVED_SECRET_MASK/);
+  assert.match(app, /input\.value = SAVED_SECRET_MASK/);
+  assert.match(app, /value === SAVED_SECRET_MASK \? "" : value/);
+  assert.match(app, /focusin/);
+  assert.match(app, /focusout/);
   assert.match(app, /\.filter\(\(\[, value\]\) => value\)/);
   assert.doesNotMatch(html, /type="password"[^>]+value=/);
   assert.doesNotMatch(app, /channel\?\.credentials|channel\.credentials/);
+});
+
+test("Meta verify tokens live beside their callback and can be safely replaced", () => {
+  assert.match(app, /callback-token-block/);
+  assert.match(app, /copy-webhook-token/);
+  assert.match(app, /edit-webhook-token/);
+  assert.match(app, /recentVerifyTokens: new Map\(\)/);
+  assert.match(app, /updateChannel\(channelId, \{ credentials: \{ verifyToken \} \}\)/);
+  assert.match(app, /state\.recentVerifyTokens\.set\(channelId, verifyToken\)/);
+  assert.match(app, /It will be masked again after a refresh/);
 });
 
 test("saving an enabled channel immediately verifies it without creating duplicates on retry", () => {
@@ -109,5 +121,15 @@ test("WhatsApp credential guidance distinguishes the three Meta secrets", () => 
   assert.match(html, /Paste only the token value from WhatsApp → API setup/);
   assert.match(html, /App settings → Basic → App secret/);
   assert.match(html, /not the Client Token/);
-  assert.match(html, /Copy this token into Meta before saving/);
+  assert.match(html, /Messaging account ID in Meta/);
+  assert.match(html, /Shown directly below the selected From number/);
+  assert.match(html, /After saving, copy the new token beside the callback URL/);
+});
+
+test("modal errors render inside the open dialog where the top layer cannot hide them", () => {
+  assert.match(app, /document\.querySelector\("dialog\[open\]"\)/);
+  assert.match(app, /modalCard\.prepend\(region\)/);
+  assert.match(app, /region\.classList\.add\("is-modal-toast"\)/);
+  assert.match(app, /toast\.setAttribute\("role", isError \? "alert" : "status"\)/);
+  assert.match(app, /isError \? 12000 : 4500/);
 });

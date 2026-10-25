@@ -338,6 +338,7 @@
       </div>
       <p class="modal-copy">Credentials are encrypted before storage and are never returned to the browser. You can connect multiple accounts of every provider.</p>
       <input type="hidden" name="channelId" id="channelIdInput">
+      <input type="hidden" name="metaVerifyToken" id="channelMetaVerifyToken">
       <div class="form-grid channel-form-grid">
         <label class="field-label">Provider<select class="text-field" name="connectorType" id="channelProvider" required><option value="whatsapp_cloud">WhatsApp Cloud</option><option value="telegram">Telegram Bot</option><option value="instagram">Instagram</option></select></label>
         <label class="field-label">Connection name<input class="text-field" name="name" id="channelNameInput" required maxlength="80" placeholder="Sales WhatsApp"></label>
@@ -346,19 +347,18 @@
       <section class="provider-fields" data-provider-fields="whatsapp_cloud">
         <div class="provider-form-head"><span class="provider-mark whatsapp">WA</span><div><strong>WhatsApp Cloud API</strong><span>Use the values shown in Meta's WhatsApp API setup.</span></div></div>
         <div class="form-grid channel-form-grid">
-          <label class="field-label">WhatsApp Business Account ID<input class="text-field" name="wabaId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
-          <label class="field-label">Phone Number ID<input class="text-field" name="phoneNumberId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
-          <label class="field-label form-span">Access token<input class="text-field secret-field" name="whatsappAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a Meta access token" required><span class="field-help secret-help">Paste only the token value from WhatsApp → API setup—without quotes, labels, or JSON. The temporary token is fine for testing; replace it with a permanent System User token later. Stored encrypted; leave blank while editing to keep the saved value.</span></label>
-          <label class="field-label">Meta App Secret<input class="text-field secret-field" name="whatsappAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">Use App settings → Basic → App secret for this same Meta app—not the Client Token.</span></label>
-          <label class="field-label">Webhook verify token<div class="inline-field"><input class="text-field secret-field" name="whatsappVerifyToken" type="password" maxlength="256" spellcheck="false" placeholder="Create a private token" required><button class="secondary-button generate-button" type="button" data-generate-secret="whatsappVerifyToken">Generate</button><button class="secondary-button generate-button" type="button" data-copy-secret="whatsappVerifyToken">Copy</button></div><span class="field-help">Copy this token into Meta before saving. For security, Helixcer cannot show it again.</span></label>
+          <label class="field-label">WhatsApp Business Account ID <span class="field-hint">Messaging account ID in Meta</span><input class="text-field" name="wabaId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
+          <label class="field-label">Phone Number ID <span class="field-hint">Shown directly below the selected From number</span><input class="text-field" name="phoneNumberId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
+          <label class="field-label form-span">Access token<input class="text-field secret-field" name="whatsappAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a Meta access token" required><span class="field-help secret-help">Paste only the token value from WhatsApp → API setup—without quotes, labels, or JSON. The temporary token is fine for testing; replace it with a permanent System User token later. A green masked value means it is saved securely; focus the field only to replace it.</span></label>
+          <label class="field-label form-span">Meta App Secret<input class="text-field secret-field" name="whatsappAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">Use App settings → Basic → App secret for this same Meta app—not the Client Token. A green masked value means it is saved securely.</span></label>
         </div>
       </section>
 
       <section class="provider-fields" data-provider-fields="telegram" hidden>
         <div class="provider-form-head"><span class="provider-mark telegram">TG</span><div><strong>Telegram Bot API</strong><span>Create a bot with BotFather, then paste its token.</span></div></div>
         <div class="form-grid channel-form-grid">
-          <label class="field-label form-span">Bot token<input class="text-field secret-field" name="telegramBotToken" type="password" maxlength="256" spellcheck="false" placeholder="123456789:AA…" required><span class="field-help secret-help">Stored encrypted. Leave blank while editing to keep the saved value.</span></label>
-          <label class="field-label form-span">Webhook secret<div class="inline-field"><input class="text-field secret-field" name="telegramWebhookSecret" type="password" maxlength="256" spellcheck="false" placeholder="Private webhook secret" required><button class="secondary-button generate-button" type="button" data-generate-secret="telegramWebhookSecret">Generate</button></div><span class="field-help">Helixcer sends this to Telegram when registering the webhook.</span></label>
+          <label class="field-label form-span">Bot token<input class="text-field secret-field" name="telegramBotToken" type="password" maxlength="256" spellcheck="false" placeholder="123456789:AA…" required><span class="field-help secret-help">A green masked value means the token is saved securely; focus the field only to replace it.</span></label>
+          <label class="field-label form-span">Webhook secret<div class="inline-field"><input class="text-field secret-field" name="telegramWebhookSecret" type="password" maxlength="256" spellcheck="false" placeholder="Private webhook secret" required><button class="secondary-button generate-button" type="button" data-generate-secret="telegramWebhookSecret">Generate</button></div><span class="field-help">Helixcer sends this to Telegram when registering the webhook. A green masked value means it is saved securely.</span></label>
         </div>
       </section>
 
@@ -368,9 +368,8 @@
           <label class="field-label">Instagram account ID<input class="text-field" name="instagramAccountId" inputmode="numeric" maxlength="40" placeholder="17841400000000000" required></label>
           <label class="field-label"><span>Meta App ID <span class="optional-label">Optional</span></span><input class="text-field" name="instagramAppId" inputmode="numeric" maxlength="40" placeholder="Your Meta app ID"></label>
           <label class="field-label form-span"><span>Instagram username <span class="optional-label">Optional</span></span><input class="text-field" name="instagramUsername" maxlength="60" autocomplete="off" placeholder="your_business"></label>
-          <label class="field-label form-span">Instagram User access token<input class="text-field secret-field" name="instagramAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a long-lived Instagram User access token" required><span class="field-help secret-help">Stored encrypted. Leave blank while editing to keep the saved value.</span></label>
-          <label class="field-label">Meta App Secret<input class="text-field secret-field" name="instagramAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required></label>
-          <label class="field-label">Webhook verify token<div class="inline-field"><input class="text-field secret-field" name="instagramVerifyToken" type="password" maxlength="256" spellcheck="false" placeholder="Create a private token" required><button class="secondary-button generate-button" type="button" data-generate-secret="instagramVerifyToken">Generate</button><button class="secondary-button generate-button" type="button" data-copy-secret="instagramVerifyToken">Copy</button></div><span class="field-help">Copy this token into Meta before saving. For security, Helixcer cannot show it again.</span></label>
+          <label class="field-label form-span">Instagram User access token<input class="text-field secret-field" name="instagramAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a long-lived Instagram User access token" required><span class="field-help secret-help">A green masked value means the token is saved securely; focus the field only to replace it.</span></label>
+          <label class="field-label form-span">Meta App Secret<input class="text-field secret-field" name="instagramAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">A green masked value means it is saved securely; focus the field only to replace it.</span></label>
         </div>
       </section>
 
@@ -378,6 +377,25 @@
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-channel-dialog">Cancel</button>
         <button class="primary-button" id="channelSubmit" type="submit">Save connection</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="webhookTokenDialog" aria-labelledby="webhookTokenDialogTitle">
+    <form class="modal-card" id="webhookTokenForm" autocomplete="off">
+      <div class="modal-head">
+        <div><p class="eyebrow">Webhook security</p><h2 id="webhookTokenDialogTitle">Replace verify token</h2></div>
+        <button class="icon-button" type="button" data-action="close-webhook-token" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="modal-copy" id="webhookTokenDialogCopy">The current token remains encrypted and cannot be displayed. Create a replacement only when you are ready to update Meta.</p>
+      <input type="hidden" name="channelId" id="webhookTokenChannelId">
+      <label class="field-label webhook-token-field">New webhook verify token
+        <div class="inline-field"><input class="text-field secret-field" id="webhookTokenInput" name="verifyToken" type="password" maxlength="256" spellcheck="false" placeholder="Enter or generate a private token" required><button class="secondary-button generate-button" type="button" data-action="generate-webhook-token">Generate</button></div>
+        <span class="field-help">After saving, copy the new token beside the callback URL and paste it into Meta.</span>
+      </label>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-webhook-token">Cancel</button>
+        <button class="primary-button" id="webhookTokenSubmit" type="submit">Save token</button>
       </div>
     </form>
   </dialog>

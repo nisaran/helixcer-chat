@@ -921,7 +921,10 @@ function editableConfigChanges(connectorType, before = {}, after = {}) {
 }
 
 function invalidateChannelVerification(connectorType, config, changedConfigFields = [], changedCredentialFields = []) {
-  if (changedConfigFields.length || changedCredentialFields.length) {
+  const providerCredentialChanged = connectorType === 'whatsapp_cloud' || connectorType === 'instagram'
+    ? changedCredentialFields.some(key => key !== 'verifyToken')
+    : changedCredentialFields.length > 0;
+  if (changedConfigFields.length || providerCredentialChanged) {
     for (const key of ['credentialsVerifiedAt', 'subscribedAppsAt', 'verifiedPhoneNumber',
       'verifiedName', 'verifiedUsername', 'verifiedProviderId']) delete config[key];
   }
