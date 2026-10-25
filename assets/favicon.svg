@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Helixcer Chat">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#dc6542"/>
+      <stop offset="1" stop-color="#a93420"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#172526"/>
+  <path d="M15 13h34v28a8 8 0 0 1-8 8H29l-10 8v-8h-4z" fill="url(#g)"/>
+  <path d="M24 22h5v8h7v-8h5v20h-5v-8h-7v8h-5z" fill="#fff"/>
+</svg>
