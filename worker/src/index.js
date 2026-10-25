@@ -643,6 +643,7 @@ async function verifyWhatsAppChannel(env, channel) {
   if (!token || !wabaId || !phoneNumberId || !verifyToken || !appSecret) {
     throw httpError(409, 'Secure WhatsApp credentials have not been fully configured.');
   }
+  assertMetaAppSecret(appSecret, 422);
   const version = metaApiVersion(channel.config?.apiVersion);
   const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/phone_numbers`);
   endpoint.searchParams.set('fields', 'id,display_phone_number,verified_name');
@@ -651,6 +652,9 @@ async function verifyWhatsAppChannel(env, channel) {
   const raw = await response.text();
   const data = safeJsonParse(raw, {});
   if (!response.ok) {
+    if (isMetaObjectVisibilityError(data)) {
+      throw httpError(422, 'The saved access token cannot access this Messaging/WhatsApp Business Account. Assign the token user or System User to this exact WhatsApp account, then regenerate the token with whatsapp_business_management.');
+    }
     throw httpError(422, `Meta could not verify this WhatsApp number: ${providerError(data, response.status)}`);
   }
   const phone = Array.isArray(data.data) ? data.data.find(item => String(item?.id || '') === phoneNumberId) : null;
@@ -726,6 +730,7 @@ async function verifyInstagramChannel(env, channel) {
   if (!credentials.accessToken || !credentials.verifyToken || !credentials.appSecret || !accountId) {
     throw httpError(409, 'Secure Instagram credentials have not been fully configured.');
   }
+  assertMetaAppSecret(credentials.appSecret, 422);
   const version = metaApiVersion(channel.config?.apiVersion);
   const endpoint = new URL(`https://graph.instagram.com/${encodeURIComponent(version)}/me`);
   endpoint.searchParams.set('fields', 'user_id,username');
@@ -982,7 +987,10 @@ function validateCredentialPayload(connectorType, supplied) {
     if (value.length > MAX_CREDENTIAL_LENGTH) throw httpError(400, `${credentialLabel(key)} is too long.`);
     if (/[\u0000-\u001f\u007f]/.test(value)) throw httpError(400, `${credentialLabel(key)} contains invalid characters.`);
     if (key === 'accessToken' && value.length < 16) throw httpError(400, 'Access token is too short.');
-    if (key === 'appSecret' && value.length < 16) throw httpError(400, 'App secret is too short.');
+    if (key === 'appSecret') {
+      if (value.length < 16) throw httpError(400, 'App secret is too short.');
+      assertMetaAppSecret(value);
+    }
     if (key === 'verifyToken' && value.length > 256) throw httpError(400, 'Verify token is too long.');
     if (key === 'botToken' && !/^\d{5,15}:[A-Za-z0-9_-]{20,}$/.test(value)) throw httpError(400, 'Telegram bot token format is invalid.');
     if (key === 'webhookSecret' && !/^[A-Za-z0-9_-]{1,256}$/.test(value)) {
@@ -991,6 +999,13 @@ function validateCredentialPayload(connectorType, supplied) {
     credentials[key] = value;
   }
   return credentials;
+}
+
+function assertMetaAppSecret(value, status = 400) {
+  const secret = String(value || '');
+  if ((/^EAA/i.test(secret) && secret.length > 64) || secret.length > 128) {
+    throw httpError(status, 'Meta App Secret is invalid. Use App Settings → Basic → App Secret, not an access token or Client Token.');
+  }
 }
 
 function credentialLabel(key) {
@@ -1840,6 +1855,13 @@ function cleanError(error) {
 function providerError(data, status) {
   return String(data?.error?.message || data?.description || data?.error_description || `HTTP ${status}`)
     .replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 240);
+}
+
+function isMetaObjectVisibilityError(data) {
+  const message = String(data?.error?.message || '');
+  const code = Number(data?.error?.code);
+  return (code === 100 || code === 803) &&
+    /unsupported get request|cannot be loaded due to missing permissions|object with id .+ does not exist|does not support this operation/i.test(message);
 }
 
 function metaApiVersion(value) {

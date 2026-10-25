@@ -13,7 +13,7 @@ import {
   validateReturnTo,
   verifyGoogleIdToken
 } from '../src/auth.js';
-import { handleRequest } from '../src/index.js';
+import { encryptChannelCredential, handleRequest } from '../src/index.js';
 
 class TestD1Statement {
   constructor(statement, values = []) {
@@ -631,6 +631,93 @@ test('managed channel CRUD encrypts credentials, preserves blank secrets, and ke
   database.close();
 });
 
+test('Meta App Secret rejects access-token-shaped values on save and before provider verification', async () => {
+  const { database, DB } = await testDatabase();
+  const credentialKey = 'test-channel-master-key-material-'.repeat(2);
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true', CHANNEL_CREDENTIALS_KEY: credentialKey
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const accessTokenShapedSecret = `EAA${'x'.repeat(180)}`;
+  const validAppSecret = '1234567890abcdef1234567890abcdef';
+
+  const rejectedWhatsApp = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId: 'wa-bad-app-secret', name: 'Bad WhatsApp secret', connectorType: 'whatsapp_cloud',
+      config: { wabaId: '223456789012345', phoneNumberId: '223456789012346', apiVersion: 'v26.0' },
+      credentials: { accessToken: 'valid-access-token-value-1234567890',
+        appSecret: accessTokenShapedSecret, verifyToken: 'verify-token-value' } })
+  }), env);
+  assert.equal(rejectedWhatsApp.status, 400);
+  const rejectedWhatsAppText = await rejectedWhatsApp.text();
+  assert.match(JSON.parse(rejectedWhatsAppText).error, /App Settings .+ Basic .+ App Secret/i);
+  assert.equal(rejectedWhatsAppText.includes(accessTokenShapedSecret), false);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE channel_id='wa-bad-app-secret'").get().count, 0);
+
+  const rejectedInstagram = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId: 'ig-bad-app-secret', name: 'Bad Instagram secret', connectorType: 'instagram',
+      config: { instagramAccountId: '27841400000000001', apiVersion: 'v26.0', authMode: 'instagram_login' },
+      credentials: { accessToken: 'valid-instagram-access-token-123456',
+        appSecret: 's'.repeat(129), verifyToken: 'instagram-verify-token' } })
+  }), env);
+  assert.equal(rejectedInstagram.status, 400);
+  assert.match((await rejectedInstagram.json()).error, /not an access token or Client Token/i);
+
+  const shortEaaSecret = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId: 'wa-short-eaa-secret', name: 'Valid short Meta secret', connectorType: 'whatsapp_cloud',
+      config: { wabaId: '223456789012347', phoneNumberId: '223456789012348', apiVersion: 'v26.0' },
+      credentials: { accessToken: 'valid-access-token-value-1234567890',
+        appSecret: `eaa${'1'.repeat(29)}`, verifyToken: 'verify-token-value' } })
+  }), env);
+  assert.equal(shortEaaSecret.status, 201);
+
+  for (const channel of [
+    { channelId: 'wa-stored-bad-secret', connectorType: 'whatsapp_cloud',
+      config: { wabaId: '323456789012345', phoneNumberId: '323456789012346', apiVersion: 'v26.0' },
+      accessToken: 'valid-access-token-value-1234567890', verifyToken: 'verify-token-value' },
+    { channelId: 'ig-stored-bad-secret', connectorType: 'instagram',
+      config: { instagramAccountId: '37841400000000001', apiVersion: 'v26.0', authMode: 'instagram_login' },
+      accessToken: 'valid-instagram-access-token-123456', verifyToken: 'instagram-verify-token' }
+  ]) {
+    const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+      method: 'POST', headers,
+      body: JSON.stringify({ channelId: channel.channelId, name: channel.channelId,
+        connectorType: channel.connectorType, config: channel.config,
+        credentials: { accessToken: channel.accessToken, appSecret: validAppSecret, verifyToken: channel.verifyToken } })
+    }), env);
+    assert.equal(created.status, 201);
+    const encrypted = await encryptChannelCredential(accessTokenShapedSecret, credentialKey,
+      'ws_default', channel.channelId, 'appSecret');
+    database.prepare(`UPDATE channel_credentials SET encrypted_value=?1
+      WHERE workspace_id='ws_default' AND channel_id=?2 AND credential_key='appSecret'`)
+      .run(encrypted, channel.channelId);
+  }
+
+  const originalFetch = globalThis.fetch;
+  let providerCalls = 0;
+  globalThis.fetch = async () => {
+    providerCalls++;
+    return new Response('{}', { status: 500 });
+  };
+  try {
+    for (const channelId of ['wa-stored-bad-secret', 'ig-stored-bad-secret']) {
+      const verified = await handleRequest(new Request(`https://api.chat.helixcer.com/api/channels/${channelId}/verify`, {
+        method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+      }), env);
+      assert.equal(verified.status, 422);
+      const verifiedText = await verified.text();
+      assert.match(JSON.parse(verifiedText).error, /App Settings .+ Basic .+ App Secret/i);
+      assert.equal(verifiedText.includes(accessTokenShapedSecret), false);
+    }
+    assert.equal(providerCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
 test('WhatsApp credential patches preserve an independent webhook handshake', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB, {
@@ -840,10 +927,16 @@ test('WhatsApp verification requires WABA ownership and subscribes the app befor
   let subscriptionOk = false;
   let subscriptionCalls = 0;
   let subscriptionRequest;
+  let phoneListError = null;
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     if (url.pathname.endsWith('/phone_numbers')) {
       providerUrl = url;
+      if (phoneListError) {
+        return new Response(JSON.stringify(phoneListError), {
+          status: 400, headers: { 'Content-Type': 'application/json' }
+        });
+      }
       return new Response(JSON.stringify({ data: [{ id: providerPhoneId, display_phone_number: '+91 98765 43210', verified_name: 'Helixcer' }] }), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -861,6 +954,25 @@ test('WhatsApp verification requires WABA ownership and subscribes the app befor
     return new Response('{}', { status: 404 });
   };
   try {
+    phoneListError = { error: { code: 100, message: "Unsupported get request. Object with ID '123456789012345' does not exist, cannot be loaded due to missing permissions, or does not support this operation." } };
+    const inaccessible = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-verify/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(inaccessible.status, 422);
+    const inaccessibleText = await inaccessible.text();
+    assert.match(JSON.parse(inaccessibleText).error, /cannot access this Messaging\/WhatsApp Business Account/i);
+    assert.match(inaccessibleText, /whatsapp_business_management/);
+    assert.equal(inaccessibleText.includes('123456789012345'), false);
+    assert.equal(subscriptionCalls, 0);
+
+    phoneListError = { error: { code: 190, message: 'Invalid OAuth access token.' } };
+    const invalidToken = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-verify/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(invalidToken.status, 422);
+    assert.match((await invalidToken.json()).error, /Invalid OAuth access token/);
+    phoneListError = null;
+
     const notOwned = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/wa-verify/verify', {
       method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
     }), env);
