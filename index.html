@@ -10,8 +10,8 @@
   <meta name="helixcer-api-base" content="https://api.chat.helixcer.com">
   <title>Helixcer Chat</title>
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./assets/styles.css">
-  <script src="./assets/app.js" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261025-2">
+  <script src="./assets/app.js?v=20261025-2" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -38,16 +38,6 @@
           Continue with Google
         </a>
         <p class="auth-footnote">Only workspace members can sign in. Contact the owner if your email has not been added.</p>
-        <button class="text-button" type="button" data-action="preview-demo">Preview with demo data</button>
-        <details class="advanced-settings auth-advanced">
-          <summary>Emergency recovery access</summary>
-          <p>Use only when Google sign-in is unavailable. The recovery token stays in this tab and is never saved to the site.</p>
-          <label class="field-label" for="authRecoveryToken">Recovery token</label>
-          <div class="inline-field">
-            <input class="text-field" id="authRecoveryToken" type="password" autocomplete="off" placeholder="Paste temporary recovery token">
-            <button class="secondary-button" type="button" data-action="apply-auth-recovery">Use token</button>
-          </div>
-        </details>
       </div>
     </div>
     <p class="auth-footer">Single workspace · Secure session · No billing portal</p>
@@ -96,12 +86,6 @@
             <span id="sidebarMode">Demo workspace</span>
           </div>
         </div>
-        <button class="nav-button" type="button" data-action="open-settings" data-admin-only>
-          <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15.04 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.96a1.7 1.7 0 0 0-.34-1.87l-.06-.06L7.03 4.2l.06.06a1.7 1.7 0 0 0 1.87.34A1.7 1.7 0 0 0 10 3.08V3h4v.08a1.7 1.7 0 0 0 1.04 1.52 1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06a1.7 1.7 0 0 0-.34 1.87A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg>
-          </span>
-          <span>Settings</span>
-        </button>
       </div>
     </aside>
 
@@ -130,7 +114,6 @@
             </button>
             <div class="user-menu" id="userMenu" hidden>
               <div class="user-menu-identity"><strong id="userMenuName">Account</strong><span id="userMenuEmail">—</span><em id="userMenuRole">Agent</em></div>
-              <button type="button" data-action="open-settings" data-admin-only>Workspace settings</button>
               <button class="logout-button" type="button" data-action="logout">Sign out</button>
             </div>
           </div>
@@ -318,37 +301,6 @@
   </div>
 
   <div class="mobile-scrim" id="mobileScrim" hidden></div>
-
-  <dialog class="modal" id="settingsDialog" aria-labelledby="settingsTitle">
-    <form method="dialog" class="modal-card" id="settingsForm">
-      <div class="modal-head">
-        <div><p class="eyebrow">Workspace</p><h2 id="settingsTitle">Connection settings</h2></div>
-        <button class="icon-button" type="button" data-action="close-settings" aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
-      </div>
-      <p class="modal-copy">This deployment uses one Helixcer workspace. Google sessions control normal access; channel credentials remain protected in Cloudflare secrets.</p>
-      <div class="settings-summary">
-        <span class="presence-dot" aria-hidden="true"></span>
-        <div><strong id="settingsWorkspaceName">Helixcer workspace</strong><span id="settingsSignedInAs">Signed in securely</span></div>
-      </div>
-      <details class="advanced-settings">
-        <summary>Advanced connection and recovery</summary>
-        <p>Only change these values while repairing a deployment. A recovery token bypasses Google sign-in and should be temporary.</p>
-        <label class="field-label" for="apiBaseInput">Worker API URL</label>
-        <input class="text-field" id="apiBaseInput" type="url" placeholder="https://api.chat.helixcer.com" spellcheck="false">
-        <p class="field-help">Leave blank only for the local demo preview.</p>
-        <label class="field-label settings-token" for="recoveryTokenInput">Emergency recovery token</label>
-        <input class="text-field" id="recoveryTokenInput" type="password" autocomplete="off" placeholder="Not stored unless you explicitly apply it">
-        <div class="advanced-actions">
-          <button class="secondary-button" type="button" data-action="clear-recovery">Clear recovery mode</button>
-          <button class="secondary-button danger-outline" type="button" data-action="apply-settings-recovery">Use token for this tab</button>
-        </div>
-      </details>
-      <div class="modal-actions">
-        <button class="secondary-button" type="button" data-action="use-demo">Use demo mode</button>
-        <button class="primary-button" type="submit" value="save">Save settings</button>
-      </div>
-    </form>
-  </dialog>
 
   <dialog class="modal" id="inviteDialog" aria-labelledby="inviteTitle">
     <form class="modal-card" id="inviteForm">

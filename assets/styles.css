@@ -72,16 +72,8 @@ body {
 .google-signin svg path:nth-child(3) { fill: #fbbc05; }
 .google-signin svg path:nth-child(4) { fill: #ea4335; }
 .auth-footnote { margin: 13px auto 0; color: #8a9491; font-size: 10px; line-height: 1.5; }
-.text-button { border: 0; background: transparent; color: var(--brand); margin-top: 14px; padding: 5px; font-size: 11px; font-weight: 700; }
-.text-button:hover { color: var(--brand-deep); text-decoration: underline; }
 .auth-footer { position: absolute; bottom: 22px; color: #84908d; font-size: 10px; letter-spacing: .03em; }
 
-.advanced-settings { border: 1px solid var(--line); border-radius: 12px; background: #fafbf9; margin-top: 18px; padding: 0 13px; text-align: left; }
-.advanced-settings summary { cursor: pointer; color: #626e6b; padding: 11px 0; font-size: 11px; font-weight: 750; }
-.advanced-settings[open] { padding-bottom: 13px; }
-.advanced-settings[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 12px; }
-.advanced-settings p { color: var(--muted); margin: 0 0 12px; font-size: 10px; line-height: 1.55; }
-.auth-advanced { margin-top: 20px; }
 .inline-field { display: flex; align-items: stretch; gap: 7px; }
 .inline-field .text-field { min-width: 0; }
 .inline-field .secondary-button { flex: 0 0 auto; }
@@ -519,15 +511,6 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .modal-head h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 24px; letter-spacing: -.4px; }
 .modal-copy { color: var(--muted); line-height: 1.6; }
 .field-label { display: grid; gap: 6px; color: #3f4b49; font-size: 11px; font-weight: 700; }
-.settings-token { margin-top: 14px; }
-.settings-summary { display: flex; align-items: center; gap: 11px; border: 1px solid var(--line); border-radius: 12px; background: #f8f9f7; padding: 12px 13px; }
-.settings-summary div { display: grid; min-width: 0; }
-.settings-summary strong { font-size: 12px; }
-.settings-summary span:not(.presence-dot) { color: var(--muted); margin-top: 2px; font-size: 10px; }
-.advanced-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 10px; }
-.danger-outline { border-color: #e1b2a8; color: #a13d29; }
-.danger-outline:hover { background: #fff0eb; color: #8f2e19; }
-
 .team-note { display: flex; align-items: center; gap: 10px; max-width: 1180px; border: 1px solid #d7e4dc; border-radius: 12px; background: #eef8f2; color: #356b54; margin: 0 auto 14px; padding: 11px 14px; font-size: 11px; }
 .team-note strong { white-space: nowrap; }
 .team-note span { color: #5f776c; }

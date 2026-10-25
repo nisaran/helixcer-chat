@@ -1,9 +1,7 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "helixcer_api_base";
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
-  const LEGACY_API_BASES = new Set(["https://helixcer-chat-api.nisaran.workers.dev"]);
   const DEFAULT_WORKSPACE = "Helixcer workspace";
 
   const $ = (id) => document.getElementById(id);
@@ -424,15 +422,6 @@
 
   function initialApiBase() {
     const configured = document.querySelector('meta[name="helixcer-api-base"]')?.content || "";
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored !== null) {
-      const normalized = stored.replace(/\/+$/, "");
-      if (LEGACY_API_BASES.has(normalized) && configured) {
-        localStorage.setItem(STORAGE_KEY, configured);
-        return configured;
-      }
-      return stored;
-    }
     if (["localhost", "127.0.0.1"].includes(location.hostname)) return "";
     return configured;
   }
@@ -526,8 +515,6 @@
     $("currentUserInitials").hidden = Boolean(safeAvatar);
     if (safeAvatar) avatarImage.src = safeAvatar;
     else avatarImage.removeAttribute("src");
-    $("settingsWorkspaceName").textContent = state.workspace?.name || DEFAULT_WORKSPACE;
-    $("settingsSignedInAs").textContent = `${user.email || "Emergency recovery"} · ${capitalize(user.role)}`;
     $("sidebarMode").textContent = state.api.isDemo ? "Demo workspace" : `${capitalize(user.role)} access`;
   }
 
@@ -1381,14 +1368,6 @@
     $("inboxGrid").classList.toggle("has-details", state.detailsOpen);
   }
 
-  function openSettings() {
-    toggleUserMenu(false);
-    $("apiBaseInput").value = initialApiBase();
-    $("recoveryTokenInput").value = "";
-    renderCurrentUser();
-    $("settingsDialog").showModal();
-  }
-
   function openChannelDialog() {
     const form = $("channelForm");
     form.reset();
@@ -1411,52 +1390,6 @@
       web_chat: "Website chat needs no provider secret. Public widget authentication can be added when the widget is deployed.",
     };
     $("channelSecretHelp").textContent = messages[type] || "Provider secrets stay in Cloudflare.";
-  }
-
-  async function saveSettings() {
-    const base = $("apiBaseInput").value.trim().replace(/\/+$/, "");
-    if (base) {
-      let url;
-      try { url = new URL(base); }
-      catch { showToast("Invalid Worker URL", "Enter a complete https:// address.", true); return; }
-      const local = ["localhost", "127.0.0.1"].includes(url.hostname);
-      if (url.protocol !== "https:" && !(local && url.protocol === "http:")) {
-        showToast("Secure URL required", "Use HTTPS for a deployed Worker.", true);
-        return;
-      }
-    }
-    localStorage.setItem(STORAGE_KEY, base);
-    $("settingsDialog").close();
-    await initializeSession();
-    if (state.authStatus === "authenticated") showToast(base ? "Connection settings saved" : "Demo mode enabled", base ? "Your secure session was checked again." : "No live channel messages will be sent.");
-  }
-
-  function useDemoMode() {
-    localStorage.setItem(STORAGE_KEY, "");
-    sessionStorage.removeItem(RECOVERY_TOKEN_KEY);
-    if ($("settingsDialog").open) $("settingsDialog").close();
-    initializeSession();
-  }
-
-  async function applyRecoveryToken(inputId) {
-    const input = $(inputId);
-    const token = input.value.trim();
-    if (!token) {
-      input.focus();
-      showToast("Recovery token required", "Paste the temporary token provided by the workspace owner.", true);
-      return;
-    }
-    sessionStorage.setItem(RECOVERY_TOKEN_KEY, token);
-    input.value = "";
-    if ($("settingsDialog").open) $("settingsDialog").close();
-    await initializeSession();
-    if (state.authStatus === "authenticated") showToast("Emergency recovery mode", "Realtime is paused; this token exists only in the current tab.");
-  }
-
-  async function clearRecoveryMode() {
-    sessionStorage.removeItem(RECOVERY_TOKEN_KEY);
-    if ($("settingsDialog").open) $("settingsDialog").close();
-    await initializeSession();
   }
 
   async function logout() {
@@ -1666,19 +1599,12 @@
       const actionButton = event.target.closest("[data-action]");
       if (actionButton) {
         const actions = {
-          "open-settings": openSettings,
-          "close-settings": () => $("settingsDialog").close(),
           "toggle-user-menu": () => toggleUserMenu(),
           "logout": logout,
-          "preview-demo": useDemoMode,
-          "apply-auth-recovery": () => applyRecoveryToken("authRecoveryToken"),
-          "apply-settings-recovery": () => applyRecoveryToken("recoveryTokenInput"),
-          "clear-recovery": clearRecoveryMode,
           "toggle-details": toggleDetails,
           "new-conversation": () => $("contactDialog").showModal(),
           "new-contact": () => $("contactDialog").showModal(),
           "close-contact-dialog": () => $("contactDialog").close(),
-          "use-demo": useDemoMode,
           "attachment-info": () => showToast("Attachments are protected", "The zero-cost release keeps media on its source channel."),
           "insert-greeting": () => {
             const input = $("messageInput");
@@ -1761,7 +1687,6 @@
       }
     });
 
-    $("settingsForm").addEventListener("submit", (event) => { event.preventDefault(); saveSettings(); });
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
     $("channelForm").addEventListener("submit", (event) => { event.preventDefault(); saveChannel(event.currentTarget); });
     $("channelConnectorType").addEventListener("change", updateChannelFormHelp);

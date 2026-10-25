@@ -21,12 +21,15 @@ test("normal authentication uses a top-level link and cookie credentials", () =>
   assert.match(app, /searchParams\.set\("return_to", location\.origin\)/);
   assert.match(app, /credentials:\s*"include"/);
   assert.match(app, /request\("\/api\/me"\)/);
-  assert.match(app, /LEGACY_API_BASES/);
+  assert.match(app, /meta\[name="helixcer-api-base"\]/);
+  assert.doesNotMatch(app, /STORAGE_KEY|LEGACY_API_BASES/);
 });
 
-test("recovery access is tab-scoped and not the default authentication path", () => {
+test("technical connection and recovery controls are not exposed in the UI", () => {
   assert.match(app, /sessionStorage\.getItem\(RECOVERY_TOKEN_KEY\)/);
-  assert.match(app, /sessionStorage\.setItem\(RECOVERY_TOKEN_KEY/);
+  assert.doesNotMatch(html, /id="settingsDialog"|Connection settings|Worker API URL/i);
+  assert.doesNotMatch(html, /Emergency recovery|recoveryTokenInput|authRecoveryToken/i);
+  assert.doesNotMatch(html, /data-action="(?:open-settings|preview-demo|apply-auth-recovery|use-demo)"/i);
   assert.doesNotMatch(app, /localStorage\.getItem\([^)]*admin_token/i);
   assert.doesNotMatch(app, /url\.searchParams\.set\([^,]*token/i);
 });
