@@ -60,7 +60,9 @@ npx wrangler deploy
 
 Migration `0002_identity_and_workspaces.sql` is additive. It preserves existing inbox rows, assigns them to `ws_default`, and creates identity/session/team tables. It does not seed a person or billing data.
 
-Route the Worker through the dedicated proxied hostname `api.chat.helixcer.com`, keep the GitHub Pages dashboard at `chat.helixcer.com`, and list only the dashboard origin in `ALLOWED_ORIGINS`. The checked-in frontend uses that API hostname; the `workers.dev` hostname is intentionally not a production fallback because its host-only `SameSite=Lax` cookie would be cross-site.
+Deploy the Worker on its `workers.dev` hostname, then deploy the repository's `gateway/` Pages Function with an `API` service binding to this Worker. Associate the Pages project with `api.chat.helixcer.com` and, at the external DNS provider, point only the `api.chat` CNAME to `helixcer-chat-gateway.pages.dev`. Keep the GitHub Pages dashboard at `chat.helixcer.com` and list only the dashboard origin in `ALLOWED_ORIGINS`. The checked-in frontend uses the branded API hostname; browsers never call the `workers.dev` hostname directly because its host-only `SameSite=Lax` cookie would be cross-site.
+
+The gateway holds no Google or channel secret. HTTP and WebSocket requests are passed to the Worker over Cloudflare's internal service binding. Deploy it from `gateway/` with `npx wrangler pages deploy` after the Worker is available.
 
 ## Authentication and team API
 

@@ -22,6 +22,7 @@ assets/                    Dashboard JavaScript and styles
 worker/src/index.js        Cloudflare Worker API
 worker/migrations/         D1 schema
 worker/test/               Node tests
+gateway/                   Cloudflare Pages API gateway
 wrangler.toml              Cloudflare deployment configuration
 ```
 
@@ -36,7 +37,7 @@ python -m http.server 4173
 Run the backend checks with:
 
 ```sh
-node --test assets/frontend.test.mjs worker/test/*.test.mjs
+node --test assets/frontend.test.mjs worker/test/*.test.mjs gateway/*.test.mjs
 ```
 
 ## Cloudflare deployment
@@ -44,10 +45,10 @@ node --test assets/frontend.test.mjs worker/test/*.test.mjs
 The Worker setup is documented in [`worker/README.md`](worker/README.md). In summary:
 
 1. Create the `helixcer-chat-v2` D1 database and put its ID in `wrangler.toml`.
-2. Route the Worker through `api.chat.helixcer.com`. This same-site hostname is required for the secure login cookie used by `chat.helixcer.com`.
+2. Deploy `gateway/` as the `helixcer-chat-gateway` Pages project, associate `api.chat.helixcer.com`, and point only that external-DNS subdomain to `helixcer-chat-gateway.pages.dev`. The gateway calls the Worker over a service binding; this same-site hostname is required for the secure login cookie used by `chat.helixcer.com`.
 3. Create a Google Web OAuth client with the exact callback `https://api.chat.helixcer.com/auth/google/callback`.
 4. Configure Google OAuth secrets and set `BOOTSTRAP_OWNER_EMAIL` to the verified Google email that may claim the first Owner membership.
-5. Export the current D1 database, apply all migrations, and deploy the Worker.
+5. Export the current D1 database, apply all migrations, deploy the Worker, and deploy the Pages gateway.
 6. Sign in with the configured owner email and verify the inbox, team roles, and realtime connection before publishing the updated GitHub Pages frontend.
 7. Create channels in the dashboard, then add their provider credentials as Worker secrets.
 8. Change production provider webhooks only after test messages work end to end.
