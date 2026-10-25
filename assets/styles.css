@@ -540,6 +540,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .channel-card h3 { margin: 0 0 2px; font-size: 14px; }
 .channel-card p { margin: 13px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .provider-label { display: block; overflow: hidden; color: var(--muted); margin-bottom: 1px; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.channel-identity-line { display: flex; min-width: 0; align-items: baseline; gap: 6px; }
+.channel-identity-field-label { flex: 0 0 auto; color: #84908d; font-size: 9px; font-weight: 700; }
+.channel-identity-field-value { overflow: hidden; color: #4d5956; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 650; }
+.channel-connection-name h3 { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
+.channel-provider-display-name { margin: 2px 0 3px; }
 .connection-card-body { min-height: 49px; }
 .channel-card .channel-description { margin-top: 14px; }
 .channel-card .verified-identity { display: inline-flex; max-width: 100%; overflow: hidden; border-radius: 999px; background: var(--green-soft); color: var(--green); margin-top: 8px; padding: 4px 8px; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 700; }

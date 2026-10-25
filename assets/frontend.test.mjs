@@ -158,10 +158,15 @@ test("settings expose permission-aware browser notifications", () => {
   assert.match(app, /registration\.pushManager\.subscribe\(\{ userVisibleOnly: true, applicationServerKey: expectedKey \}\)/);
   assert.match(app, /state\.api\.savePushSubscription/);
   assert.match(app, /\/api\/push\/subscriptions/);
+  assert.match(app, /const enabledOnDevice = permission === "granted" && state\.notificationsEnabled && state\.pushSubscriptionReady/);
+  assert.match(app, /pushNotificationsToggle"\)\.addEventListener\("click"/);
+  assert.match(app, /subscription\?\.endpoint/);
+  assert.match(app, /state\.notificationsEnabled = true;[\s\S]*?localStorage\.setItem\(NOTIFICATION_PREFERENCE_KEY, "true"\)/);
   assert.match(app, /state\.pushSubscriptionReady && document\.visibilityState !== "visible"/);
   assert.match(app, /Add Helixcer to your Home Screen/);
   assert.match(html, /Receive background alerts on this device/);
   assert.match(app, /site-controls icon beside the address bar/);
+  assert.match(app, /Android Settings → Apps → Chrome → Notifications/);
   assert.match(app, /new Notification\(/);
   assert.match(app, /type === "webhook\.received"[\s\S]*?await loadAll\(\)[\s\S]*?notifyInboundMessage/);
   assert.match(app, /lastNotificationAt: new Map\(\)/);
@@ -171,6 +176,10 @@ test("channel cards collapse by default and use provider artwork throughout the 
   assert.match(app, /expandedChannelIds: new Set\(\)/);
   assert.match(app, /data\.action = "toggle-channel-details"|dataset\.action = "toggle-channel-details"/);
   assert.match(app, /details\.hidden = !expanded/);
+  assert.match(app, /"Connection name"/);
+  assert.match(app, /"Provider display name"/);
+  assert.match(app, /channel\.setup\?\.verifiedName \|\| channel\.setup\?\.verifiedUsername \|\| "Not available yet"/);
+  assert.match(styles, /\.channel-provider-display-name/);
   assert.match(app, /provider-whatsapp\.svg/);
   assert.match(app, /provider-telegram\.svg/);
   assert.match(app, /provider-instagram\.svg/);

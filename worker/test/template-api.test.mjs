@@ -75,11 +75,15 @@ async function fixture() {
       (workspace_id,channel_id,credential_key,encrypted_value,created_at,updated_at,updated_by_user_id)
     VALUES ('ws_default','wa-sales','appSecret',?,?,?,'user-owner')`).run(encryptedAppSecret, now, now);
   const DB = new TestD1(database);
+  const broadcasts = [];
   const INBOX_HUB = {
     idFromName: value => value,
-    get: () => ({ fetch: async () => new Response(null, { status: 204 }) })
+    get: () => ({ fetch: async (url, init = {}) => {
+      if (String(url).endsWith('/broadcast')) broadcasts.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    } })
   };
-  return { database, env: { DB, INBOX_HUB, CHANNEL_CREDENTIALS_KEY: encryptionKey } };
+  return { database, broadcasts, env: { DB, INBOX_HUB, CHANNEL_CREDENTIALS_KEY: encryptionKey } };
 }
 
 async function sha256(value) {
@@ -230,7 +234,7 @@ test('external template API updates a saved contact name only when displayName i
 });
 
 test('external template API persists once, dispatches, replays safely, and scopes status to its key', async () => {
-  const { database, env } = await fixture();
+  const { database, env, broadcasts } = await fixture();
   const token = `hxc_live_public123.${'s'.repeat(43)}`;
   await insertKey(database, token, 'key-one', 'hxc_live_public123');
   database.prepare('UPDATE api_keys SET allowed_channel_ids_json=? WHERE api_key_id=?')
@@ -293,6 +297,14 @@ test('external template API persists once, dispatches, replays safely, and scope
     }), env);
     assert.equal(fastStatus.status, 200);
     assert.equal(database.prepare('SELECT status FROM messages').get().status, 'delivered');
+    const realtimeDelivery = broadcasts.find(event => event.type === 'message.updated' && event.status === 'delivered');
+    assert.ok(realtimeDelivery);
+    assert.equal(realtimeDelivery.messageId, accepted.messageId);
+    assert.equal(realtimeDelivery.conversationId, accepted.conversationId);
+    assert.deepEqual(realtimeDelivery.message, {
+      messageId: accepted.messageId, conversationId: accepted.conversationId,
+      status: 'delivered', error: ''
+    });
     const stalePayload = statusPayload.replace('"delivered"', '"sent"').replace('1761360001', '1761360002');
     const staleStatus = await handleRequest(new Request('https://api.chat.helixcer.com/webhooks/whatsapp/wa-sales', {
       method: 'POST',

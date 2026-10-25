@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-1";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-2";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -37,6 +37,7 @@
     pushConfig: null,
     pushSubscriptionReady: false,
     pushSyncPromise: null,
+    pushActionPending: false,
     lastNotificationAt: new Map(),
     loading: true,
   };
@@ -1461,7 +1462,20 @@
     const identity = element("div", "channel-card-identity");
     const logo = providerLogo(channel.connectorType, "channel-logo");
     const name = document.createElement("div");
-    name.append(element("span", "provider-label", profile.label), element("h3", "", channel.name), element("span", `health-dot${health.className ? ` ${health.className}` : ""}`, health.label));
+    const providerDisplayName = channel.setup?.verifiedName || channel.setup?.verifiedUsername || "Not available yet";
+    const connectionName = element("div", "channel-identity-line channel-connection-name");
+    connectionName.append(element("span", "channel-identity-field-label", "Connection name"), element("h3", "", channel.name));
+    const providerName = element("div", "channel-identity-line channel-provider-display-name");
+    providerName.append(
+      element("span", "channel-identity-field-label", "Provider display name"),
+      element("strong", "channel-identity-field-value", providerDisplayName)
+    );
+    name.append(
+      element("span", "provider-label", profile.label),
+      connectionName,
+      providerName,
+      element("span", `health-dot${health.className ? ` ${health.className}` : ""}`, health.label)
+    );
     identity.append(logo, name);
     const headActions = element("div", "channel-head-actions");
     const providerLink = document.createElement("a");
@@ -2613,6 +2627,7 @@
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: expectedKey });
     }
+    if (!subscription?.endpoint) throw new Error("Chrome did not create a Web Push subscription.");
     await state.api.savePushSubscription({ deviceId: pushDeviceId(), subscription: subscription.toJSON() });
     state.pushSubscriptionReady = true;
     return registration;
@@ -2632,7 +2647,7 @@
   }
 
   function androidPermissionHelp() {
-    return "In Android Chrome, tap the site-controls icon beside the address bar, open Permissions, and allow Notifications.";
+    return "In Android Chrome, tap the site-controls icon beside the address bar, open Permissions, and allow Notifications. If Chrome itself is blocked, open Android Settings → Apps → Chrome → Notifications.";
   }
 
   function renderNotificationSetting() {
@@ -2658,7 +2673,7 @@
       return;
     }
     if (state.pushConfig === null) {
-      toggle.checked = state.notificationsEnabled;
+      toggle.checked = false;
       toggle.disabled = true;
       status.textContent = "Checking the background notification service…";
       return;
@@ -2670,23 +2685,28 @@
       return;
     }
     if (!state.serviceWorkerRegistration?.active) {
-      toggle.checked = state.notificationsEnabled;
+      toggle.checked = false;
       toggle.disabled = true;
       status.textContent = "Preparing the background notification service…";
       return;
     }
     const permission = Notification.permission;
-    toggle.checked = state.notificationsEnabled;
-    toggle.disabled = false;
+    const enabledOnDevice = permission === "granted" && state.notificationsEnabled && state.pushSubscriptionReady;
+    toggle.checked = enabledOnDevice;
+    toggle.disabled = state.pushActionPending;
+    if (state.pushActionPending) {
+      status.textContent = permission === "granted"
+        ? "Creating this device's background notification subscription…"
+        : "Waiting for Chrome's notification permission…";
+      return;
+    }
     status.textContent = permission === "granted"
-      ? (state.notificationsEnabled
-        ? (state.pushSubscriptionReady ? "Background notifications are enabled on this device." : "Finishing the background notification subscription…")
+      ? (enabledOnDevice
+        ? "Background notifications are enabled on this device."
         : "Permission granted; background notifications are currently off.")
       : permission === "denied"
-        ? `Enabled in Helixcer, but blocked by Chrome. ${androidPermissionHelp()}`
-        : (state.notificationsEnabled
-          ? `Waiting for Chrome permission. ${androidPermissionHelp()}`
-          : "Chrome will ask for notification permission when you enable this setting.");
+        ? `Notifications are off because Chrome blocked permission. ${androidPermissionHelp()}`
+        : "Notifications are off. Chrome will ask for permission when you enable this setting.";
   }
 
   async function setBrowserNotifications(enabled) {
@@ -2704,10 +2724,12 @@
       toggle.blur();
       return;
     }
-    state.notificationsEnabled = true;
-    localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "true");
+    state.pushActionPending = true;
+    state.notificationsEnabled = false;
+    state.pushSubscriptionReady = false;
+    localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
     renderNotificationSetting();
-    if (enabled && Notification.permission !== "granted") {
+    if (Notification.permission !== "granted") {
       let permission = "default";
       try {
         permission = await Notification.requestPermission();
@@ -2715,6 +2737,7 @@
         permission = Notification.permission || "default";
       }
       if (permission !== "granted") {
+        state.pushActionPending = false;
         renderNotificationSetting();
         showToast("Chrome permission is still needed", permission === "denied"
           ? androidPermissionHelp()
@@ -2732,15 +2755,20 @@
         tag: "helixcer-notification-test",
         data: { url: "/#inbox" }
       });
+      state.notificationsEnabled = true;
+      localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "true");
     } catch (error) {
       state.notificationsEnabled = false;
       state.pushSubscriptionReady = false;
       localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
+      await removeBrowserPushSubscription().catch(() => {});
+      state.pushActionPending = false;
       renderNotificationSetting();
       showToast("Notifications were not enabled", `The background notification service could not start: ${error.message}`, true);
       toggle.blur();
       return;
     }
+    state.pushActionPending = false;
     renderNotificationSetting();
     showToast("Background notifications enabled", "This device can receive alerts even when Helixcer Chat is closed.");
     toggle.blur();
@@ -2760,7 +2788,11 @@
       }
       if (!state.notificationsEnabled || Notification.permission !== "granted") {
         state.pushSubscriptionReady = false;
-        if (state.notificationsEnabled && Notification.permission === "denied") await removeBrowserPushSubscription();
+        if (state.notificationsEnabled) {
+          state.notificationsEnabled = false;
+          localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
+          await removeBrowserPushSubscription();
+        }
         renderNotificationSetting();
         return;
       }
@@ -3529,7 +3561,7 @@
       }
     });
     $("attachmentInput").addEventListener("change", (event) => uploadCurrentAttachment(event.target.files?.[0]));
-    $("pushNotificationsToggle").addEventListener("change", (event) => setBrowserNotifications(event.target.checked));
+    $("pushNotificationsToggle").addEventListener("click", (event) => setBrowserNotifications(event.target.checked));
 
     $("conversationStatus").addEventListener("change", async (event) => {
       const conversation = selectedConversation();

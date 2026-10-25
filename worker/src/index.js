@@ -18,7 +18,7 @@ import {
   sendWorkspacePush
 } from './push.js';
 
-const API_VERSION = '2026-10-26-push-receipts';
+const API_VERSION = '2026-10-26-realtime-push';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
@@ -956,13 +956,17 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
     return json({ ok: false, error: 'Webhook phone number does not match this channel.' }, 403);
   }
   let received = 0;
+  const statusChanges = [];
   for (const event of normalized.messages) if (await storeInbound(env, channel, event, payload)) received++;
-  for (const status of normalized.statuses) await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload);
+  for (const status of normalized.statuses) {
+    statusChanges.push(...await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload));
+  }
   const receivedAt = new Date().toISOString();
   await updateChannelRuntimeConfig(env, channel, {
     lastWebhookAt: receivedAt,
     webhookVerifiedAt: channel.config?.webhookVerifiedAt || receivedAt
   });
+  await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
   if (received || normalized.statuses.length) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: normalized.statuses.length });
   if (received) scheduleInboundPush(ctx, env, channel);
   return json({ ok: true, received, statuses: normalized.statuses.length });
@@ -981,9 +985,13 @@ async function handleGenericWebhook(request, env, channelId, ctx) {
   let received = 0;
   for (const event of events) if (await storeInbound(env, channel, event, payload)) received++;
   let updatedStatuses = 0;
+  const statusChanges = [];
   for (const status of statuses) {
-    if (await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload)) updatedStatuses++;
+    const changes = await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload);
+    updatedStatuses += changes.length;
+    statusChanges.push(...changes);
   }
+  await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
   if (received || updatedStatuses) {
     await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: updatedStatuses });
   }
@@ -1042,13 +1050,19 @@ async function handleInstagramWebhook(request, env, channelId, ctx) {
   let received = 0;
   for (const event of normalized.messages) if (await storeInbound(env, channel, event, payload)) received++;
   let updatedStatuses = 0;
+  const statusChanges = [];
   for (const status of normalized.statuses) {
-    if (await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload)) updatedStatuses++;
+    const changes = await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload);
+    updatedStatuses += changes.length;
+    statusChanges.push(...changes);
   }
   for (const status of normalized.watermarkStatuses) {
-    if (await applyProviderWatermarkStatus(env, channel.workspaceId, channel.channelId, status, payload)) updatedStatuses++;
+    const changes = await applyProviderWatermarkStatus(env, channel.workspaceId, channel.channelId, status, payload);
+    updatedStatuses += changes.length;
+    statusChanges.push(...changes);
   }
   await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
+  await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
   if (received || updatedStatuses) {
     await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: updatedStatuses });
   }
@@ -1121,17 +1135,19 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
       }
     }
     let channelStatuses = 0;
+    const statusChanges = [];
     for (const status of normalized.statuses) {
-      if (await applyProviderStatus(env, route.channel.workspaceId, route.channel.channelId, status, route.payload)) {
-        channelStatuses++;
-      }
+      const changes = await applyProviderStatus(env, route.channel.workspaceId, route.channel.channelId, status, route.payload);
+      channelStatuses += changes.length;
+      statusChanges.push(...changes);
     }
     for (const status of normalized.watermarkStatuses) {
-      if (await applyProviderWatermarkStatus(env, route.channel.workspaceId, route.channel.channelId, status, route.payload)) {
-        channelStatuses++;
-      }
+      const changes = await applyProviderWatermarkStatus(env, route.channel.workspaceId, route.channel.channelId, status, route.payload);
+      channelStatuses += changes.length;
+      statusChanges.push(...changes);
     }
     await updateChannelRuntimeConfig(env, route.channel, { lastWebhookAt: now });
+    await broadcastMessageStatusChanges(env, route.channel.workspaceId, statusChanges);
     if (channelReceived || channelStatuses) {
       await broadcast(env, route.channel.workspaceId, {
         type: 'webhook.received', channelId: route.channel.channelId, received: channelReceived, statuses: channelStatuses
@@ -2565,7 +2581,7 @@ async function sendOrQueue(env, messageId) {
   try {
     await markMessageSent(env, messageId, await dispatchOutbound(env, messageId));
   } catch (error) {
-    const message = await env.DB.prepare('SELECT workspace_id,status FROM messages WHERE message_id=?1').bind(messageId).first();
+    const message = await env.DB.prepare('SELECT workspace_id,conversation_id,status FROM messages WHERE message_id=?1').bind(messageId).first();
     if (!message) throw error;
     if (isTerminalProviderStatus(message.status)) {
       await env.DB.batch([
@@ -2580,7 +2596,9 @@ async function sendOrQueue(env, messageId) {
         env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId),
         env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(messageId)
       ]);
-      await broadcast(env, message.workspace_id, { type: 'message.updated', messageId, status: 'failed' });
+      await broadcastMessageStatusChanges(env, message.workspace_id, [{
+        messageId, conversationId: message.conversation_id, status: 'failed', error: cleanError(error)
+      }]);
       return;
     }
     const now = new Date();
@@ -2593,7 +2611,9 @@ async function sendOrQueue(env, messageId) {
           last_error=excluded.last_error,updated_at=excluded.updated_at`)
         .bind(crypto.randomUUID(), messageId, next, cleanError(error), now.toISOString(), message.workspace_id)
     ]);
-    await broadcast(env, message.workspace_id, { type: 'message.updated', messageId, status: 'retrying' });
+    await broadcastMessageStatusChanges(env, message.workspace_id, [{
+      messageId, conversationId: message.conversation_id, status: 'retrying', error: cleanError(error)
+    }]);
   }
 }
 
@@ -2810,8 +2830,11 @@ async function markMessageSent(env, messageId, result) {
     env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId),
     env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(messageId)
   ]);
-  const stored = await env.DB.prepare('SELECT status FROM messages WHERE message_id=?1').bind(messageId).first();
-  await broadcast(env, result.workspaceId, { type: 'message.updated', messageId, status: stored?.status || result.status || 'submitted' });
+  const stored = await env.DB.prepare('SELECT conversation_id,status,error FROM messages WHERE message_id=?1').bind(messageId).first();
+  await broadcastMessageStatusChanges(env, result.workspaceId, [{
+    messageId, conversationId: stored?.conversation_id,
+    status: stored?.status || result.status || 'submitted', error: stored?.error || ''
+  }]);
 }
 
 async function retryDueMessages(env) {
@@ -2836,7 +2859,7 @@ async function retryDueMessages(env) {
     try {
       await markMessageSent(env, job.message_id, await dispatchOutbound(env, job.message_id));
     } catch (error) {
-      const latest = await env.DB.prepare('SELECT status FROM messages WHERE message_id=?1').bind(job.message_id).first();
+      const latest = await env.DB.prepare('SELECT conversation_id,status FROM messages WHERE message_id=?1').bind(job.message_id).first();
       if (latest && isTerminalProviderStatus(latest.status)) {
         await env.DB.batch([
           env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(job.message_id),
@@ -2856,7 +2879,10 @@ async function retryDueMessages(env) {
       ];
       if (exhausted) statements.push(env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(job.message_id));
       await env.DB.batch(statements);
-      await broadcast(env, job.workspace_id, { type: 'message.updated', messageId: job.message_id, status: exhausted ? 'failed' : 'retrying' });
+      await broadcastMessageStatusChanges(env, job.workspace_id, [{
+        messageId: job.message_id, conversationId: latest?.conversation_id,
+        status: exhausted ? 'failed' : 'retrying', error: cleanError(error)
+      }]);
     }
   }
 }
@@ -2932,11 +2958,11 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
   const internalMessageId = /^[A-Za-z0-9_-]{1,100}$/.test(String(event.internalMessageId || ''))
     ? String(event.internalMessageId) : '';
   const status = normalizeDeliveryStatus(event.status);
-  if ((!providerMessageId && !internalMessageId) || !status) return false;
+  if ((!providerMessageId && !internalMessageId) || !status) return [];
   const key = `${workspaceId}:${channelId}:status:${providerMessageId || internalMessageId}:${status}:${event.timestamp || ''}`;
   const dedupe = await env.DB.prepare(`INSERT OR IGNORE INTO webhook_events (event_key,channel_id,event_type,received_at,workspace_id)
     VALUES (?1,?2,'status',?3,?4)`).bind(key, channelId, new Date().toISOString(), workspaceId).run();
-  if (!dedupe.meta?.changes) return;
+  if (!dedupe.meta?.changes) return [];
   try {
     const updated = await env.DB.prepare(`UPDATE messages SET
         status=CASE
@@ -2967,9 +2993,13 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
         String(event.error || '').slice(0, 500), internalMessageId).run();
     if (!updated.meta?.changes) {
       await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
-      return false;
+      return [];
     }
-    return true;
+    const changed = await env.DB.prepare(`SELECT message_id,conversation_id,status,error FROM messages
+      WHERE workspace_id=?1 AND channel_id=?2
+        AND ((?3<>'' AND provider_message_id=?3) OR (?4<>'' AND message_id=?4))`)
+      .bind(workspaceId, channelId, providerMessageId, internalMessageId).all();
+    return changed.results.map(realtimeMessageStatus);
   } catch (error) {
     await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
     throw error;
@@ -2980,11 +3010,11 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
   const channelProfileId = String(event.channelProfileId || '');
   const status = normalizeDeliveryStatus(event.status);
   const timestamp = normalizeTimestamp(event.timestamp, '');
-  if (!channelProfileId || !timestamp || !['delivered', 'read'].includes(status)) return false;
+  if (!channelProfileId || !timestamp || !['delivered', 'read'].includes(status)) return [];
   const key = `${workspaceId}:${channelId}:watermark:${channelProfileId}:${status}:${timestamp}`;
   const dedupe = await env.DB.prepare(`INSERT OR IGNORE INTO webhook_events (event_key,channel_id,event_type,received_at,workspace_id)
     VALUES (?1,?2,'status',?3,?4)`).bind(key, channelId, new Date().toISOString(), workspaceId).run();
-  if (!dedupe.meta?.changes) return false;
+  if (!dedupe.meta?.changes) return [];
   try {
     const updated = await env.DB.prepare(`UPDATE messages SET
         status=CASE
@@ -3005,10 +3035,43 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
         AND contact_id IN (SELECT contact_id FROM channel_identities
           WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3)`)
       .bind(workspaceId, channelId, channelProfileId, timestamp, status, truncateJson(rawPayload)).run();
-    return Boolean(updated.meta?.changes);
+    if (!updated.meta?.changes) return [];
+    const changed = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.status,m.error FROM messages m
+      WHERE m.workspace_id=?1 AND m.channel_id=?2 AND m.direction='outbound' AND m.timestamp<=?4
+        AND m.provider_message_id<>'' AND m.status IN ('submitted','sent','delivered','read')
+        AND m.contact_id IN (SELECT contact_id FROM channel_identities
+          WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3)`)
+      .bind(workspaceId, channelId, channelProfileId, timestamp).all();
+    return changed.results.map(realtimeMessageStatus);
   } catch (error) {
     await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
     throw error;
+  }
+}
+
+function realtimeMessageStatus(row) {
+  return {
+    messageId: String(row.message_id || ''),
+    conversationId: String(row.conversation_id || ''),
+    status: String(row.status || ''),
+    error: String(row.error || '')
+  };
+}
+
+async function broadcastMessageStatusChanges(env, workspaceId, changes) {
+  const unique = new Map();
+  for (const change of changes || []) {
+    if (!change?.messageId || !change?.conversationId || !change?.status) continue;
+    unique.set(change.messageId, change);
+  }
+  for (const change of unique.values()) {
+    await broadcast(env, workspaceId, {
+      type: 'message.updated',
+      messageId: change.messageId,
+      conversationId: change.conversationId,
+      status: change.status,
+      message: change
+    });
   }
 }
 
