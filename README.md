@@ -50,7 +50,7 @@ The Worker setup is documented in [`worker/README.md`](worker/README.md). In sum
 5. Export the current D1 database, apply all migrations, deploy the Worker, and deploy the Pages gateway.
 6. Sign in with the configured owner email and verify the inbox, team roles, and realtime connection before publishing the updated GitHub Pages frontend.
 7. Add each WhatsApp, Telegram, or Instagram connection in the dashboard. The Worker encrypts its credentials in D1; do not create `WA_MAIN_*` or other per-channel Worker secrets.
-8. Verify the connection, configure the exact channel-specific callback shown in the dashboard when the provider requires a manual webhook setup, and confirm it reports **Live** before sending production messages. Managed Meta calls default to Graph API v26.0.
+8. Configure the exact channel-specific callback shown in the dashboard. WhatsApp starts placing correctly signed inbound webhook messages in the Inbox as soon as they arrive, without waiting for API/provider verification. Complete **Verify sending** before relying on outbound replies. Managed Meta calls default to Graph API v26.0.
 
 Never place Google credentials, provider tokens, signing secrets, the bootstrap owner email, or a recovery token in GitHub.
 

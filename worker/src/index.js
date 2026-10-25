@@ -12,7 +12,7 @@ import {
   updateMembership
 } from './auth.js';
 
-const API_VERSION = '2026-10-25-multichannel';
+const API_VERSION = '2026-10-25-inbound-first';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
@@ -354,7 +354,11 @@ async function handleWhatsAppWebhook(request, env, channelId) {
   let received = 0;
   for (const event of normalized.messages) if (await storeInbound(env, channel, event, payload)) received++;
   for (const status of normalized.statuses) await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload);
-  await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
+  const receivedAt = new Date().toISOString();
+  await updateChannelRuntimeConfig(env, channel, {
+    lastWebhookAt: receivedAt,
+    webhookVerifiedAt: channel.config?.webhookVerifiedAt || receivedAt
+  });
   if (received || normalized.statuses.length) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: normalized.statuses.length });
   return json({ ok: true, received, statuses: normalized.statuses.length });
 }
@@ -583,7 +587,7 @@ function channelHealth(row, config = safeJsonParse(row.config_json, {}), credent
   const configured = definition.requiredConfig.every(key => Boolean(config[key])) &&
     definition.requiredCredentials.every(key => credentialFields.has(key));
   if (!configured) return 'setup_required';
-  if (!config.credentialsVerifiedAt) return 'configured';
+  if (!config.credentialsVerifiedAt) return config.webhookVerifiedAt ? 'receiving' : 'configured';
   if (!config.webhookVerifiedAt) return 'webhook_required';
   return 'connected';
 }

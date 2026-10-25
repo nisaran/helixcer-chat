@@ -36,6 +36,17 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
   assert.deepEqual(result.phoneNumberIds, ['123456789']);
 });
 
+test('dashboard reloads the Inbox when a webhook arrives', async () => {
+  const appSource = await readFile(new URL('../../assets/app.js', import.meta.url), 'utf8');
+  const start = appSource.indexOf('function handleRealtimeEvent(event)');
+  const end = appSource.indexOf('async function refreshMessages', start);
+  assert.ok(start >= 0 && end > start);
+  const handler = appSource.slice(start, end);
+  assert.match(handler, /type === "webhook\.received"/);
+  assert.match(handler, /state\.messages\.delete\(state\.selectedConversationId\)/);
+  assert.match(handler, /loadAll\(\)/);
+});
+
 test('normalizes WhatsApp recipients and classifies retryable provider failures', () => {
   assert.equal(normalizeWhatsAppRecipient('+91 98765-43210'), '919876543210');
   assert.equal(normalizeWhatsAppRecipient('0091 (98765) 43210'), '919876543210');

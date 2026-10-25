@@ -784,6 +784,96 @@ test('WhatsApp credential patches preserve an independent webhook handshake', as
   database.close();
 });
 
+test('signed WhatsApp webhooks reach the Inbox before Meta API verification', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const channelId = 'wa-inbound-first';
+  const phoneNumberId = '123456789012346';
+  const appSecret = '1234567890abcdef1234567890abcdef';
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId, name: 'Inbound-first WhatsApp', connectorType: 'whatsapp_cloud', enabled: true,
+      config: { wabaId: '123456789012345', phoneNumberId, apiVersion: 'v26.0' },
+      credentials: { accessToken: 'unverified-access-token-value-1234567890', appSecret, verifyToken: 'verify-token-value' } })
+  }), env);
+  assert.equal(created.status, 201);
+  const before = JSON.parse(database.prepare('SELECT config_json FROM channels WHERE channel_id=?').get(channelId).config_json);
+  assert.equal(before.credentialsVerifiedAt, undefined);
+  assert.equal(before.webhookVerifiedAt, undefined);
+
+  const payload = { object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: {
+    messaging_product: 'whatsapp', metadata: { display_phone_number: '916282010794', phone_number_id: phoneNumberId },
+    contacts: [{ profile: { name: 'Asha' }, wa_id: '919999999999' }],
+    messages: [{ from: '919999999999', id: 'wamid.inbound-first', timestamp: '1761360000', type: 'text', text: { body: 'Hello Helixcer' } }]
+  } }] }] };
+  const sign = async value => {
+    const raw = JSON.stringify(value);
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(appSecret),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(raw));
+    return { raw, signature: `sha256=${Buffer.from(digest).toString('hex')}` };
+  };
+  const originalFetch = globalThis.fetch;
+  let providerCalls = 0;
+  globalThis.fetch = async () => {
+    providerCalls++;
+    throw new Error('Webhook delivery must not call the Meta Graph API.');
+  };
+  try {
+    const signed = await sign(payload);
+    const delivered = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/whatsapp/${channelId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signed.signature }, body: signed.raw
+    }), env);
+    assert.equal(delivered.status, 200);
+    assert.deepEqual(await delivered.json(), { ok: true, received: 1, statuses: 0 });
+    assert.equal(providerCalls, 0);
+
+    const conversation = database.prepare(`SELECT conversation_id,status,subject,unread_count FROM conversations
+      WHERE channel_id=?`).get(channelId);
+    assert.equal(conversation.status, 'open');
+    assert.equal(conversation.subject, 'Asha');
+    assert.equal(conversation.unread_count, 1);
+    const message = database.prepare(`SELECT direction,text,status,provider_message_id FROM messages
+      WHERE channel_id=?`).get(channelId);
+    assert.deepEqual({ ...message }, {
+      direction: 'inbound', text: 'Hello Helixcer', status: 'received', provider_message_id: 'wamid.inbound-first'
+    });
+    const after = JSON.parse(database.prepare('SELECT config_json FROM channels WHERE channel_id=?').get(channelId).config_json);
+    assert.ok(after.webhookVerifiedAt);
+    assert.ok(after.lastWebhookAt);
+    assert.equal(after.credentialsVerifiedAt, undefined);
+
+    const listed = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+      headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    const listedChannel = (await listed.json()).items.find(item => item.channelId === channelId);
+    assert.equal(listedChannel.health, 'receiving');
+
+    const replay = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/whatsapp/${channelId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signed.signature }, body: signed.raw
+    }), env);
+    assert.equal((await replay.json()).received, 0);
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 1);
+    assert.equal(database.prepare('SELECT unread_count FROM conversations WHERE conversation_id=?').get(conversation.conversation_id).unread_count, 1);
+
+    const mismatched = structuredClone(payload);
+    mismatched.entry[0].changes[0].value.metadata.phone_number_id = '999999999999999';
+    const mismatchedSigned = await sign(mismatched);
+    const rejected = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/whatsapp/${channelId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': mismatchedSigned.signature }, body: mismatchedSigned.raw
+    }), env);
+    assert.equal(rejected.status, 403);
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
 test('Instagram verification uses /me and exposes sanitized credential errors', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB, {

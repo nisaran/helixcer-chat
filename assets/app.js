@@ -1075,7 +1075,7 @@
     if (verifiedIdentity) body.append(element("p", "verified-identity", verifiedIdentity));
 
     const setup = element("section", "connection-setup");
-    const credentialsReady = Boolean(channel.setup?.credentialsPresent || ["configured", "webhook_required", "connected"].includes(channel.health));
+    const credentialsReady = Boolean(channel.setup?.credentialsPresent || ["configured", "receiving", "webhook_required", "connected"].includes(channel.health));
     const identityVerified = Boolean(channel.setup?.credentialsVerifiedAt || ["webhook_required", "connected"].includes(channel.health));
     const webhookVerified = Boolean(channel.setup?.webhookVerifiedAt || channel.health === "connected");
     const progress = [credentialsReady, identityVerified, webhookVerified].filter(Boolean).length;
@@ -1144,7 +1144,9 @@
     setup.append(callbackBlock);
 
     const actions = element("div", "channel-card-actions");
-    const verify = element("button", "primary-button", channel.health === "connected" ? "Recheck connection" : "Verify connection");
+    const verify = element("button", "primary-button", channel.health === "connected"
+      ? "Recheck connection"
+      : channel.health === "receiving" ? "Verify sending" : "Verify connection");
     verify.type = "button";
     verify.dataset.action = "verify-channel";
     verify.dataset.channelId = channel.channelId;
@@ -1174,6 +1176,7 @@
     const states = {
       setup_required: { label: "Setup required", className: "is-warning", summary: "Add the required provider IDs and credentials." },
       configured: { label: "Ready to verify", className: "is-warning", summary: "Credentials are encrypted and ready for verification." },
+      receiving: { label: "Receiving", className: "", summary: "Signed webhook messages are reaching the Inbox. Verify provider access when you are ready to send replies." },
       webhook_required: { label: "Webhook required", className: "is-warning", summary: "The provider identity is verified. Complete the webhook setup." },
       connected: { label: "Live", className: "", summary: "This connection is ready for live messaging." },
       error: { label: "Connection error", className: "is-error", summary: "Review the credentials and verify the connection again." },
@@ -1485,6 +1488,11 @@
 
   function handleRealtimeEvent(event) {
     const type = event.type || event.event;
+    if (type === "webhook.received") {
+      if (state.selectedConversationId) state.messages.delete(state.selectedConversationId);
+      loadAll();
+      return;
+    }
     if (type === "message.created" || type === "message.updated") {
       const rawMessage = event.message || event.item || event.data || {};
       let conversationId = String(event.conversationId || rawMessage.conversationId || event.item?.conversationId || "");
@@ -1811,7 +1819,8 @@
         $("channelDialogTitle").textContent = `Edit ${payload.name}`;
       }
       let verification = null;
-      if (payload.enabled) {
+      const receiveBeforeVerification = payload.enabled && payload.connectorType === "whatsapp_cloud";
+      if (payload.enabled && !receiveBeforeVerification) {
         submit.textContent = "Verifying…";
         verification = await state.api.verifyChannel(savedChannelId);
       }
@@ -1819,6 +1828,7 @@
       await loadAll();
       setRoute("channels");
       if (!payload.enabled) showToast(channelId ? "Connection updated" : "Connection added", `${payload.name} is saved but disabled.`);
+      else if (receiveBeforeVerification) showToast("Connection saved", `${payload.name} will place valid signed webhook messages in the Inbox now. Verify sending when Meta access is ready.`);
       else if (verification?.health === "connected") showToast("Connection is live", `${payload.name} is verified and ready for messaging.`);
       else showToast("Connection verified", `${payload.name} is ready for its provider webhook. Copy the verify token beside the callback URL.`);
     } catch (error) {
