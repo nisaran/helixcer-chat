@@ -1,0 +1,26 @@
+name = "helixcer-chat-api"
+main = "worker/src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+APP_NAME = "Helixcer Chat"
+ALLOWED_ORIGINS = "https://nisaran.github.io,https://chat.helixcer.com"
+WHATSAPP_API_VERSION = "v23.0"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "helixcer-chat-v2"
+database_id = "45386cc5-53bf-481c-b678-01fc1ae2c58c"
+migrations_dir = "worker/migrations"
+
+[[durable_objects.bindings]]
+name = "INBOX_HUB"
+class_name = "InboxHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["InboxHub"]
+
+[triggers]
+crons = ["* * * * *"]
+

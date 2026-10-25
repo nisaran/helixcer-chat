@@ -1,214 +1,305 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <base target="_top">
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root { --brand:#C24525; --bg:#f5f6f8; --panel:#fff; --line:#e5e7eb; --text:#20242b; --muted:#6b7280; }
-    * { box-sizing:border-box; }
-    body { margin:0; font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
-    header { height:62px; display:flex; align-items:center; justify-content:space-between; padding:0 22px; background:#fff; border-bottom:1px solid var(--line); }
-    .brand { font-size:18px; font-weight:750; letter-spacing:-.3px; } .brand span { color:var(--brand); }
-    .shell { display:grid; grid-template-columns:220px minmax(230px,320px) 1fr; height:calc(100vh - 62px); }
-    aside,.list,.chat { background:var(--panel); min-height:0; }
-    aside { border-right:1px solid var(--line); padding:18px 12px; }
-    .nav { width:100%; border:0; background:transparent; text-align:left; padding:11px 12px; border-radius:9px; cursor:pointer; color:#454b55; margin-bottom:4px; }
-    .nav.active,.nav:hover { background:#fff0eb; color:var(--brand); font-weight:650; }
-    .list { border-right:1px solid var(--line); display:flex; flex-direction:column; }
-    .panehead { padding:18px 16px 12px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:8px; }
-    h2 { margin:0; font-size:17px; } .muted { color:var(--muted); font-size:12px; }
-    input,select,textarea { font:inherit; border:1px solid #d8dce2; border-radius:8px; padding:10px 11px; background:#fff; width:100%; color:var(--text); }
-    .search { padding:12px; border-bottom:1px solid var(--line); }
-    .items { overflow:auto; }
-    .conversation { display:block; width:100%; text-align:left; padding:14px 16px; border:0; border-bottom:1px solid #f0f1f3; background:white; cursor:pointer; }
-    .conversation:hover,.conversation.selected { background:#fff5f1; }
-    .conversation strong { display:block; margin-bottom:4px; }
-    .chat { display:flex; flex-direction:column; min-width:0; }
-    .empty { display:grid; place-items:center; text-align:center; color:var(--muted); padding:28px; height:100%; }
-    .messages { flex:1; overflow:auto; padding:24px; display:flex; flex-direction:column; gap:10px; }
-    .bubble { max-width:min(72%,560px); padding:11px 13px; border-radius:13px; background:#f0f2f5; align-self:flex-start; white-space:pre-wrap; overflow-wrap:anywhere; }
-    .bubble.out { background:#fce8e1; align-self:flex-end; }
-    .compose { border-top:1px solid var(--line); padding:14px; display:flex; gap:10px; align-items:end; }
-    .compose textarea { resize:vertical; min-height:44px; max-height:130px; }
-    button.primary { border:0; background:var(--brand); color:#fff; border-radius:8px; padding:10px 15px; font-weight:650; cursor:pointer; }
-    button.secondary { border:1px solid var(--line); background:#fff; border-radius:8px; padding:8px 11px; cursor:pointer; }
-    .view { display:none; grid-column:1/-1; padding:24px; overflow:auto; background:var(--bg); }
-    .view.show { display:block; }
-    .card { max-width:900px; background:white; border:1px solid var(--line); border-radius:14px; padding:20px; margin-bottom:16px; }
-    .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-    label { display:block; font-size:12px; color:var(--muted); margin-bottom:5px; }
-    .field { margin-bottom:12px; } .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#f8f9fa; padding:12px; border-radius:8px; }
-    #notice { position:fixed; bottom:18px; right:18px; background:#20242b; color:white; padding:11px 15px; border-radius:9px; display:none; max-width:80vw; z-index:4; }
-    @media(max-width:800px) { .shell { grid-template-columns:64px 1fr; } aside { padding:12px 5px; } .nav { font-size:0; text-align:center; padding:12px 4px; } .nav::first-letter { font-size:16px; } .list { grid-column:2; } .chat { grid-column:1/-1; display:none; } .grid { grid-template-columns:1fr; } }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#8f2e19">
+  <meta name="description" content="Helixcer Chat — a focused omnichannel inbox for customer conversations.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://helixcer-chat-api.nisaran.workers.dev wss://helixcer-chat-api.nisaran.workers.dev; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <meta name="helixcer-api-base" content="https://helixcer-chat-api.nisaran.workers.dev">
+  <title>Helixcer Chat</title>
+  <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./assets/styles.css">
+  <script src="./assets/app.js" defer></script>
 </head>
 <body>
-<header><div class="brand">Helixcer <span>Chat</span></div><div class="muted" id="userState">Configuration-driven omnichannel inbox</div></header>
-<div class="shell" id="inboxLayout">
-  <aside>
-    <button class="nav active" data-view="inbox" onclick="showView('inbox')">▣ &nbsp; Inbox</button>
-    <button class="nav" data-view="channels" onclick="showView('channels')">◉ &nbsp; Channels</button>
-    <button class="nav" data-view="contacts" onclick="showView('contacts')">♙ &nbsp; Contacts</button>
-    <div style="margin:20px 12px 6px" class="muted">WORKSPACE</div>
-    <div class="muted" style="padding:8px 12px">Provider-neutral core</div>
-  </aside>
-  <section class="list" id="conversationPane">
-    <div class="panehead"><div><h2>Inbox</h2><div class="muted" id="conversationCount">Loading…</div></div><button class="secondary" onclick="loadAll()">↻</button></div>
-    <div class="search"><input id="search" placeholder="Search conversations…" oninput="renderConversations()"></div>
-    <div class="items" id="conversationItems"></div>
-  </section>
-  <section class="chat" id="chatPane"><div class="empty">Select a conversation to view messages.</div></section>
-</div>
-<section class="view" id="channelsView">
-  <div class="card"><h2>Channel configuration</h2><p class="muted">Add a provider connection without changing the shared inbox. Secrets are stored separately in Apps Script Script Properties.</p>
-    <form id="channelForm" onsubmit="saveChannel(event)">
-      <div class="grid">
-        <div class="field"><label>Channel display name</label><input id="channelName" required placeholder="e.g. Main WhatsApp"></div>
-        <div class="field"><label>Connector type</label><select id="connectorType" onchange="renderConnectorHelp()"></select></div>
-        <div class="field"><label>Channel ID (optional for new channel)</label><input id="channelId" placeholder="auto-generated if blank"></div>
-        <div class="field"><label>Capabilities (comma separated)</label><input id="capabilities" value="text" placeholder="text,template,media"></div>
-      </div>
-      <div id="connectorHelp" class="field"></div>
-      <div class="field"><label>Configuration JSON</label><textarea id="configJson" rows="10" spellcheck="false"></textarea></div>
-      <div class="field"><label>Secret property prefix (generic connector)</label><input id="secretKey" placeholder="e.g. CHANNEL_CUSTOM_API"></div>
-      <div class="row"><button class="primary" type="submit">Save channel</button><button class="secondary" type="button" onclick="resetChannelForm()">Clear</button></div>
-    </form>
-  </div>
-  <div class="card"><h2>Configured channels</h2><div id="channelItems" class="items"></div></div>
-  <div class="card"><h2>Secret setup</h2><p>In Apps Script → Project Settings → Script Properties, add secrets for each channel. Never put tokens in this form or in GitHub.</p><pre>WhatsApp channel ID "wa-main":
-CHANNEL_WA-MAIN_ACCESS_TOKEN = your token
-CHANNEL_WA-MAIN_PHONE_NUMBER_ID = your phone number ID
+  <a class="skip-link" href="#main-content">Skip to inbox</a>
 
-Generic channel secret prefix "CHANNEL_CUSTOM_API":
-CHANNEL_CUSTOM_API_API_TOKEN = your API token</pre></div>
-</section>
-<section class="view" id="contactsView">
-  <div class="card"><h2>Create contact and conversation</h2><p class="muted">The Channel Profile ID is the platform-specific identity. A person can later have additional identities linked to the same Contact ID.</p>
-    <form id="contactForm" onsubmit="createContact(event)">
-      <div class="grid">
-        <div class="field"><label>Display name</label><input id="contactName" required></div>
-        <div class="field"><label>Channel</label><select id="contactChannel" required></select></div>
-        <div class="field"><label>Channel Profile ID</label><input id="profileId" required placeholder="WhatsApp number / provider user ID"></div>
+  <div class="app-shell" id="appShell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <a class="brand" href="#inbox" aria-label="Helixcer Chat home">
+        <span class="brand-mark" aria-hidden="true">H</span>
+        <span class="brand-copy">Helixcer <strong>Chat</strong></span>
+      </a>
+
+      <nav class="primary-nav" id="primaryNav">
+        <button class="nav-button is-active" type="button" data-route="inbox" aria-current="page">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-5.2 4v-4.8A2.5 2.5 0 0 1 4 13.5z"/></svg>
+          </span>
+          <span>Inbox</span>
+          <span class="nav-count" id="sidebarUnread" aria-label="Unread conversations">0</span>
+        </button>
+        <button class="nav-button" type="button" data-route="contacts">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M16 20v-1.5A4.5 4.5 0 0 0 11.5 14h-5A4.5 4.5 0 0 0 2 18.5V20M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm9-1v6m3-3h-6"/></svg>
+          </span>
+          <span>Contacts</span>
+        </button>
+        <button class="nav-button" type="button" data-route="channels">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8m12.8 0a9 9 0 0 0 0-12.8M8.5 8.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7"/></svg>
+          </span>
+          <span>Channels</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="workspace-card">
+          <span class="presence-dot" aria-hidden="true"></span>
+          <div>
+            <strong>Helixcer workspace</strong>
+            <span id="sidebarMode">Demo workspace</span>
+          </div>
+        </div>
+        <button class="nav-button" type="button" data-action="open-settings">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15.04 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.96a1.7 1.7 0 0 0-.34-1.87l-.06-.06L7.03 4.2l.06.06a1.7 1.7 0 0 0 1.87.34A1.7 1.7 0 0 0 10 3.08V3h4v.08a1.7 1.7 0 0 0 1.04 1.52 1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06a1.7 1.7 0 0 0-.34 1.87A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+          </span>
+          <span>Settings</span>
+        </button>
       </div>
-      <button class="primary" type="submit">Create contact</button>
-    </form>
+    </aside>
+
+    <main class="main" id="main-content">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="mobileMenu" type="button" aria-label="Open navigation" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <div class="topbar-title">
+          <p class="eyebrow">Customer operations</p>
+          <h1 id="pageTitle">Inbox</h1>
+        </div>
+        <div class="topbar-actions">
+          <div class="connection-pill" id="connectionPill" role="status">
+            <span class="connection-dot" aria-hidden="true"></span>
+            <span id="connectionText">Starting…</span>
+          </div>
+          <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh data">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9a7 7 0 0 1 11.6-2.6L20 9M4 15l2.3 2.6A7 7 0 0 0 18 15"/></svg>
+          </button>
+          <button class="avatar avatar-button" type="button" data-action="open-settings" aria-label="Open workspace settings">NH</button>
+        </div>
+      </header>
+
+      <section class="route is-active" id="inboxRoute" data-route-panel="inbox" aria-labelledby="pageTitle">
+        <div class="inbox-grid" id="inboxGrid">
+          <section class="conversation-panel" aria-label="Conversations">
+            <div class="panel-toolbar">
+              <div>
+                <h2>Conversations</h2>
+                <span class="subtle" id="conversationSummary">Loading conversations…</span>
+              </div>
+              <button class="icon-button elevated" type="button" data-action="new-conversation" aria-label="Start a conversation">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+            </div>
+
+            <div class="search-wrap">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+              <label class="sr-only" for="conversationSearch">Search conversations</label>
+              <input id="conversationSearch" type="search" placeholder="Search people or messages…" autocomplete="off">
+              <kbd class="search-shortcut">/</kbd>
+            </div>
+
+            <div class="filter-row" id="conversationFilters" aria-label="Conversation filters">
+              <button class="filter-chip is-active" type="button" data-filter="all">All <span id="allCount">0</span></button>
+              <button class="filter-chip" type="button" data-filter="open">Open <span id="openCount">0</span></button>
+              <button class="filter-chip" type="button" data-filter="unread">Unread <span id="unreadCount">0</span></button>
+              <button class="filter-chip" type="button" data-filter="closed">Closed</button>
+            </div>
+
+            <div class="conversation-list" id="conversationList" role="list" aria-live="polite"></div>
+          </section>
+
+          <section class="chat-panel" id="chatPanel" aria-label="Current conversation">
+            <div class="empty-state" id="emptyConversation">
+              <div class="empty-illustration" aria-hidden="true"><span></span><span></span><span></span></div>
+              <h2>Your customer conversations, together</h2>
+              <p>Select a conversation to read the history and respond from the same workspace.</p>
+            </div>
+
+            <div class="chat-content" id="chatContent" hidden>
+              <header class="chat-header">
+                <button class="icon-button mobile-back" id="mobileBack" type="button" aria-label="Back to conversations">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+                </button>
+                <span class="avatar contact-avatar" id="chatAvatar" aria-hidden="true">—</span>
+                <div class="chat-person">
+                  <h2 id="chatTitle">Conversation</h2>
+                  <div class="chat-meta">
+                    <span class="channel-badge" id="chatChannel">Channel</span>
+                    <span id="chatPresence">Recently active</span>
+                  </div>
+                </div>
+                <div class="chat-actions">
+                  <label class="sr-only" for="conversationStatus">Conversation status</label>
+                  <select class="compact-select" id="conversationStatus">
+                    <option value="open">Open</option>
+                    <option value="pending">Pending</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                  <button class="icon-button" type="button" data-action="toggle-details" aria-label="View contact details">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.2v.1"/></svg>
+                  </button>
+                </div>
+              </header>
+
+              <div class="message-thread" id="messageThread" aria-live="polite"></div>
+              <div class="typing-row" id="typingIndicator" hidden><span></span><span></span><span></span><em>A customer is typing</em></div>
+
+              <form class="composer" id="messageForm">
+                <div class="composer-box">
+                  <textarea id="messageInput" rows="1" maxlength="4000" placeholder="Write a reply…" aria-label="Message"></textarea>
+                  <div class="composer-tools">
+                    <div>
+                      <button class="composer-icon" type="button" data-action="attachment-info" aria-label="Attach a file">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20.5 11.5-8.8 8.8a6 6 0 0 1-8.5-8.5l9.5-9.5a4 4 0 0 1 5.7 5.7l-9.6 9.5a2 2 0 1 1-2.8-2.8l8.8-8.8"/></svg>
+                      </button>
+                      <button class="composer-icon" type="button" data-action="insert-greeting" aria-label="Insert greeting">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
+                      </button>
+                    </div>
+                    <div class="send-group">
+                      <span class="send-hint">Enter to send</span>
+                      <button class="send-button" id="sendButton" type="submit" aria-label="Send message">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 17 8-17 8 3-8Zm3 8h14"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <aside class="details-panel" id="detailsPanel" aria-label="Contact details" hidden>
+            <div class="details-head">
+              <h2>Contact details</h2>
+              <button class="icon-button" type="button" data-action="toggle-details" aria-label="Close contact details">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+              </button>
+            </div>
+            <div class="profile-card">
+              <span class="avatar profile-avatar" id="detailsAvatar">—</span>
+              <h3 id="detailsName">Unknown contact</h3>
+              <span class="subtle" id="detailsIdentity">No identity</span>
+            </div>
+            <dl class="details-list">
+              <div><dt>Email</dt><dd id="detailsEmail">—</dd></div>
+              <div><dt>Phone</dt><dd id="detailsPhone">—</dd></div>
+              <div><dt>Channel</dt><dd id="detailsChannel">—</dd></div>
+              <div><dt>Assigned to</dt><dd id="detailsAssignee">—</dd></div>
+            </dl>
+            <div class="details-section">
+              <h3>Tags</h3>
+              <div class="tag-list" id="detailsTags"></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="route content-route" id="contactsRoute" data-route-panel="contacts" aria-labelledby="contactsTitle" hidden>
+        <div class="route-heading">
+          <div><p class="eyebrow">Audience</p><h2 id="contactsTitle">Contacts</h2><p>Customer identities across every connected channel.</p></div>
+          <button class="primary-button" type="button" data-action="new-contact"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add contact</button>
+        </div>
+        <div class="surface">
+          <div class="surface-toolbar">
+            <div class="search-wrap compact-search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+              <label class="sr-only" for="contactSearch">Search contacts</label>
+              <input id="contactSearch" type="search" placeholder="Search contacts…">
+            </div>
+            <span class="subtle" id="contactCount">0 contacts</span>
+          </div>
+          <div class="contact-table-wrap">
+            <table class="contact-table">
+              <thead><tr><th>Contact</th><th>Channel</th><th>Tags</th><th>Last active</th><th>Status</th></tr></thead>
+              <tbody id="contactTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="route content-route" id="channelsRoute" data-route-panel="channels" aria-labelledby="channelsTitle" hidden>
+        <div class="route-heading">
+          <div><p class="eyebrow">Integrations</p><h2 id="channelsTitle">Channels</h2><p>Monitor every customer touchpoint from one place.</p></div>
+          <button class="primary-button" type="button" data-action="channel-help"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Connect channel</button>
+        </div>
+        <div class="stats-grid" id="channelStats"></div>
+        <div class="channel-grid" id="channelGrid"></div>
+      </section>
+    </main>
   </div>
-</section>
-<div id="notice"></div>
-<script>
-  let state = { channels: [], conversations: [], selectedConversationId: null, messages: [] };
-  const $ = id => document.getElementById(id);
-  function callApi(action, payload={}) {
-    return new Promise((resolve,reject) => {
-      google.script.run.withSuccessHandler(resolve).withFailureHandler(e => reject(new Error(e && e.message ? e.message : String(e)))).api(action,payload);
-    });
-  }
-  function notice(msg) { const el=$('notice'); el.textContent=msg; el.style.display='block'; setTimeout(()=>el.style.display='none',4500); }
-  function showView(name) {
-    document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
-    $('inboxLayout').style.display = name==='inbox' ? 'grid' : 'none';
-    document.querySelectorAll('.view').forEach(v=>v.classList.remove('show'));
-    if(name!=='inbox') $(name+'View').classList.add('show');
-  }
-  async function loadAll() {
-    try {
-      const data = await callApi('bootstrap');
-      state.channels = data.channels || []; state.conversations = data.conversations || [];
-      const sel=$('connectorType'); const old=sel.value;
-      sel.innerHTML=''; (data.connectorTypes||[]).forEach(t=>{const o=document.createElement('option');o.value=t.value;o.textContent=t.label;sel.appendChild(o);});
-      if(old) sel.value=old;
-      renderConnectorHelp(); renderConversations(); renderChannels(); populateContactChannels();
-      if(state.selectedConversationId) await selectConversation(state.selectedConversationId);
-    } catch(e) { notice('Load failed: '+e.message); $('userState').textContent='Unable to load data'; }
-  }
-  function renderConversations() {
-    const term=$('search').value.toLowerCase();
-    const items=state.conversations.filter(c=>(c.subject+' '+c.status+' '+c.channelId).toLowerCase().includes(term));
-    $('conversationCount').textContent=items.length+' conversations';
-    const host=$('conversationItems'); host.innerHTML='';
-    items.forEach(c=>{
-      const ch=state.channels.find(x=>x.channelId===c.channelId);
-      const b=document.createElement('button'); b.className='conversation'+(c.conversationId===state.selectedConversationId?' selected':'');
-      const title=document.createElement('strong'); title.textContent=c.subject||'Unknown contact';
-      const sub=document.createElement('div'); sub.className='muted'; sub.textContent=(ch?ch.name:c.channelId)+' · '+(c.status||'open');
-      b.append(title,sub); b.onclick=()=>selectConversation(c.conversationId); host.appendChild(b);
-    });
-    if(!items.length) host.innerHTML='<div class="empty" style="height:180px">No conversations yet.<br>Create a contact to start testing.</div>';
-  }
-  async function selectConversation(id) {
-    state.selectedConversationId=id; renderConversations();
-    try { state.messages=await callApi('getMessages',{conversationId:id}); renderChat(); }
-    catch(e){notice(e.message);}
-  }
-  function renderChat() {
-    const c=state.conversations.find(x=>x.conversationId===state.selectedConversationId);
-    const host=$('chatPane'); host.innerHTML='';
-    const head=document.createElement('div'); head.className='panehead';
-    const info=document.createElement('div'); const h=document.createElement('h2'); h.textContent=c?c.subject:'Conversation';
-    const sub=document.createElement('div');sub.className='muted';const ch=state.channels.find(x=>c&&x.channelId===c.channelId);sub.textContent=ch?ch.name:(c?c.channelId:'');
-    info.append(h,sub);head.append(info);host.append(head);
-    const messages=document.createElement('div');messages.className='messages';
-    if(!state.messages.length){const empty=document.createElement('div');empty.className='empty';empty.style.height='160px';empty.textContent='No messages stored yet.';messages.append(empty);}
-    state.messages.forEach(m=>{const b=document.createElement('div');b.className='bubble '+(m.direction==='outbound'?'out':'');b.textContent=m.text||('['+m.messageType+']');const meta=document.createElement('div');meta.className='muted';meta.style.marginTop='5px';meta.textContent=(m.timestamp||'')+' · '+(m.status||'');b.append(meta);messages.append(b);});
-    host.append(messages);
-    const form=document.createElement('form');form.className='compose';form.onsubmit=sendMessage;
-    const input=document.createElement('textarea');input.id='messageText';input.required=true;input.placeholder='Write a message…';
-    const btn=document.createElement('button');btn.className='primary';btn.textContent='Send';btn.type='submit';
-    form.append(input,btn);host.append(form);messages.scrollTop=messages.scrollHeight;
-  }
-  async function sendMessage(e) {
-    e.preventDefault();const text=$('messageText').value.trim();if(!text)return;
-    try { await callApi('sendMessage',{conversationId:state.selectedConversationId,text});notice('Message submitted to provider.');await selectConversation(state.selectedConversationId); }
-    catch(err){notice('Send failed: '+err.message);}
-  }
-  function renderConnectorHelp() {
-    const type=$('connectorType').value; const help=$('connectorHelp'); if(!help)return;
-    if(type==='whatsapp_cloud'){
-      help.innerHTML='<p class="muted">WhatsApp Cloud API uses channel-specific Script Properties. Config JSON controls the API version only. This starter supports outbound text messages.</p>';
-      $('configJson').value=JSON.stringify({apiVersion:'v23.0'},null,2);
-    } else {
-      help.innerHTML='<p class="muted">Generic connector config example. Use {{recipient.channelProfileId}}, {{message.text}}, and {{secret:API_TOKEN}}. Only trusted admins should configure endpoints.</p>';
-      $('configJson').value=JSON.stringify({endpoint:'https://api.example.com/messages',method:'POST',headers:{Authorization:'Bearer {{secret:API_TOKEN}}','Content-Type':'application/json'},bodyTemplate:{to:'{{recipient.channelProfileId}}',text:'{{message.text}}'},responseMapping:{providerMessageId:'id',status:'status'}},null,2);
-    }
-  }
-  async function saveChannel(e) {
-    e.preventDefault();
-    try {
-      const config=JSON.parse($('configJson').value||'{}');
-      const result=await callApi('saveChannel',{name:$('channelName').value,connectorType:$('connectorType').value,channelId:$('channelId').value.trim(),capabilities:$('capabilities').value.split(',').map(x=>x.trim()).filter(Boolean),config,secretKey:$('secretKey').value.trim()});
-      notice('Channel saved: '+result.channelId);resetChannelForm();await loadAll();
-    } catch(err){notice('Save failed: '+err.message);}
-  }
-  function resetChannelForm(){ $('channelForm').reset(); $('channelId').value=''; $('capabilities').value='text'; renderConnectorHelp(); }
-  function renderChannels(){
-    const host=$('channelItems');host.innerHTML='';
-    if(!state.channels.length){host.textContent='No channels configured.';return;}
-    state.channels.forEach(c=>{
-      const wrap=document.createElement('div');wrap.style.padding='12px 0';wrap.style.borderBottom='1px solid #eee';
-      const row=document.createElement('div');row.className='row';
-      const strong=document.createElement('strong');strong.textContent=c.name+' ('+c.channelId+')';
-      const tag=document.createElement('span');tag.className='muted';tag.textContent=c.connectorType+' · '+(c.enabled?'enabled':'disabled');
-      const edit=document.createElement('button');edit.className='secondary';edit.textContent='Edit';edit.onclick=()=>{
-        $('channelName').value=c.name;$('channelId').value=c.channelId;$('connectorType').value=c.connectorType;
-        $('capabilities').value=(c.capabilities||[]).join(',');$('configJson').value=JSON.stringify(c.config||{},null,2);
-        $('secretKey').value=c.secretKey||'';renderConnectorHelp();$('configJson').value=JSON.stringify(c.config||{},null,2);window.scrollTo({top:0,behavior:'smooth'});
-      };
-      row.append(strong,tag,edit);wrap.append(row);host.append(wrap);
-    });
-  }
-  function populateContactChannels(){
-    const sel=$('contactChannel');sel.innerHTML='';
-    state.channels.filter(c=>c.enabled).forEach(c=>{const o=document.createElement('option');o.value=c.channelId;o.textContent=c.name;sel.append(o);});
-  }
-  async function createContact(e){
-    e.preventDefault();
-    try {const r=await callApi('createContact',{displayName:$('contactName').value,channelId:$('contactChannel').value,channelProfileId:$('profileId').value});
-      notice('Contact and conversation created.');$('contactForm').reset();await loadAll();showView('inbox');await selectConversation(r.conversationId);
-    }catch(err){notice('Create failed: '+err.message);}
-  }
-  loadAll();
-</script>
+
+  <div class="mobile-scrim" id="mobileScrim" hidden></div>
+
+  <dialog class="modal" id="settingsDialog" aria-labelledby="settingsTitle">
+    <form method="dialog" class="modal-card" id="settingsForm">
+      <div class="modal-head">
+        <div><p class="eyebrow">Workspace</p><h2 id="settingsTitle">Connection settings</h2></div>
+        <button class="icon-button" type="button" data-action="close-settings" aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="modal-copy">Enter the public URL of your Helixcer Cloudflare Worker. Tokens and channel secrets must remain in Cloudflare, never in this browser.</p>
+      <label class="field-label" for="apiBaseInput">Worker API URL</label>
+      <input class="text-field" id="apiBaseInput" type="url" placeholder="https://helixcer-chat.your-name.workers.dev" spellcheck="false">
+      <p class="field-help">Leave this blank to explore the interface safely with demo data.</p>
+      <label class="field-label settings-token" for="adminTokenInput">Admin access token</label>
+      <input class="text-field" id="adminTokenInput" type="password" autocomplete="off" placeholder="Stored only for this browser tab">
+      <p class="field-help">This token stays in this browser and is sent only to your Worker. It is never committed to GitHub.</p>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="use-demo">Use demo mode</button>
+        <button class="primary-button" type="submit" value="save">Save and connect</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="channelDialog" aria-labelledby="channelDialogTitle">
+    <form class="modal-card" id="channelForm">
+      <div class="modal-head">
+        <div><p class="eyebrow">Integration</p><h2 id="channelDialogTitle">Connect a channel</h2></div>
+        <button class="icon-button" type="button" data-action="close-channel-dialog" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="modal-copy">Create the channel record here. Provider tokens remain encrypted in Cloudflare Worker secrets and are never entered into this page.</p>
+      <div class="form-grid">
+        <label class="field-label">Name<input class="text-field" name="name" required maxlength="80" placeholder="Main WhatsApp"></label>
+        <label class="field-label">Connector<select class="text-field" name="connectorType" id="channelConnectorType" required>
+          <option value="whatsapp_cloud">WhatsApp Cloud API</option>
+          <option value="telegram">Telegram Bot API</option>
+          <option value="web_chat">Website chat</option>
+          <option value="generic_http">Generic HTTP API</option>
+        </select></label>
+        <label class="field-label">Channel ID<input class="text-field" name="channelId" required maxlength="100" pattern="[A-Za-z0-9_-]+" placeholder="wa-main"></label>
+        <label class="field-label">Secret prefix<input class="text-field" name="secretKey" required maxlength="100" pattern="[A-Za-z0-9_-]+" placeholder="WA_MAIN"></label>
+        <label class="field-label form-span" id="genericEndpointField" hidden>Generic API endpoint<input class="text-field" name="endpoint" type="url" placeholder="https://api.provider.example/messages"></label>
+      </div>
+      <p class="field-help" id="channelSecretHelp">After saving, add WA_MAIN_ACCESS_TOKEN, WA_MAIN_PHONE_NUMBER_ID, WA_MAIN_VERIFY_TOKEN, and WA_MAIN_APP_SECRET in Cloudflare Worker secrets.</p>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-channel-dialog">Cancel</button>
+        <button class="primary-button" type="submit">Save channel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="contactDialog" aria-labelledby="contactDialogTitle">
+    <form class="modal-card" id="contactForm">
+      <div class="modal-head">
+        <div><p class="eyebrow">New conversation</p><h2 id="contactDialogTitle">Add a contact</h2></div>
+        <button class="icon-button" type="button" data-action="close-contact-dialog" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="form-grid">
+        <label class="field-label">Name<input class="text-field" name="displayName" required maxlength="100" placeholder="Customer name"></label>
+        <label class="field-label">Channel<select class="text-field" name="channelId" id="newContactChannel" required></select></label>
+        <label class="field-label form-span">Channel identity<input class="text-field" name="channelProfileId" required maxlength="255" placeholder="Phone number, email, or platform ID"></label>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-contact-dialog">Cancel</button>
+        <button class="primary-button" type="submit">Create conversation</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+  <template id="conversationSkeleton"><div class="skeleton conversation-skeleton"><span></span><div><i></i><i></i></div></div></template>
 </body>
 </html>
