@@ -2,7 +2,8 @@
   "use strict";
 
   const STORAGE_KEY = "helixcer_api_base";
-  const TOKEN_KEY = "helixcer_admin_token";
+  const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
+  const LEGACY_API_BASES = new Set(["https://helixcer-chat-api.nisaran.workers.dev"]);
   const DEFAULT_WORKSPACE = "Helixcer workspace";
 
   const $ = (id) => document.getElementById(id);
@@ -17,6 +18,10 @@
     messages: new Map(),
     selectedConversationId: null,
     detailsOpen: false,
+    currentUser: null,
+    workspace: { name: DEFAULT_WORKSPACE, workspaceId: "default", slug: "helixcer" },
+    team: { members: [], invitations: [] },
+    authStatus: "checking",
     api: null,
     disconnectRealtime: null,
     loading: true,
@@ -47,6 +52,22 @@
     const ago = (minutes) => new Date(now - minutes * 60_000).toISOString();
     return {
       appName: "Helixcer Chat",
+      me: {
+        authenticated: true,
+        user: { userId: "demo-owner", email: "owner@helixcer.example", displayName: "Nisar", avatarUrl: "" },
+        workspace: { workspaceId: "demo", name: "Helixcer workspace", slug: "helixcer" },
+        membership: { membershipId: "demo-membership-owner", role: "owner", status: "active" },
+      },
+      team: {
+        members: [
+          { membershipId: "demo-membership-owner", userId: "demo-owner", email: "owner@helixcer.example", displayName: "Nisar", avatarUrl: "", role: "owner", status: "active", createdAt: ago(43200) },
+          { membershipId: "demo-membership-admin", userId: "demo-admin", email: "admin@helixcer.example", displayName: "Asha Rao", avatarUrl: "", role: "admin", status: "active", createdAt: ago(20160) },
+          { membershipId: "demo-membership-agent", userId: "demo-agent", email: "agent@helixcer.example", displayName: "Kiran Shah", avatarUrl: "", role: "agent", status: "active", createdAt: ago(10080) },
+        ],
+        invitations: [
+          { invitationId: "demo-invite", email: "new.agent@helixcer.example", role: "agent", status: "pending", expiresAt: ago(-10080), createdAt: ago(40) },
+        ],
+      },
       channels: [
         { channelId: "wa-main", name: "Main WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", messagesToday: 86 },
         { channelId: "telegram-support", name: "Telegram Support", connectorType: "telegram", enabled: true, health: "connected", messagesToday: 31 },
@@ -109,10 +130,54 @@
       await smallDelay();
       return clone({
         appName: this.data.appName,
+        me: this.data.me,
         channels: this.data.channels,
         contacts: this.data.contacts,
         conversations: this.data.conversations,
       });
+    }
+
+    async me() {
+      await smallDelay(120);
+      return clone(this.data.me);
+    }
+
+    async logout() {
+      await smallDelay(80);
+      return { ok: true };
+    }
+
+    async getTeam() {
+      await smallDelay(140);
+      return clone(this.data.team);
+    }
+
+    async inviteMember(payload) {
+      const suffix = Date.now().toString(36);
+      const invitation = {
+        invitationId: `invite-${suffix}`,
+        email: payload.email,
+        role: payload.role,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 7 * 86400_000).toISOString(),
+      };
+      this.data.team.invitations.unshift(invitation);
+      return { ok: true, invitation: clone(invitation), inviteUrl: `${location.origin}${location.pathname}?invite=${suffix}` };
+    }
+
+    async updateMember(membershipId, patch) {
+      const item = this.data.team.members.find((member) => member.membershipId === membershipId);
+      if (!item) throw new Error("Member not found");
+      Object.assign(item, patch);
+      return { ok: true, item: clone(item) };
+    }
+
+    async cancelInvitation(invitationId) {
+      const item = this.data.team.invitations.find((invitation) => invitation.invitationId === invitationId);
+      if (!item) throw new Error("Invitation not found");
+      item.status = "cancelled";
+      return { ok: true, item: clone(item) };
     }
 
     async getMessages(conversationId) {
@@ -144,7 +209,7 @@
       const item = this.data.conversations.find((entry) => entry.conversationId === conversationId);
       if (!item) throw new Error("Conversation not found");
       if (patch.status) item.status = patch.status;
-      if (patch.assignedTo) item.assignedTo = patch.assignedTo;
+      if (Object.prototype.hasOwnProperty.call(patch, "assignedTo")) item.assignedTo = patch.assignedTo || "Unassigned";
       if (patch.markRead) item.unreadCount = 0;
       this.emit({ type: "conversation.updated", conversation: clone(item), item: clone(item) });
       return { ok: true, item: clone(item) };
@@ -206,9 +271,9 @@
   }
 
   class ApiClient {
-    constructor(base, token) {
+    constructor(base, recoveryToken = "") {
       this.base = (base || "").trim().replace(/\/+$/, "");
-      this.token = (token || "").trim();
+      this.recoveryToken = (recoveryToken || "").trim();
       this.isDemo = !this.base;
       this.demo = this.isDemo ? new DemoApi() : null;
       this.socket = null;
@@ -220,17 +285,37 @@
       const headers = new Headers(options.headers || {});
       headers.set("Accept", "application/json");
       if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-      if (this.token) headers.set("Authorization", `Bearer ${this.token}`);
-      const response = await fetch(`${this.base}${path}`, { ...options, headers });
+      if (this.recoveryToken) headers.set("Authorization", `Bearer ${this.recoveryToken}`);
+      const response = await fetch(`${this.base}${path}`, { ...options, headers, credentials: "include" });
       const contentType = response.headers.get("content-type") || "";
       const payload = contentType.includes("application/json") ? await response.json() : await response.text();
       if (!response.ok) {
         const message = typeof payload === "object" && payload
           ? payload.error || payload.message
           : String(payload || "");
-        throw new Error(message || `Request failed (${response.status})`);
+        const error = new Error(message || `Request failed (${response.status})`);
+        error.status = response.status;
+        if (response.status === 401 && path !== "/api/me") window.dispatchEvent(new CustomEvent("helixcer:unauthorized"));
+        throw error;
       }
       return payload;
+    }
+
+    loginUrl() {
+      if (this.isDemo) return "#";
+      const url = new URL("/auth/google/start", this.base);
+      url.searchParams.set("return_to", location.origin);
+      const invite = new URLSearchParams(location.search).get("invite");
+      if (invite) url.searchParams.set("invite", invite);
+      return url.toString();
+    }
+
+    me() {
+      return this.isDemo ? this.demo.me() : this.request("/api/me");
+    }
+
+    logout() {
+      return this.isDemo ? this.demo.logout() : this.request("/api/logout", { method: "POST" });
     }
 
     bootstrap() {
@@ -273,14 +358,40 @@
         : this.request("/api/channels", { method: "POST", body: JSON.stringify(payload) });
     }
 
+    getTeam() {
+      return this.isDemo ? this.demo.getTeam() : this.request("/api/team");
+    }
+
+    inviteMember(payload) {
+      return this.isDemo
+        ? this.demo.inviteMember(payload)
+        : this.request("/api/team/invitations", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    updateMember(membershipId, patch) {
+      return this.isDemo
+        ? this.demo.updateMember(membershipId, patch)
+        : this.request(`/api/team/members/${encodeURIComponent(membershipId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+    }
+
+    cancelInvitation(invitationId) {
+      return this.isDemo
+        ? this.demo.cancelInvitation(invitationId)
+        : this.request(`/api/team/invitations/${encodeURIComponent(invitationId)}`, { method: "PATCH", body: JSON.stringify({ status: "cancelled" }) });
+    }
+
     connect(listener, onState) {
       if (this.isDemo) return this.demo.connect(listener, onState);
+      if (this.recoveryToken) {
+        onState("recovery");
+        return () => {};
+      }
       this.closedByClient = false;
       const openSocket = () => {
         const url = new URL(this.base);
         url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
         url.pathname = `${url.pathname.replace(/\/$/, "")}/api/realtime`;
-        url.search = this.token ? `?token=${encodeURIComponent(this.token)}` : "";
+        url.search = "";
         onState("connecting");
         const socket = new WebSocket(url);
         this.socket = socket;
@@ -312,17 +423,150 @@
   }
 
   function initialApiBase() {
+    const configured = document.querySelector('meta[name="helixcer-api-base"]')?.content || "";
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored !== null) return stored;
+    if (stored !== null) {
+      const normalized = stored.replace(/\/+$/, "");
+      if (LEGACY_API_BASES.has(normalized) && configured) {
+        localStorage.setItem(STORAGE_KEY, configured);
+        return configured;
+      }
+      return stored;
+    }
     if (["localhost", "127.0.0.1"].includes(location.hostname)) return "";
-    return document.querySelector('meta[name="helixcer-api-base"]')?.content || "";
+    return configured;
   }
 
   function createApi() {
     if (state.disconnectRealtime) state.disconnectRealtime();
-    state.api = new ApiClient(initialApiBase(), localStorage.getItem(TOKEN_KEY) || "");
-    state.disconnectRealtime = state.api.connect(handleRealtimeEvent, setConnectionState);
+    state.disconnectRealtime = null;
+    state.api = new ApiClient(initialApiBase(), sessionStorage.getItem(RECOVERY_TOKEN_KEY) || "");
     $("sidebarMode").textContent = state.api.isDemo ? "Demo workspace" : "Live workspace";
+    $("googleSignInLink").href = state.api.loginUrl();
+  }
+
+  function startRealtime() {
+    if (state.disconnectRealtime) state.disconnectRealtime();
+    state.disconnectRealtime = state.api.connect(handleRealtimeEvent, setConnectionState);
+  }
+
+  function normalizeAuth(payload) {
+    const source = payload?.me || payload || {};
+    const user = source.user || {};
+    const membership = source.membership || {};
+    return {
+      authenticated: source.authenticated !== false,
+      userId: String(user.userId || user.id || ""),
+      email: String(user.email || ""),
+      displayName: user.displayName || user.name || user.email?.split("@")[0] || "Team member",
+      avatarUrl: user.avatarUrl || user.picture || "",
+      membershipId: String(membership.membershipId || membership.id || ""),
+      role: ["owner", "admin", "agent"].includes(membership.role) ? membership.role : "agent",
+      status: membership.status || "active",
+      workspace: source.workspace || { workspaceId: "default", name: DEFAULT_WORKSPACE, slug: "helixcer" },
+    };
+  }
+
+  function canAdmin() {
+    return state.currentUser && ["owner", "admin"].includes(state.currentUser.role);
+  }
+
+  function isOwner() {
+    return state.currentUser?.role === "owner";
+  }
+
+  function showAuthChecking() {
+    state.authStatus = "checking";
+    $("authGate").hidden = false;
+    $("authChecking").hidden = false;
+    $("signedOutContent").hidden = true;
+    $("appShell").hidden = true;
+  }
+
+  function showSignedOut(message = "") {
+    state.authStatus = "signed-out";
+    state.currentUser = null;
+    if (state.disconnectRealtime) state.disconnectRealtime();
+    state.disconnectRealtime = null;
+    $("appShell").hidden = true;
+    $("authGate").hidden = false;
+    $("authChecking").hidden = true;
+    $("signedOutContent").hidden = false;
+    $("googleSignInLink").href = state.api?.loginUrl() || "#";
+    const alert = $("authAlert");
+    alert.hidden = !message;
+    alert.textContent = message;
+    closeMobileMenu();
+  }
+
+  function showApplication(auth) {
+    state.authStatus = "authenticated";
+    state.currentUser = auth;
+    state.workspace = auth.workspace || state.workspace;
+    $("authGate").hidden = true;
+    $("appShell").hidden = false;
+    renderCurrentUser();
+    applyPermissions();
+    startRealtime();
+  }
+
+  function renderCurrentUser() {
+    const user = state.currentUser;
+    if (!user) return;
+    const displayName = user.displayName || user.email || "Team member";
+    $("currentUserName").textContent = displayName;
+    $("currentUserRole").textContent = user.role;
+    $("userMenuName").textContent = displayName;
+    $("userMenuEmail").textContent = user.email || "Recovery access";
+    $("userMenuRole").textContent = user.role;
+    $("currentUserInitials").textContent = initials(displayName);
+    const avatarImage = $("currentUserAvatarImage");
+    const safeAvatar = safeAvatarUrl(user.avatarUrl);
+    avatarImage.hidden = !safeAvatar;
+    $("currentUserInitials").hidden = Boolean(safeAvatar);
+    if (safeAvatar) avatarImage.src = safeAvatar;
+    else avatarImage.removeAttribute("src");
+    $("settingsWorkspaceName").textContent = state.workspace?.name || DEFAULT_WORKSPACE;
+    $("settingsSignedInAs").textContent = `${user.email || "Emergency recovery"} · ${capitalize(user.role)}`;
+    $("sidebarMode").textContent = state.api.isDemo ? "Demo workspace" : `${capitalize(user.role)} access`;
+  }
+
+  function applyPermissions() {
+    const admin = canAdmin();
+    document.querySelectorAll("[data-admin-only]").forEach((node) => { node.hidden = !admin; });
+    document.querySelectorAll("[data-owner-only]").forEach((node) => { node.hidden = !isOwner(); node.disabled = !isOwner(); });
+    if (!admin && ["channels", "team"].includes(state.route)) setRoute("inbox");
+  }
+
+  async function initializeSession() {
+    showAuthChecking();
+    createApi();
+    try {
+      let authPayload;
+      try {
+        authPayload = await state.api.me();
+      } catch (error) {
+        if (!state.api.recoveryToken || ![401, 404].includes(error.status)) throw error;
+        await state.api.bootstrap();
+        authPayload = {
+          authenticated: true,
+          user: { userId: "recovery", email: "", displayName: "Recovery administrator", avatarUrl: "" },
+          workspace: { workspaceId: "default", name: DEFAULT_WORKSPACE, slug: "helixcer" },
+          membership: { membershipId: "recovery", role: "owner", status: "active" },
+        };
+      }
+      const auth = normalizeAuth(authPayload);
+      if (!auth.authenticated || auth.status !== "active") throw Object.assign(new Error("Your workspace access is not active."), { status: 403 });
+      showApplication(auth);
+      await Promise.all([loadAll({ preserveSelection: false }), canAdmin() ? loadTeam() : Promise.resolve()]);
+    } catch (error) {
+      const message = error.status === 403
+        ? "Your account does not currently have access to this workspace."
+        : error.status === 401
+          ? "Sign in with an approved Google account to continue."
+          : "We could not reach the secure session service. Please try again.";
+      showSignedOut(message);
+    }
   }
 
   function asItems(value) {
@@ -409,6 +653,12 @@
     renderConversationList();
     try {
       const data = await state.api.bootstrap();
+      if (data.me) {
+        state.currentUser = normalizeAuth(data.me);
+        state.workspace = state.currentUser.workspace || state.workspace;
+        renderCurrentUser();
+        applyPermissions();
+      }
       state.channels = asItems(data.channels).map(normalizeChannel);
       state.conversations = asItems(data.conversations).map(normalizeConversation);
       state.contacts = asItems(data.contacts).map(normalizeContact);
@@ -435,13 +685,18 @@
     renderContacts();
     renderChannels();
     populateChannelSelect();
+    populateAssigneeSelect();
     renderSelectedConversation();
   }
 
   function renderCounts() {
     const open = state.conversations.filter((item) => item.status !== "closed").length;
     const unread = state.conversations.filter((item) => item.unreadCount > 0).length;
+    const mine = state.conversations.filter((item) => isAssignedToCurrentUser(item)).length;
+    const unassigned = state.conversations.filter((item) => !item.assignedTo || item.assignedTo === "Unassigned").length;
     $("allCount").textContent = String(state.conversations.length);
+    $("mineCount").textContent = String(mine);
+    $("unassignedCount").textContent = String(unassigned);
     $("openCount").textContent = String(open);
     $("unreadCount").textContent = String(unread);
     $("sidebarUnread").textContent = unread ? String(unread) : "";
@@ -455,6 +710,8 @@
         if (state.filter === "open" && item.status === "closed") return false;
         if (state.filter === "closed" && item.status !== "closed") return false;
         if (state.filter === "unread" && item.unreadCount <= 0) return false;
+        if (state.filter === "mine" && !isAssignedToCurrentUser(item)) return false;
+        if (state.filter === "unassigned" && item.assignedTo && item.assignedTo !== "Unassigned") return false;
         if (!search) return true;
         return `${item.subject} ${item.lastMessage} ${item.channelId}`.toLocaleLowerCase().includes(search);
       })
@@ -557,6 +814,7 @@
     $("chatChannel").style.color = style.color;
     $("chatPresence").textContent = `Active ${relativeTime(conversation.lastMessageAt)}`;
     $("conversationStatus").value = conversation.status;
+    populateAssigneeSelect(conversation);
 
     $("detailsAvatar").textContent = initials(conversation.subject);
     $("detailsName").textContent = conversation.subject;
@@ -715,6 +973,214 @@
     if (!state.channels.length) grid.append(element("div", "empty-list", "No channels have been connected yet."));
   }
 
+  function normalizeMember(raw) {
+    return {
+      ...raw,
+      membershipId: String(raw.membershipId || raw.id || ""),
+      userId: String(raw.userId || raw.user?.userId || ""),
+      email: String(raw.email || raw.user?.email || ""),
+      displayName: raw.displayName || raw.user?.displayName || raw.email?.split("@")[0] || "Team member",
+      avatarUrl: raw.avatarUrl || raw.user?.avatarUrl || "",
+      role: ["owner", "admin", "agent"].includes(raw.role) ? raw.role : "agent",
+      status: raw.status || "active",
+      createdAt: raw.createdAt || new Date().toISOString(),
+    };
+  }
+
+  function normalizeInvitation(raw) {
+    return {
+      ...raw,
+      invitationId: String(raw.invitationId || raw.id || ""),
+      email: String(raw.email || ""),
+      role: ["owner", "admin", "agent"].includes(raw.role) ? raw.role : "agent",
+      status: raw.status || "pending",
+      createdAt: raw.createdAt || new Date().toISOString(),
+      expiresAt: raw.expiresAt || "",
+    };
+  }
+
+  async function loadTeam() {
+    if (!canAdmin()) {
+      state.team = { members: [], invitations: [] };
+      renderTeam();
+      return;
+    }
+    try {
+      const data = await state.api.getTeam();
+      state.team.members = asItems(data.members).map(normalizeMember);
+      state.team.invitations = asItems(data.invitations).map(normalizeInvitation);
+      renderTeam();
+      populateAssigneeSelect();
+    } catch (error) {
+      if (error.status !== 403) showToast("Team could not be loaded", error.message, true);
+    }
+  }
+
+  function renderTeam() {
+    const body = $("teamTableBody");
+    body.replaceChildren();
+    $("teamCount").textContent = `${state.team.members.length} member${state.team.members.length === 1 ? "" : "s"}`;
+    if (!state.team.members.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      cell.className = "empty-list";
+      cell.textContent = "No team members are available.";
+      row.append(cell);
+      body.append(row);
+    }
+
+    state.team.members.forEach((member, index) => {
+      const row = document.createElement("tr");
+      const memberCell = document.createElement("td");
+      const identity = element("div", "member-cell");
+      const avatar = element("span", "avatar", initials(member.displayName));
+      const palette = avatarPalettes[index % avatarPalettes.length];
+      avatar.style.background = palette[0];
+      avatar.style.color = palette[1];
+      const copy = document.createElement("div");
+      copy.append(element("strong", "", member.displayName), element("span", "", member.email));
+      identity.append(avatar, copy);
+      memberCell.append(identity);
+      row.append(memberCell);
+
+      const roleCell = document.createElement("td");
+      const roleSelect = element("select", "compact-select role-select");
+      roleSelect.dataset.memberRole = member.membershipId;
+      ["owner", "admin", "agent"].forEach((role) => {
+        const option = document.createElement("option");
+        option.value = role;
+        option.textContent = capitalize(role);
+        option.disabled = role === "owner" && !isOwner();
+        roleSelect.append(option);
+      });
+      roleSelect.value = member.role;
+      const isCurrentOwner = member.membershipId === state.currentUser?.membershipId && member.role === "owner";
+      roleSelect.disabled = !isOwner() && member.role === "owner" || isCurrentOwner;
+      roleCell.append(roleSelect);
+      row.append(roleCell);
+
+      const statusCell = document.createElement("td");
+      statusCell.append(element("span", `status-chip${member.status !== "active" ? " is-inactive" : ""}`, member.status === "active" ? "Enabled" : "Disabled"));
+      row.append(statusCell, tableCell(dateLabel(member.createdAt)));
+
+      const actionCell = document.createElement("td");
+      const toggle = element("button", `member-action${member.status === "active" ? " is-danger" : ""}`, member.status === "active" ? "Disable" : "Enable");
+      toggle.type = "button";
+      toggle.dataset.toggleMember = member.membershipId;
+      toggle.disabled = member.role === "owner";
+      actionCell.append(toggle);
+      row.append(actionCell);
+      body.append(row);
+    });
+
+    const invitations = state.team.invitations.filter((item) => item.status === "pending");
+    $("invitationSurface").hidden = invitations.length === 0;
+    $("invitationCount").textContent = `${invitations.length} pending`;
+    const invitationHost = $("invitationList");
+    invitationHost.replaceChildren();
+    invitations.forEach((invitation) => {
+      const item = element("div", "invitation-item");
+      const copy = document.createElement("div");
+      copy.append(element("strong", "", invitation.email), element("span", "", `${capitalize(invitation.role)} · waiting for sign-in`));
+      const time = document.createElement("time");
+      time.dateTime = invitation.expiresAt;
+      time.textContent = invitation.expiresAt ? `Expires ${relativeTime(invitation.expiresAt)}` : "Pending";
+      const cancel = element("button", "member-action is-danger", "Cancel");
+      cancel.type = "button";
+      cancel.dataset.cancelInvitation = invitation.invitationId;
+      item.append(copy, time, cancel);
+      invitationHost.append(item);
+    });
+  }
+
+  function openInviteDialog() {
+    const form = $("inviteForm");
+    form.reset();
+    $("inviteFields").hidden = false;
+    $("inviteResult").hidden = true;
+    $("inviteSubmit").hidden = false;
+    applyPermissions();
+    updateInviteRoleHelp();
+    $("inviteDialog").showModal();
+  }
+
+  function updateInviteRoleHelp() {
+    const role = $("inviteRole").value;
+    const descriptions = {
+      admin: "Admins can manage channels, contacts, conversations, and team members.",
+      agent: "Agents can manage customer conversations but cannot change channels or team access.",
+    };
+    $("inviteRoleHelp").textContent = descriptions[role] || descriptions.agent;
+  }
+
+  async function inviteMember(form) {
+    const data = new FormData(form);
+    const email = String(data.get("email") || "").trim().toLocaleLowerCase();
+    const role = String(data.get("role") || "agent");
+    if (!email || !form.elements.email.checkValidity()) {
+      form.elements.email.reportValidity();
+      return;
+    }
+    $("inviteSubmit").disabled = true;
+    try {
+      const result = await state.api.inviteMember({ email, role, return_to: location.origin });
+      $("inviteFields").hidden = true;
+      $("inviteResult").hidden = false;
+      $("inviteSubmit").hidden = true;
+      $("inviteLinkOutput").value = result.inviteUrl || state.api.loginUrl();
+      await loadTeam();
+      showToast("Member access created", `${email} can now sign in with Google.`);
+    } catch (error) {
+      showToast("Member could not be added", error.message, true);
+    } finally {
+      $("inviteSubmit").disabled = false;
+    }
+  }
+
+  async function changeMemberRole(membershipId, role, select) {
+    const member = state.team.members.find((item) => item.membershipId === membershipId);
+    if (!member) return;
+    const previous = member.role;
+    select.disabled = true;
+    try {
+      const result = await state.api.updateMember(membershipId, { role });
+      Object.assign(member, normalizeMember(result.item || { ...member, role }));
+      renderTeam();
+      showToast("Role updated", `${member.displayName} is now ${capitalize(member.role)}.`);
+    } catch (error) {
+      select.value = previous;
+      showToast("Role was not changed", error.message, true);
+    } finally {
+      select.disabled = false;
+    }
+  }
+
+  async function toggleMember(membershipId) {
+    const member = state.team.members.find((item) => item.membershipId === membershipId);
+    if (!member || member.role === "owner") return;
+    const status = member.status === "active" ? "disabled" : "active";
+    try {
+      const result = await state.api.updateMember(membershipId, { status });
+      Object.assign(member, normalizeMember(result.item || { ...member, status }));
+      renderTeam();
+      showToast(status === "active" ? "Member enabled" : "Member disabled", member.displayName);
+    } catch (error) {
+      showToast("Member access was not changed", error.message, true);
+    }
+  }
+
+  async function cancelInvitation(invitationId) {
+    try {
+      await state.api.cancelInvitation(invitationId);
+      state.team.invitations = state.team.invitations.filter((item) => item.invitationId !== invitationId);
+      renderTeam();
+      showToast("Invitation cancelled");
+    } catch (error) {
+      showToast("Invitation was not cancelled", error.message, true);
+    }
+  }
+
   function metric(label, value) {
     const node = document.createElement("div");
     node.append(element("span", "", label), element("strong", "", String(value)));
@@ -732,6 +1198,52 @@
       select.append(option);
     });
     if (previous && state.channels.some((channel) => channel.channelId === previous)) select.value = previous;
+  }
+
+  function assignmentMembers() {
+    const members = state.team.members.filter((member) => member.status === "active");
+    if (state.currentUser && !members.some((member) => member.email === state.currentUser.email)) {
+      members.push({
+        membershipId: state.currentUser.membershipId,
+        email: state.currentUser.email,
+        displayName: state.currentUser.displayName,
+        role: state.currentUser.role,
+        status: "active",
+      });
+    }
+    return members;
+  }
+
+  function populateAssigneeSelect(conversation = selectedConversation()) {
+    const select = $("conversationAssignee");
+    const assignedTo = conversation?.assignedTo && conversation.assignedTo !== "Unassigned" ? conversation.assignedTo : "";
+    select.replaceChildren();
+    const unassigned = document.createElement("option");
+    unassigned.value = "";
+    unassigned.textContent = "Unassigned";
+    select.append(unassigned);
+    assignmentMembers().forEach((member) => {
+      const option = document.createElement("option");
+      option.value = member.email || member.displayName;
+      option.textContent = member.displayName || member.email;
+      select.append(option);
+    });
+    if (assignedTo && ![...select.options].some((option) => option.value === assignedTo)) {
+      const existing = document.createElement("option");
+      existing.value = assignedTo;
+      existing.textContent = assignedTo;
+      select.append(existing);
+    }
+    select.value = assignedTo;
+    select.disabled = !conversation;
+  }
+
+  function isAssignedToCurrentUser(conversation) {
+    if (!state.currentUser || !conversation.assignedTo) return false;
+    const assigned = String(conversation.assignedTo).toLocaleLowerCase();
+    return [state.currentUser.email, state.currentUser.displayName, state.currentUser.userId]
+      .filter(Boolean)
+      .some((value) => String(value).toLocaleLowerCase() === assigned);
   }
 
   async function sendCurrentMessage() {
@@ -833,12 +1345,13 @@
     const pill = $("connectionPill");
     pill.classList.toggle("is-online", status === "online" || status === "demo");
     pill.classList.toggle("is-error", status === "error" || status === "offline");
-    const labels = { demo: "Demo mode", connecting: "Connecting…", online: "Live", offline: "Reconnecting…", error: "Connection issue" };
+    const labels = { demo: "Demo mode", recovery: "Recovery mode", connecting: "Connecting…", online: "Live", offline: "Reconnecting…", error: "Connection issue" };
     $("connectionText").textContent = labels[status] || "Starting…";
   }
 
   function setRoute(route) {
-    if (!["inbox", "contacts", "channels"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "channels", "team"].includes(route)) route = "inbox";
+    if (!canAdmin() && ["channels", "team"].includes(route)) route = "inbox";
     state.route = route;
     document.querySelectorAll("[data-route-panel]").forEach((panel) => {
       const active = panel.dataset.routePanel === route;
@@ -851,7 +1364,7 @@
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     });
-    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels" };
+    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", team: "Team" };
     $("pageTitle").textContent = labels[route];
     if (location.hash !== `#${route}`) history.replaceState(null, "", `#${route}`);
     closeMobileMenu();
@@ -869,8 +1382,10 @@
   }
 
   function openSettings() {
+    toggleUserMenu(false);
     $("apiBaseInput").value = initialApiBase();
-    $("adminTokenInput").value = localStorage.getItem(TOKEN_KEY) || "";
+    $("recoveryTokenInput").value = "";
+    renderCurrentUser();
     $("settingsDialog").showModal();
   }
 
@@ -900,7 +1415,6 @@
 
   async function saveSettings() {
     const base = $("apiBaseInput").value.trim().replace(/\/+$/, "");
-    const token = $("adminTokenInput").value.trim();
     if (base) {
       let url;
       try { url = new URL(base); }
@@ -912,20 +1426,64 @@
       }
     }
     localStorage.setItem(STORAGE_KEY, base);
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
     $("settingsDialog").close();
-    createApi();
-    await loadAll({ preserveSelection: false });
-    showToast(base ? "Worker connected" : "Demo mode enabled", base ? "The inbox is now using your configured API." : "No live channel messages will be sent.");
+    await initializeSession();
+    if (state.authStatus === "authenticated") showToast(base ? "Connection settings saved" : "Demo mode enabled", base ? "Your secure session was checked again." : "No live channel messages will be sent.");
   }
 
   function useDemoMode() {
     localStorage.setItem(STORAGE_KEY, "");
-    localStorage.removeItem(TOKEN_KEY);
-    $("settingsDialog").close();
-    createApi();
-    loadAll({ preserveSelection: false });
+    sessionStorage.removeItem(RECOVERY_TOKEN_KEY);
+    if ($("settingsDialog").open) $("settingsDialog").close();
+    initializeSession();
+  }
+
+  async function applyRecoveryToken(inputId) {
+    const input = $(inputId);
+    const token = input.value.trim();
+    if (!token) {
+      input.focus();
+      showToast("Recovery token required", "Paste the temporary token provided by the workspace owner.", true);
+      return;
+    }
+    sessionStorage.setItem(RECOVERY_TOKEN_KEY, token);
+    input.value = "";
+    if ($("settingsDialog").open) $("settingsDialog").close();
+    await initializeSession();
+    if (state.authStatus === "authenticated") showToast("Emergency recovery mode", "Realtime is paused; this token exists only in the current tab.");
+  }
+
+  async function clearRecoveryMode() {
+    sessionStorage.removeItem(RECOVERY_TOKEN_KEY);
+    if ($("settingsDialog").open) $("settingsDialog").close();
+    await initializeSession();
+  }
+
+  async function logout() {
+    try { await state.api.logout(); }
+    catch { /* Always clear local recovery state and return to sign-in. */ }
+    sessionStorage.removeItem(RECOVERY_TOKEN_KEY);
+    state.messages.clear();
+    showSignedOut("You have signed out of the workspace.");
+  }
+
+  function toggleUserMenu(force) {
+    const menu = $("userMenu");
+    const shouldOpen = typeof force === "boolean" ? force : menu.hidden;
+    menu.hidden = !shouldOpen;
+    $("userMenuButton").setAttribute("aria-expanded", String(shouldOpen));
+  }
+
+  async function copyInviteLink() {
+    const input = $("inviteLinkOutput");
+    try {
+      await navigator.clipboard.writeText(input.value);
+      showToast("Sign-in link copied");
+    } catch {
+      input.focus();
+      input.select();
+      showToast("Copy the selected link", "Your browser blocked automatic clipboard access.");
+    }
   }
 
   async function createContact(form) {
@@ -1052,6 +1610,21 @@
     return String(name || "?").trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase() || "?";
   }
 
+  function capitalize(value) {
+    const text = String(value || "");
+    return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : "";
+  }
+
+  function safeAvatarUrl(value) {
+    if (!value) return "";
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && url.hostname === "lh3.googleusercontent.com" ? url.toString() : "";
+    } catch {
+      return "";
+    }
+  }
+
   function relativeTime(value) {
     const timestamp = new Date(value).getTime();
     if (!Number.isFinite(timestamp)) return "recently";
@@ -1095,6 +1668,12 @@
         const actions = {
           "open-settings": openSettings,
           "close-settings": () => $("settingsDialog").close(),
+          "toggle-user-menu": () => toggleUserMenu(),
+          "logout": logout,
+          "preview-demo": useDemoMode,
+          "apply-auth-recovery": () => applyRecoveryToken("authRecoveryToken"),
+          "apply-settings-recovery": () => applyRecoveryToken("recoveryTokenInput"),
+          "clear-recovery": clearRecoveryMode,
           "toggle-details": toggleDetails,
           "new-conversation": () => $("contactDialog").showModal(),
           "new-contact": () => $("contactDialog").showModal(),
@@ -1110,9 +1689,13 @@
           },
           "channel-help": openChannelDialog,
           "close-channel-dialog": () => $("channelDialog").close(),
+          "open-invite": openInviteDialog,
+          "close-invite": () => $("inviteDialog").close(),
+          "copy-invite-link": copyInviteLink,
         };
         actions[actionButton.dataset.action]?.();
       }
+      if (!event.target.closest(".user-menu-wrap")) toggleUserMenu(false);
     });
 
     $("conversationList").addEventListener("click", (event) => {
@@ -1160,13 +1743,46 @@
       }
     });
 
+    $("conversationAssignee").addEventListener("change", async (event) => {
+      const conversation = selectedConversation();
+      if (!conversation) return;
+      const previous = conversation.assignedTo;
+      const assignedTo = event.target.value || "Unassigned";
+      conversation.assignedTo = assignedTo;
+      renderCounts();
+      renderConversationList();
+      try { await state.api.updateConversation(conversation.conversationId, { assignedTo: event.target.value }); }
+      catch (error) {
+        conversation.assignedTo = previous;
+        populateAssigneeSelect(conversation);
+        renderCounts();
+        renderConversationList();
+        showToast("Assignee was not updated", error.message, true);
+      }
+    });
+
     $("settingsForm").addEventListener("submit", (event) => { event.preventDefault(); saveSettings(); });
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
     $("channelForm").addEventListener("submit", (event) => { event.preventDefault(); saveChannel(event.currentTarget); });
     $("channelConnectorType").addEventListener("change", updateChannelFormHelp);
     $("channelForm").elements.secretKey.addEventListener("input", updateChannelFormHelp);
+    $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
+    $("inviteRole").addEventListener("change", updateInviteRoleHelp);
+    $("teamTableBody").addEventListener("change", (event) => {
+      const select = event.target.closest("[data-member-role]");
+      if (select) changeMemberRole(select.dataset.memberRole, select.value, select);
+    });
+    $("teamTableBody").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-toggle-member]");
+      if (button) toggleMember(button.dataset.toggleMember);
+    });
+    $("invitationList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-cancel-invitation]");
+      if (button) cancelInvitation(button.dataset.cancelInvitation);
+    });
     window.addEventListener("hashchange", () => setRoute(location.hash.slice(1)));
     window.addEventListener("beforeunload", () => state.disconnectRealtime?.());
+    window.addEventListener("helixcer:unauthorized", () => showSignedOut("Your session expired. Sign in again to continue."));
     document.addEventListener("keydown", (event) => {
       if (event.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) {
         event.preventDefault();
@@ -1180,8 +1796,7 @@
   async function init() {
     bindEvents();
     setRoute(location.hash.slice(1) || "inbox");
-    createApi();
-    await loadAll({ preserveSelection: false });
+    await initializeSession();
   }
 
   init();

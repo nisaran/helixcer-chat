@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   assertAllowedHttpsEndpoint,
   handleRequest,
+  InboxHub,
   normalizeGeneric,
   normalizeTelegram,
   normalizeWhatsApp,
@@ -71,19 +72,62 @@ test('verifies Meta sha256 webhook signatures', async () => {
   assert.equal(await verifyMetaSignature(`${body}x`, signature, secret), false);
 });
 
-test('D1 migration is valid SQLite and creates the required tables', async () => {
-  const sql = await readFile(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8');
+test('D1 migrations are valid SQLite, preserve rows, and create identity tables', async () => {
+  const initial = await readFile(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8');
+  const identity = await readFile(new URL('../migrations/0002_identity_and_workspaces.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
-  database.exec(sql);
+  database.exec(initial);
+  database.exec(`
+    INSERT INTO channels (channel_id,name,connector_type,secret_key,created_at,updated_at)
+      VALUES ('legacy-channel','Legacy channel','web_chat','LEGACY','2026-01-01','2026-01-01');
+    INSERT INTO contacts (contact_id,display_name,created_at,updated_at)
+      VALUES ('legacy-contact','Legacy contact','2026-01-01','2026-01-01');
+    INSERT INTO channel_identities (identity_id,contact_id,channel_id,channel_profile_id,created_at)
+      VALUES ('legacy-identity','legacy-contact','legacy-channel','profile-1','2026-01-01');
+    INSERT INTO conversations (conversation_id,contact_id,channel_id,last_message_at,created_at,updated_at)
+      VALUES ('legacy-conversation','legacy-contact','legacy-channel','2026-01-01','2026-01-01','2026-01-01');
+    INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,status,timestamp)
+      VALUES ('legacy-message','legacy-conversation','legacy-contact','legacy-channel','inbound','received','2026-01-01');
+    INSERT INTO webhook_events (event_key,channel_id,event_type,received_at)
+      VALUES ('legacy-event','legacy-channel','message','2026-01-01');
+    INSERT INTO outbox (outbox_id,message_id,next_attempt_at,created_at,updated_at)
+      VALUES ('legacy-outbox','legacy-message','2026-01-01','2026-01-01','2026-01-01');
+    INSERT INTO agents (agent_id,email,display_name,created_at,updated_at)
+      VALUES ('legacy-agent','legacy@example.com','Legacy agent','2026-01-01','2026-01-01');
+    INSERT INTO audit_log (audit_id,actor,action,target_type,target_id,timestamp)
+      VALUES ('legacy-audit','legacy@example.com','create','contact','legacy-contact','2026-01-01');
+  `);
+  database.exec(identity);
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
-  for (const name of ['channels', 'contacts', 'channel_identities', 'conversations', 'messages', 'webhook_events', 'outbox', 'audit_log']) {
+  for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'contacts', 'messages', 'audit_log']) {
     assert.ok(tables.includes(name), `missing table ${name}`);
+  }
+  for (const [table, idColumn, id] of [
+    ['channels', 'channel_id', 'legacy-channel'],
+    ['contacts', 'contact_id', 'legacy-contact'],
+    ['channel_identities', 'identity_id', 'legacy-identity'],
+    ['conversations', 'conversation_id', 'legacy-conversation'],
+    ['messages', 'message_id', 'legacy-message'],
+    ['webhook_events', 'event_key', 'legacy-event'],
+    ['outbox', 'outbox_id', 'legacy-outbox'],
+    ['agents', 'agent_id', 'legacy-agent'],
+    ['audit_log', 'audit_id', 'legacy-audit']
+  ]) {
+    assert.equal(database.prepare(`SELECT workspace_id FROM ${table} WHERE ${idColumn}=?`).get(id).workspace_id, 'ws_default');
+  }
+  assert.equal(database.prepare("SELECT actor_email FROM audit_log WHERE audit_id='legacy-audit'").get().actor_email, 'legacy@example.com');
+  assert.equal(database.prepare('SELECT count(*) AS count FROM memberships').get().count, 0);
+  assert.equal(database.prepare("SELECT name FROM workspaces WHERE workspace_id='ws_default'").get().name, 'Helixcer Chat');
+  assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
+  const indexes = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(row => row.name));
+  for (const name of ['idx_channels_workspace', 'idx_conversations_workspace_activity', 'idx_messages_workspace_conversation', 'idx_outbox_workspace_due']) {
+    assert.ok(indexes.has(name), `missing index ${name}`);
   }
   database.close();
 });
 
 test('health is public with configured CORS and API routes reject missing auth', async () => {
-  const env = { ALLOWED_ORIGINS: 'https://chat.helixcer.com', ADMIN_TOKEN: 'secret' };
+  const env = { ALLOWED_ORIGINS: 'https://chat.helixcer.com', ADMIN_TOKEN: 'secret', RECOVERY_MODE: 'true' };
   const health = await handleRequest(new Request('https://api.example.com/health', {
     headers: { Origin: 'https://chat.helixcer.com' }
   }), env);
@@ -91,5 +135,75 @@ test('health is public with configured CORS and API routes reject missing auth',
   assert.equal(health.headers.get('Access-Control-Allow-Origin'), 'https://chat.helixcer.com');
   const denied = await handleRequest(new Request('https://api.example.com/api/bootstrap'), env);
   assert.equal(denied.status, 401);
+  const queryToken = await handleRequest(new Request('https://api.example.com/api/realtime?token=secret'), env);
+  assert.equal(queryToken.status, 401);
+  const spoofedEmail = await handleRequest(new Request('https://api.example.com/api/bootstrap', {
+    headers: { 'X-Agent-Email': 'owner@example.com' }
+  }), env);
+  assert.equal(spoofedEmail.status, 401);
+  const crossSiteSocket = await handleRequest(new Request('https://api.example.com/api/realtime', {
+    headers: { Authorization: 'Bearer secret', Origin: 'https://evil.example' }
+  }), env);
+  assert.equal(crossSiteSocket.status, 403);
+});
+
+test('realtime hub revalidates sessions and disconnects changed memberships', async () => {
+  const sent = [];
+  const closed = [];
+  const attachment = {
+    sessionId: 'session-1', membershipId: 'membership-1',
+    expiresAt: new Date(Date.now() + 60_000).toISOString()
+  };
+  const socket = {
+    deserializeAttachment: () => attachment,
+    send: value => sent.push(value),
+    close: (code, reason) => closed.push({ code, reason })
+  };
+  let active = true;
+  const env = {
+    DB: {
+      prepare: () => ({
+        bind: () => ({ first: async () => active ? { ok: 1 } : null })
+      })
+    }
+  };
+  const hub = new InboxHub({ getWebSockets: () => [socket] }, env);
+  await hub.fetch(new Request('https://hub.internal/broadcast', { method: 'POST', body: '{"type":"changed"}' }));
+  assert.deepEqual(sent, ['{"type":"changed"}']);
+  active = false;
+  await hub.webSocketMessage(socket, 'ping');
+  assert.equal(closed.at(-1).code, 1008);
+  active = true;
+  await hub.fetch(new Request('https://hub.internal/disconnect', {
+    method: 'POST', body: JSON.stringify({ membershipId: 'membership-1' })
+  }));
+  assert.equal(closed.at(-1).code, 1008);
+});
+
+test('OAuth start limiter enforces per-client and global windows before D1 work', async () => {
+  const values = new Map();
+  const storageApi = {
+    get: async key => values.get(key),
+    put: async (key, value) => values.set(key, structuredClone(value))
+  };
+  const state = {
+    storage: { transaction: callback => callback(storageApi) },
+    getWebSockets: () => []
+  };
+  const hub = new InboxHub(state, {
+    OAUTH_RATE_LIMIT_WINDOW_SECONDS: '600',
+    OAUTH_RATE_LIMIT_PER_CLIENT: '2',
+    OAUTH_RATE_LIMIT_GLOBAL: '3'
+  });
+  const attempt = key => hub.fetch(new Request('https://hub.internal/oauth-rate-limit', {
+    method: 'POST', body: key.repeat(64)
+  }));
+  assert.equal((await attempt('a')).status, 204);
+  assert.equal((await attempt('a')).status, 204);
+  const perClient = await attempt('a');
+  assert.equal(perClient.status, 429);
+  assert.ok(Number(perClient.headers.get('Retry-After')) > 0);
+  assert.equal((await attempt('b')).status, 204);
+  assert.equal((await attempt('c')).status, 429);
 });
 

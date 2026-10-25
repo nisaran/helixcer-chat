@@ -1,10 +1,20 @@
 name = "helixcer-chat-api"
 main = "worker/src/index.js"
 compatibility_date = "2026-10-01"
+routes = [
+  { pattern = "api.chat.helixcer.com", custom_domain = true }
+]
 
 [vars]
 APP_NAME = "Helixcer Chat"
-ALLOWED_ORIGINS = "https://nisaran.github.io,https://chat.helixcer.com"
+ALLOWED_ORIGINS = "https://chat.helixcer.com"
+APP_ORIGIN = "https://chat.helixcer.com"
+DEFAULT_WORKSPACE_ID = "ws_default"
+SESSION_TTL_SECONDS = "604800"
+RECOVERY_MODE = "false"
+OAUTH_RATE_LIMIT_WINDOW_SECONDS = "600"
+OAUTH_RATE_LIMIT_PER_CLIENT = "10"
+OAUTH_RATE_LIMIT_GLOBAL = "500"
 WHATSAPP_API_VERSION = "v23.0"
 
 [[d1_databases]]

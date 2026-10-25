@@ -1,0 +1,12 @@
+# Copy to .dev.vars for local development only. The real file is gitignored.
+GOOGLE_CLIENT_ID="your-google-oauth-client-id.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="your-google-oauth-client-secret"
+GOOGLE_REDIRECT_URI="http://localhost:8787/auth/google/callback"
+BOOTSTRAP_OWNER_EMAIL="owner@example.com"
+ADMIN_TOKEN="generate-a-long-random-emergency-token"
+RECOVERY_MODE="false"
+OAUTH_RATE_LIMIT_WINDOW_SECONDS="600"
+OAUTH_RATE_LIMIT_PER_CLIENT="10"
+OAUTH_RATE_LIMIT_GLOBAL="500"
+APP_ORIGIN="http://localhost:8787"
+ALLOWED_ORIGINS="http://localhost:8787"

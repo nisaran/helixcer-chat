@@ -1,0 +1,40 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
+
+test("all JavaScript DOM id references exist exactly once", () => {
+  const htmlIds = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  const duplicates = htmlIds.filter((id, index) => htmlIds.indexOf(id) !== index);
+  assert.deepEqual(duplicates, []);
+
+  const referencedIds = [...app.matchAll(/\$\("([^"]+)"\)/g)].map((match) => match[1]);
+  const missing = [...new Set(referencedIds)].filter((id) => !htmlIds.includes(id));
+  assert.deepEqual(missing, []);
+});
+
+test("normal authentication uses a top-level link and cookie credentials", () => {
+  assert.match(html, /<a[^>]+id="googleSignInLink"/);
+  assert.match(html, /name="helixcer-api-base" content="https:\/\/api\.chat\.helixcer\.com"/);
+  assert.match(app, /searchParams\.set\("return_to", location\.origin\)/);
+  assert.match(app, /credentials:\s*"include"/);
+  assert.match(app, /request\("\/api\/me"\)/);
+  assert.match(app, /LEGACY_API_BASES/);
+});
+
+test("recovery access is tab-scoped and not the default authentication path", () => {
+  assert.match(app, /sessionStorage\.getItem\(RECOVERY_TOKEN_KEY\)/);
+  assert.match(app, /sessionStorage\.setItem\(RECOVERY_TOKEN_KEY/);
+  assert.doesNotMatch(app, /localStorage\.getItem\([^)]*admin_token/i);
+  assert.doesNotMatch(app, /url\.searchParams\.set\([^,]*token/i);
+});
+
+test("role-aware single-workspace UI includes team management and no billing surface", () => {
+  assert.match(html, /data-route="team"/);
+  assert.match(html, /id="teamTableBody"/);
+  assert.match(html, /id="inviteForm"/);
+  assert.doesNotMatch(html, /id="inviteRole"[^>]*>[\s\S]*?<option value="owner"/);
+  assert.doesNotMatch(html, /data-route="billing"/i);
+});

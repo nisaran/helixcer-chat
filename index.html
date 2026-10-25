@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#8f2e19">
   <meta name="description" content="Helixcer Chat — a focused omnichannel inbox for customer conversations.">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://helixcer-chat-api.nisaran.workers.dev wss://helixcer-chat-api.nisaran.workers.dev; object-src 'none'; base-uri 'none'; form-action 'self'">
-  <meta name="helixcer-api-base" content="https://helixcer-chat-api.nisaran.workers.dev">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://lh3.googleusercontent.com; connect-src 'self' https://api.chat.helixcer.com wss://api.chat.helixcer.com; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <meta name="helixcer-api-base" content="https://api.chat.helixcer.com">
   <title>Helixcer Chat</title>
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./assets/styles.css">
@@ -15,7 +16,44 @@
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
 
-  <div class="app-shell" id="appShell">
+  <section class="auth-gate" id="authGate" aria-labelledby="authTitle">
+    <div class="auth-backdrop" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-mark" aria-hidden="true">H</span>
+        <span>Helixcer <strong>Chat</strong></span>
+      </div>
+      <div class="auth-checking" id="authChecking" role="status">
+        <span class="auth-spinner" aria-hidden="true"></span>
+        <h1 id="authTitle">Opening your workspace</h1>
+        <p>Checking your secure session…</p>
+      </div>
+      <div class="auth-signed-out" id="signedOutContent" hidden>
+        <p class="eyebrow">One shared customer inbox</p>
+        <h1>Welcome back</h1>
+        <p class="auth-copy">Sign in with your approved Google account to continue to the Helixcer workspace.</p>
+        <p class="auth-alert" id="authAlert" hidden></p>
+        <a class="google-signin" id="googleSignInLink" href="#">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.2c0-.7-.1-1.4-.2-2H12v3.7h5a4.3 4.3 0 0 1-1.9 2.8v2.4h3.1c1.8-1.7 2.8-4.1 2.8-6.9Z"/><path d="M12 21c2.5 0 4.7-.8 6.2-2.2l-3.1-2.4c-.8.6-1.9.9-3.1.9a5.5 5.5 0 0 1-5.2-3.8H3.6V16A9.4 9.4 0 0 0 12 21Z"/><path d="M6.8 13.5a5.6 5.6 0 0 1 0-3.5V7.5H3.6a9.4 9.4 0 0 0 0 8.5l3.2-2.5Z"/><path d="M12 6.3c1.4 0 2.6.5 3.6 1.4L18.3 5A9.1 9.1 0 0 0 3.6 7.5L6.8 10A5.5 5.5 0 0 1 12 6.3Z"/></svg>
+          Continue with Google
+        </a>
+        <p class="auth-footnote">Only workspace members can sign in. Contact the owner if your email has not been added.</p>
+        <button class="text-button" type="button" data-action="preview-demo">Preview with demo data</button>
+        <details class="advanced-settings auth-advanced">
+          <summary>Emergency recovery access</summary>
+          <p>Use only when Google sign-in is unavailable. The recovery token stays in this tab and is never saved to the site.</p>
+          <label class="field-label" for="authRecoveryToken">Recovery token</label>
+          <div class="inline-field">
+            <input class="text-field" id="authRecoveryToken" type="password" autocomplete="off" placeholder="Paste temporary recovery token">
+            <button class="secondary-button" type="button" data-action="apply-auth-recovery">Use token</button>
+          </div>
+        </details>
+      </div>
+    </div>
+    <p class="auth-footer">Single workspace · Secure session · No billing portal</p>
+  </section>
+
+  <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar" aria-label="Primary navigation">
       <a class="brand" href="#inbox" aria-label="Helixcer Chat home">
         <span class="brand-mark" aria-hidden="true">H</span>
@@ -36,11 +74,17 @@
           </span>
           <span>Contacts</span>
         </button>
-        <button class="nav-button" type="button" data-route="channels">
+        <button class="nav-button" type="button" data-route="channels" data-admin-only>
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8m12.8 0a9 9 0 0 0 0-12.8M8.5 8.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7"/></svg>
           </span>
           <span>Channels</span>
+        </button>
+        <button class="nav-button" type="button" data-route="team" data-admin-only>
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M16 20v-1.6a4.4 4.4 0 0 0-4.4-4.4H6.4A4.4 4.4 0 0 0 2 18.4V20M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8-1a3 3 0 1 0 0-6m5 17v-1.6a4.4 4.4 0 0 0-3.3-4.3"/></svg>
+          </span>
+          <span>Team</span>
         </button>
       </nav>
 
@@ -52,7 +96,7 @@
             <span id="sidebarMode">Demo workspace</span>
           </div>
         </div>
-        <button class="nav-button" type="button" data-action="open-settings">
+        <button class="nav-button" type="button" data-action="open-settings" data-admin-only>
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15.04 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.96a1.7 1.7 0 0 0-.34-1.87l-.06-.06L7.03 4.2l.06.06a1.7 1.7 0 0 0 1.87.34A1.7 1.7 0 0 0 10 3.08V3h4v.08a1.7 1.7 0 0 0 1.04 1.52 1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06a1.7 1.7 0 0 0-.34 1.87A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg>
           </span>
@@ -78,7 +122,18 @@
           <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh data">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9a7 7 0 0 1 11.6-2.6L20 9M4 15l2.3 2.6A7 7 0 0 0 18 15"/></svg>
           </button>
-          <button class="avatar avatar-button" type="button" data-action="open-settings" aria-label="Open workspace settings">NH</button>
+          <div class="user-menu-wrap">
+            <button class="user-menu-button" id="userMenuButton" type="button" data-action="toggle-user-menu" aria-label="Open account menu" aria-expanded="false">
+              <span class="avatar avatar-button" id="currentUserAvatar"><span id="currentUserInitials">—</span><img id="currentUserAvatarImage" alt="" hidden></span>
+              <span class="user-compact"><strong id="currentUserName">Account</strong><small id="currentUserRole">Agent</small></span>
+              <svg class="user-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+            </button>
+            <div class="user-menu" id="userMenu" hidden>
+              <div class="user-menu-identity"><strong id="userMenuName">Account</strong><span id="userMenuEmail">—</span><em id="userMenuRole">Agent</em></div>
+              <button type="button" data-action="open-settings" data-admin-only>Workspace settings</button>
+              <button class="logout-button" type="button" data-action="logout">Sign out</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -104,6 +159,8 @@
 
             <div class="filter-row" id="conversationFilters" aria-label="Conversation filters">
               <button class="filter-chip is-active" type="button" data-filter="all">All <span id="allCount">0</span></button>
+              <button class="filter-chip" type="button" data-filter="mine">Mine <span id="mineCount">0</span></button>
+              <button class="filter-chip" type="button" data-filter="unassigned">Unassigned <span id="unassignedCount">0</span></button>
               <button class="filter-chip" type="button" data-filter="open">Open <span id="openCount">0</span></button>
               <button class="filter-chip" type="button" data-filter="unread">Unread <span id="unreadCount">0</span></button>
               <button class="filter-chip" type="button" data-filter="closed">Closed</button>
@@ -133,6 +190,10 @@
                   </div>
                 </div>
                 <div class="chat-actions">
+                  <label class="sr-only" for="conversationAssignee">Assigned agent</label>
+                  <select class="compact-select assignee-select" id="conversationAssignee" aria-label="Assigned agent">
+                    <option value="">Unassigned</option>
+                  </select>
                   <label class="sr-only" for="conversationStatus">Conversation status</label>
                   <select class="compact-select" id="conversationStatus">
                     <option value="open">Open</option>
@@ -229,6 +290,30 @@
         <div class="stats-grid" id="channelStats"></div>
         <div class="channel-grid" id="channelGrid"></div>
       </section>
+
+      <section class="route content-route" id="teamRoute" data-route-panel="team" aria-labelledby="teamTitle" hidden>
+        <div class="route-heading">
+          <div><p class="eyebrow">Workspace access</p><h2 id="teamTitle">Team</h2><p>Control who can enter this workspace and what they can manage.</p></div>
+          <button class="primary-button" type="button" data-action="open-invite"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add member</button>
+        </div>
+        <div class="team-note"><strong>Invite by email</strong><span>Adding a member creates secure access for that Google account. Helixcer does not send an email automatically.</span></div>
+        <div class="surface team-surface">
+          <div class="surface-toolbar">
+            <div><strong>Workspace members</strong><span class="subtle" id="teamCount">0 members</span></div>
+            <span class="role-legend"><i class="role-dot owner"></i>Owner <i class="role-dot admin"></i>Admin <i class="role-dot agent"></i>Agent</span>
+          </div>
+          <div class="contact-table-wrap">
+            <table class="contact-table team-table">
+              <thead><tr><th>Member</th><th>Role</th><th>Access</th><th>Added</th><th><span class="sr-only">Actions</span></th></tr></thead>
+              <tbody id="teamTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="surface invitation-surface" id="invitationSurface" hidden>
+          <div class="surface-toolbar"><div><strong>Pending invitations</strong><span class="subtle" id="invitationCount">0 pending</span></div></div>
+          <div class="invitation-list" id="invitationList"></div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -240,16 +325,55 @@
         <div><p class="eyebrow">Workspace</p><h2 id="settingsTitle">Connection settings</h2></div>
         <button class="icon-button" type="button" data-action="close-settings" aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
-      <p class="modal-copy">Enter the public URL of your Helixcer Cloudflare Worker. Tokens and channel secrets must remain in Cloudflare, never in this browser.</p>
-      <label class="field-label" for="apiBaseInput">Worker API URL</label>
-      <input class="text-field" id="apiBaseInput" type="url" placeholder="https://helixcer-chat.your-name.workers.dev" spellcheck="false">
-      <p class="field-help">Leave this blank to explore the interface safely with demo data.</p>
-      <label class="field-label settings-token" for="adminTokenInput">Admin access token</label>
-      <input class="text-field" id="adminTokenInput" type="password" autocomplete="off" placeholder="Stored only for this browser tab">
-      <p class="field-help">This token stays in this browser and is sent only to your Worker. It is never committed to GitHub.</p>
+      <p class="modal-copy">This deployment uses one Helixcer workspace. Google sessions control normal access; channel credentials remain protected in Cloudflare secrets.</p>
+      <div class="settings-summary">
+        <span class="presence-dot" aria-hidden="true"></span>
+        <div><strong id="settingsWorkspaceName">Helixcer workspace</strong><span id="settingsSignedInAs">Signed in securely</span></div>
+      </div>
+      <details class="advanced-settings">
+        <summary>Advanced connection and recovery</summary>
+        <p>Only change these values while repairing a deployment. A recovery token bypasses Google sign-in and should be temporary.</p>
+        <label class="field-label" for="apiBaseInput">Worker API URL</label>
+        <input class="text-field" id="apiBaseInput" type="url" placeholder="https://api.chat.helixcer.com" spellcheck="false">
+        <p class="field-help">Leave blank only for the local demo preview.</p>
+        <label class="field-label settings-token" for="recoveryTokenInput">Emergency recovery token</label>
+        <input class="text-field" id="recoveryTokenInput" type="password" autocomplete="off" placeholder="Not stored unless you explicitly apply it">
+        <div class="advanced-actions">
+          <button class="secondary-button" type="button" data-action="clear-recovery">Clear recovery mode</button>
+          <button class="secondary-button danger-outline" type="button" data-action="apply-settings-recovery">Use token for this tab</button>
+        </div>
+      </details>
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="use-demo">Use demo mode</button>
-        <button class="primary-button" type="submit" value="save">Save and connect</button>
+        <button class="primary-button" type="submit" value="save">Save settings</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="inviteDialog" aria-labelledby="inviteTitle">
+    <form class="modal-card" id="inviteForm">
+      <div class="modal-head">
+        <div><p class="eyebrow">Workspace access</p><h2 id="inviteTitle">Add a team member</h2></div>
+        <button class="icon-button" type="button" data-action="close-invite" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div id="inviteFields">
+        <p class="modal-copy">Allow a Google account to join this workspace. No email will be sent automatically.</p>
+        <div class="form-grid">
+          <label class="field-label form-span">Google account email<input class="text-field" name="email" type="email" required maxlength="254" autocomplete="email" placeholder="person@company.com"></label>
+          <label class="field-label form-span">Role<select class="text-field" name="role" id="inviteRole" required><option value="agent">Agent</option><option value="admin">Admin</option></select></label>
+        </div>
+        <div class="role-explainer" id="inviteRoleHelp">Agents can manage customer conversations but cannot change channels or team access.</div>
+      </div>
+      <div class="invite-result" id="inviteResult" hidden>
+        <span class="success-mark" aria-hidden="true">✓</span>
+        <h3>Member access created</h3>
+        <p>Share this sign-in link yourself. Helixcer has not sent an email.</p>
+        <label class="field-label" for="inviteLinkOutput">Sign-in link</label>
+        <div class="inline-field"><input class="text-field" id="inviteLinkOutput" readonly><button class="secondary-button" type="button" data-action="copy-invite-link">Copy</button></div>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-invite">Close</button>
+        <button class="primary-button" id="inviteSubmit" type="submit">Add member</button>
       </div>
     </form>
   </dialog>
