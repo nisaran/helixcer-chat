@@ -242,19 +242,14 @@
       return { ok: true, contactId: contact.contactId, conversationId: conversation.conversationId, item: clone(conversation) };
     }
 
-    async saveChannel(payload) {
-      const channel = {
-        ...payload,
-        channelId: payload.channelId,
-        enabled: payload.enabled !== false,
-        health: "connected",
-      };
-      const index = this.data.channels.findIndex((entry) => entry.channelId === channel.channelId);
-      if (index >= 0) this.data.channels[index] = channel;
-      else this.data.channels.push(channel);
-      this.emit({ type: "channel.updated", channelId: channel.channelId });
+    async verifyChannel(channelId) {
       await smallDelay(120);
-      return { ok: true, channelId: channel.channelId };
+      const channel = this.data.channels.find((entry) => entry.channelId === channelId);
+      if (!channel) throw new Error("WhatsApp channel not found.");
+      channel.health = "connected";
+      channel.setup = { credentialsPresent: true, credentialsVerifiedAt: new Date().toISOString(), webhookVerifiedAt: new Date().toISOString() };
+      this.emit({ type: "channel.updated", channelId });
+      return { ok: true, channelId, health: "connected" };
     }
 
     connect(listener, onState) {
@@ -350,10 +345,15 @@
         : this.request("/api/contacts", { method: "POST", body: JSON.stringify(payload) });
     }
 
-    saveChannel(payload) {
+    verifyChannel(channelId) {
       return this.isDemo
-        ? this.demo.saveChannel(payload)
-        : this.request("/api/channels", { method: "POST", body: JSON.stringify(payload) });
+        ? this.demo.verifyChannel(channelId)
+        : this.request(`/api/channels/${encodeURIComponent(channelId)}/verify`, { method: "POST" });
+    }
+
+    webhookUrl(channelId) {
+      if (this.isDemo) return "https://api.chat.helixcer.com/webhooks/whatsapp/wa-main";
+      return `${this.base}/webhooks/whatsapp/${encodeURIComponent(channelId)}`;
     }
 
     getTeam() {
@@ -671,7 +671,6 @@
     renderCounts();
     renderContacts();
     renderChannels();
-    populateChannelSelect();
     populateAssigneeSelect();
     renderSelectedConversation();
   }
@@ -922,12 +921,21 @@
   }
 
   function renderChannels() {
+    const channels = state.channels.filter((channel) => channel.connectorType === "whatsapp_cloud");
+    const channel = channels[0] || null;
+    const healthStates = {
+      setup_required: { label: "Setup required", className: "is-warning", summary: "Secure Meta credentials still need to be added." },
+      configured: { label: "Credentials saved", className: "is-warning", summary: "Verify the WhatsApp number, then subscribe the Meta webhook." },
+      webhook_required: { label: "Webhook required", className: "is-warning", summary: "The WhatsApp number is verified. Complete the Meta webhook subscription." },
+      connected: { label: "Live", className: "", summary: "The Meta number and webhook are verified for live messaging." },
+      disconnected: { label: "Disconnected", className: "is-disconnected", summary: "This WhatsApp connection is disabled." },
+    };
+    const healthState = healthStates[channel?.health] || healthStates.setup_required;
     const stats = $("channelStats");
     stats.replaceChildren();
-    const connected = state.channels.filter((channel) => channel.enabled && channel.health === "connected").length;
     const open = state.conversations.filter((item) => item.status !== "closed").length;
     const unread = state.conversations.reduce((sum, item) => sum + item.unreadCount, 0);
-    [["Connected channels", connected], ["Open conversations", open], ["Unread messages", unread]].forEach(([label, value]) => {
+    [["WhatsApp connection", channel ? healthState.label : "Preparing"], ["Open conversations", open], ["Unread messages", unread]].forEach(([label, value]) => {
       const card = element("div", "stat-card");
       card.append(element("span", "", label), element("strong", "", String(value)));
       stats.append(card);
@@ -935,29 +943,45 @@
 
     const grid = $("channelGrid");
     grid.replaceChildren();
-    state.channels.forEach((channel) => {
-      const style = channelStyle(channel);
-      const card = element("article", "channel-card");
-      const head = element("div", "channel-card-head");
-      const logo = element("span", "channel-logo", style.short);
-      logo.style.setProperty("--channel-color", style.color);
-      logo.style.setProperty("--channel-soft", style.soft);
-      const copy = document.createElement("div");
-      const needsSetup = channel.health === "setup_required";
-      const disconnected = channel.health === "disconnected" || !channel.enabled;
-      const healthClass = disconnected ? " is-disconnected" : needsSetup ? " is-warning" : "";
-      const healthLabel = disconnected ? "Disconnected" : needsSetup ? "Needs secrets" : "Healthy";
-      const health = element("span", `health-dot${healthClass}`, healthLabel);
-      copy.append(element("h3", "", channel.name), health);
-      head.append(logo, copy);
-      const channelConversations = state.conversations.filter((item) => item.channelId === channel.channelId);
-      const unreadCount = channelConversations.reduce((sum, item) => sum + item.unreadCount, 0);
-      const metrics = element("div", "channel-metrics");
-      metrics.append(metric("Conversations", channelConversations.length), metric("Unread", unreadCount));
-      card.append(head, element("p", "", `${style.label} routes customer messages into the shared Helixcer inbox.`), metrics);
-      grid.append(card);
-    });
-    if (!state.channels.length) grid.append(element("div", "empty-list", "No channels have been connected yet."));
+    if (!channel) {
+      grid.append(element("div", "empty-list", "The WhatsApp channel is being prepared. Refresh in a moment."));
+      return;
+    }
+    const style = channelStyle(channel);
+    const card = element("article", "channel-card whatsapp-card");
+    const head = element("div", "channel-card-head");
+    const logo = element("span", "channel-logo", style.short);
+    logo.style.setProperty("--channel-color", style.color);
+    logo.style.setProperty("--channel-soft", style.soft);
+    const copy = document.createElement("div");
+    const health = element("span", `health-dot${healthState.className ? ` ${healthState.className}` : ""}`, healthState.label);
+    copy.append(element("h3", "", channel.name), health);
+    head.append(logo, copy);
+
+    const channelConversations = state.conversations.filter((item) => item.channelId === channel.channelId);
+    const unreadCount = channelConversations.reduce((sum, item) => sum + item.unreadCount, 0);
+    const metrics = element("div", "channel-metrics");
+    metrics.append(metric("Conversations", channelConversations.length), metric("Unread", unreadCount));
+
+    const setup = element("div", "channel-setup");
+    setup.append(element("strong", "", "Meta webhook callback"));
+    setup.append(element("code", "channel-callback", state.api.webhookUrl(channel.channelId)));
+    const setupNote = element("p", "channel-setup-note", healthState.summary);
+    if (channel.setup?.verifiedName || channel.setup?.verifiedPhoneNumber) {
+      setupNote.textContent = `${healthState.summary} ${[channel.setup.verifiedName, channel.setup.verifiedPhoneNumber].filter(Boolean).join(" · ")}`;
+    }
+    setup.append(setupNote);
+
+    const actions = element("div", "channel-actions");
+    const verifyButton = element("button", "secondary-button", channel.health === "connected" ? "Recheck connection" : "Check Meta connection");
+    verifyButton.type = "button";
+    verifyButton.dataset.action = "verify-whatsapp";
+    verifyButton.dataset.channelId = channel.channelId;
+    verifyButton.disabled = channel.health === "setup_required" || channel.health === "disconnected";
+    actions.append(verifyButton);
+
+    card.append(head, element("p", "", "WhatsApp Cloud API routes customer text messages into this shared inbox."), metrics, setup, actions);
+    grid.append(card);
   }
 
   function normalizeMember(raw) {
@@ -1174,19 +1198,6 @@
     return node;
   }
 
-  function populateChannelSelect() {
-    const select = $("newContactChannel");
-    const previous = select.value;
-    select.replaceChildren();
-    state.channels.filter((channel) => channel.enabled).forEach((channel) => {
-      const option = document.createElement("option");
-      option.value = channel.channelId;
-      option.textContent = channel.name;
-      select.append(option);
-    });
-    if (previous && state.channels.some((channel) => channel.channelId === previous)) select.value = previous;
-  }
-
   function assignmentMembers() {
     const members = state.team.members.filter((member) => member.status === "active");
     if (state.currentUser && !members.some((member) => member.email === state.currentUser.email)) {
@@ -1351,7 +1362,7 @@
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     });
-    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", team: "Team" };
+    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "WhatsApp", team: "Team" };
     $("pageTitle").textContent = labels[route];
     if (location.hash !== `#${route}`) history.replaceState(null, "", `#${route}`);
     closeMobileMenu();
@@ -1366,30 +1377,6 @@
   function updateDetailsVisibility() {
     $("detailsPanel").hidden = !state.detailsOpen;
     $("inboxGrid").classList.toggle("has-details", state.detailsOpen);
-  }
-
-  function openChannelDialog() {
-    const form = $("channelForm");
-    form.reset();
-    form.elements.connectorType.value = "whatsapp_cloud";
-    form.elements.channelId.value = "wa-main";
-    form.elements.secretKey.value = "WA_MAIN";
-    updateChannelFormHelp();
-    $("channelDialog").showModal();
-  }
-
-  function updateChannelFormHelp() {
-    const form = $("channelForm");
-    const type = form.elements.connectorType.value;
-    const prefix = String(form.elements.secretKey.value || "CHANNEL_MAIN").toUpperCase().replace(/[^A-Z0-9_]/g, "_");
-    $("genericEndpointField").hidden = type !== "generic_http";
-    const messages = {
-      whatsapp_cloud: `After saving, add ${prefix}_ACCESS_TOKEN, ${prefix}_PHONE_NUMBER_ID, ${prefix}_VERIFY_TOKEN, and ${prefix}_APP_SECRET in Cloudflare Worker secrets.`,
-      telegram: `After saving, add ${prefix}_BOT_TOKEN and ${prefix}_WEBHOOK_TOKEN in Cloudflare Worker secrets.`,
-      generic_http: `After saving, add ${prefix}_WEBHOOK_TOKEN and any template secrets in Cloudflare Worker secrets. Redirects are blocked for safety.`,
-      web_chat: "Website chat needs no provider secret. Public widget authentication can be added when the widget is deployed.",
-    };
-    $("channelSecretHelp").textContent = messages[type] || "Provider secrets stay in Cloudflare.";
   }
 
   async function logout() {
@@ -1423,7 +1410,7 @@
     const formData = new FormData(form);
     const payload = {
       displayName: String(formData.get("displayName") || "").trim(),
-      channelId: String(formData.get("channelId") || "").trim(),
+      channelId: "wa-main",
       channelProfileId: String(formData.get("channelProfileId") || "").trim(),
     };
     if (!payload.displayName || !payload.channelId || !payload.channelProfileId) return;
@@ -1444,47 +1431,22 @@
     }
   }
 
-  async function saveChannel(form) {
-    const data = new FormData(form);
-    const connectorType = String(data.get("connectorType") || "");
-    const endpoint = String(data.get("endpoint") || "").trim();
-    const capabilities = connectorType === "whatsapp_cloud" || connectorType === "telegram"
-      ? ["text", "media"] : ["text"];
-    const config = connectorType === "whatsapp_cloud" ? { apiVersion: "v23.0" } : {};
-    if (connectorType === "generic_http") {
-      if (!endpoint) { showToast("Endpoint required", "Enter the HTTPS provider endpoint.", true); return; }
-      try {
-        const url = new URL(endpoint);
-        if (url.protocol !== "https:") throw new Error("HTTPS required");
-        config.endpoint = url.toString();
-        config.allowedHosts = [url.hostname];
-        config.method = "POST";
-      } catch {
-        showToast("Invalid endpoint", "Use a complete HTTPS provider URL.", true);
-        return;
-      }
-    }
-    const payload = {
-      name: String(data.get("name") || "").trim(),
-      connectorType,
-      channelId: String(data.get("channelId") || "").trim(),
-      secretKey: String(data.get("secretKey") || "").trim(),
-      capabilities,
-      enabled: true,
-      config,
-    };
-    const submit = form.querySelector('[type="submit"]');
-    submit.disabled = true;
+  async function verifyWhatsAppConnection(channelId, button) {
+    if (!channelId || !button) return;
+    button.disabled = true;
+    const previousLabel = button.textContent;
+    button.textContent = "Checking…";
     try {
-      await state.api.saveChannel(payload);
-      $("channelDialog").close();
+      const result = await state.api.verifyChannel(channelId);
       await loadAll();
       setRoute("channels");
-      showToast("Channel saved", `${payload.name} is ready for its Cloudflare secrets.`);
+      showToast(result.health === "connected" ? "WhatsApp is live" : "WhatsApp number verified",
+        result.health === "connected" ? "Meta credentials and webhook are working." : "Complete the Meta webhook subscription to go live.");
     } catch (error) {
-      showToast("Channel could not be saved", error.message, true);
+      showToast("WhatsApp connection failed", error.message, true);
     } finally {
-      submit.disabled = false;
+      button.disabled = false;
+      button.textContent = previousLabel;
     }
   }
 
@@ -1598,6 +1560,10 @@
       if (routeButton) { setRoute(routeButton.dataset.route); return; }
       const actionButton = event.target.closest("[data-action]");
       if (actionButton) {
+        if (actionButton.dataset.action === "verify-whatsapp") {
+          verifyWhatsAppConnection(actionButton.dataset.channelId, actionButton);
+          return;
+        }
         const actions = {
           "toggle-user-menu": () => toggleUserMenu(),
           "logout": logout,
@@ -1613,8 +1579,6 @@
             resizeComposer();
             input.focus();
           },
-          "channel-help": openChannelDialog,
-          "close-channel-dialog": () => $("channelDialog").close(),
           "open-invite": openInviteDialog,
           "close-invite": () => $("inviteDialog").close(),
           "copy-invite-link": copyInviteLink,
@@ -1688,9 +1652,6 @@
     });
 
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
-    $("channelForm").addEventListener("submit", (event) => { event.preventDefault(); saveChannel(event.currentTarget); });
-    $("channelConnectorType").addEventListener("change", updateChannelFormHelp);
-    $("channelForm").elements.secretKey.addEventListener("input", updateChannelFormHelp);
     $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
     $("inviteRole").addEventListener("change", updateInviteRoleHelp);
     $("teamTableBody").addEventListener("change", (event) => {

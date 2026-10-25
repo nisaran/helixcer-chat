@@ -9,9 +9,7 @@ Helixcer Chat is a zero-monthly-cost omnichannel inbox designed for GitHub Pages
 - Team invitations, member enable/disable controls, and protection against removing the last active Owner.
 - REST API backed by indexed D1 tables for contacts, identities, conversations, messages, webhook deduplication, retries, and audit history.
 - Realtime browser refresh through a hibernatable Durable Object WebSocket.
-- WhatsApp Cloud API webhooks with Meta signature verification, inbound text, outbound text, and delivery status updates.
-- Telegram webhook verification and inbound/outbound text.
-- Generic HTTPS connector with explicit host allowlisting and redirects disabled.
+- WhatsApp Cloud API v25.0 webhooks with Meta signature verification, phone-number binding, inbound text, outbound text, delivery status updates, and encrypted Worker secrets.
 - D1 outbox with scheduled exponential-backoff retries. No paid queue is required.
 
 ## Repository layout
@@ -50,8 +48,8 @@ The Worker setup is documented in [`worker/README.md`](worker/README.md). In sum
 4. Configure Google OAuth secrets and set `BOOTSTRAP_OWNER_EMAIL` to the verified Google email that may claim the first Owner membership.
 5. Export the current D1 database, apply all migrations, deploy the Worker, and deploy the Pages gateway.
 6. Sign in with the configured owner email and verify the inbox, team roles, and realtime connection before publishing the updated GitHub Pages frontend.
-7. Create channels in the dashboard, then add their provider credentials as Worker secrets.
-8. Change production provider webhooks only after test messages work end to end.
+7. Add the WhatsApp Cloud API credentials as encrypted Worker secrets and verify the number from the dashboard.
+8. Subscribe Meta to `https://api.chat.helixcer.com/webhooks/whatsapp/wa-main`, then confirm the dashboard reports **Live** before sending production messages.
 
 Never place Google credentials, provider tokens, signing secrets, the bootstrap owner email, or a recovery token in GitHub.
 

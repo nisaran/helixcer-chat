@@ -104,7 +104,8 @@ Every authenticated business-data query includes the session's `workspace_id`. P
 
 ## Channel secrets
 
-For a WhatsApp channel whose `secretKey` is `WA_MAIN`:
+The current product exposes one WhatsApp Cloud API channel: `wa-main`, with secret prefix `WA_MAIN`.
+Store all provider values as encrypted Worker secrets:
 
 ```sh
 npx wrangler secret put WA_MAIN_ACCESS_TOKEN
@@ -113,14 +114,24 @@ npx wrangler secret put WA_MAIN_VERIFY_TOKEN
 npx wrangler secret put WA_MAIN_APP_SECRET
 ```
 
-For a Telegram channel whose `secretKey` is `TELEGRAM_MAIN`:
+Use a production System User access token with `whatsapp_business_messaging` and
+`whatsapp_business_management`, the Meta Phone Number ID, the Meta App Secret, and a random verify token.
+The public callback is:
 
-```sh
-npx wrangler secret put TELEGRAM_MAIN_BOT_TOKEN
-npx wrangler secret put TELEGRAM_MAIN_WEBHOOK_TOKEN
+```text
+https://api.chat.helixcer.com/webhooks/whatsapp/wa-main
 ```
 
-Generic connector `config.allowedHosts` must explicitly allow its HTTPS destination. With `secretKey` `CUSTOM`, `{{secret:API_TOKEN}}` resolves the encrypted `CUSTOM_API_TOKEN` binding.
+After saving secrets, use **Check Meta connection** in the dashboard. In Meta, verify the callback with the
+same verify token, subscribe the app to the WABA `messages` webhook field, and confirm the dashboard changes
+to **Live**. The Worker pins Graph API v25.0 by default.
+
+Free-form replies are subject to WhatsApp's 24-hour customer-service window. An approved template is required
+outside that window; template authoring is intentionally not part of this text-only first release.
+
+Telegram, Generic HTTP, and Web Chat connector code remains dormant for future expansion and is not exposed
+by the current WhatsApp-only product UI. Generic connector `config.allowedHosts` must still explicitly allow
+its HTTPS destination if that code is enabled in a later release.
 
 The current `ws_default` workspace retains simple prefixes such as `WA_MAIN` for compatibility. Any future non-default workspace automatically receives a workspace-derived prefix, so its administrators cannot select another workspace's provider-secret namespace.
 

@@ -41,3 +41,14 @@ test("role-aware single-workspace UI includes team management and no billing sur
   assert.doesNotMatch(html, /id="inviteRole"[^>]*>[\s\S]*?<option value="owner"/);
   assert.doesNotMatch(html, /data-route="billing"/i);
 });
+
+test("production channel UI is WhatsApp-only and hides provider internals", () => {
+  assert.match(html, /<h2 id="channelsTitle">WhatsApp<\/h2>/);
+  assert.match(html, />WhatsApp number<input/);
+  assert.match(app, /channelId:\s*"wa-main"/);
+  assert.match(app, /\/api\/channels\/\$\{encodeURIComponent\(channelId\)\}\/verify/);
+  assert.match(app, /webhooks\/whatsapp\/\$\{encodeURIComponent\(channelId\)\}/);
+  assert.doesNotMatch(html, /channelConnectorType|Secret prefix|Generic API endpoint|Telegram Bot API|Website chat/);
+  assert.doesNotMatch(html, /id="channelDialog"|id="channelForm"/);
+  assert.doesNotMatch(app, /apiVersion:\s*"v23\.0"/);
+});

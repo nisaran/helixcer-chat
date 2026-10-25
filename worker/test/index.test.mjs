@@ -6,9 +6,11 @@ import {
   assertAllowedHttpsEndpoint,
   handleRequest,
   InboxHub,
+  isRetryableWhatsAppStatus,
   normalizeGeneric,
   normalizeTelegram,
   normalizeWhatsApp,
+  normalizeWhatsAppRecipient,
   resolveTemplate,
   timingSafeEqual,
   verifyMetaSignature
@@ -16,13 +18,30 @@ import {
 
 test('normalizes inbound WhatsApp messages and statuses', () => {
   const result = normalizeWhatsApp({ entry: [{ changes: [{ value: {
+    metadata: { phone_number_id: '123456789' },
     contacts: [{ wa_id: '919999999999', profile: { name: 'Asha' } }],
-    messages: [{ id: 'wamid.1', from: '919999999999', timestamp: '1761360000', type: 'text', text: { body: 'Hello' } }],
+    messages: [
+      { id: 'wamid.1', from: '919999999999', timestamp: '1761360000', type: 'text', text: { body: 'Hello' } },
+      { id: 'wamid.2', from: '919999999999', timestamp: '1761360002', type: 'image', image: {} }
+    ],
     statuses: [{ id: 'wamid.out', status: 'delivered', timestamp: '1761360001' }]
   } }] }] });
   assert.equal(result.messages[0].displayName, 'Asha');
   assert.equal(result.messages[0].text, 'Hello');
+  assert.equal(result.messages[1].text, '[WhatsApp image received]');
   assert.equal(result.statuses[0].status, 'delivered');
+  assert.deepEqual(result.phoneNumberIds, ['123456789']);
+});
+
+test('normalizes WhatsApp recipients and classifies retryable provider failures', () => {
+  assert.equal(normalizeWhatsAppRecipient('+91 98765-43210'), '919876543210');
+  assert.equal(normalizeWhatsAppRecipient('0091 (98765) 43210'), '919876543210');
+  assert.throws(() => normalizeWhatsAppRecipient('98765'), /8 to 15 digits/);
+  assert.throws(() => normalizeWhatsAppRecipient('not-a-number'), /country code/);
+  assert.equal(isRetryableWhatsAppStatus(429), true);
+  assert.equal(isRetryableWhatsAppStatus(503), true);
+  assert.equal(isRetryableWhatsAppStatus(400), false);
+  assert.equal(isRetryableWhatsAppStatus(401), false);
 });
 
 test('normalizes a configured generic event list', () => {
@@ -75,6 +94,7 @@ test('verifies Meta sha256 webhook signatures', async () => {
 test('D1 migrations are valid SQLite, preserve rows, and create identity tables', async () => {
   const initial = await readFile(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8');
   const identity = await readFile(new URL('../migrations/0002_identity_and_workspaces.sql', import.meta.url), 'utf8');
+  const whatsapp = await readFile(new URL('../migrations/0003_whatsapp_channel.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -98,6 +118,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
       VALUES ('legacy-audit','legacy@example.com','create','contact','legacy-contact','2026-01-01');
   `);
   database.exec(identity);
+  database.exec(whatsapp);
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
   for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'contacts', 'messages', 'audit_log']) {
     assert.ok(tables.includes(name), `missing table ${name}`);
@@ -118,6 +139,11 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   assert.equal(database.prepare("SELECT actor_email FROM audit_log WHERE audit_id='legacy-audit'").get().actor_email, 'legacy@example.com');
   assert.equal(database.prepare('SELECT count(*) AS count FROM memberships').get().count, 0);
   assert.equal(database.prepare("SELECT name FROM workspaces WHERE workspace_id='ws_default'").get().name, 'Helixcer Chat');
+  const whatsappChannel = database.prepare("SELECT connector_type,capabilities_json,secret_key,workspace_id FROM channels WHERE channel_id='wa-main'").get();
+  assert.equal(whatsappChannel.connector_type, 'whatsapp_cloud');
+  assert.equal(whatsappChannel.capabilities_json, '["text"]');
+  assert.equal(whatsappChannel.secret_key, 'WA_MAIN');
+  assert.equal(whatsappChannel.workspace_id, 'ws_default');
   assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
   const indexes = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(row => row.name));
   for (const name of ['idx_channels_workspace', 'idx_conversations_workspace_activity', 'idx_messages_workspace_conversation', 'idx_outbox_workspace_due']) {

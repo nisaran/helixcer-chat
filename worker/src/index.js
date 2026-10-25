@@ -12,7 +12,7 @@ import {
   updateMembership
 } from './auth.js';
 
-const API_VERSION = '2026-10-25';
+const API_VERSION = '2026-10-25-whatsapp';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
 
@@ -194,10 +194,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json({
         appName: env.APP_NAME || 'Helixcer Chat', channels, conversations, contacts, me: principalView(principal),
         connectorTypes: [
-          { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: ['text', 'media', 'template'] },
-          { value: 'generic_http', label: 'Generic HTTP API', capabilities: ['text'] },
-          { value: 'web_chat', label: 'Web chat', capabilities: ['text'] },
-          { value: 'telegram', label: 'Telegram Bot API', capabilities: ['text', 'media'] }
+          { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: ['text'] }
         ]
       }), cors);
     }
@@ -210,6 +207,14 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       const result = await saveChannel(env, workspaceId, await readJson(request), principal);
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId: result.channelId });
       return withCors(json(result, 201), cors);
+    }
+    const channelVerifyMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/verify$/);
+    if (channelVerifyMatch && request.method === 'POST') {
+      requireRole(principal, 'admin');
+      const channelId = decodeURIComponent(channelVerifyMatch[1]);
+      const result = await verifyWhatsAppChannel(env, workspaceId, channelId);
+      await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
+      return withCors(json(result), cors);
     }
     if (url.pathname === '/api/conversations' && request.method === 'GET') {
       return withCors(json({ items: await listConversations(env, workspaceId, url) }), cors);
@@ -283,6 +288,8 @@ async function handleWhatsAppWebhook(request, env, channelId) {
     const url = new URL(request.url);
     const expected = env[`${prefix}_VERIFY_TOKEN`];
     if (url.searchParams.get('hub.mode') === 'subscribe' && expected && timingSafeEqual(url.searchParams.get('hub.verify_token') || '', expected)) {
+      await updateChannelRuntimeConfig(env, channel, { webhookVerifiedAt: new Date().toISOString() });
+      await broadcast(env, channel.workspaceId, { type: 'channel.updated', channelId });
       return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
     }
     return new Response('Forbidden', { status: 403 });
@@ -297,9 +304,16 @@ async function handleWhatsAppWebhook(request, env, channelId) {
   const payload = safeJsonParse(raw, null);
   if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
   const normalized = normalizeWhatsApp(payload);
+  const expectedPhoneNumberId = String(env[`${prefix}_PHONE_NUMBER_ID`] || '');
+  const hasEvents = normalized.messages.length > 0 || normalized.statuses.length > 0;
+  if (hasEvents && (!expectedPhoneNumberId || normalized.phoneNumberIds.length === 0 ||
+      normalized.phoneNumberIds.some(id => id !== expectedPhoneNumberId))) {
+    return json({ ok: false, error: 'Webhook phone number does not match this channel.' }, 403);
+  }
   let received = 0;
   for (const event of normalized.messages) if (await storeInbound(env, channel, event, payload)) received++;
   for (const status of normalized.statuses) await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload);
+  await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
   if (received || normalized.statuses.length) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: normalized.statuses.length });
   return json({ ok: true, received, statuses: normalized.statuses.length });
 }
@@ -336,20 +350,27 @@ async function handleTelegramWebhook(request, env, channelId) {
 async function listChannels(env, workspaceId, includeConfiguration = false) {
   const result = await env.DB.prepare(`SELECT channel_id,name,connector_type,enabled,capabilities_json,config_json,secret_key
     FROM channels WHERE workspace_id=?1 ORDER BY name COLLATE NOCASE`).bind(workspaceId).all();
-  return result.results.map(row => ({
-    channelId: row.channel_id, name: row.name, connectorType: row.connector_type,
-    enabled: Boolean(row.enabled), capabilities: safeJsonParse(row.capabilities_json, []),
-    health: channelHealth(env, row),
-    ...(includeConfiguration ? { config: safeJsonParse(row.config_json, {}), secretKey: row.secret_key } : {})
-  }));
+  return result.results.map(row => {
+    const config = safeJsonParse(row.config_json, {});
+    return {
+      channelId: row.channel_id, name: row.name, connectorType: row.connector_type,
+      enabled: Boolean(row.enabled), capabilities: safeJsonParse(row.capabilities_json, []),
+      health: channelHealth(env, row, config),
+      ...(includeConfiguration ? { config, setup: channelSetupView(env, row, config) } : {})
+    };
+  });
 }
 
-function channelHealth(env, row) {
+function channelHealth(env, row, config = safeJsonParse(row.config_json, {})) {
   if (!row.enabled) return 'disconnected';
   const prefix = secretPrefix(row.secret_key);
   if (row.connector_type === 'whatsapp_cloud') {
-    return env[`${prefix}_ACCESS_TOKEN`] && env[`${prefix}_PHONE_NUMBER_ID`] &&
-      env[`${prefix}_VERIFY_TOKEN`] && env[`${prefix}_APP_SECRET`] ? 'connected' : 'setup_required';
+    const configured = env[`${prefix}_ACCESS_TOKEN`] && env[`${prefix}_PHONE_NUMBER_ID`] &&
+      env[`${prefix}_VERIFY_TOKEN`] && env[`${prefix}_APP_SECRET`];
+    if (!configured) return 'setup_required';
+    if (!config.credentialsVerifiedAt) return 'configured';
+    if (!config.webhookVerifiedAt) return 'webhook_required';
+    return 'connected';
   }
   if (row.connector_type === 'telegram') {
     return env[`${prefix}_BOT_TOKEN`] && env[`${prefix}_WEBHOOK_TOKEN`] ? 'connected' : 'setup_required';
@@ -358,6 +379,20 @@ function channelHealth(env, row) {
     return env[`${prefix}_WEBHOOK_TOKEN`] ? 'connected' : 'setup_required';
   }
   return 'connected';
+}
+
+function channelSetupView(env, row, config = safeJsonParse(row.config_json, {})) {
+  if (row.connector_type !== 'whatsapp_cloud') return {};
+  const prefix = secretPrefix(row.secret_key);
+  return {
+    credentialsPresent: Boolean(env[`${prefix}_ACCESS_TOKEN`] && env[`${prefix}_PHONE_NUMBER_ID`] &&
+      env[`${prefix}_VERIFY_TOKEN`] && env[`${prefix}_APP_SECRET`]),
+    credentialsVerifiedAt: config.credentialsVerifiedAt || '',
+    webhookVerifiedAt: config.webhookVerifiedAt || '',
+    lastWebhookAt: config.lastWebhookAt || '',
+    verifiedPhoneNumber: config.verifiedPhoneNumber || '',
+    verifiedName: config.verifiedName || ''
+  };
 }
 
 async function getChannel(env, id, connectorType = '', workspaceId = '') {
@@ -369,6 +404,59 @@ async function getChannel(env, id, connectorType = '', workspaceId = '') {
     capabilities: safeJsonParse(row.capabilities_json, []), config: safeJsonParse(row.config_json, {}),
     secretKey: row.secret_key, workspaceId: row.workspace_id
   };
+}
+
+async function verifyWhatsAppChannel(env, workspaceId, channelId) {
+  const channel = await getChannel(env, channelId, 'whatsapp_cloud', workspaceId);
+  if (!channel) throw httpError(404, 'WhatsApp channel not found.');
+  const prefix = secretPrefix(channel.secretKey);
+  const token = env[`${prefix}_ACCESS_TOKEN`];
+  const phoneNumberId = String(env[`${prefix}_PHONE_NUMBER_ID`] || '');
+  const verifyToken = env[`${prefix}_VERIFY_TOKEN`];
+  const appSecret = env[`${prefix}_APP_SECRET`];
+  if (!token || !phoneNumberId || !verifyToken || !appSecret) {
+    throw httpError(409, 'Secure WhatsApp credentials have not been fully configured.');
+  }
+  const version = String(channel.config?.apiVersion || env.WHATSAPP_API_VERSION || 'v25.0');
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneNumberId)}`);
+  endpoint.searchParams.set('fields', 'id,display_phone_number,verified_name');
+  const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } });
+  const raw = await response.text();
+  const data = safeJsonParse(raw, {});
+  if (!response.ok) {
+    const providerMessage = String(data?.error?.message || `HTTP ${response.status}`).slice(0, 240);
+    throw httpError(502, `Meta could not verify this WhatsApp number: ${providerMessage}`);
+  }
+  if (String(data.id || '') !== phoneNumberId) throw httpError(502, 'Meta returned a different WhatsApp phone number.');
+  const now = new Date().toISOString();
+  const config = await updateChannelRuntimeConfig(env, channel, {
+    apiVersion: version,
+    credentialsVerifiedAt: now,
+    verifiedPhoneNumber: String(data.display_phone_number || ''),
+    verifiedName: String(data.verified_name || '')
+  });
+  return {
+    ok: true,
+    channelId,
+    health: config.webhookVerifiedAt ? 'connected' : 'webhook_required',
+    verifiedPhoneNumber: config.verifiedPhoneNumber,
+    verifiedName: config.verifiedName,
+    credentialsVerifiedAt: config.credentialsVerifiedAt,
+    webhookVerifiedAt: config.webhookVerifiedAt || ''
+  };
+}
+
+async function updateChannelRuntimeConfig(env, channel, patch) {
+  const config = { ...(channel.config || {}) };
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (value === undefined || value === null || value === '') delete config[key];
+    else config[key] = value;
+  }
+  const now = new Date().toISOString();
+  await env.DB.prepare('UPDATE channels SET config_json=?3,updated_at=?4 WHERE channel_id=?1 AND workspace_id=?2')
+    .bind(channel.channelId, channel.workspaceId, JSON.stringify(config), now).run();
+  channel.config = config;
+  return config;
 }
 
 async function saveChannel(env, workspaceId, payload, principal) {
@@ -480,8 +568,12 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
 async function createContact(env, workspaceId, payload, principal) {
   const displayName = cleanRequired(payload.displayName, 'Display name', 120);
   const channelId = cleanId(payload.channelId, 'Channel ID');
-  const channelProfileId = cleanRequired(payload.channelProfileId, 'Channel profile ID', 200);
-  if (!await getChannel(env, channelId, '', workspaceId)) throw httpError(400, 'Unknown or disabled channel.');
+  const channel = await getChannel(env, channelId, '', workspaceId);
+  if (!channel) throw httpError(400, 'Unknown or disabled channel.');
+  const rawChannelProfileId = cleanRequired(payload.channelProfileId, 'Channel profile ID', 200);
+  const channelProfileId = channel.connectorType === 'whatsapp_cloud'
+    ? normalizeWhatsAppRecipient(rawChannelProfileId)
+    : rawChannelProfileId;
   const now = new Date().toISOString();
   const contactId = crypto.randomUUID();
   const identityId = crypto.randomUUID();
@@ -525,6 +617,14 @@ async function sendOrQueue(env, messageId) {
   } catch (error) {
     const message = await env.DB.prepare('SELECT workspace_id FROM messages WHERE message_id=?1').bind(messageId).first();
     if (!message) throw error;
+    if (error?.retryable === false) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE messages SET status='failed',error=?2 WHERE message_id=?1").bind(messageId, cleanError(error)),
+        env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId)
+      ]);
+      await broadcast(env, message.workspace_id, { type: 'message.updated', messageId, status: 'failed' });
+      return;
+    }
     const now = new Date();
     const next = new Date(now.getTime() + 30000).toISOString();
     await env.DB.batch([
@@ -562,15 +662,22 @@ async function sendWhatsApp(env, channel, recipient, text) {
   const token = env[`${prefix}_ACCESS_TOKEN`];
   const phoneNumberId = env[`${prefix}_PHONE_NUMBER_ID`];
   if (!token || !phoneNumberId) throw new Error('WhatsApp channel secrets are not configured.');
-  const version = String(channel.config?.apiVersion || env.WHATSAPP_API_VERSION || 'v23.0');
+  const normalizedRecipient = normalizeWhatsAppRecipient(recipient);
+  const version = String(channel.config?.apiVersion || env.WHATSAPP_API_VERSION || 'v25.0');
   const response = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneNumberId)}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: recipient, type: 'text', text: { preview_url: false, body: text } })
+    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: normalizedRecipient, type: 'text', text: { preview_url: false, body: text } })
   });
   const raw = await response.text();
   const data = safeJsonParse(raw, {});
-  if (!response.ok) throw new Error(`WhatsApp API HTTP ${response.status}: ${raw.slice(0, 500)}`);
+  if (!response.ok) {
+    const code = data?.error?.code ? ` (${data.error.code})` : '';
+    const providerMessage = String(data?.error?.message || `HTTP ${response.status}`).slice(0, 300);
+    const error = new Error(`WhatsApp API${code}: ${providerMessage}`);
+    error.retryable = isRetryableWhatsAppStatus(response.status);
+    throw error;
+  }
   return { status: 'submitted', providerMessageId: data.messages?.[0]?.id || '', httpStatus: response.status };
 }
 
@@ -709,9 +816,14 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
     VALUES (?1,?2,'status',?3,?4)`).bind(key, channelId, new Date().toISOString(), workspaceId).run();
   if (!dedupe.meta?.changes) return;
   try {
-    await env.DB.prepare(`UPDATE messages SET status=?4,payload_json=?5,error=?6
+    const updated = await env.DB.prepare(`UPDATE messages SET status=?4,payload_json=?5,error=?6
       WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3`)
       .bind(workspaceId, channelId, event.providerMessageId, event.status, truncateJson(rawPayload), String(event.error || '').slice(0, 500)).run();
+    if (!updated.meta?.changes) {
+      await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
+      return false;
+    }
+    return true;
   } catch (error) {
     await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
     throw error;
@@ -743,13 +855,15 @@ async function seedDemo(env, workspaceId, principal) {
 export function normalizeWhatsApp(payload) {
   const messages = [];
   const statuses = [];
+  const phoneNumberIds = new Set();
   for (const entry of payload?.entry || []) {
     for (const change of entry?.changes || []) {
       const value = change?.value || {};
+      if (value.metadata?.phone_number_id) phoneNumberIds.add(String(value.metadata.phone_number_id));
       const contacts = value.contacts || [];
       for (const message of value.messages || []) {
         const contact = contacts.find(item => String(item.wa_id) === String(message.from)) || {};
-        const text = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || '';
+        const text = whatsappInboundText(message);
         messages.push({
           channelProfileId: String(message.from || ''), displayName: contact.profile?.name || String(message.from || ''),
           text, providerMessageId: String(message.id || ''),
@@ -766,7 +880,43 @@ export function normalizeWhatsApp(payload) {
       }
     }
   }
-  return { messages: messages.filter(item => item.channelProfileId), statuses: statuses.filter(item => item.providerMessageId) };
+  return {
+    messages: messages.filter(item => item.channelProfileId),
+    statuses: statuses.filter(item => item.providerMessageId),
+    phoneNumberIds: [...phoneNumberIds]
+  };
+}
+
+function whatsappInboundText(message) {
+  const direct = message?.text?.body || message?.button?.text ||
+    message?.interactive?.button_reply?.title || message?.interactive?.list_reply?.title;
+  if (direct) return String(direct);
+  const caption = message?.image?.caption || message?.video?.caption || message?.document?.caption;
+  if (caption) return String(caption);
+  const type = String(message?.type || 'message').replace(/_/g, ' ');
+  return `[WhatsApp ${type} received]`;
+}
+
+export function normalizeWhatsAppRecipient(value) {
+  const input = String(value || '').trim();
+  if (!input || !/^[+\d\s().-]+$/.test(input)) {
+    const error = httpError(400, 'Enter a WhatsApp number with country code.');
+    error.retryable = false;
+    throw error;
+  }
+  let digits = input.replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (!/^[1-9]\d{7,14}$/.test(digits)) {
+    const error = httpError(400, 'Enter a valid WhatsApp number with country code (8 to 15 digits).');
+    error.retryable = false;
+    throw error;
+  }
+  return digits;
+}
+
+export function isRetryableWhatsAppStatus(status) {
+  const code = Number(status);
+  return code === 408 || code === 429 || code >= 500;
 }
 
 export function normalizeGeneric(payload, mapping = {}) {

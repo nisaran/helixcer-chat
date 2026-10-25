@@ -485,9 +485,10 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; max-width: 1180px; margin: 0 auto 16px; }
 .stat-card { border: 1px solid var(--line); border-radius: 14px; background: white; box-shadow: var(--shadow-sm); padding: 15px 16px; }
 .stat-card span { color: var(--muted); font-size: 11px; }
-.stat-card strong { display: block; margin-top: 3px; font-family: Georgia, "Times New Roman", serif; font-size: 25px; font-weight: 650; }
+.stat-card strong { display: block; overflow-wrap: anywhere; margin-top: 3px; font-family: Georgia, "Times New Roman", serif; font-size: 25px; font-weight: 650; }
 .channel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; max-width: 1180px; margin: 0 auto; }
 .channel-card { border: 1px solid var(--line); border-radius: var(--radius); background: white; box-shadow: var(--shadow-sm); padding: 17px; }
+.whatsapp-card { grid-column: 1 / -1; }
 .channel-card-head { display: flex; align-items: center; gap: 11px; }
 .channel-logo { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: var(--channel-soft, #eff1ee); color: var(--channel-color, #586360); font-size: 13px; font-weight: 850; }
 .channel-card-head div { min-width: 0; }
@@ -503,6 +504,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .channel-metrics span, .channel-metrics strong { display: block; }
 .channel-metrics span { color: var(--muted); font-size: 9px; }
 .channel-metrics strong { margin-top: 2px; font-size: 13px; }
+.channel-setup { display: grid; gap: 7px; border-top: 1px solid var(--line); margin-top: 16px; padding-top: 15px; }
+.channel-setup > strong { font-size: 11px; }
+.channel-callback { display: block; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 9px; background: #f6f7f4; color: #3d4946; padding: 10px 11px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
+.channel-card .channel-setup-note { margin-top: 0; }
+.channel-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
 
 .modal { width: min(520px, calc(100vw - 28px)); max-width: none; overflow: visible; border: 0; border-radius: 18px; background: transparent; padding: 0; box-shadow: var(--shadow-lg); }
 .modal::backdrop { background: rgba(17,25,25,.54); backdrop-filter: blur(3px); }
