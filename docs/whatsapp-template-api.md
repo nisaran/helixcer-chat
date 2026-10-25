@@ -1,6 +1,12 @@
-# WhatsApp Templates | Helixcer Messaging API
+# Helixcer Developer API
 
-This is the WhatsApp Templates module of the Helixcer Developer and Messaging API. It lets your server send approved WhatsApp templates while keeping every outbound message, delivery update, and reply in the Helixcer inbox.
+Connect external applications to the Helixcer inbox through the Helixcer Messaging API. The currently available channel module is WhatsApp.
+
+## WhatsApp
+
+### Template messages
+
+Send approved WhatsApp templates from your server while keeping every outbound message, delivery update, and reply in the Helixcer inbox.
 
 > **Available now:** The external Messaging API currently supports WhatsApp template messages. Telegram and Instagram external-send endpoints are not enabled yet.
 
@@ -15,7 +21,6 @@ This is the WhatsApp Templates module of the Helixcer Developer and Messaging AP
 | Read message status | `GET /api/v1/messages/{messageId}` |
 | Authentication | `Authorization: Bearer hxc_live_...` |
 | Request format | `application/json` |
-| Idempotency | `Idempotency-Key` is required on every send request |
 
 Your application supplies a Helixcer channel ID and a Meta-native template object. Helixcer selects the saved WhatsApp connection, writes the outbound message to the chatbox, sends it to Meta, and applies Meta status webhooks to the same message.
 
@@ -38,7 +43,6 @@ Keys are bound to one workspace and apply to its WhatsApp connections. Sending r
 ```http
 POST https://api.chat.helixcer.com/api/v1/whatsapp/template-messages
 Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
-Idempotency-Key: order-1001-confirmation-v1
 Content-Type: application/json
 ```
 
@@ -75,8 +79,8 @@ Content-Type: application/json
 |---|---:|---|
 | `channelId` | Yes | Helixcer ID of the saved WhatsApp channel that sends the message. |
 | `to` | Yes | Recipient's WhatsApp number in international format, using digits only. Example: `919999999999`. |
-| `contact.displayName` | No | Name shown when Helixcer creates a contact for a number it has not seen before. Existing names are not overwritten automatically. |
-| `clientReference` | No | Your order, ticket, campaign, or transaction identifier. It is stored with and returned on the message for reconciliation. It does not replace the idempotency key. |
+| `contact.displayName` | No | Name used to save or update to the contact list |
+| `clientReference` | No | Your order, ticket, campaign, or transaction identifier. It is stored with and returned on the message for reconciliation. |
 | `previewText` | Recommended | Human-readable chatbox summary. Useful when the approved template contains variables or media. This does not change the WhatsApp payload. |
 | `template` | Yes | Meta-native template object. `name` and `language.code` are required; `components` is included when the approved template expects parameters. |
 
@@ -89,7 +93,6 @@ curl --request POST \
   --url https://api.chat.helixcer.com/api/v1/whatsapp/template-messages \
   --header 'Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY' \
   --header 'Content-Type: application/json' \
-  --header 'Idempotency-Key: order-1001-confirmation-v1' \
   --data '{
     "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
     "to": "919999999999",
@@ -114,7 +117,7 @@ curl --request POST \
 
 ## Template examples
 
-The examples below show only the request body. Every send request also needs the authentication, idempotency, and content-type headers shown above.
+The examples below show only the request body. Every send request also needs the authentication and content-type headers shown above.
 
 ### Simple template with no variables
 
@@ -447,7 +450,7 @@ A copy-code button commonly uses a coupon code parameter:
 }
 ```
 
-Authentication templates can contain a one-time password, a copy-code button, and/or an autofill or zero-tap URL button. Their exact send-time component structure depends on the authentication template Meta approved. Pass the exact Meta-native components required for that template; never reuse an OTP as an idempotency key, `clientReference`, or log value.
+Authentication templates can contain a one-time password, a copy-code button, and/or an autofill or zero-tap URL button. Their exact send-time component structure depends on the authentication template Meta approved. Pass the exact Meta-native components required for that template; never reuse an OTP as a `clientReference` or log value.
 
 ### Advanced components: pass-through
 
@@ -504,8 +507,6 @@ Helixcer records the message and queues provider delivery before responding. The
 }
 ```
 
-The response header `Idempotent-Replayed` is `false` for a newly created operation and `true` when an identical retry returns its existing message. `X-Request-Id` matches the body `requestId`.
-
 `202` means recorded and queued, not delivered. Use the status endpoint or the Helixcer inbox for the final outcome.
 
 ## Errors
@@ -525,31 +526,15 @@ Errors use a stable machine-readable code plus a human-readable message:
 
 | HTTP status | Meaning | What to do |
 |---:|---|---|
-| `400` | Malformed JSON, missing/unknown field, invalid parameter, or invalid idempotency key. | Correct the request; do not retry unchanged. |
+| `400` | Malformed JSON, missing or unknown field, or invalid parameter. | Correct the request; do not retry unchanged. |
 | `401` | Missing, invalid, expired, or revoked API key. | Replace the key. Do not log it. |
 | `403` | Browser-origin request or key lacks the required scope. | Send server-to-server and check key permissions. |
 | `404` | Channel, message, or route was not found for this key. | Check the identifier and confirm the channel belongs to the key's workspace. |
-| `409` | Channel is not ready, or the idempotency key was reused with a different body. | Read `error.code`; fix channel setup or use the original request. |
-| `429` | Rate limit exceeded. | Wait for `Retry-After`, then retry with the same idempotency key. |
-| `5xx` | Temporary Helixcer, rate-limiter, or upstream failure. | Retry with exponential backoff and the same idempotency key. |
+| `409` | The selected channel is not ready to send. | Read `error.code` and fix the channel setup. |
+| `429` | Rate limit exceeded. | Wait for `Retry-After` before trying again. |
+| `5xx` | Temporary Helixcer, rate-limiter, or upstream failure. | Wait, then retry with exponential backoff. |
 
 Do not parse `error.message` to drive application logic; use `error.code`. Include `error.requestId` or the matching `X-Request-Id` header when contacting support.
-
-## Idempotency and safe retries
-
-`Idempotency-Key` is mandatory because a network timeout can occur after Helixcer has accepted a message. Without a stable key, a blind retry could send the same WhatsApp template twice.
-
-- Use 8–128 safe ASCII characters: letters, numbers, period, underscore, colon, or hyphen.
-- Generate one unique key per logical send operation and retain it until the operation is complete.
-- Use an opaque UUID or a stable business-operation key such as `order-1001-confirmation-v1`.
-- Use the **same key and identical JSON body** after a timeout, `429`, or retryable `5xx` response.
-- A repeat with the same key and same body returns the existing message with the `Idempotent-Replayed: true` response header; it does not create a second message.
-- Reusing the key with a different body returns `409 idempotency_conflict`.
-- Generate a new key only when you intentionally want another message.
-
-Helixcer retains each idempotency record for seven days. Do not intentionally reuse an old key after that retention period.
-
-`clientReference` is stored with and returned on the message as business metadata; it does not provide duplicate-send protection.
 
 ## Read message status
 
@@ -593,7 +578,7 @@ Poll the status endpoint for machine-to-machine updates today. When Helixcer out
 - acknowledge quickly with a `2xx` response;
 - deduplicate events by event ID;
 - expect retries and out-of-order status events;
-- keep processing idempotent; and
+- deduplicate repeated events; and
 - fetch the message with `GET /api/v1/messages/{messageId}` when reconciliation is needed.
 
 The exact outbound webhook management and signature contract will be documented when that feature is enabled. Until then, poll the status endpoint or use the chatbox.
@@ -617,8 +602,7 @@ Official references:
 - The template name, locale, components, button indexes, and parameters exactly match Meta's approved template.
 - Recipient numbers use international digits-only format.
 - The API key is stored only on your server.
-- Every send uses a stable, unique `Idempotency-Key`.
 - Your application treats `202` as recorded and queued, not delivered.
-- Retries use backoff and retain the original idempotency key.
+- Retries use exponential backoff.
 - Your logs exclude keys, OTPs, customer message content, and sensitive personal data.
-- Status processing is idempotent and can reconcile through the GET endpoint.
+- Status processing safely handles duplicate provider events and can reconcile through the GET endpoint.

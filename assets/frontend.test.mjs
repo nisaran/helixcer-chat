@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
+const apiDocs = await readFile(new URL("../api-docs.html", import.meta.url), "utf8");
 
 test("all JavaScript DOM id references exist exactly once", () => {
   const htmlIds = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
@@ -141,6 +142,17 @@ test("Developer API keys are managed by admins and shown only once", () => {
   assert.doesNotMatch(apiKeyDialog, /WhatsApp/i);
   assert.match(app, /\$\("apiKeyOutput"\)\.value = ""/);
   assert.doesNotMatch(app, /localStorage\.(?:setItem|getItem)\([^)]*api.?key/i);
+});
+
+test("Developer API documentation is channel-organized and keeps the send contract complete", () => {
+  assert.match(apiDocs, /<h1>Connect your apps to the Helixcer inbox\.<\/h1>/);
+  assert.doesNotMatch(apiDocs, /<h1>[^<]*WhatsApp/i);
+  assert.match(apiDocs, /<p class="nav-label">Channels<\/p>[\s\S]*?<p class="nav-channel">WhatsApp<\/p>[\s\S]*?<a href="#send">Template messages<\/a>/);
+  const sendSection = apiDocs.match(/<section id="send">[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(sendSection, /<h2>Send a template message<\/h2>/);
+  assert.match(sendSection, /POST<\/span><code>https:\/\/api\.chat\.helixcer\.com\/api\/v1\/whatsapp\/template-messages<\/code>/);
+  assert.match(sendSection, /<code>contact\.displayName<\/code>[\s\S]*?Name used to save or update to the contact list/);
+  assert.doesNotMatch(apiDocs, /Idempotency-Key|id="idempotency"|href="#idempotency"/i);
 });
 
 test("WhatsApp credential guidance distinguishes the three Meta secrets", () => {

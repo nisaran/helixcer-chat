@@ -120,7 +120,7 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 
 Every authenticated business-data query includes the session's `workspace_id`. Provider webhook routing resolves a globally unique channel and carries its workspace through storage and realtime delivery.
 
-The public v1 Helixcer Messaging API accepts only server-to-server requests and rejects browser `Origin` headers. Its currently available external-send module is WhatsApp templates; Telegram and Instagram external-send endpoints are not enabled yet. It derives the workspace from a `hxc_live_...` key, which applies to the workspace's WhatsApp connections; each send selects one with `channelId`. It requires an `Idempotency-Key` for every send and never accepts Meta credentials or provider envelope fields from the caller. See [`../api-docs.html`](../api-docs.html) or [`../docs/whatsapp-template-api.md`](../docs/whatsapp-template-api.md) for the complete contract.
+The public v1 Helixcer Messaging API accepts only server-to-server requests and rejects browser `Origin` headers. Its currently available external-send module is WhatsApp templates; Telegram and Instagram external-send endpoints are not enabled yet. It derives the workspace from a `hxc_live_...` key, which applies to the workspace's WhatsApp connections; each send selects one with `channelId`. An `Idempotency-Key` is optional for backward-compatible retry deduplication, and Helixcer generates an internal operation key when the header is omitted. The API never accepts Meta credentials or provider envelope fields from the caller. See [`../api-docs.html`](../api-docs.html) or [`../docs/whatsapp-template-api.md`](../docs/whatsapp-template-api.md) for the complete contract.
 
 ## Managed channel connections
 

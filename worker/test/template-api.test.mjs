@@ -101,17 +101,93 @@ async function insertKey(database, token, apiKeyId, prefix) {
 }
 
 function postTemplate(token, idempotencyKey, body, headers = {}) {
+  const requestHeaders = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+    ...headers
+  };
+  if (idempotencyKey) requestHeaders['Idempotency-Key'] = idempotencyKey;
   return new Request('https://api.chat.helixcer.com/api/v1/whatsapp/template-messages', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Idempotency-Key': idempotencyKey,
-      'Content-Type': 'application/json',
-      ...headers
-    },
+    headers: requestHeaders,
     body: JSON.stringify(body)
   });
 }
+
+test('external template API accepts requests without an Idempotency-Key', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_noidem123.${'n'.repeat(43)}`;
+  await insertKey(database, token, 'key-no-idempotency', 'hxc_live_noidem123');
+  const waits = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ messages: [{ id: 'wamid.no-idempotency' }] }), {
+    status: 200, headers: { 'Content-Type': 'application/json' }
+  });
+  try {
+    const body = {
+      channelId: 'wa-sales', to: '+91 98765 43210',
+      template: { name: 'order_update', language: { code: 'en_US' } }
+    };
+    const response = await handleRequest(postTemplate(token, null, body), env, {
+      waitUntil(promise) { waits.push(promise); }
+    });
+    assert.equal(response.status, 202);
+    assert.equal(response.headers.get('Idempotent-Replayed'), null);
+    const accepted = await response.json();
+    assert.equal(accepted.ok, true);
+    assert.equal(database.prepare('SELECT count(*) AS count FROM messages').get().count, 1);
+    const storedRequest = database.prepare('SELECT idempotency_key_hash FROM external_api_requests').get();
+    assert.match(storedRequest.idempotency_key_hash, /^[a-f0-9]{64}$/);
+    await Promise.all(waits);
+
+    const invalid = await handleRequest(postTemplate(token, 'short', body), env, { waitUntil() {} });
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).error.code, 'invalid_idempotency_key');
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('external template API updates a saved contact name only when displayName is supplied', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_contact1.${'c'.repeat(43)}`;
+  await insertKey(database, token, 'key-contact-name', 'hxc_live_contact1');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ messages: [{ id: crypto.randomUUID() }] }), {
+    status: 200, headers: { 'Content-Type': 'application/json' }
+  });
+  const baseBody = {
+    channelId: 'wa-sales', to: '+91 98765 43210',
+    template: { name: 'order_update', language: { code: 'en_US' } }
+  };
+  try {
+    const send = async (body) => {
+      const waits = [];
+      const response = await handleRequest(postTemplate(token, null, body), env, {
+        waitUntil(promise) { waits.push(promise); }
+      });
+      assert.equal(response.status, 202);
+      await Promise.all(waits);
+    };
+
+    await send({ ...baseBody, contact: { displayName: 'Original name' } });
+    const contactId = database.prepare('SELECT contact_id FROM contacts').get().contact_id;
+    assert.equal(database.prepare('SELECT display_name FROM contacts WHERE contact_id=?').get(contactId).display_name, 'Original name');
+    assert.equal(database.prepare('SELECT display_name FROM channel_identities WHERE contact_id=?').get(contactId).display_name, 'Original name');
+
+    await send({ ...baseBody, contact: { displayName: 'Updated contact name' } });
+    assert.equal(database.prepare('SELECT display_name FROM contacts WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
+    assert.equal(database.prepare('SELECT display_name FROM channel_identities WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
+
+    await send(baseBody);
+    assert.equal(database.prepare('SELECT display_name FROM contacts WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
+    assert.equal(database.prepare('SELECT display_name FROM channel_identities WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
 
 test('external template API persists once, dispatches, replays safely, and scopes status to its key', async () => {
   const { database, env } = await fixture();

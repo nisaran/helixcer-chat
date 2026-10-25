@@ -539,10 +539,11 @@ async function enforceExternalApiRateLimit(env, principal, requestId) {
 }
 
 async function createExternalTemplateMessage(request, env, ctx, url, principal, requestId) {
-  const idempotencyKey = String(request.headers.get('Idempotency-Key') || '');
-  if (!/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) {
-    throw apiError(400, 'invalid_idempotency_key', 'Idempotency-Key is required and must contain 8 to 128 safe ASCII characters.');
+  const suppliedIdempotencyKey = request.headers.get('Idempotency-Key');
+  if (suppliedIdempotencyKey !== null && !/^[A-Za-z0-9._:-]{8,128}$/.test(suppliedIdempotencyKey)) {
+    throw apiError(400, 'invalid_idempotency_key', 'When provided, Idempotency-Key must contain 8 to 128 safe ASCII characters.');
   }
+  const idempotencyKey = suppliedIdempotencyKey || `automatic-${crypto.randomUUID()}`;
   const raw = await readExternalJson(request);
   const input = validateWhatsAppTemplateRequest(raw);
   const requestHash = await hashText(stableStringify(input));
@@ -552,7 +553,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
     if (!timingSafeEqual(existing.request_hash, requestHash)) {
       throw apiError(409, 'idempotency_conflict', 'This Idempotency-Key was already used with a different request.');
     }
-    return externalMessageResponse(await getExternalMessageStatus(env, principal, existing.message_id, url), requestId, true);
+    return externalMessageResponse(await getExternalMessageStatus(env, principal, existing.message_id, url), requestId, true, suppliedIdempotencyKey !== null);
   }
   await env.DB.prepare(`DELETE FROM external_api_requests
     WHERE api_key_id=?1 AND operation=?2 AND idempotency_key_hash=?3 AND expires_at<=?4`)
@@ -576,6 +577,14 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   const expiresAt = new Date(Date.now() + EXTERNAL_API_IDEMPOTENCY_DAYS * 86400000).toISOString();
   const firstRetryAt = new Date(Date.now() + 30000).toISOString();
   const statements = [
+    ...(input.contact?.displayName ? [
+      env.DB.prepare(`UPDATE contacts SET display_name=?3,updated_at=?4
+        WHERE contact_id=?1 AND workspace_id=?2`)
+        .bind(identity.contactId, principal.workspaceId, input.contact.displayName, now),
+      env.DB.prepare(`UPDATE channel_identities SET display_name=?4
+        WHERE contact_id=?1 AND workspace_id=?2 AND channel_id=?3`)
+        .bind(identity.contactId, principal.workspaceId, channel.channelId, input.contact.displayName)
+    ] : []),
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
         status,timestamp,payload_json,workspace_id)
       VALUES (?1,?2,?3,?4,'outbound','template',?5,'pending',?6,'{}',?7)`)
@@ -598,7 +607,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
     if (isUniqueConstraintError(error)) {
       const winner = await findExternalRequest(env, principal.apiKeyId, idempotencyHash);
       if (winner && timingSafeEqual(winner.request_hash, requestHash)) {
-        return externalMessageResponse(await getExternalMessageStatus(env, principal, winner.message_id, url), requestId, true);
+        return externalMessageResponse(await getExternalMessageStatus(env, principal, winner.message_id, url), requestId, true, suppliedIdempotencyKey !== null);
       }
       if (winner) throw apiError(409, 'idempotency_conflict', 'This Idempotency-Key was already used with a different request.');
     }
@@ -616,7 +625,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
     channelId: channel.channelId, status: 'pending', providerMessageId: '', error: '',
     clientReference: input.clientReference, createdAt: now,
     statusUrl: new URL(`/api/v1/messages/${encodeURIComponent(messageId)}`, url.origin).toString()
-  }, requestId, false);
+  }, requestId, false, suppliedIdempotencyKey !== null);
 }
 
 async function findExternalRequest(env, apiKeyId, idempotencyHash) {
@@ -647,9 +656,9 @@ async function getExternalMessageStatus(env, principal, messageId, url) {
   };
 }
 
-function externalMessageResponse(item, requestId, replayed) {
+function externalMessageResponse(item, requestId, replayed, includeReplayHeader) {
   const response = json({ ok: true, ...item, requestId }, 202);
-  response.headers.set('Idempotent-Replayed', replayed ? 'true' : 'false');
+  if (includeReplayHeader) response.headers.set('Idempotent-Replayed', replayed ? 'true' : 'false');
   return response;
 }
 

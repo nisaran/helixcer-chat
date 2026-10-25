@@ -32,6 +32,7 @@
     .sidebar{position:fixed;z-index:30;top:64px;bottom:0;width:var(--sidebar-width);overflow:auto;border-right:1px solid var(--line);background:#f8f9f6;padding:24px 18px 40px}
     .nav-label{margin:0 10px 9px;color:#8a9491;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
     .nav-list{display:grid;gap:2px;margin:0 0 24px;padding:0;list-style:none}.nav-list a{display:block;border-radius:9px;color:#52605e;padding:7px 10px;text-decoration:none;font-size:12px;font-weight:650;transition:.16s}.nav-list a:hover{background:#eef1ed;color:var(--ink)}.nav-list a.active{background:var(--brand-soft);color:var(--brand-deep)}
+    .nav-channel{display:flex;align-items:center;gap:8px;margin:0 10px 5px;color:var(--ink);font-size:12px;font-weight:850}.nav-channel::before{width:7px;height:7px;border-radius:50%;background:#25d366;content:""}.nav-list.nav-sublist{margin-left:9px;border-left:1px solid #d9dfda;padding-left:8px}.nav-list.nav-sublist a{padding-left:13px}
     .sidebar-card{border:1px solid #dfd9d3;border-radius:12px;background:#fffaf5;padding:13px;color:#6c625b;font-size:11px;line-height:1.55}.sidebar-card strong{display:block;margin-bottom:4px;color:var(--ink);font-size:12px}
     main{grid-column:2;width:min(1160px,100%);margin:0 auto;padding:46px 48px 90px} section{margin-top:74px} section:first-child{margin-top:0}
     .eyebrow{margin:0 0 12px;color:var(--brand);font-size:11px;font-weight:850;letter-spacing:.14em;text-transform:uppercase}
@@ -73,11 +74,12 @@
     <aside class="sidebar" aria-label="Documentation navigation">
       <p class="nav-label">Start</p>
       <nav>
-        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li><li><a href="#send">WhatsApp templates</a></li></ul>
-        <p class="nav-label">Available now</p>
-        <ul class="nav-list"><li><a href="#examples">Examples</a></li><li><a href="#advanced">Advanced pass-through</a></li></ul>
+        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li></ul>
+        <p class="nav-label">Channels</p>
+        <p class="nav-channel">WhatsApp</p>
+        <ul class="nav-list nav-sublist"><li><a href="#send">Template messages</a></li><li><a href="#examples">Template examples</a></li><li><a href="#advanced">Advanced templates</a></li><li><a href="#meta">Meta references</a></li></ul>
         <p class="nav-label">Operations</p>
-        <ul class="nav-list"><li><a href="#responses">Responses</a></li><li><a href="#idempotency">Idempotency</a></li><li><a href="#status">Message status</a></li><li><a href="#webhooks">Chatbox &amp; webhooks</a></li><li><a href="#errors">Errors</a></li><li><a href="#security">Security checklist</a></li><li><a href="#meta">Meta references</a></li></ul>
+        <ul class="nav-list"><li><a href="#responses">Responses</a></li><li><a href="#status">Message status</a></li><li><a href="#webhooks">Chatbox &amp; webhooks</a></li><li><a href="#errors">Errors</a></li><li><a href="#security">Security checklist</a></li></ul>
       </nav>
       <div class="sidebar-card"><strong>Helixcer Messaging API</strong>Available now: WhatsApp template sends that appear beside agent messages, inbound replies, and delivery updates.</div>
     </aside>
@@ -91,13 +93,13 @@
           <div class="quick-card"><small>Base URL</small><code>api.chat.helixcer.com</code></div>
           <div class="quick-card"><small>Authentication</small><code>Bearer hxc_live_…</code></div>
           <div class="quick-card"><small>Format</small><code>application/json</code></div>
-          <div class="quick-card"><small>Retry safety</small><code>Idempotency-Key</code></div>
+          <div class="quick-card"><small>Available channel</small><code>WhatsApp</code></div>
         </div>
       </section>
       <div class="notice" role="note"><span class="notice-mark" aria-hidden="true">!</span><p><strong>Available now: WhatsApp template messages.</strong> Telegram and Instagram external-send endpoints are not enabled yet. Live WhatsApp delivery requires a valid Meta access token and an approved template whose name, language, components, and parameters match the request.</p></div>
 
       <section id="quickstart">
-        <p class="eyebrow">Quickstart · WhatsApp</p><h2>Send a template from your server</h2>
+        <p class="eyebrow">Quickstart</p><h2>Send a template from your server</h2>
         <p class="intro">Choose a saved WhatsApp channel, provide the recipient and approved Meta template, then retain the returned Helixcer message ID.</p>
         <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/template-messages</code></div>
         <div class="code-card">
@@ -106,7 +108,6 @@
   --url https://api.chat.helixcer.com/api/v1/whatsapp/template-messages \
   --header 'Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY' \
   --header 'Content-Type: application/json' \
-  --header 'Idempotency-Key: welcome-customer-4082-v1' \
   --data '{
     "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
     "to": "919999999999",
@@ -130,7 +131,6 @@
         <div class="two-col">
           <div><p class="eyebrow">Authentication</p><h2>Your key stays on your server</h2><p class="intro">Create a workspace key in Helixcer and include it as a Bearer token. Sending requires <code class="plain">whatsapp:template:send</code>; reading status requires <code class="plain">messages:read</code>. The key applies to the workspace's WhatsApp connections, and each send selects one with <code class="plain">channelId</code>.</p><div class="callout"><strong>A Helixcer key is not a Meta token.</strong> External applications never receive the Meta token, WABA ID, or phone-number ID saved on the channel.</div></div>
           <div class="code-card"><div class="code-head"><span>Required headers</span><button class="copy" type="button">Copy</button></div><pre><code>Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
-Idempotency-Key: order-1001-confirmation-v1
 Content-Type: application/json</code></pre></div>
         </div>
         <p style="margin-top:20px">An API key is shown once. Store it in a server-side secret manager or environment variable. Never place it in browser JavaScript, a mobile app, logs, screenshots, support messages, or a source repository. Revoke and replace it immediately if it may have leaked.</p>
@@ -139,6 +139,7 @@ Content-Type: application/json</code></pre></div>
       <section id="send">
         <p class="eyebrow">Request contract</p><h2>Send a template message</h2>
         <p class="intro">Helixcer validates the outer envelope, finds the channel's encrypted credentials, records the outbound message, and submits a Meta-compatible template payload.</p>
+        <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/template-messages</code></div>
         <div class="code-card" style="margin:22px 0"><div class="code-head"><span>JSON request body</span><button class="copy" type="button">Copy</button></div><pre><code>{
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
   "to": "919999999999",
@@ -164,7 +165,7 @@ Content-Type: application/json</code></pre></div>
           <tbody>
             <tr><td><code>channelId</code></td><td class="yes">Yes</td><td>Helixcer ID of the saved WhatsApp channel that sends the message.</td></tr>
             <tr><td><code>to</code></td><td class="yes">Yes</td><td>Recipient's WhatsApp number in international digits-only format, for example <code>919999999999</code>.</td></tr>
-            <tr><td><code>contact.displayName</code></td><td>No</td><td>Name used when Helixcer creates a previously unseen contact. Existing names are not overwritten automatically.</td></tr>
+            <tr><td><code>contact.displayName</code></td><td>No</td><td>Name used to save or update to the contact list</td></tr>
             <tr><td><code>clientReference</code></td><td>No</td><td>Your order, ticket, campaign, or transaction ID. It is stored with and returned on the message.</td></tr>
             <tr><td><code>previewText</code></td><td class="recommended">Recommended</td><td>Readable chatbox summary. It helps agents understand variable or media templates and does not alter the WhatsApp payload.</td></tr>
             <tr><td><code>template</code></td><td class="yes">Yes</td><td>Meta-native template object. <code>name</code> and <code>language.code</code> are required; add <code>components</code> when expected.</td></tr>
@@ -333,7 +334,7 @@ Content-Type: application/json</code></pre></div>
     "coupon_code": "SAVE20"
   }]
 }]</code></pre></div>
-              <p style="margin-top:14px">Authentication templates can include an OTP, copy-code button, and/or autofill or zero-tap URL. Pass exactly what Meta approved. Never place an OTP in an idempotency key, reference, or log.</p>
+              <p style="margin-top:14px">Authentication templates can include an OTP, copy-code button, and/or autofill or zero-tap URL. Pass exactly what Meta approved. Never place an OTP in a client reference or log.</p>
             </div>
           </details>
         </div>
@@ -365,7 +366,7 @@ Content-Type: application/json</code></pre></div>
       </section>
       <section id="responses">
         <p class="eyebrow">Accepted response</p><h2>Every valid send is asynchronous</h2>
-        <p class="intro">Helixcer first records the message and queues provider delivery. New sends and idempotent replays therefore return <code class="plain">202 Accepted</code>. The first status is normally <code class="plain">pending</code>; Meta submission happens just after the response.</p>
+        <p class="intro">Helixcer first records the message and queues provider delivery. Accepted sends therefore return <code class="plain">202 Accepted</code>. The first status is normally <code class="plain">pending</code>; Meta submission happens just after the response.</p>
         <div class="response-grid">
           <article class="response queued"><span class="response-code">202 Accepted</span><h3>Stored and queued</h3><p>The message exists in the inbox and provider delivery is running asynchronously.</p></article>
           <article class="response created"><span class="response-code">GET 200</span><h3>Current state</h3><p>The status route returns the latest stored result using the same flat shape.</p></article>
@@ -385,24 +386,6 @@ Content-Type: application/json</code></pre></div>
   "statusUrl": "https://api.chat.helixcer.com/api/v1/messages/594798db-1c00-481f-adab-137d1c80b2d8",
   "requestId": "96fe6806-a769-451e-918a-034b33d06dc1"
 }</code></pre></div>
-        <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p>The response includes <code>Idempotent-Replayed: false</code> for a newly created operation and <code>Idempotent-Replayed: true</code> when the same key and body replay its existing message. <code>X-Request-Id</code> matches the body <code>requestId</code>.</p></div>
-      </section>
-
-      <section id="idempotency">
-        <div class="two-col">
-          <div><p class="eyebrow">Safe retries</p><h2>One operation, one key</h2><p class="intro">A timeout can occur after Helixcer records a message. The required <code class="plain">Idempotency-Key</code> prevents a network retry from sending it twice.</p>
-            <ul class="checklist">
-              <li>Use 8–128 safe ASCII characters: letters, numbers, period, underscore, colon, or hyphen.</li>
-              <li>Generate one unique key per logical send operation.</li>
-              <li>Retry the identical JSON body with the same key after a timeout, <code>429</code>, or retryable <code>5xx</code>.</li>
-              <li>Same key plus same body returns the existing message with <code>Idempotent-Replayed: true</code>.</li>
-              <li>Same key plus a different body returns <code>409 idempotency_conflict</code>.</li>
-              <li>Use a new key only when you intentionally want another message.</li>
-            </ul>
-            <p class="muted" style="margin-top:14px">Idempotency records are retained for seven days. Do not intentionally reuse an old key after that period.</p>
-          </div>
-          <article class="card"><h3>Good keys</h3><p><code class="plain">order-1001-confirmation-v1</code></p><p><code class="plain">38aa7b1a-8468-4f26-a473-c627e720704e</code></p><h3>Not the same as</h3><p class="muted"><code class="plain">clientReference</code> is stored and returned as business metadata. It does not protect against duplicate sends.</p></article>
-        </div>
       </section>
 
       <section id="status">
@@ -456,13 +439,13 @@ Content-Type: application/json</code></pre></div>
         <div class="table-wrap"><table>
           <thead><tr><th>Status</th><th>Meaning</th><th>Action</th></tr></thead>
           <tbody>
-            <tr><td><code>400</code></td><td>Malformed JSON, missing/unknown field, invalid parameter, or invalid idempotency key.</td><td>Correct the request; do not retry unchanged.</td></tr>
+            <tr><td><code>400</code></td><td>Malformed JSON, missing or unknown field, or invalid parameter.</td><td>Correct the request; do not retry unchanged.</td></tr>
             <tr><td><code>401</code></td><td>Missing, invalid, expired, or revoked API key.</td><td>Replace the key and ensure it is not logged.</td></tr>
             <tr><td><code>403</code></td><td>Browser-origin request or key lacks the required scope.</td><td>Send server-to-server; check key permissions.</td></tr>
             <tr><td><code>404</code></td><td>Channel, message, or API route was not found for this key.</td><td>Check the ID and confirm the channel belongs to the key's workspace.</td></tr>
-            <tr><td><code>409</code></td><td>Channel is not ready, or an idempotency key was reused with a different body.</td><td>Read <code>error.code</code>; fix channel setup or use the original request.</td></tr>
-            <tr><td><code>429</code></td><td>Rate limit exceeded.</td><td>Wait for <code>Retry-After</code>; retry with the same idempotency key.</td></tr>
-            <tr><td><code>5xx</code></td><td>Temporary Helixcer, rate-limiter, or upstream failure.</td><td>Back off and retry with the same key.</td></tr>
+            <tr><td><code>409</code></td><td>The selected channel is not ready to send.</td><td>Read <code>error.code</code> and fix the channel setup.</td></tr>
+            <tr><td><code>429</code></td><td>Rate limit exceeded.</td><td>Wait for <code>Retry-After</code> before trying again.</td></tr>
+            <tr><td><code>5xx</code></td><td>Temporary Helixcer, rate-limiter, or upstream failure.</td><td>Wait, then retry with exponential backoff.</td></tr>
           </tbody>
         </table></div>
       </section>
@@ -474,11 +457,10 @@ Content-Type: application/json</code></pre></div>
           <li>The template name, locale, components, indexes, and parameters exactly match Meta's approved template.</li>
           <li>Recipient numbers use international digits-only format.</li>
           <li>The API key is stored only on your server and rotated periodically.</li>
-          <li>Every send uses a stable, unique <code>Idempotency-Key</code>.</li>
           <li>Your application treats <code>202</code> as recorded and queued, not delivered.</li>
-          <li>Retries use exponential backoff and retain the original idempotency key.</li>
+          <li>Retries use exponential backoff.</li>
           <li>Logs exclude keys, OTPs, sensitive message content, and unnecessary personal data.</li>
-          <li>Status processing is idempotent and can reconcile through the GET endpoint.</li>
+          <li>Status processing safely handles duplicate provider events and can reconcile through the GET endpoint.</li>
         </ul></div>
       </section>
       <section id="meta">
