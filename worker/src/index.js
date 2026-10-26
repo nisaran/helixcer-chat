@@ -666,8 +666,8 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   const identity = await ensureWhatsAppConversation(env, principal.workspaceId, channel, input.to, input.contact?.displayName || '', now);
   const messageId = crypto.randomUUID();
   const externalRequestId = crypto.randomUUID();
-  const templateLanguage = input.template.language.code;
-  const preview = input.previewText || `Template: ${input.template.name} (${templateLanguage})`;
+  const presentation = await externalTemplateInboxPresentation(env, channel, input.template, input.previewText);
+  const preview = presentation.text;
   const encryptedPayload = await encryptOutboundPayload({ template: input.template }, env.CHANNEL_CREDENTIALS_KEY,
     principal.workspaceId, messageId);
   const expiresAt = new Date(Date.now() + EXTERNAL_API_IDEMPOTENCY_DAYS * 86400000).toISOString();
@@ -683,8 +683,9 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
     ] : []),
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
         status,timestamp,payload_json,workspace_id)
-      VALUES (?1,?2,?3,?4,'outbound','template',?5,'pending',?6,'{}',?7)`)
-      .bind(messageId, identity.conversationId, identity.contactId, channel.channelId, preview, now, principal.workspaceId),
+      VALUES (?1,?2,?3,?4,'outbound','template',?5,'pending',?6,?7,?8)`)
+      .bind(messageId, identity.conversationId, identity.contactId, channel.channelId, preview, now,
+        JSON.stringify(presentation.storedPayload), principal.workspaceId),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, principal.workspaceId, encryptedPayload, now),
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
@@ -712,10 +713,12 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   await auditApiKey(env, principal, 'send_template', 'message', messageId, {
     channelId: channel.channelId, templateName: input.template.name
   });
+  const realtimeAttachment = messageAttachmentView('template', presentation.storedPayload, messageId);
   const realtimeMessage = {
     messageId, conversationId: identity.conversationId, channelId: channel.channelId,
     direction: 'outbound', messageType: 'template', text: preview, status: 'pending', timestamp: now,
-    channelMessageId: '', error: '', reply: null
+    channelMessageId: '', error: '', reply: null,
+    ...(realtimeAttachment ? { attachment: realtimeAttachment } : {})
   };
   const realtimeConversation = await getConversationItem(env, principal.workspaceId, identity.conversationId);
   await broadcast(env, principal.workspaceId, {
@@ -2669,6 +2672,34 @@ async function listWhatsAppChannelTemplates(env, channel, { approvedOnly = true,
   return includeMetadata ? { items, truncated: moreAvailable, limit: maximumItems } : items;
 }
 
+async function findWhatsAppChannelTemplate(env, channel, name, languageCode) {
+  const wabaId = String(channel.config?.wabaId || '').trim();
+  if (!/^\d{5,40}$/.test(wabaId)) throw httpError(409, 'The WhatsApp Business Account ID is not configured.');
+  const credentials = await readChannelCredentials(env, channel);
+  if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(metaApiVersion(channel.config?.apiVersion))}/${encodeURIComponent(wabaId)}/message_templates`);
+  endpoint.searchParams.set('fields', 'id,name,language,status,category,components');
+  endpoint.searchParams.set('name', name);
+  endpoint.searchParams.set('limit', '100');
+  let response;
+  try {
+    response = await fetch(endpoint, { headers: { Authorization: `Bearer ${credentials.accessToken}` } });
+  } catch {
+    throw httpError(502, 'Meta could not load the WhatsApp template.');
+  }
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) {
+    const detail = redactProviderSecret(providerError(data, response.status), credentials.accessToken);
+    throw httpError(422, `Meta could not load the WhatsApp template: ${detail}`);
+  }
+  if (!Array.isArray(data.data)) throw httpError(502, 'Meta returned an invalid WhatsApp template response.');
+  for (const value of data.data) {
+    const template = sanitizeWhatsAppTemplateDefinition(value);
+    if (template?.status === 'APPROVED' && template.name === name && template.language.code === languageCode) return template;
+  }
+  return null;
+}
+
 export function sanitizeWhatsAppTemplateDefinition(value) {
   if (!isPlainObject(value)) return null;
   const name = providerText(value.name, 512);
@@ -2828,6 +2859,118 @@ function redactProviderSecret(message, secret) {
   const value = String(message || '');
   const needle = String(secret || '');
   return needle ? value.split(needle).join('[redacted]') : value;
+}
+
+async function externalTemplateInboxPresentation(env, channel, template, explicitPreview) {
+  const attachment = templateMediaAttachment(template, null);
+  let definition = null;
+  if (!explicitPreview && channel.config?.wabaId) {
+    try {
+      definition = await findWhatsAppChannelTemplate(env, channel, template.name, template.language?.code);
+    } catch {
+      // Template discovery only improves the local inbox presentation. A
+      // catalogue permission/outage must not prevent a valid provider send.
+    }
+  }
+  const rendered = definition ? renderWhatsAppTemplatePreview(definition, template) : '';
+  const languageCode = String(template.language?.code || '');
+  const text = explicitPreview || rendered || `Template: ${template.name} (${languageCode})`;
+  const templateView = {
+    name: template.name,
+    language: template.language,
+    ...(definition?.templateId ? { templateId: definition.templateId } : {}),
+    ...(definition?.category ? { category: definition.category } : {})
+  };
+  return {
+    text: providerMultilineText(text, MAX_TEXT_LENGTH),
+    storedPayload: { template: templateView, ...(attachment ? { attachment } : {}) }
+  };
+}
+
+export function renderWhatsAppTemplatePreview(definition, template) {
+  if (!isPlainObject(definition) || !isPlainObject(template)) return '';
+  const requestComponents = Array.isArray(template.components) ? template.components : [];
+  const componentParameters = (type, buttonIndex = null) => {
+    const match = requestComponents.find(component => {
+      if (!isPlainObject(component) || String(component.type || '').toLowerCase() !== type) return false;
+      return type !== 'button' || Number(component.index) === Number(buttonIndex);
+    });
+    return Array.isArray(match?.parameters) ? match.parameters : [];
+  };
+  const parts = [];
+  const buttonLabels = [];
+  for (const component of Array.isArray(definition.components) ? definition.components : []) {
+    if (!isPlainObject(component)) continue;
+    const type = String(component.type || '').toLowerCase();
+    if (type === 'header') {
+      const parameters = componentParameters('header');
+      if (String(component.format || '').toLowerCase() === 'location') {
+        const location = parameters.find(parameter => String(parameter?.type || '').toLowerCase() === 'location')?.location;
+        const locationText = whatsappTemplateLocationPreview(location);
+        if (locationText) parts.push(`Location: ${locationText}`);
+      } else if (component.text) {
+        parts.push(replaceWhatsAppTemplatePreviewVariables(component.text, parameters));
+      }
+    } else if (type === 'body' && component.text) {
+      parts.push(replaceWhatsAppTemplatePreviewVariables(component.text, componentParameters('body')));
+    } else if (type === 'footer' && component.text) {
+      parts.push(String(component.text));
+    } else if (type === 'buttons') {
+      for (const button of Array.isArray(component.buttons) ? component.buttons : []) {
+        const label = providerText(button?.text || button?.type, 100);
+        if (label) buttonLabels.push(label);
+      }
+    }
+  }
+  if (buttonLabels.length) parts.push(`Actions: ${buttonLabels.join(', ')}`);
+  return providerMultilineText(parts.filter(Boolean).join('\n'), MAX_TEXT_LENGTH);
+}
+
+function replaceWhatsAppTemplatePreviewVariables(text, parameters) {
+  const items = Array.isArray(parameters) ? parameters : [];
+  const values = items.map(whatsappTemplateParameterPreview);
+  const named = new Map();
+  for (let index = 0; index < items.length; index++) {
+    const name = providerIdentifier(items[index]?.parameter_name, 100);
+    if (name) named.set(name, values[index]);
+  }
+  let fallbackIndex = 0;
+  return String(text || '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, rawKey) => {
+    const key = String(rawKey || '').trim();
+    let value = named.get(key);
+    if (value === undefined && /^\d+$/.test(key)) value = values[Number(key) - 1];
+    if (value === undefined) value = values[fallbackIndex++];
+    return value === undefined || value === '' ? match : value;
+  });
+}
+
+function whatsappTemplateParameterPreview(parameter) {
+  if (!isPlainObject(parameter)) return '';
+  const type = String(parameter.type || '').toLowerCase();
+  if (type === 'text') return providerMultilineText(parameter.text, 1024);
+  if (type === 'currency' && isPlainObject(parameter.currency)) {
+    const fallback = providerText(parameter.currency.fallback_value, 256);
+    if (fallback) return fallback;
+    const code = providerText(parameter.currency.code, 12);
+    const amount = Number(parameter.currency.amount_1000);
+    return [code, Number.isFinite(amount) ? String(amount / 1000) : ''].filter(Boolean).join(' ');
+  }
+  if (type === 'date_time' && isPlainObject(parameter.date_time)) {
+    return providerText(parameter.date_time.fallback_value, 256);
+  }
+  if (type === 'coupon_code') return providerText(parameter.coupon_code, 256);
+  if (type === 'payload') return providerText(parameter.payload, 256);
+  return '';
+}
+
+function whatsappTemplateLocationPreview(location) {
+  if (!isPlainObject(location)) return '';
+  const name = providerText(location.name, 256);
+  const address = providerText(location.address, 512);
+  if (name || address) return [name, address].filter(Boolean).join(' · ');
+  const latitude = Number(location.latitude);
+  const longitude = Number(location.longitude);
+  return Number.isFinite(latitude) && Number.isFinite(longitude) ? `${latitude}, ${longitude}` : '';
 }
 
 async function createConversationTemplateMessage(env, workspaceId, conversationId, payload, principal) {

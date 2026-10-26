@@ -753,6 +753,9 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .workspace-form-section legend { color: var(--ink); padding: 0; font-size: 12px; font-weight: 760; }
 .workspace-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 13px; }
 .workspace-form-grid .form-span { grid-column: 1 / -1; }
+.workspace-id-row { display: flex; min-width: 0; align-items: stretch; gap: 8px; }
+.workspace-id-row .text-field { min-width: 0; flex: 1 1 auto; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+.workspace-id-row .secondary-button { flex: 0 0 auto; }
 .workspace-textarea { min-height: 88px; resize: vertical; font: inherit; line-height: 1.5; }
 .field-optional { display: inline; color: var(--muted); margin-left: 3px; font-size: 9px; font-weight: 600; }
 .text-uppercase { text-transform: uppercase; }
@@ -1052,6 +1055,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .workspace-profile-form { padding: 0 15px 17px; }
   .workspace-form-grid { grid-template-columns: 1fr; }
   .workspace-form-grid .form-span { grid-column: auto; }
+  .workspace-id-row { align-items: stretch; }
   .workspace-form-actions { align-items: stretch; flex-direction: column; }
   .workspace-form-actions .primary-button { width: 100%; }
   .form-grid { grid-template-columns: 1fr; }

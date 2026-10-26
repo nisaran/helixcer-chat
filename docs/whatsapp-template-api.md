@@ -81,7 +81,7 @@ Content-Type: application/json
 | `to` | Yes | Recipient's WhatsApp number in international format, using digits only. Example: `919999999999`. |
 | `contact.displayName` | No | Name used to save or update to the contact list |
 | `clientReference` | No | Your order, ticket, campaign, or transaction identifier. It is stored with and returned on the message for reconciliation. |
-| `previewText` | Recommended | Human-readable chatbox summary. Useful when the approved template contains variables or media. This does not change the WhatsApp payload. |
+| `previewText` | No | Optional inbox-text override. When omitted, Helixcer renders the approved Meta template with the supplied variables, media, footer, and action labels. This does not change the WhatsApp payload. |
 | `template` | Yes | Meta-native template object. `name` and `language.code` are required; `components` is included when the approved template expects parameters. |
 
 `template.name`, language, component order, button indexes, and parameter types must match the template approved for the selected WhatsApp Business Account.

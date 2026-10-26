@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-12";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-13";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -974,8 +974,9 @@
     const admin = canAdmin();
     const editable = admin && state.workspaceProfileLoaded;
     $("workspaceProfileForm").querySelectorAll("input, textarea").forEach((field) => {
-      field.readOnly = busy || !editable;
-      field.setAttribute("aria-readonly", String(busy || !editable));
+      const readOnly = field.hasAttribute("data-workspace-immutable") || busy || !editable;
+      field.readOnly = readOnly;
+      field.setAttribute("aria-readonly", String(readOnly));
     });
     $("workspaceSaveButton").disabled = busy || !editable;
     $("workspaceReadonlyNote").hidden = admin;
@@ -984,6 +985,7 @@
   function renderWorkspaceProfile() {
     const profile = state.workspaceProfile || normalizeWorkspaceProfile(state.workspace);
     const values = {
+      workspaceId: profile.workspaceId,
       workspaceDisplayName: profile.displayName,
       workspaceRegisteredName: profile.registeredName,
       workspaceAddressLine1: profile.addressLine1,
@@ -5390,6 +5392,7 @@
           "close-api-key": closeApiKeyDialog,
           "copy-api-base": () => copyDeveloperApiValue($("developerApiBase").textContent, "API base URL copied"),
           "copy-api-key": () => copyDeveloperApiValue($("apiKeyOutput").value, "API key copied"),
+          "copy-workspace-id": () => copyDeveloperApiValue($("workspaceId").value, "Workspace ID copied"),
         };
         actions[actionButton.dataset.action]?.();
       }

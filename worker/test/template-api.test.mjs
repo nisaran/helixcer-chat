@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
-import { encryptChannelCredential, handleRequest } from '../src/index.js';
+import { encryptChannelCredential, handleRequest, renderWhatsAppTemplatePreview } from '../src/index.js';
 
 class TestD1Statement {
   constructor(statement, values = []) {
@@ -119,6 +119,32 @@ function postTemplate(token, idempotencyKey, body, headers = {}) {
   });
 }
 
+test('template inbox preview renders approved copy, runtime values, footer, and actions', () => {
+  const rendered = renderWhatsAppTemplatePreview({
+    components: [
+      { type: 'header', format: 'text', text: 'Invoice update for {{customer}}' },
+      { type: 'body', text: 'Invoice {{1}} costs {{2}} and is due {{3}}.' },
+      { type: 'footer', text: 'Thank you' },
+      { type: 'buttons', buttons: [{ type: 'url', text: 'View invoice' }, { type: 'quick_reply', text: 'Need help' }] }
+    ]
+  }, {
+    components: [
+      { type: 'header', parameters: [{ type: 'text', parameter_name: 'customer', text: 'Asha' }] },
+      { type: 'body', parameters: [
+        { type: 'text', text: 'INV-1001' },
+        { type: 'currency', currency: { code: 'INR', amount_1000: 1499000, fallback_value: '₹1,499.00' } },
+        { type: 'date_time', date_time: { fallback_value: '31 October 2026' } }
+      ] }
+    ]
+  });
+  assert.equal(rendered, [
+    'Invoice update for Asha',
+    'Invoice INV-1001 costs ₹1,499.00 and is due 31 October 2026.',
+    'Thank you',
+    'Actions: View invoice, Need help'
+  ].join('\n'));
+});
+
 test('public Developer API preflight and rate-limit errors use the status envelope', async () => {
   const preflight = await handleRequest(new Request('https://api.chat.helixcer.com/api/v1/whatsapp/template-messages', {
     method: 'OPTIONS', headers: { Origin: 'https://chat.helixcer.com' }
@@ -229,6 +255,83 @@ test('external template API updates a saved contact name only when displayName i
     await send(baseBody);
     assert.equal(database.prepare('SELECT display_name FROM contacts WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
     assert.equal(database.prepare('SELECT display_name FROM channel_identities WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('external template API stores and broadcasts the rendered template and media attachment', async () => {
+  const { database, env, broadcasts } = await fixture();
+  const token = `hxc_live_richview1.${'r'.repeat(43)}`;
+  await insertKey(database, token, 'key-rich-view', 'hxc_live_richview1');
+  const config = JSON.parse(database.prepare("SELECT config_json FROM channels WHERE channel_id='wa-sales'").get().config_json);
+  config.wabaId = '2053926168641345';
+  database.prepare("UPDATE channels SET config_json=? WHERE channel_id='wa-sales'").run(JSON.stringify(config));
+  const originalFetch = globalThis.fetch;
+  const providerPaths = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    providerPaths.push(url.pathname);
+    if (url.pathname.endsWith('/message_templates')) {
+      assert.equal(init.headers.Authorization, 'Bearer EAAtest-access-token-123456789');
+      assert.equal(url.searchParams.get('name'), 'invoice_ready');
+      assert.equal(url.searchParams.get('limit'), '100');
+      return new Response(JSON.stringify({ data: [{
+        id: 'meta-template-invoice', name: 'invoice_ready', language: 'en_US', status: 'APPROVED', category: 'UTILITY',
+        components: [
+          { type: 'HEADER', format: 'DOCUMENT' },
+          { type: 'BODY', text: 'Hello {{1}}, invoice {{2}} is ready.' },
+          { type: 'FOOTER', text: 'Accounts team' },
+          { type: 'BUTTONS', buttons: [{ type: 'URL', text: 'View invoice', url: 'https://billing.example/{{1}}' }] }
+        ]
+      }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.pathname.endsWith('/messages')) {
+      const sent = JSON.parse(init.body);
+      assert.equal(sent.template.name, 'invoice_ready');
+      return new Response(JSON.stringify({ messages: [{ id: 'wamid.rich-template' }] }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    throw new Error(`Unexpected provider request: ${url.pathname}`);
+  };
+  try {
+    const waits = [];
+    const response = await handleRequest(postTemplate(token, null, {
+      channelId: 'wa-sales', to: '+91 98765 43210', contact: { displayName: 'Asha' },
+      template: {
+        name: 'invoice_ready', language: { code: 'en_US' }, components: [
+          { type: 'header', parameters: [{ type: 'document', document: { link: 'https://cdn.example.com/invoice-1001.pdf' } }] },
+          { type: 'body', parameters: [{ type: 'text', text: 'Asha' }, { type: 'text', text: 'INV-1001' }] },
+          { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'INV-1001' }] }
+        ]
+      }
+    }), env, { waitUntil(promise) { waits.push(promise); } });
+    assert.equal(response.status, 202);
+    const accepted = await response.json();
+    const expectedText = 'Hello Asha, invoice INV-1001 is ready.\nAccounts team\nActions: View invoice';
+    const row = database.prepare('SELECT text,payload_json FROM messages WHERE message_id=?').get(accepted.messageId);
+    assert.equal(row.text, expectedText);
+    const stored = JSON.parse(row.payload_json);
+    assert.deepEqual(stored.template, {
+      name: 'invoice_ready', language: { code: 'en_US' }, templateId: 'meta-template-invoice', category: 'UTILITY'
+    });
+    assert.deepEqual(stored.attachment, {
+      type: 'document', filename: 'invoice-1001.pdf', mimeType: '', size: 0, caption: '',
+      externalUrl: 'https://cdn.example.com/invoice-1001.pdf'
+    });
+    const created = broadcasts.find(event => event.type === 'message.created' && event.messageId === accepted.messageId);
+    assert.equal(created.message.text, expectedText);
+    assert.deepEqual(created.message.attachment, {
+      type: 'document', filename: 'invoice-1001.pdf', mimeType: '', size: 0, caption: '',
+      available: true, external: true, url: 'https://cdn.example.com/invoice-1001.pdf'
+    });
+    assert.equal(created.conversation.lastMessage, expectedText);
+    await Promise.all(waits);
+    assert.deepEqual(providerPaths, [
+      '/v26.0/2053926168641345/message_templates', '/v26.0/103698172469545/messages'
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();

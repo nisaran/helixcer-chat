@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261026-12">
-  <script src="./assets/app.js?v=20261026-12" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261026-13">
+  <script src="./assets/app.js?v=20261026-13" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -501,6 +501,7 @@
             <fieldset class="workspace-form-section">
               <legend>Identity</legend>
               <div class="workspace-form-grid">
+                <label class="field-label form-span"><span>Workspace ID <span class="field-optional">Read only</span></span><span class="workspace-id-row"><input class="text-field workspace-id-field" id="workspaceId" type="text" readonly aria-readonly="true" data-workspace-immutable autocomplete="off"><button class="secondary-button" type="button" data-action="copy-workspace-id" aria-label="Copy workspace ID">Copy</button></span></label>
                 <label class="field-label">Workspace display name<input class="text-field" id="workspaceDisplayName" name="displayName" required maxlength="120" autocomplete="organization" placeholder="Helixcer workspace"></label>
                 <label class="field-label">Registered company name<input class="text-field" id="workspaceRegisteredName" name="registeredName" maxlength="180" autocomplete="organization" placeholder="Legal registered name"></label>
               </div>

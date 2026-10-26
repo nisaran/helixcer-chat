@@ -62,9 +62,16 @@ test("single workspace profile stores organisation, address, and GST details", (
   assert.match(html, /data-route="workspace"/);
   assert.match(html, /id="workspaceRoute" data-route-panel="workspace"/);
   assert.match(html, /Single workspace/);
-  for (const field of ["workspaceDisplayName", "workspaceRegisteredName", "workspaceAddressLine1", "workspaceAddressLine2", "workspaceCity", "workspaceState", "workspacePostalCode", "workspaceCountry", "workspaceGstin", "workspaceTaxDetails"]) {
+  for (const field of ["workspaceId", "workspaceDisplayName", "workspaceRegisteredName", "workspaceAddressLine1", "workspaceAddressLine2", "workspaceCity", "workspaceState", "workspacePostalCode", "workspaceCountry", "workspaceGstin", "workspaceTaxDetails"]) {
     assert.match(html, new RegExp(`id="${field}"`));
   }
+  assert.match(html, /id="workspaceId"[^>]*readonly[^>]*data-workspace-immutable/);
+  assert.match(html, /data-action="copy-workspace-id"/);
+  assert.match(app, /workspaceId: profile\.workspaceId/);
+  assert.match(app, /field\.hasAttribute\("data-workspace-immutable"\)/);
+  assert.match(app, /"copy-workspace-id": \(\) => copyDeveloperApiValue\(\$\("workspaceId"\)\.value/);
+  const workspacePayload = app.slice(app.indexOf("async function saveWorkspaceProfile"), app.indexOf("function showAuthChecking"));
+  assert.doesNotMatch(workspacePayload, /workspaceId\s*:/);
   assert.match(app, /getWorkspace\(\)[\s\S]*?request\("\/api\/workspace"\)/);
   assert.match(app, /updateWorkspace\(payload\)[\s\S]*?request\("\/api\/workspace", \{ method: "PATCH"/);
   assert.match(app, /loadWorkspaceProfile\(\)/);

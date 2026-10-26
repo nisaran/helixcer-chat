@@ -113,7 +113,6 @@
     "to": "919999999999",
     "contact": { "displayName": "Asha" },
     "clientReference": "customer-4082",
-    "previewText": "Welcome to Helixcer",
     "template": {
       "name": "hello_world",
       "language": { "code": "en_US" }
@@ -138,7 +137,7 @@ Content-Type: application/json</code></pre></div>
 
       <section id="send">
         <p class="eyebrow">Request contract</p><h2>Send a template message</h2>
-        <p class="intro">Helixcer validates the outer envelope, finds the channel's encrypted credentials, records the outbound message, and submits a Meta-compatible template payload.</p>
+        <p class="intro">Helixcer validates the outer envelope, finds the channel's encrypted credentials, renders the approved template for the inbox, records its text and media, and submits a Meta-compatible template payload.</p>
         <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/template-messages</code></div>
         <div class="code-card" style="margin:22px 0"><div class="code-head"><span>JSON request body</span><button class="copy" type="button">Copy</button></div><pre><code>{
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
@@ -167,7 +166,7 @@ Content-Type: application/json</code></pre></div>
             <tr><td><code>to</code></td><td class="yes">Yes</td><td>Recipient's WhatsApp number in international digits-only format, for example <code>919999999999</code>.</td></tr>
             <tr><td><code>contact.displayName</code></td><td>No</td><td>Name used to save or update to the contact list</td></tr>
             <tr><td><code>clientReference</code></td><td>No</td><td>Your order, ticket, campaign, or transaction ID. It is stored with and returned on the message.</td></tr>
-            <tr><td><code>previewText</code></td><td class="recommended">Recommended</td><td>Readable chatbox summary. It helps agents understand variable or media templates and does not alter the WhatsApp payload.</td></tr>
+            <tr><td><code>previewText</code></td><td>No</td><td>Optional inbox-text override. When omitted, Helixcer renders the approved Meta template with the supplied variables, media, footer, and action labels.</td></tr>
             <tr><td><code>template</code></td><td class="yes">Yes</td><td>Meta-native template object. <code>name</code> and <code>language.code</code> are required; add <code>components</code> when expected.</td></tr>
           </tbody>
         </table></div>
