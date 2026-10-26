@@ -1,7 +1,6 @@
 import {
   authenticateRequest,
   createInvitation,
-  DEFAULT_WORKSPACE_ID,
   finishGoogleOAuthResponse,
   listTeam,
   logout,
@@ -32,6 +31,7 @@ const WHATSAPP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 const EXTERNAL_API_OPERATION = 'whatsapp.template.send';
 const EXTERNAL_API_IDEMPOTENCY_DAYS = 7;
+const LEGACY_WORKSPACE_ID = 'ws_default';
 const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram']);
 const TEMPLATE_BUTTON_TYPES = new Set(['quick_reply', 'url', 'phone_number', 'copy_code', 'catalog', 'mpm', 'flow', 'otp']);
 const CONNECTOR_DEFINITIONS = {
@@ -245,6 +245,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (mutation && request.headers.get('Origin') && !cors['Access-Control-Allow-Origin']) {
       return json({ ok: false, error: 'Origin not allowed.' }, 403);
     }
+    if (url.pathname === '/api/realtime' && request.headers.get('Origin') && !cors['Access-Control-Allow-Origin']) {
+      return json({ ok: false, error: 'Origin not allowed.' }, 403);
+    }
     const principal = await authenticateRequest(request, env);
     if (!principal) return withCors(json({ ok: false, error: 'Unauthorized.' }, 401), cors);
     if (mutation && principal.authType === 'session' && !cors['Access-Control-Allow-Origin']) {
@@ -353,6 +356,13 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       await broadcast(env, workspaceId, { type: 'conversation.updated', conversationId: id, conversation: item });
       return withCors(json({ ok: true, item }), cors);
     }
+    if (conversationMatch && request.method === 'DELETE') {
+      requireRole(principal, 'admin');
+      const id = decodeURIComponent(conversationMatch[1]);
+      const result = await deleteConversation(env, workspaceId, id, principal);
+      await broadcast(env, workspaceId, { type: 'conversation.deleted', conversationId: id });
+      return withCors(json(result), cors);
+    }
     const messagesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/messages$/);
     if (messagesMatch && request.method === 'GET') {
       const id = decodeURIComponent(messagesMatch[1]);
@@ -425,6 +435,13 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       await broadcast(env, workspaceId, { type: 'contact.updated', contactId: id });
       return withCors(json({ ok: true, item }), cors);
     }
+    if (contactMatch && request.method === 'DELETE') {
+      requireRole(principal, 'admin');
+      const id = decodeURIComponent(contactMatch[1]);
+      const result = await deleteContact(env, workspaceId, id, principal);
+      await broadcast(env, workspaceId, { type: 'contact.deleted', contactId: id, conversationIds: result.conversationIds });
+      return withCors(json(result), cors);
+    }
     if (url.pathname === '/api/demo/seed' && request.method === 'POST') {
       requireRole(principal, 'admin');
       const result = await seedDemo(env, workspaceId, principal);
@@ -442,7 +459,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     const apiKeyMatch = url.pathname.match(/^\/api\/developer\/api-keys\/([^/]+)$/);
     if (apiKeyMatch && request.method === 'DELETE') {
       requireRole(principal, 'admin');
-      return withCors(json(await revokeApiKey(env, workspaceId, principal, decodeURIComponent(apiKeyMatch[1]))), cors);
+      return withCors(json(await deleteApiKey(env, workspaceId, principal, decodeURIComponent(apiKeyMatch[1]))), cors);
     }
     if (url.pathname === '/api/team' && request.method === 'GET') {
       return withCors(json(await listTeam(env, principal)), cors);
@@ -457,6 +474,14 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       const result = await updateMembership(env, principal, decodeURIComponent(memberMatch[1]), await readJson(request));
       await broadcast(env, workspaceId, { type: 'team.updated' });
       await disconnectRealtime(env, workspaceId, { membershipId: decodeURIComponent(memberMatch[1]) });
+      return withCors(json(result), cors);
+    }
+    if (memberMatch && request.method === 'DELETE') {
+      requireRole(principal, 'admin');
+      const membershipId = decodeURIComponent(memberMatch[1]);
+      const result = await deleteTeamMember(env, workspaceId, membershipId, principal);
+      await broadcast(env, workspaceId, { type: 'team.updated' });
+      await disconnectRealtime(env, workspaceId, { membershipId });
       return withCors(json(result), cors);
     }
     const invitationMatch = url.pathname.match(/^\/api\/team\/invitations\/([^/]+)$/);
@@ -514,14 +539,18 @@ async function createApiKey(env, workspaceId, principal, payload) {
   };
 }
 
-async function revokeApiKey(env, workspaceId, principal, apiKeyId) {
+async function deleteApiKey(env, workspaceId, principal, apiKeyId) {
   const id = cleanId(apiKeyId, 'API key ID');
-  const now = new Date().toISOString();
-  const result = await env.DB.prepare(`UPDATE api_keys SET status='revoked',revoked_at=?3,updated_at=?3
-    WHERE api_key_id=?1 AND workspace_id=?2 AND status='active'`).bind(id, workspaceId, now).run();
-  if (!result.meta?.changes) throw httpError(404, 'Active API key not found.');
-  await audit(env, principal, 'revoke', 'api_key', id, {});
-  return { ok: true, apiKeyId: id, status: 'revoked', revokedAt: now };
+  const existing = await env.DB.prepare(`SELECT name,key_prefix,status FROM api_keys
+    WHERE api_key_id=?1 AND workspace_id=?2`).bind(id, workspaceId).first();
+  if (!existing) throw httpError(404, 'API key not found.');
+  const result = await env.DB.prepare('DELETE FROM api_keys WHERE api_key_id=?1 AND workspace_id=?2')
+    .bind(id, workspaceId).run();
+  if (!result.meta?.changes) throw httpError(404, 'API key not found.');
+  await audit(env, principal, 'delete', 'api_key', id, {
+    name: existing.name, keyPrefix: existing.key_prefix, previousStatus: existing.status
+  });
+  return { ok: true, apiKeyId: id, deleted: true };
 }
 
 function publicApiKeyView(row) {
@@ -537,6 +566,52 @@ function publicApiKeyView(row) {
     updatedAt: row.updated_at,
     revokedAt: row.revoked_at || ''
   };
+}
+
+async function deleteTeamMember(env, workspaceId, membershipId, principal) {
+  const id = cleanId(membershipId, 'Membership ID');
+  const target = await env.DB.prepare(`SELECT m.membership_id,m.user_id,m.role,m.status,u.email,u.display_name
+    FROM memberships m JOIN users u ON u.user_id=m.user_id
+    WHERE m.membership_id=?1 AND m.workspace_id=?2`).bind(id, workspaceId).first();
+  if (!target) throw httpError(404, 'Team member not found.');
+  if (principal.membership?.role === 'admin' && target.role !== 'agent') {
+    throw httpError(403, 'Administrators can only remove agents.');
+  }
+  if (principal.membership?.membershipId && principal.membership.membershipId === id) {
+    throw httpError(409, 'You cannot remove your own workspace membership.');
+  }
+  if (target.role === 'owner' && target.status === 'active') {
+    const owners = await env.DB.prepare(`SELECT COUNT(*) AS count FROM memberships
+      WHERE workspace_id=?1 AND role='owner' AND status='active'`).bind(workspaceId).first();
+    if (Number(owners?.count || 0) <= 1) throw httpError(409, 'The workspace must retain at least one active owner.');
+  }
+  const now = new Date().toISOString();
+  const deleted = await env.DB.batch([
+    env.DB.prepare(`DELETE FROM memberships WHERE membership_id=?1 AND workspace_id=?2 AND (
+      role!='owner' OR status!='active' OR
+      (SELECT COUNT(*) FROM memberships WHERE workspace_id=?2 AND role='owner' AND status='active')>1
+    )`).bind(id, workspaceId),
+    env.DB.prepare(`UPDATE conversations SET assigned_to='',updated_at=?3
+      WHERE workspace_id=?1 AND lower(assigned_to)=lower(?2)
+        AND NOT EXISTS (SELECT 1 FROM memberships WHERE membership_id=?4 AND workspace_id=?1)`)
+      .bind(workspaceId, target.email, now, id),
+    env.DB.prepare(`UPDATE sessions SET revoked_at=?3
+      WHERE user_id=?1 AND workspace_id=?2 AND revoked_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM memberships WHERE membership_id=?4 AND workspace_id=?2)`)
+      .bind(target.user_id, workspaceId, now, id),
+    env.DB.prepare(`DELETE FROM users WHERE user_id=?1
+      AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=?1)
+      AND NOT EXISTS (SELECT 1 FROM memberships WHERE membership_id=?2 AND workspace_id=?3)`)
+      .bind(target.user_id, id, workspaceId)
+  ]);
+  if (!deleted[0]?.meta?.changes) throw httpError(409, 'The workspace must retain at least one active owner.');
+  await audit(env, principal, 'delete', 'membership', id, {
+    targetEmail: target.email,
+    targetDisplayName: target.display_name,
+    previousRole: target.role,
+    previousStatus: target.status
+  });
+  return { ok: true, membershipId: id, userId: target.user_id, deleted: true };
 }
 
 async function handleExternalApi(request, env, ctx, url) {
@@ -1775,21 +1850,48 @@ async function saveLegacyChannel(env, workspaceId, payload, principal, existing,
 
 async function deleteChannel(env, workspaceId, channelId, principal) {
   const id = cleanId(channelId, 'Channel ID');
-  const channel = await env.DB.prepare('SELECT name FROM channels WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId).first();
+  const channel = await env.DB.prepare(`SELECT name,connector_type,provider_type FROM channels
+    WHERE channel_id=?1 AND workspace_id=?2`).bind(id, workspaceId).first();
   if (!channel) throw httpError(404, 'Channel not found.');
-  const linked = await env.DB.prepare(`SELECT
-      (SELECT COUNT(*) FROM channel_identities WHERE channel_id=?1 AND workspace_id=?2) +
-      (SELECT COUNT(*) FROM conversations WHERE channel_id=?1 AND workspace_id=?2) +
-      (SELECT COUNT(*) FROM messages WHERE channel_id=?1 AND workspace_id=?2) AS count`)
+  const counts = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM channel_identities WHERE channel_id=?1 AND workspace_id=?2) AS identities,
+      (SELECT COUNT(*) FROM conversations WHERE channel_id=?1 AND workspace_id=?2) AS conversations,
+      (SELECT COUNT(*) FROM messages WHERE channel_id=?1 AND workspace_id=?2) AS messages`)
     .bind(id, workspaceId).first();
-  if (Number(linked?.count || 0) > 0) throw httpError(409, 'Disable this channel instead; it already has conversation history.');
   await env.DB.batch([
+    env.DB.prepare(`DELETE FROM external_api_requests WHERE workspace_id=?2 AND message_id IN
+      (SELECT message_id FROM messages WHERE channel_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare(`DELETE FROM outbox WHERE workspace_id=?2 AND message_id IN
+      (SELECT message_id FROM messages WHERE channel_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare(`DELETE FROM outbound_payloads WHERE workspace_id=?2 AND message_id IN
+      (SELECT message_id FROM messages WHERE channel_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM messages WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM conversations WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
+    env.DB.prepare(`DELETE FROM contacts WHERE workspace_id=?2
+      AND contact_id IN (SELECT contact_id FROM channel_identities WHERE channel_id=?1 AND workspace_id=?2)
+      AND NOT EXISTS (SELECT 1 FROM channel_identities other
+        WHERE other.workspace_id=?2 AND other.contact_id=contacts.contact_id AND other.channel_id<>?1)
+      AND NOT EXISTS (SELECT 1 FROM conversations other_conversation
+        WHERE other_conversation.workspace_id=?2 AND other_conversation.contact_id=contacts.contact_id)`)
+      .bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM channel_identities WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM channel_credentials WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM webhook_events WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM channels WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId)
   ]);
-  await audit(env, principal, 'delete', 'channel', id, { name: channel.name });
-  return { ok: true, channelId: id };
+  await audit(env, principal, 'delete', 'channel', id, {
+    name: channel.name,
+    connectorType: logicalConnectorType(channel),
+    localOnly: true,
+    deletedIdentities: Number(counts?.identities || 0),
+    deletedConversations: Number(counts?.conversations || 0),
+    deletedMessages: Number(counts?.messages || 0)
+  });
+  return {
+    ok: true, channelId: id, deleted: true, localOnly: true,
+    deletedConversations: Number(counts?.conversations || 0),
+    deletedMessages: Number(counts?.messages || 0)
+  };
 }
 
 function logicalConnectorType(row) {
@@ -2316,6 +2418,43 @@ async function updateContact(env, workspaceId, contactId, payload, principal) {
   return getContactDetail(env, workspaceId, id);
 }
 
+async function deleteContact(env, workspaceId, contactId, principal) {
+  const id = cleanId(contactId, 'Contact ID');
+  const existing = await env.DB.prepare(`SELECT contact_id,display_name,company,
+      (SELECT COUNT(*) FROM channel_identities WHERE workspace_id=?2 AND contact_id=?1) AS identity_count,
+      (SELECT COUNT(*) FROM conversations WHERE workspace_id=?2 AND contact_id=?1) AS conversation_count,
+      (SELECT COUNT(*) FROM messages WHERE workspace_id=?2 AND contact_id=?1) AS message_count
+    FROM contacts WHERE contact_id=?1 AND workspace_id=?2`).bind(id, workspaceId).first();
+  if (!existing) throw httpError(404, 'Contact not found.');
+  const conversations = await env.DB.prepare(`SELECT conversation_id FROM conversations
+    WHERE workspace_id=?1 AND contact_id=?2 ORDER BY created_at`).bind(workspaceId, id).all();
+  const conversationIds = (conversations.results || []).map(row => String(row.conversation_id));
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM external_api_requests WHERE workspace_id=?2 AND message_id IN
+      (SELECT message_id FROM messages WHERE contact_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare(`DELETE FROM outbox WHERE workspace_id=?2 AND message_id IN
+      (SELECT message_id FROM messages WHERE contact_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare(`DELETE FROM outbound_payloads WHERE workspace_id=?2 AND message_id IN
+      (SELECT message_id FROM messages WHERE contact_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM messages WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM conversations WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM channel_identities WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM contacts WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId)
+  ]);
+  await audit(env, principal, 'delete', 'contact', id, {
+    displayName: existing.display_name,
+    company: existing.company || '',
+    deletedIdentities: Number(existing.identity_count || 0),
+    deletedConversations: Number(existing.conversation_count || 0),
+    deletedMessages: Number(existing.message_count || 0)
+  });
+  return {
+    ok: true, contactId: id, deleted: true, conversationIds,
+    deletedConversations: Number(existing.conversation_count || 0),
+    deletedMessages: Number(existing.message_count || 0)
+  };
+}
+
 async function listMessages(env, workspaceId, conversationId, url) {
   const limit = clampInt(url.searchParams.get('limit'), 1, 200, 100);
   const before = url.searchParams.get('before') || '';
@@ -2408,6 +2547,36 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
   await audit(env, principal, 'update', 'conversation', id, { status, assignedTo, markRead });
   return await getConversationItem(env, workspaceId, id) ||
     { conversationId: id, status, assignedTo, unreadCount: fallbackUnreadCount, updatedAt: now };
+}
+
+async function deleteConversation(env, workspaceId, conversationId, principal) {
+  const id = cleanId(conversationId, 'Conversation ID');
+  const existing = await env.DB.prepare(`SELECT conversation_id,contact_id,channel_id,subject,status,
+      (SELECT COUNT(*) FROM messages WHERE workspace_id=?2 AND conversation_id=?1) AS message_count
+    FROM conversations WHERE conversation_id=?1 AND workspace_id=?2`)
+    .bind(id, workspaceId).first();
+  if (!existing) throw httpError(404, 'Conversation not found.');
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM external_api_requests WHERE workspace_id=?2 AND message_id IN
+      (SELECT message_id FROM messages WHERE conversation_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare(`DELETE FROM outbox WHERE workspace_id=?2 AND message_id IN
+      (SELECT message_id FROM messages WHERE conversation_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare(`DELETE FROM outbound_payloads WHERE workspace_id=?2 AND message_id IN
+      (SELECT message_id FROM messages WHERE conversation_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM messages WHERE conversation_id=?1 AND workspace_id=?2').bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM conversations WHERE conversation_id=?1 AND workspace_id=?2').bind(id, workspaceId)
+  ]);
+  await audit(env, principal, 'delete', 'conversation', id, {
+    contactId: existing.contact_id,
+    channelId: existing.channel_id,
+    subject: existing.subject,
+    previousStatus: existing.status,
+    deletedMessages: Number(existing.message_count || 0)
+  });
+  return {
+    ok: true, conversationId: id, contactId: existing.contact_id, deleted: true,
+    deletedMessages: Number(existing.message_count || 0)
+  };
 }
 
 async function createContact(env, workspaceId, payload, principal) {
@@ -4401,18 +4570,28 @@ async function audit(env, principal, action, targetType, targetId, details) {
 
 async function broadcast(env, workspaceId, event) {
   if (!env.INBOX_HUB || !workspaceId) return;
+  const body = JSON.stringify({ ...event, at: new Date().toISOString() });
   await inboxHub(env, workspaceId).fetch('https://hub.internal/broadcast', {
-    method: 'POST', body: JSON.stringify({ ...event, at: new Date().toISOString() })
+    method: 'POST', body
   });
+  if (workspaceId !== LEGACY_WORKSPACE_ID) {
+    await inboxHub(env, LEGACY_WORKSPACE_ID).fetch('https://hub.internal/broadcast', {
+      method: 'POST', body
+    }).catch(() => {});
+  }
 }
 
 async function disconnectRealtime(env, workspaceId, target) {
   if (!env.INBOX_HUB || !workspaceId) return;
-  await inboxHub(env, workspaceId).fetch('https://hub.internal/disconnect', {
+  const init = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(target || {})
-  });
+  };
+  await inboxHub(env, workspaceId).fetch('https://hub.internal/disconnect', init);
+  if (workspaceId !== LEGACY_WORKSPACE_ID) {
+    await inboxHub(env, LEGACY_WORKSPACE_ID).fetch('https://hub.internal/disconnect', init).catch(() => {});
+  }
 }
 
 async function enforceOAuthRateLimit(request, env) {
@@ -4549,9 +4728,8 @@ function secretPrefix(value) {
   return String(value || '').toUpperCase().replace(/[^A-Z0-9_]/g, '_').replace(/^_+|_+$/g, '');
 }
 
-function workspaceSecretPrefix(workspaceId, value) {
-  if (workspaceId === DEFAULT_WORKSPACE_ID) return secretPrefix(value);
-  return `${secretPrefix(`WS_${workspaceId}`)}_${secretPrefix(value)}`;
+function workspaceSecretPrefix(_workspaceId, value) {
+  return secretPrefix(value);
 }
 
 function normalizeTimestamp(value, fallback) {

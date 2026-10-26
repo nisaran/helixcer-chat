@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-14";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-15";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -61,6 +61,7 @@
     pushSyncPromise: null,
     pushActionPending: false,
     lastNotificationAt: new Map(),
+    confirmationResolve: null,
     loading: true,
   };
 
@@ -120,7 +121,7 @@
     const now = Date.now();
     const ago = (minutes) => new Date(now - minutes * 60_000).toISOString();
     const workspaceProfile = {
-      workspaceId: "demo", displayName: "Helixcer workspace", registeredName: "Helixcer Technologies",
+      workspaceId: "e29d8006-c4de-4cbe-9b17-ec550ba9c6f9", displayName: "Helixcer workspace", registeredName: "Helixcer Technologies",
       addressLine1: "", addressLine2: "", city: "", state: "", postalCode: "", country: "India",
       gstin: "", taxDetails: "",
     };
@@ -273,13 +274,12 @@
       return { ok: true, item: clone(item), apiKey: `hxc_live_${suffix}.demo-secret-${crypto.randomUUID().replaceAll("-", "")}` };
     }
 
-    async revokeApiKey(apiKeyId) {
+    async deleteApiKey(apiKeyId) {
       await smallDelay(100);
-      const item = this.data.apiKeys.find((entry) => entry.apiKeyId === apiKeyId);
-      if (!item) throw new Error("API key not found.");
-      item.status = "revoked";
-      item.revokedAt = new Date().toISOString();
-      return { ok: true, item: clone(item) };
+      const index = this.data.apiKeys.findIndex((entry) => entry.apiKeyId === apiKeyId);
+      if (index < 0) throw new Error("API key not found.");
+      const [item] = this.data.apiKeys.splice(index, 1);
+      return { ok: true, deleted: true, item: clone(item) };
     }
 
     async inviteMember(payload) {
@@ -301,6 +301,18 @@
       if (!item) throw new Error("Member not found");
       Object.assign(item, patch);
       return { ok: true, item: clone(item) };
+    }
+
+    async deleteMember(membershipId) {
+      await smallDelay(100);
+      const index = this.data.team.members.findIndex((member) => member.membershipId === membershipId);
+      if (index < 0) throw new Error("Member not found");
+      const member = this.data.team.members[index];
+      if (member.membershipId === this.data.me.membership.membershipId) throw new Error("You cannot delete your own workspace membership.");
+      const ownerCount = this.data.team.members.filter((item) => item.role === "owner" && item.status === "active").length;
+      if (member.role === "owner" && ownerCount <= 1) throw new Error("The workspace must keep at least one active owner.");
+      this.data.team.members.splice(index, 1);
+      return { ok: true, deleted: true, item: clone(member) };
     }
 
     async cancelInvitation(invitationId) {
@@ -444,6 +456,15 @@
       return { ok: true, item: clone(item) };
     }
 
+    async deleteConversation(conversationId) {
+      await smallDelay(100);
+      const index = this.data.conversations.findIndex((entry) => entry.conversationId === conversationId);
+      if (index < 0) throw new Error("Conversation not found");
+      const [item] = this.data.conversations.splice(index, 1);
+      delete this.data.messages[conversationId];
+      return { ok: true, deleted: true, item: clone(item) };
+    }
+
     async createContact(payload) {
       const suffix = Date.now().toString(36);
       const contact = {
@@ -510,6 +531,18 @@
       return { ok: true, item: clone({ ...item, channelName: channel?.name || "", connectorType: channel?.connectorType || "generic", channelEditable: !hasMessages }) };
     }
 
+    async deleteContact(contactId) {
+      await smallDelay(100);
+      const index = this.data.contacts.findIndex((contact) => contact.contactId === contactId);
+      if (index < 0) throw new Error("Contact not found.");
+      const [item] = this.data.contacts.splice(index, 1);
+      const conversationIds = this.data.conversations.filter((conversation) => conversation.contactId === contactId)
+        .map((conversation) => conversation.conversationId);
+      this.data.conversations = this.data.conversations.filter((conversation) => conversation.contactId !== contactId);
+      conversationIds.forEach((conversationId) => { delete this.data.messages[conversationId]; });
+      return { ok: true, deleted: true, item: clone(item) };
+    }
+
     async createChannel(payload) {
       await smallDelay(140);
       const channel = {
@@ -543,6 +576,22 @@
       if (payload.credentials?.verifyToken) this.verifyTokens.set(channelId, payload.credentials.verifyToken);
       this.emit({ type: "channel.updated", channelId });
       return { ok: true, channelId, item: clone(channel) };
+    }
+
+    async deleteChannel(channelId) {
+      await smallDelay(100);
+      const index = this.data.channels.findIndex((entry) => entry.channelId === channelId);
+      if (index < 0) throw new Error("Channel not found.");
+      const [item] = this.data.channels.splice(index, 1);
+      const contactIds = new Set(this.data.contacts.filter((contact) => contact.channelId === channelId).map((contact) => contact.contactId));
+      const conversationIds = this.data.conversations.filter((conversation) => conversation.channelId === channelId)
+        .map((conversation) => conversation.conversationId);
+      this.data.contacts = this.data.contacts.filter((contact) => !contactIds.has(contact.contactId));
+      this.data.conversations = this.data.conversations.filter((conversation) => conversation.channelId !== channelId);
+      conversationIds.forEach((conversationId) => { delete this.data.messages[conversationId]; });
+      this.verifyTokens.delete(channelId);
+      this.emit({ type: "channel.deleted", channelId });
+      return { ok: true, deleted: true, item: clone(item) };
     }
 
     async getVerifyToken(channelId) {
@@ -709,6 +758,12 @@
         });
     }
 
+    deleteConversation(conversationId) {
+      return this.isDemo
+        ? this.demo.deleteConversation(conversationId)
+        : this.request(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
+    }
+
     createContact(payload) {
       return this.isDemo
         ? this.demo.createContact(payload)
@@ -725,6 +780,12 @@
       return this.isDemo
         ? this.demo.updateContact(contactId, payload)
         : this.request(`/api/contacts/${encodeURIComponent(contactId)}`, { method: "PATCH", body: JSON.stringify(payload) });
+    }
+
+    deleteContact(contactId) {
+      return this.isDemo
+        ? this.demo.deleteContact(contactId)
+        : this.request(`/api/contacts/${encodeURIComponent(contactId)}`, { method: "DELETE" });
     }
 
     getPushConfig() {
@@ -755,6 +816,12 @@
       return this.isDemo
         ? this.demo.updateChannel(channelId, payload)
         : this.request(`/api/channels/${encodeURIComponent(channelId)}`, { method: "PATCH", body: JSON.stringify(payload) });
+    }
+
+    deleteChannel(channelId) {
+      return this.isDemo
+        ? this.demo.deleteChannel(channelId)
+        : this.request(`/api/channels/${encodeURIComponent(channelId)}`, { method: "DELETE" });
     }
 
     verifyChannel(channelId) {
@@ -796,9 +863,9 @@
         : this.request("/api/developer/api-keys", { method: "POST", body: JSON.stringify(payload) });
     }
 
-    revokeApiKey(apiKeyId) {
+    deleteApiKey(apiKeyId) {
       return this.isDemo
-        ? this.demo.revokeApiKey(apiKeyId)
+        ? this.demo.deleteApiKey(apiKeyId)
         : this.request(`/api/developer/api-keys/${encodeURIComponent(apiKeyId)}`, { method: "DELETE" });
     }
 
@@ -812,6 +879,12 @@
       return this.isDemo
         ? this.demo.updateMember(membershipId, patch)
         : this.request(`/api/team/members/${encodeURIComponent(membershipId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+    }
+
+    deleteMember(membershipId) {
+      return this.isDemo
+        ? this.demo.deleteMember(membershipId)
+        : this.request(`/api/team/members/${encodeURIComponent(membershipId)}`, { method: "DELETE" });
     }
 
     cancelInvitation(invitationId) {
@@ -1643,6 +1716,7 @@
     const unreadCount = Math.max(0, Number(conversation.unreadCount) || 0);
     const changingConversation = state.selectedConversationId !== conversationId;
     if (changingConversation) {
+      closeConversationActionMenu();
       state.unreadMarker = markRead && unreadCount > 0 ? { conversationId, count: unreadCount } : null;
       state.replyingTo = null;
     }
@@ -2357,6 +2431,7 @@
     $("contactEditorStatus").textContent = loading ? "Loading contact details…" : error || "Choose a contact to view the details.";
     fields.hidden = !contact || loading || Boolean(error);
     actions.hidden = fields.hidden;
+    $("contactDeleteButton").hidden = !canAdmin();
     if (!contact || fields.hidden) return;
     const normalized = normalizeContact(contact);
     $("contactEditorTitle").textContent = normalized.displayName;
@@ -2436,6 +2511,38 @@
     } finally {
       submit.disabled = false;
       submit.textContent = "Save contact";
+    }
+  }
+
+  async function deleteSelectedContact() {
+    const contactId = String(state.selectedContactId || "");
+    const contact = state.contacts.find((item) => item.contactId === contactId);
+    if (!canAdmin() || !contact) return;
+    const relatedConversations = state.conversations.filter((conversation) => conversation.contactId === contactId);
+    const confirmed = await requestConfirmation({
+      title: `Delete ${contact.displayName}?`,
+      message: "This permanently deletes the contact from Helixcer, including every conversation and message stored for this contact.",
+      note: "This does not block or delete the customer on the original messaging provider.",
+      confirmLabel: "Delete contact",
+    });
+    if (!confirmed) return;
+    try {
+      await state.api.deleteContact(contactId);
+      const conversationIds = new Set(relatedConversations.map((conversation) => conversation.conversationId));
+      conversationIds.forEach((conversationId) => {
+        state.messages.delete(conversationId);
+        state.conversationRevisions.delete(conversationId);
+      });
+      state.contacts = state.contacts.filter((item) => item.contactId !== contactId);
+      state.conversations = state.conversations.filter((conversation) => !conversationIds.has(conversation.conversationId));
+      if (conversationIds.has(state.selectedConversationId)) clearSelectedConversation();
+      closeContactEditor();
+      renderCounts();
+      renderChannels();
+      renderConversationList();
+      showToast("Contact deleted", `${contact.displayName} and their Helixcer history were removed.`);
+    } catch (error) {
+      showToast("Contact was not deleted", error.message, true);
     }
   }
 
@@ -3067,13 +3174,11 @@
       statusCell.append(element("span", `status-chip${status === "Active" ? "" : " is-inactive"}`, status));
 
       const actionCell = document.createElement("td");
-      if (status === "Active") {
-        const revoke = element("button", "member-action is-danger", "Revoke");
-        revoke.type = "button";
-        revoke.dataset.action = "revoke-api-key";
-        revoke.dataset.revokeApiKey = apiKey.apiKeyId;
-        actionCell.append(revoke);
-      }
+      const remove = element("button", "member-action is-danger", "Delete");
+      remove.type = "button";
+      remove.dataset.action = "delete-api-key";
+      remove.dataset.deleteApiKey = apiKey.apiKeyId;
+      actionCell.append(remove);
       row.append(identityCell, lastUsedCell, statusCell, actionCell);
       body.append(row);
     });
@@ -3124,17 +3229,25 @@
     }
   }
 
-  async function revokeDeveloperApiKey(apiKeyId, button) {
+  async function deleteDeveloperApiKey(apiKeyId, button) {
     const apiKey = state.apiKeys.find((item) => item.apiKeyId === apiKeyId);
-    if (!apiKey || !window.confirm(`Revoke “${apiKey.name}”? Apps using this key will stop working immediately.`)) return;
-    button.disabled = true;
+    if (!canAdmin() || !apiKey) return;
+    const confirmed = await requestConfirmation({
+      title: `Delete ${apiKey.name}?`,
+      message: "This permanently deletes this API key from Helixcer. Any app using it will lose access immediately.",
+      note: "This action cannot be undone. Create a new key if the integration needs access again.",
+      confirmLabel: "Delete API key",
+    });
+    if (!confirmed) return;
+    if (button) button.disabled = true;
     try {
-      await state.api.revokeApiKey(apiKeyId);
-      await loadApiKeys();
-      showToast("API key revoked", apiKey.name);
+      await state.api.deleteApiKey(apiKeyId);
+      state.apiKeys = state.apiKeys.filter((item) => item.apiKeyId !== apiKeyId);
+      renderApiKeys();
+      showToast("API key deleted", apiKey.name);
     } catch (error) {
-      button.disabled = false;
-      showToast("API key was not revoked", error.message, true);
+      if (button) button.disabled = false;
+      showToast("API key was not deleted", error.message, true);
     }
   }
 
@@ -3214,11 +3327,21 @@
       row.append(statusCell, tableCell(dateLabel(member.createdAt)));
 
       const actionCell = document.createElement("td");
+      const actionWrap = element("div", "member-actions");
       const toggle = element("button", `member-action${member.status === "active" ? " is-danger" : ""}`, member.status === "active" ? "Disable" : "Enable");
       toggle.type = "button";
       toggle.dataset.toggleMember = member.membershipId;
       toggle.disabled = member.role === "owner";
-      actionCell.append(toggle);
+      const remove = element("button", "member-action is-danger", "Delete");
+      remove.type = "button";
+      remove.dataset.deleteMember = member.membershipId;
+      const deletingSelf = member.membershipId === state.currentUser?.membershipId;
+      const outsideAdminScope = !isOwner() && member.role !== "agent";
+      remove.disabled = deletingSelf || outsideAdminScope;
+      if (deletingSelf) remove.title = "You cannot delete your own workspace membership.";
+      else if (outsideAdminScope) remove.title = "Only an owner can delete an administrator or owner.";
+      actionWrap.append(toggle, remove);
+      actionCell.append(actionWrap);
       row.append(actionCell);
       body.append(row);
     });
@@ -3316,6 +3439,32 @@
       showToast(status === "active" ? "Member enabled" : "Member disabled", member.displayName);
     } catch (error) {
       showToast("Member access was not changed", error.message, true);
+    }
+  }
+
+  async function deleteTeamMember(membershipId) {
+    const member = state.team.members.find((item) => item.membershipId === membershipId);
+    if (!canAdmin() || !member || member.membershipId === state.currentUser?.membershipId) return;
+    if (!isOwner() && member.role !== "agent") return;
+    const confirmed = await requestConfirmation({
+      title: `Delete ${member.displayName}?`,
+      message: `This permanently removes ${member.email || member.displayName} from the Helixcer workspace and ends their access.`,
+      note: "Their past actions and customer messages remain in the workspace history.",
+      confirmLabel: "Delete team member",
+    });
+    if (!confirmed) return;
+    try {
+      await state.api.deleteMember(membershipId);
+      state.team.members = state.team.members.filter((item) => item.membershipId !== membershipId);
+      state.conversations.forEach((conversation) => {
+        if ([member.email, member.displayName].includes(conversation.assignedTo)) conversation.assignedTo = "Unassigned";
+      });
+      renderTeam();
+      populateAssigneeSelect();
+      renderConversationList();
+      showToast("Team member deleted", `${member.displayName} no longer has workspace access.`);
+    } catch (error) {
+      showToast("Team member was not deleted", error.message, true);
     }
   }
 
@@ -4391,11 +4540,47 @@
       }
       return;
     }
+    if (type === "conversation.deleted") {
+      const conversationId = String(event.conversationId || event.id || "");
+      if (!conversationId) return;
+      state.messages.delete(conversationId);
+      state.conversationRevisions.delete(conversationId);
+      state.conversations = state.conversations.filter((conversation) => conversation.conversationId !== conversationId);
+      if (conversationId === state.selectedConversationId) clearSelectedConversation();
+      else {
+        renderCounts();
+        renderConversationList();
+      }
+      return;
+    }
     if (type === "contact.updated") {
       const selectedContactId = state.selectedContactId;
       await reconcileWorkspace();
       if (selectedContactId && state.contacts.some((contact) => contact.contactId === selectedContactId)) {
         await selectContact(selectedContactId);
+      }
+      return;
+    }
+    if (type === "contact.deleted") {
+      const contactId = String(event.contactId || event.id || "");
+      if (!contactId) return;
+      const conversationIds = new Set([
+        ...asItems(event.conversationIds).map(String),
+        ...state.conversations.filter((conversation) => conversation.contactId === contactId)
+          .map((conversation) => conversation.conversationId),
+      ]);
+      conversationIds.forEach((conversationId) => {
+        state.messages.delete(conversationId);
+        state.conversationRevisions.delete(conversationId);
+      });
+      state.contacts = state.contacts.filter((contact) => contact.contactId !== contactId);
+      state.conversations = state.conversations.filter((conversation) => !conversationIds.has(conversation.conversationId));
+      if (contactId === state.selectedContactId) closeContactEditor();
+      if (conversationIds.has(state.selectedConversationId)) clearSelectedConversation();
+      else {
+        renderCounts();
+        renderContacts();
+        renderConversationList();
       }
       return;
     }
@@ -5000,6 +5185,7 @@
     form.elements.instagramUsername.value = channel?.config?.username || "";
     $("channelDialogTitle").textContent = channel ? `Edit ${channel.name}` : "Add a channel";
     $("channelSubmit").textContent = channel ? "Save changes" : "Save connection";
+    $("channelDeleteButton").hidden = !channel;
     syncChannelForm(channel?.connectorType || "whatsapp_cloud", Boolean(channel), channel?.setup || {});
     $("channelDialog").showModal();
   }
@@ -5128,6 +5314,47 @@
     }
   }
 
+  async function deleteEditingChannel() {
+    const channelId = String($("channelIdInput").value || "");
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    if (!canAdmin() || !channel) return;
+    const providerName = providerProfiles[channel.connectorType]?.label || "provider";
+    const relatedConversationIds = new Set(state.conversations.filter((conversation) => conversation.channelId === channelId)
+      .map((conversation) => conversation.conversationId));
+    const confirmed = await requestConfirmation({
+      title: `Delete ${channel.name}?`,
+      message: "This removes the channel connection, credentials, contacts, conversations, and stored messages from Helixcer.",
+      note: `Only Helixcer data will be deleted. The original ${providerName} account, phone number, bot, profile, and provider-side message history will not be changed.`,
+      confirmLabel: "Delete channel",
+    });
+    if (!confirmed) return;
+    try {
+      await state.api.deleteChannel(channelId);
+      relatedConversationIds.forEach((conversationId) => {
+        state.messages.delete(conversationId);
+        state.conversationRevisions.delete(conversationId);
+      });
+      state.channels = state.channels.filter((item) => item.channelId !== channelId);
+      state.conversations = state.conversations.filter((conversation) => !relatedConversationIds.has(conversation.conversationId));
+      state.expandedChannelIds.delete(channelId);
+      state.recentVerifyTokens.delete(channelId);
+      state.whatsappTemplates = state.whatsappTemplates.filter((template) => template.channelId !== channelId);
+      state.whatsappTemplateFilters.channel.delete(channelId);
+      if (relatedConversationIds.has(state.selectedConversationId)) clearSelectedConversation();
+      $("channelDialog").close();
+      // Reload the authoritative contact list because a contact can have identities
+      // on more than one channel. The server preserves those shared contacts.
+      await loadAll({ preserveSelection: true });
+      if (state.selectedContactId && !state.contacts.some((contact) => contact.contactId === state.selectedContactId)) {
+        closeContactEditor();
+      }
+      setRoute("channels");
+      showToast("Channel deleted from Helixcer", `${channel.name} was removed. The original ${providerName} account was not changed.`);
+    } catch (error) {
+      showToast("Channel was not deleted", error.message, true);
+    }
+  }
+
   function populateContactChannelSelect(selectedId = "") {
     const select = $("contactChannelId");
     if (!select) return;
@@ -5211,6 +5438,28 @@
     }
   }
 
+  function finishConfirmation(confirmed, { close = true } = {}) {
+    const resolve = state.confirmationResolve;
+    state.confirmationResolve = null;
+    const dialog = $("confirmationDialog");
+    if (close && dialog.open) dialog.close();
+    if (resolve) resolve(Boolean(confirmed));
+  }
+
+  function requestConfirmation({ eyebrow = "Confirm deletion", title, message, note = "", confirmLabel = "Delete" }) {
+    if (state.confirmationResolve) finishConfirmation(false);
+    $("confirmationEyebrow").textContent = eyebrow;
+    $("confirmationTitle").textContent = title;
+    $("confirmationMessage").textContent = message;
+    $("confirmationNote").textContent = note;
+    $("confirmationNote").hidden = !note;
+    $("confirmationSubmit").textContent = confirmLabel;
+    return new Promise((resolve) => {
+      state.confirmationResolve = resolve;
+      $("confirmationDialog").showModal();
+    });
+  }
+
   function showToast(title, message = "", isError = false) {
     const region = $("toastRegion");
     const openDialog = document.querySelector("dialog[open]");
@@ -5248,8 +5497,28 @@
     return state.conversations.find((item) => item.conversationId === state.selectedConversationId) || null;
   }
 
+  function closeConversationActionMenu({ restoreFocus = false } = {}) {
+    const menu = $("conversationActionMenu");
+    const button = $("conversationMenuButton");
+    if (!menu || !button || menu.hidden) return;
+    menu.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    if (restoreFocus) button.focus();
+  }
+
+  function toggleConversationActionMenu() {
+    const menu = $("conversationActionMenu");
+    const button = $("conversationMenuButton");
+    if (!canAdmin() || !selectedConversation() || !menu || !button) return;
+    const opening = menu.hidden;
+    menu.hidden = !opening;
+    button.setAttribute("aria-expanded", String(opening));
+    if (opening) menu.querySelector("button")?.focus();
+  }
+
   function clearSelectedConversation({ updateUrl = true } = {}) {
     const conversationId = state.selectedConversationId;
+    closeConversationActionMenu();
     discardAttachmentQueue(conversationId);
     if (state.templateConversationId === conversationId) closeTemplateDialog();
     state.selectedConversationId = null;
@@ -5261,6 +5530,32 @@
     renderConversationList();
     renderSelectedConversation();
     if (updateUrl && state.route === "inbox") replaceAppHash("#inbox");
+  }
+
+  async function deleteSelectedConversation() {
+    const conversation = selectedConversation();
+    if (!canAdmin() || !conversation) return;
+    closeConversationActionMenu();
+    const confirmed = await requestConfirmation({
+      title: `Delete conversation with ${conversation.subject}?`,
+      message: "This permanently deletes this conversation and its message history from Helixcer.",
+      note: "The contact and the original provider account are not deleted. A future customer message may create a new conversation.",
+      confirmLabel: "Delete conversation",
+    });
+    if (!confirmed) return;
+    try {
+      await state.api.deleteConversation(conversation.conversationId);
+      state.messages.delete(conversation.conversationId);
+      state.conversationRevisions.delete(conversation.conversationId);
+      state.conversations = state.conversations.filter((item) => item.conversationId !== conversation.conversationId);
+      clearSelectedConversation();
+      renderCounts();
+      renderContacts();
+      renderChannels();
+      showToast("Conversation deleted", `${conversation.subject}'s conversation was removed from Helixcer.`);
+    } catch (error) {
+      showToast("Conversation was not deleted", error.message, true);
+    }
   }
 
   function contactFor(conversation) {
@@ -5379,6 +5674,7 @@
     document.addEventListener("click", (event) => {
       if (!event.target.closest(".template-filter")) closeTemplateFilterMenus();
       if (!event.target.closest(".conversation-filter-desktop")) closeConversationFilterMenu();
+      if (!event.target.closest(".conversation-menu-wrap")) closeConversationActionMenu();
       const routeButton = event.target.closest("[data-route]");
       if (routeButton) { setRoute(routeButton.dataset.route); return; }
       const actionButton = event.target.closest("[data-action]");
@@ -5424,8 +5720,8 @@
           loadWhatsAppTemplateLibrary({ refresh: true });
           return;
         }
-        if (actionButton.dataset.revokeApiKey) {
-          revokeDeveloperApiKey(actionButton.dataset.revokeApiKey, actionButton);
+        if (actionButton.dataset.deleteApiKey) {
+          deleteDeveloperApiKey(actionButton.dataset.deleteApiKey, actionButton);
           return;
         }
         if (actionButton.dataset.action === "verify-channel") {
@@ -5484,8 +5780,11 @@
           "toggle-user-menu": () => toggleUserMenu(),
           "logout": logout,
           "toggle-details": toggleDetails,
+          "toggle-conversation-menu": toggleConversationActionMenu,
+          "delete-conversation": deleteSelectedConversation,
           "open-channel": () => openChannelDialog(),
           "close-channel-dialog": () => $("channelDialog").close(),
+          "delete-channel": deleteEditingChannel,
           "close-webhook-token": () => $("webhookTokenDialog").close(),
           "generate-webhook-token": () => {
             const input = $("webhookTokenInput");
@@ -5496,6 +5795,7 @@
           "new-contact": openContactDialog,
           "close-contact-dialog": () => $("contactDialog").close(),
           "close-contact-editor": closeContactEditor,
+          "delete-contact": deleteSelectedContact,
           "cancel-contact-edit": () => {
             const contact = state.contacts.find((item) => item.contactId === state.selectedContactId);
             if (contact) showContactEditor(contact);
@@ -5522,6 +5822,7 @@
           "copy-api-base": () => copyDeveloperApiValue($("developerApiBase").textContent, "API base URL copied"),
           "copy-api-key": () => copyDeveloperApiValue($("apiKeyOutput").value, "API key copied"),
           "copy-workspace-id": () => copyDeveloperApiValue($("workspaceId").value, "Workspace ID copied"),
+          "cancel-confirmation": () => finishConfirmation(false),
         };
         actions[actionButton.dataset.action]?.();
       }
@@ -5795,14 +6096,24 @@
     });
     $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
     $("apiKeyForm").addEventListener("submit", (event) => { event.preventDefault(); createDeveloperApiKey(event.currentTarget); });
+    $("confirmationForm").addEventListener("submit", (event) => { event.preventDefault(); finishConfirmation(true); });
+    $("confirmationDialog").addEventListener("cancel", (event) => { event.preventDefault(); finishConfirmation(false); });
+    $("confirmationDialog").addEventListener("close", () => {
+      if (state.confirmationResolve) finishConfirmation(false, { close: false });
+    });
     $("inviteRole").addEventListener("change", updateInviteRoleHelp);
     $("teamTableBody").addEventListener("change", (event) => {
       const select = event.target.closest("[data-member-role]");
       if (select) changeMemberRole(select.dataset.memberRole, select.value, select);
     });
     $("teamTableBody").addEventListener("click", (event) => {
-      const button = event.target.closest("[data-toggle-member]");
-      if (button) toggleMember(button.dataset.toggleMember);
+      const deleteButton = event.target.closest("[data-delete-member]");
+      if (deleteButton) {
+        deleteTeamMember(deleteButton.dataset.deleteMember);
+        return;
+      }
+      const toggleButton = event.target.closest("[data-toggle-member]");
+      if (toggleButton) toggleMember(toggleButton.dataset.toggleMember);
     });
     $("invitationList").addEventListener("click", (event) => {
       const button = event.target.closest("[data-cancel-invitation]");
@@ -5820,6 +6131,7 @@
         $("conversationSearch").focus();
       }
       if (event.key === "Escape") {
+        closeConversationActionMenu({ restoreFocus: true });
         closeTemplateFilterMenus("", { restoreFocus: true });
         closeConversationFilterMenu({ restoreFocus: true });
         closeMobileMenu();

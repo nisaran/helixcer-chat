@@ -522,7 +522,7 @@ test('external template API persists once, dispatches, replays safely, and scope
   }
 });
 
-test('API key management reveals a secret once, stores only its hash, lists metadata, and revokes it', async () => {
+test('API key management reveals a secret once, stores only its hash, lists metadata, and deletes it', async () => {
   const { database, env } = await fixture();
   Object.assign(env, {
     RECOVERY_MODE: 'true', ADMIN_TOKEN: 'recovery-secret', DEFAULT_WORKSPACE_ID: 'ws_default',
@@ -568,12 +568,13 @@ test('API key management reveals a secret once, stores only its hash, lists meta
       assert.equal(Object.hasOwn(item, 'allowedChannelIds'), false);
     }
 
-    const revokedResponse = await handleRequest(new Request(
+    const deletedResponse = await handleRequest(new Request(
       `https://api.chat.helixcer.com/api/developer/api-keys/${created.item.apiKeyId}`,
       { method: 'DELETE', headers: { Authorization: 'Bearer recovery-secret' } }
     ), env);
-    assert.equal(revokedResponse.status, 200);
-    assert.equal(database.prepare('SELECT status FROM api_keys WHERE api_key_id=?').get(created.item.apiKeyId).status, 'revoked');
+    assert.equal(deletedResponse.status, 200);
+    assert.equal((await deletedResponse.json()).deleted, true);
+    assert.equal(database.prepare('SELECT status FROM api_keys WHERE api_key_id=?').get(created.item.apiKeyId), undefined);
 
     const rejected = await handleRequest(new Request('https://api.chat.helixcer.com/api/v1/messages/not-found', {
       headers: { Authorization: `Bearer ${created.apiKey}` }

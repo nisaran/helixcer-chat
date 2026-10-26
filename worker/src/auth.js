@@ -1,7 +1,5 @@
 export const SESSION_COOKIE = '__Host-helixcer_session';
 export const OAUTH_COOKIE = '__Host-helixcer_oauth';
-export const DEFAULT_WORKSPACE_ID = 'ws_default';
-
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs';
@@ -129,7 +127,7 @@ export async function finishGoogleOAuthResponse(request, env, fetchImpl = fetch)
 }
 
 export async function authenticateRequest(request, env) {
-  const recovery = recoveryPrincipal(request, env);
+  const recovery = await recoveryPrincipal(request, env);
   if (recovery) return recovery;
   const rawToken = readCookie(request, SESSION_COOKIE);
   if (!rawToken) return null;
@@ -161,7 +159,7 @@ export async function logout(request, env) {
 async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
   const now = new Date().toISOString();
   const email = normalizeEmail(identity.email);
-  const workspaceId = env.DEFAULT_WORKSPACE_ID || DEFAULT_WORKSPACE_ID;
+  const workspaceId = (await resolveDefaultWorkspace(env)).workspace_id;
   let user = await env.DB.prepare('SELECT * FROM users WHERE google_sub=?1').bind(identity.sub).first();
   const emailOwner = await env.DB.prepare('SELECT user_id,google_sub FROM users WHERE lower(email)=?1').bind(email).first();
   if (emailOwner && emailOwner.google_sub !== identity.sub) throw authError(409, 'This email is already linked to another Google identity.');
@@ -438,19 +436,35 @@ async function auditAuthAction(env, principal, action, targetType, targetId, det
       JSON.stringify(details || {}), new Date().toISOString(), principal.workspace.workspaceId, principal.user.userId || '').run();
 }
 
-function recoveryPrincipal(request, env) {
+async function recoveryPrincipal(request, env) {
   if (String(env.RECOVERY_MODE || '').toLowerCase() !== 'true' || !env.ADMIN_TOKEN) return null;
   const header = request.headers.get('Authorization') || '';
   const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
   const direct = request.headers.get('X-Admin-Token') || '';
   if (!timingSafeEqual(bearer || direct, env.ADMIN_TOKEN)) return null;
-  const workspaceId = env.DEFAULT_WORKSPACE_ID || DEFAULT_WORKSPACE_ID;
+  const workspace = await resolveDefaultWorkspace(env);
   return {
     authType: 'recovery',
     user: { userId: '', email: 'emergency-recovery', displayName: 'Emergency recovery', avatarUrl: '' },
-    workspace: { workspaceId, name: env.APP_NAME || 'Helixcer Chat', slug: 'default' },
+    workspace: { workspaceId: workspace.workspace_id, name: workspace.name, slug: workspace.slug },
     membership: { membershipId: '', role: 'owner', status: 'active' }
   };
+}
+
+async function resolveDefaultWorkspace(env) {
+  const configured = String(env.DEFAULT_WORKSPACE_ID || '').trim();
+  let workspace = configured
+    ? await env.DB.prepare('SELECT workspace_id,name,slug FROM workspaces WHERE workspace_id=?1 LIMIT 1').bind(configured).first()
+    : null;
+  if (!workspace) {
+    workspace = await env.DB.prepare("SELECT workspace_id,name,slug FROM workspaces WHERE slug='default' LIMIT 1").first();
+  }
+  if (!workspace) {
+    const result = await env.DB.prepare('SELECT workspace_id,name,slug FROM workspaces ORDER BY created_at,workspace_id LIMIT 2').all();
+    if ((result.results || []).length === 1) workspace = result.results[0];
+  }
+  if (!workspace) throw authError(503, 'The workspace is not configured.');
+  return workspace;
 }
 
 function principalFromRow(row) {

@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261026-14">
-  <script src="./assets/app.js?v=20261026-14" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261026-15">
+  <script src="./assets/app.js?v=20261026-15" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -236,6 +236,14 @@
                   </span>
                 </button>
                 <div class="chat-actions">
+                  <div class="conversation-menu-wrap" data-admin-only>
+                    <button class="conversation-more-button" id="conversationMenuButton" type="button" data-action="toggle-conversation-menu" aria-label="Conversation options" aria-haspopup="menu" aria-expanded="false" aria-controls="conversationActionMenu">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="6.5" r="1.35"/><circle cx="12" cy="12" r="1.35"/><circle cx="12" cy="17.5" r="1.35"/></svg>
+                    </button>
+                    <div class="conversation-action-menu" id="conversationActionMenu" role="menu" hidden>
+                      <button type="button" role="menuitem" data-action="delete-conversation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>Delete conversation</button>
+                    </div>
+                  </div>
                   <label class="sr-only" for="conversationAssignee">Assigned agent</label>
                   <select class="compact-select assignee-select" id="conversationAssignee" aria-label="Assigned agent">
                     <option value="">Unassigned</option>
@@ -356,6 +364,7 @@
                 <span class="field-help">Separate tags with commas.</span>
               </div>
               <div class="contact-editor-actions" id="contactEditorActions" hidden>
+                <button class="danger-button contact-delete-button" id="contactDeleteButton" type="button" data-action="delete-contact">Delete contact</button>
                 <button class="secondary-button" type="button" data-action="cancel-contact-edit">Cancel</button>
                 <button class="primary-button" id="contactEditSubmit" type="submit">Save contact</button>
               </div>
@@ -652,6 +661,7 @@
 
       <label class="channel-enabled"><input type="checkbox" name="enabled" id="channelEnabledInput" checked><span><strong>Connection enabled</strong><small>Disabled channels keep their history but stop sending and receiving.</small></span></label>
       <div class="modal-actions">
+        <button class="danger-button modal-danger-action" id="channelDeleteButton" type="button" data-action="delete-channel" hidden>Delete channel</button>
         <button class="secondary-button" type="button" data-action="close-channel-dialog">Cancel</button>
         <button class="primary-button" id="channelSubmit" type="submit">Save connection</button>
       </div>
@@ -673,6 +683,20 @@
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-webhook-token">Cancel</button>
         <button class="primary-button" id="webhookTokenSubmit" type="submit">Save token</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal confirmation-modal" id="confirmationDialog" aria-labelledby="confirmationTitle" aria-describedby="confirmationMessage">
+    <form class="modal-card confirmation-card" id="confirmationForm">
+      <div class="confirmation-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></div>
+      <p class="eyebrow" id="confirmationEyebrow">Confirm deletion</p>
+      <h2 id="confirmationTitle">Delete item?</h2>
+      <p class="modal-copy" id="confirmationMessage"></p>
+      <p class="confirmation-note" id="confirmationNote" hidden></p>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="cancel-confirmation">Cancel</button>
+        <button class="danger-button" id="confirmationSubmit" type="submit">Delete</button>
       </div>
     </form>
   </dialog>

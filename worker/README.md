@@ -25,7 +25,7 @@ Public Worker variables in `wrangler.toml`:
 
 - `APP_ORIGIN`: dashboard origin used for safe post-login redirects.
 - `ALLOWED_ORIGINS`: exact comma-separated browser origins; wildcards are not accepted.
-- `DEFAULT_WORKSPACE_ID`: currently `ws_default`.
+- No workspace ID variable is required. The single workspace is resolved from D1 by its `default` slug (or as the only workspace), and its internal ID is a generated UUID.
 - `SESSION_TTL_SECONDS`: defaults to seven days and is capped at 30 days.
 - `RECOVERY_MODE`: leave `false`; set to `true` only for a short, supervised recovery window.
 - `OAUTH_RATE_LIMIT_WINDOW_SECONDS`, `OAUTH_RATE_LIMIT_PER_CLIENT`, and `OAUTH_RATE_LIMIT_GLOBAL`: bound anonymous login starts in the existing Durable Object before D1 is written.
@@ -72,7 +72,7 @@ npx wrangler d1 migrations apply helixcer-chat-v2 --remote
 npx wrangler deploy
 ```
 
-Migration `0002_identity_and_workspaces.sql` is additive. It preserves existing inbox rows, assigns them to `ws_default`, and creates identity/session/team tables. It does not seed a person or billing data.
+Migration `0002_identity_and_workspaces.sql` is additive. It preserves existing inbox rows, initially assigns them to the bootstrap workspace, and creates identity/session/team tables. It does not seed a person or billing data.
 
 Migration `0004_multichannel_credentials.sql` adds a logical `provider_type` and the encrypted `channel_credentials` vault. Instagram is stored physically as `generic_http` only to respect the original table check constraint; runtime routing always uses `provider_type`. The migration deletes `wa-main` only when it is still the exact, unreferenced placeholder inserted by migration 0003. Edited or used rows are preserved.
 
@@ -83,6 +83,8 @@ Migration `0006_contact_profiles.sql` adds contact-level `company` and `tags_jso
 Migration `0007_conversation_uniqueness.sql` merges earlier duplicate conversation rows for the same workspace, contact, and channel into the most recently active thread. It moves all messages, preserves cumulative unread activity and the latest status, then enforces one durable conversation per channel identity. A new inbound message reopens that thread instead of creating another row.
 
 Migration `0008_push_subscriptions.sql` adds workspace/member/device-scoped Web Push subscriptions. Browser-issued endpoints and encryption keys are never returned from list or bootstrap APIs; disabled memberships are excluded from notification delivery.
+
+Migration `0010_workspace_uuid.sql` replaces the bootstrap workspace's actual primary key with a database-generated RFC 4122 version-4 UUID. It preserves users, memberships, sessions, invitations, contacts, conversations, messages, API keys, push subscriptions, webhook history, and audit history. Because channel credentials and queued provider payloads are encrypted with the old workspace ID as authenticated data, the migration removes those encrypted values, stops queued sends, marks affected pending messages failed, and clears provider-verification markers. Channel definitions and message history remain visible, but every provider connection must be reconnected. For an existing deployment, deploy the compatible Worker code first and then apply this migration so sign-in and emergency recovery resolve the renamed workspace dynamically throughout the rollout.
 
 Deploy the Worker on its `workers.dev` hostname, then deploy the repository's `gateway/` Pages Function with an `API` service binding to this Worker. Associate the Pages project with `api.chat.helixcer.com` and, at the external DNS provider, point only the `api.chat` CNAME to `helixcer-chat-gateway.pages.dev`. Keep the GitHub Pages dashboard at `chat.helixcer.com` and list only the dashboard origin in `ALLOWED_ORIGINS`. The checked-in frontend uses the branded API hostname; browsers never call the `workers.dev` hostname directly because its host-only `SameSite=Lax` cookie would be cross-site.
 

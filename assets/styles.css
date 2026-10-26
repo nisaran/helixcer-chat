@@ -443,6 +443,14 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .chat-channel-badge span { overflow: hidden; max-width: 190px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-profile-id { min-width: 0; overflow: hidden; max-width: 210px; flex: 0 1 auto; color: #526075; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; font-variant-numeric: tabular-nums; }
 .chat-actions { display: flex; align-items: center; gap: 5px; margin-left: auto; }
+.conversation-menu-wrap { position: relative; flex: 0 0 auto; }
+.conversation-more-button { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: #697572; padding: 0; }
+.conversation-more-button:hover, .conversation-more-button[aria-expanded="true"] { border-color: var(--line); background: #f6f7f5; color: var(--ink); }
+.conversation-more-button svg { width: 19px; height: 19px; fill: currentColor; stroke: none; }
+.conversation-action-menu { position: absolute; z-index: 35; top: calc(100% + 6px); right: 0; min-width: 180px; border: 1px solid var(--line); border-radius: 11px; background: white; box-shadow: 0 16px 42px rgba(20,29,26,.18); padding: 6px; }
+.conversation-action-menu button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 8px; background: transparent; color: #a33f2d; padding: 9px 10px; text-align: left; font-size: 11px; font-weight: 720; }
+.conversation-action-menu button:hover, .conversation-action-menu button:focus-visible { background: #fff1ed; outline: 0; }
+.conversation-action-menu svg { width: 16px; height: 16px; flex: 0 0 auto; }
 .compact-select { height: 38px; border: 1px solid var(--line-strong); border-radius: 10px; background: white; color: #475467; padding: 0 30px 0 11px; font-size: 12px; font-weight: 650; }
 .assignee-select { max-width: 145px; }
 
@@ -612,6 +620,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .contact-editor-status { color: var(--muted); padding: 28px 8px; text-align: center; font-size: 11px; line-height: 1.5; }
 .contact-editor-fields { display: grid; gap: 13px; padding: 17px 0 4px; }
 .contact-editor-actions { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); margin-top: 16px; padding-top: 14px; }
+.contact-delete-button { margin-right: auto; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; max-width: 1180px; margin: 0 auto 16px; }
 .stat-card { border: 1px solid var(--line); border-radius: 14px; background: white; box-shadow: var(--shadow-sm); padding: 15px 16px; }
@@ -881,6 +890,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .member-action:hover { background: #f4f5f2; }
 .member-action.is-danger { border-color: #ebc9c1; color: #9b3a28; }
 .member-action:disabled { cursor: not-allowed; opacity: .5; }
+.member-actions { display: flex; align-items: center; gap: 6px; }
 .invitation-surface { margin-top: 14px; }
 .invitation-list { display: grid; }
 .invitation-item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; border-top: 1px solid #eff1ee; padding: 12px 16px; }
@@ -922,6 +932,17 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .text-field:focus { border-color: #b8a5f3; box-shadow: 0 0 0 3px rgba(109,59,234,.09); }
 .field-help { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); margin-top: 20px; padding-top: 15px; }
+.danger-button { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; border: 1px solid #e7b7ac; border-radius: 9px; background: #fff5f2; color: #a43f2b; padding: 8px 13px; font-size: 11px; font-weight: 760; }
+.danger-button:hover { border-color: #d88d7c; background: #ffebe6; }
+.danger-button:disabled { cursor: not-allowed; opacity: .55; }
+.modal-danger-action { margin-right: auto; }
+.confirmation-modal { width: min(450px, calc(100vw - 28px)); }
+.confirmation-card { text-align: left; }
+.confirmation-card h2 { margin: 7px 0 0; font-family: var(--font-sans); font-size: 24px; letter-spacing: -.5px; }
+.confirmation-card > .modal-copy { margin: 10px 0 0; }
+.confirmation-symbol { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: #fff0ec; color: #b54731; }
+.confirmation-symbol svg { width: 21px; height: 21px; }
+.confirmation-note { border: 1px solid #f0d2c9; border-radius: 10px; background: #fff7f4; color: #854333; margin: 13px 0 0; padding: 10px 11px; font-size: 10px; font-weight: 650; line-height: 1.5; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-top: 18px; }
 .form-span { grid-column: 1 / -1; }
 .channel-form-grid { margin-top: 15px; }
@@ -1069,8 +1090,12 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .template-variable-row { grid-template-columns: 1fr; }
   .contacts-workspace.has-editor { display: block; }
   .contact-editor-panel { position: fixed; z-index: 45; top: 8px; right: 8px; bottom: 8px; width: min(360px, calc(100vw - 16px)); overflow-y: auto; box-shadow: -15px 0 40px rgba(35,42,39,.2); }
+  .contact-editor-actions { flex-wrap: wrap; }
+  .contact-delete-button { width: 100%; margin-right: 0; }
   .channel-modal { max-height: calc(100dvh - 16px); }
   .channel-modal .modal-card { padding: 18px 15px; }
+  .channel-modal .modal-actions { flex-wrap: wrap; }
+  .channel-modal .modal-danger-action { width: 100%; margin-right: 0; }
   .provider-fields { padding: 13px; }
   .channel-enabled { align-items: flex-start; }
   .auth-card { padding: 25px 20px; border-radius: 20px; }

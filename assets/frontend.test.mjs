@@ -67,6 +67,7 @@ test("single workspace profile stores organisation, address, and GST details", (
   }
   assert.match(html, /id="workspaceId"[^>]*readonly[^>]*data-workspace-immutable/);
   assert.match(html, /data-action="copy-workspace-id"/);
+  assert.match(app, /workspaceId: "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"/);
   assert.match(app, /workspaceId: profile\.workspaceId/);
   assert.match(app, /field\.hasAttribute\("data-workspace-immutable"\)/);
   assert.match(app, /"copy-workspace-id": \(\) => copyDeveloperApiValue\(\$\("workspaceId"\)\.value/);
@@ -649,6 +650,33 @@ test("Developer API keys are managed by admins and shown only once", () => {
   assert.doesNotMatch(apiKeyDialog, /WhatsApp/i);
   assert.match(app, /\$\("apiKeyOutput"\)\.value = ""/);
   assert.doesNotMatch(app, /localStorage\.(?:setItem|getItem)\([^)]*api.?key/i);
+});
+
+test("destructive workspace actions use one in-app confirmation dialog", () => {
+  assert.match(html, /id="confirmationDialog"[^>]*aria-labelledby="confirmationTitle"/);
+  assert.match(html, /id="confirmationForm"/);
+  assert.match(html, /class="conversation-menu-wrap"[^>]*data-admin-only/);
+  assert.match(html, /id="conversationMenuButton"[^>]*aria-controls="conversationActionMenu"/);
+  assert.match(html, /id="conversationActionMenu"[^>]*role="menu"[^>]*hidden/);
+  assert.match(html, /data-action="delete-conversation"/);
+  assert.match(html, /id="contactDeleteButton"[^>]*data-action="delete-contact"/);
+  assert.match(html, /id="channelDeleteButton"[^>]*data-action="delete-channel"[^>]*hidden/);
+  assert.match(app, /function requestConfirmation\(/);
+  assert.match(app, /function finishConfirmation\(/);
+  assert.doesNotMatch(app, /window\.confirm\s*\(/);
+  assert.match(app, /deleteConversation\(conversationId\)[\s\S]*?method: "DELETE"/);
+  assert.match(app, /deleteContact\(contactId\)[\s\S]*?method: "DELETE"/);
+  assert.match(app, /deleteChannel\(channelId\)[\s\S]*?method: "DELETE"/);
+  assert.match(app, /deleteApiKey\(apiKeyId\)[\s\S]*?method: "DELETE"/);
+  assert.match(app, /deleteMember\(membershipId\)[\s\S]*?method: "DELETE"/);
+  assert.match(app, /Only Helixcer data will be deleted\.[\s\S]*?provider-side message history will not be changed/);
+  assert.match(app, /clearSelectedConversation\(\);[\s\S]*?Conversation deleted/);
+  assert.match(app, /type === "conversation\.deleted"[\s\S]*?state\.conversations = state\.conversations\.filter/);
+  assert.match(app, /type === "contact\.deleted"[\s\S]*?state\.contacts = state\.contacts\.filter/);
+  assert.match(app, /data\.deleteMember|dataset\.deleteMember/);
+  assert.match(styles, /\.conversation-action-menu\s*\{/);
+  assert.match(styles, /\.danger-button\s*\{/);
+  assert.match(styles, /\.confirmation-modal\s*\{/);
 });
 
 test("Developer API documentation is channel-organized and keeps the send contract complete", () => {

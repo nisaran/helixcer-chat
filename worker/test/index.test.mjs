@@ -321,6 +321,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const conversationUniqueness = await readFile(new URL('../migrations/0007_conversation_uniqueness.sql', import.meta.url), 'utf8');
   const pushSubscriptions = await readFile(new URL('../migrations/0008_push_subscriptions.sql', import.meta.url), 'utf8');
   const workspaceProfile = await readFile(new URL('../migrations/0009_workspace_profile.sql', import.meta.url), 'utf8');
+  const workspaceIdMigration = await readFile(new URL('../migrations/0010_workspace_uuid.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -363,6 +364,36 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   database.exec(conversationUniqueness);
   database.exec(pushSubscriptions);
   database.exec(workspaceProfile);
+  database.exec(`
+    INSERT INTO users (user_id,google_sub,email,display_name,email_verified,last_login_at,created_at,updated_at)
+      VALUES ('migration-user','migration-sub','migration@example.com','Migration owner',1,'2026-01-01','2026-01-01','2026-01-01');
+    INSERT INTO memberships (membership_id,workspace_id,user_id,role,status,created_at,updated_at)
+      VALUES ('migration-membership','ws_default','migration-user','owner','active','2026-01-01','2026-01-01');
+    INSERT INTO sessions (session_id,token_hash,user_id,workspace_id,expires_at,last_seen_at,created_at)
+      VALUES ('migration-session','migration-token','migration-user','ws_default','2027-01-01','2026-01-01','2026-01-01');
+    INSERT INTO invitations (invitation_id,workspace_id,email,role,token_hash,status,expires_at,created_at,updated_at)
+      VALUES ('migration-invitation','ws_default','invite@example.com','agent','migration-invite-token','pending','2027-01-01','2026-01-01','2026-01-01');
+    INSERT INTO push_subscriptions
+      (subscription_id,workspace_id,membership_id,device_id,endpoint,p256dh,auth,created_at,updated_at)
+      VALUES ('migration-push','ws_default','migration-membership','device','https://push.example/sub','key','auth','2026-01-01','2026-01-01');
+    INSERT INTO channel_credentials
+      (workspace_id,channel_id,credential_key,encrypted_value,created_at,updated_at)
+      VALUES ('ws_default','legacy-channel','accessToken','encrypted-old-aad','2026-01-01','2026-01-01');
+    INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
+      VALUES ('legacy-message','ws_default','encrypted-old-aad','2026-01-01','2026-01-01');
+    INSERT INTO api_keys
+      (api_key_id,workspace_id,name,key_prefix,secret_hash,status,created_at,updated_at)
+      VALUES ('migration-key','ws_default','Migration key','hxc_migrate','migration-secret-hash','active','2026-01-01','2026-01-01');
+    INSERT INTO external_api_requests
+      (request_id,workspace_id,api_key_id,operation,idempotency_key_hash,request_hash,message_id,created_at,expires_at)
+      VALUES ('migration-request','ws_default','migration-key','send','migration-idempotency','migration-request-hash','legacy-message','2026-01-01','2027-01-01');
+    UPDATE channels SET config_json='{"credentialsVerifiedAt":"2026-01-01","webhookVerifiedAt":"2026-01-01","verifiedProviderId":"provider-1","phoneNumberId":"10001"}'
+      WHERE channel_id='legacy-channel';
+  `);
+  database.exec(workspaceIdMigration);
+  const migratedWorkspaceId = database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id;
+  assert.match(migratedWorkspaceId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM workspaces WHERE workspace_id='ws_default'").get().count, 0);
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
   for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'channel_credentials',
     'contacts', 'messages', 'audit_log', 'api_keys', 'outbound_payloads', 'external_api_requests', 'push_subscriptions']) {
@@ -375,19 +406,37 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
     ['conversations', 'conversation_id', 'legacy-conversation-new'],
     ['messages', 'message_id', 'legacy-message'],
     ['webhook_events', 'event_key', 'legacy-event'],
-    ['outbox', 'outbox_id', 'legacy-outbox'],
     ['agents', 'agent_id', 'legacy-agent'],
     ['audit_log', 'audit_id', 'legacy-audit']
   ]) {
-    assert.equal(database.prepare(`SELECT workspace_id FROM ${table} WHERE ${idColumn}=?`).get(id).workspace_id, 'ws_default');
+    assert.equal(database.prepare(`SELECT workspace_id FROM ${table} WHERE ${idColumn}=?`).get(id).workspace_id, migratedWorkspaceId);
   }
   assert.equal(database.prepare("SELECT actor_email FROM audit_log WHERE audit_id='legacy-audit'").get().actor_email, 'legacy@example.com');
-  assert.equal(database.prepare('SELECT count(*) AS count FROM memberships').get().count, 0);
-  assert.equal(database.prepare("SELECT name FROM workspaces WHERE workspace_id='ws_default'").get().name, 'Helixcer Chat');
+  assert.equal(database.prepare('SELECT count(*) AS count FROM memberships').get().count, 1);
+  assert.equal(database.prepare('SELECT name FROM workspaces WHERE workspace_id=?').get(migratedWorkspaceId).name, 'Helixcer Chat');
   assert.deepEqual({ ...database.prepare(`SELECT registered_name,address_line1,address_line2,city,state,postal_code,country,gstin,tax_details
-    FROM workspaces WHERE workspace_id='ws_default'`).get() }, {
+    FROM workspaces WHERE workspace_id=?`).get(migratedWorkspaceId) }, {
     registered_name: '', address_line1: '', address_line2: '', city: '', state: '', postal_code: '', country: '', gstin: '', tax_details: ''
   });
+  for (const [table, idColumn, id] of [
+    ['memberships', 'membership_id', 'migration-membership'],
+    ['sessions', 'session_id', 'migration-session'],
+    ['invitations', 'invitation_id', 'migration-invitation'],
+    ['push_subscriptions', 'subscription_id', 'migration-push'],
+    ['api_keys', 'api_key_id', 'migration-key'],
+    ['external_api_requests', 'request_id', 'migration-request']
+  ]) {
+    assert.equal(database.prepare(`SELECT workspace_id FROM ${table} WHERE ${idColumn}=?`).get(id).workspace_id, migratedWorkspaceId);
+  }
+  assert.equal(database.prepare('SELECT count(*) AS count FROM channel_credentials').get().count, 0);
+  assert.equal(database.prepare('SELECT count(*) AS count FROM outbound_payloads').get().count, 0);
+  assert.equal(database.prepare('SELECT count(*) AS count FROM outbox').get().count, 0);
+  assert.equal(database.prepare("SELECT status FROM messages WHERE message_id='legacy-message'").get().status, 'failed');
+  const migratedChannelConfig = JSON.parse(database.prepare("SELECT config_json FROM channels WHERE channel_id='legacy-channel'").get().config_json);
+  assert.equal(migratedChannelConfig.phoneNumberId, '10001');
+  assert.equal(migratedChannelConfig.credentialsVerifiedAt, undefined);
+  assert.equal(migratedChannelConfig.webhookVerifiedAt, undefined);
+  assert.equal(migratedChannelConfig.verifiedProviderId, undefined);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE channel_id='wa-main'").get().count, 0);
   assert.equal(database.prepare("SELECT provider_type FROM channels WHERE channel_id='legacy-channel'").get().provider_type, 'web_chat');
   assert.equal(database.prepare("SELECT company FROM contacts WHERE contact_id='legacy-contact'").get().company, '');

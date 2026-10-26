@@ -571,6 +571,9 @@ test('session-authenticated bootstrap is workspace scoped and returns verified i
 test('single workspace profile is readable by members and writable only by admins', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB);
+  database.exec(await readFile(new URL('../migrations/0010_workspace_uuid.sql', import.meta.url), 'utf8'));
+  const migratedWorkspaceId = database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id;
+  assert.match(migratedWorkspaceId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   const { sessionToken } = await performOwnerLogin(env);
   const headers = {
     Cookie: `__Host-helixcer_session=${encodeURIComponent(sessionToken)}`,
@@ -579,12 +582,13 @@ test('single workspace profile is readable by members and writable only by admin
 
   const initial = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', { headers }), env);
   assert.equal(initial.status, 200);
-  assert.deepEqual(await initial.json(), { item: {
-    workspaceId: 'ws_default', displayName: 'Helixcer Chat', registeredName: '', addressLine1: '', addressLine2: '',
+  const initialBody = await initial.json();
+  assert.deepEqual(initialBody, { item: {
+    workspaceId: migratedWorkspaceId, displayName: 'Helixcer Chat', registeredName: '', addressLine1: '', addressLine2: '',
     city: '', state: '', postalCode: '', country: '', gstin: '', taxDetails: ''
   } });
 
-  database.prepare("UPDATE memberships SET role='agent' WHERE workspace_id='ws_default'").run();
+  database.prepare("UPDATE memberships SET role='agent' WHERE workspace_id=?").run(migratedWorkspaceId);
   const memberRead = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', { headers }), env);
   assert.equal(memberRead.status, 200);
   const memberWrite = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', {
@@ -593,7 +597,14 @@ test('single workspace profile is readable by members and writable only by admin
   }), env);
   assert.equal(memberWrite.status, 403);
 
-  database.prepare("UPDATE memberships SET role='owner' WHERE workspace_id='ws_default'").run();
+  database.prepare("UPDATE memberships SET role='owner' WHERE workspace_id=?").run(migratedWorkspaceId);
+  const immutableId = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', {
+    method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workspaceId: crypto.randomUUID() })
+  }), env);
+  assert.equal(immutableId.status, 400);
+  assert.equal(database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id,
+    migratedWorkspaceId);
   const update = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', {
     method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -606,6 +617,7 @@ test('single workspace profile is readable by members and writable only by admin
   assert.equal(update.status, 200);
   const updated = await update.json();
   assert.equal(updated.item.displayName, 'Helixcer Operations');
+  assert.equal(updated.item.workspaceId, migratedWorkspaceId);
   assert.equal(updated.item.registeredName, 'Helixcer Private Limited');
   assert.equal(updated.item.gstin, '32ABCDE1234F1Z5');
   assert.match(updated.item.taxDetails, /\nInvoices/);
@@ -619,10 +631,20 @@ test('single workspace profile is readable by members and writable only by admin
   assert.equal(partialBody.item.city, 'Ernakulam');
   assert.equal(partialBody.item.displayName, 'Helixcer Operations');
   assert.equal(partialBody.item.gstin, '32ABCDE1234F1Z5');
+  assert.equal(partialBody.item.workspaceId, migratedWorkspaceId);
+  assert.equal(database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id,
+    migratedWorkspaceId);
 
   const bootstrap = await handleRequest(new Request('https://api.chat.helixcer.com/api/bootstrap', { headers }), env);
   assert.equal(bootstrap.status, 200);
-  assert.equal((await bootstrap.json()).workspace.registeredName, 'Helixcer Private Limited');
+  const bootstrapBody = await bootstrap.json();
+  assert.equal(bootstrapBody.workspace.registeredName, 'Helixcer Private Limited');
+  assert.equal(bootstrapBody.workspace.workspaceId, migratedWorkspaceId);
+  const recovery = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), { ...env, RECOVERY_MODE: 'true', ADMIN_TOKEN: 'recovery-secret' });
+  assert.equal(recovery.status, 200);
+  assert.equal((await recovery.json()).item.workspaceId, migratedWorkspaceId);
   assert.equal(database.prepare("SELECT action FROM audit_log WHERE target_type='workspace'").get().action, 'update');
 
   const invalidGstin = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', {
@@ -2533,5 +2555,193 @@ test('contact detail and update APIs preserve conversations, keep Channel Profil
     headers: { Authorization: 'Bearer recovery-secret' }
   }), env);
   assert.equal(privateContact.status, 404);
+  database.close();
+});
+
+test('conversation, contact, and channel deletion removes only local workspace data and never calls providers', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, { ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true' });
+  const headers = { Authorization: 'Bearer recovery-secret' };
+  const now = new Date().toISOString();
+  const originalFetch = globalThis.fetch;
+  let providerCalls = 0;
+  globalThis.fetch = async () => {
+    providerCalls++;
+    throw new Error('Channel deletion must not call a provider.');
+  };
+  try {
+    database.prepare(`INSERT INTO channels
+        (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+      VALUES ('delete-channel','Delete WhatsApp','whatsapp_cloud','whatsapp_cloud',1,'["text"]','{}','DELETE_TEST',?,?, 'ws_default'),
+        ('keep-channel','Keep Telegram','telegram','telegram',1,'["text"]','{}','KEEP_TEST',?,?, 'ws_default')`)
+      .run(now, now, now, now);
+    database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+      VALUES ('delete-exclusive','Exclusive',?,?, 'ws_default'),('delete-shared','Shared',?,?, 'ws_default')`)
+      .run(now, now, now, now);
+    database.prepare(`INSERT INTO channel_identities
+        (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
+      VALUES ('identity-exclusive','delete-exclusive','delete-channel','profile-exclusive','Exclusive',?,'ws_default'),
+        ('identity-shared-delete','delete-shared','delete-channel','profile-shared-a','Shared',?,'ws_default'),
+        ('identity-shared-keep','delete-shared','keep-channel','profile-shared-b','Shared',?,'ws_default')`)
+      .run(now, now, now);
+    database.prepare(`INSERT INTO conversations
+        (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+      VALUES ('conversation-delete','delete-exclusive','delete-channel','open','Exclusive',?,0,?,?,'ws_default'),
+        ('conversation-shared-delete','delete-shared','delete-channel','open','Shared A',?,0,?,?,'ws_default'),
+        ('conversation-keep','delete-shared','keep-channel','open','Shared B',?,0,?,?,'ws_default')`)
+      .run(now, now, now, now, now, now, now, now, now);
+    database.prepare(`INSERT INTO messages
+        (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
+      VALUES ('message-delete','conversation-delete','delete-exclusive','delete-channel','outbound','text','Delete','pending',?,'ws_default'),
+        ('message-shared-delete','conversation-shared-delete','delete-shared','delete-channel','inbound','text','Delete shared','received',?,'ws_default'),
+        ('message-keep','conversation-keep','delete-shared','keep-channel','inbound','text','Keep','received',?,'ws_default')`)
+      .run(now, now, now);
+    database.prepare(`INSERT INTO outbox
+        (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,created_at,updated_at,workspace_id)
+      VALUES ('outbox-delete','message-delete',0,6,?,'pending',?,?,'ws_default')`).run(now, now, now);
+    database.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
+      VALUES ('message-delete','ws_default','encrypted',?,?)`).run(now, now);
+    database.prepare(`INSERT INTO api_keys
+        (api_key_id,workspace_id,name,key_prefix,secret_hash,scopes_json,allowed_channel_ids_json,status,created_at,updated_at)
+      VALUES ('delete-api-key','ws_default','Delete key','hxc_live_delete','delete-hash','[]','[]','active',?,?)`).run(now, now);
+    database.prepare(`INSERT INTO external_api_requests
+        (request_id,workspace_id,api_key_id,operation,idempotency_key_hash,request_hash,message_id,created_at,expires_at)
+      VALUES ('external-delete','ws_default','delete-api-key','send','idem-delete','request-delete','message-delete',?,?)`)
+      .run(now, new Date(Date.now() + 3600000).toISOString());
+    database.prepare(`INSERT INTO channel_credentials
+        (workspace_id,channel_id,credential_key,encrypted_value,created_at,updated_at)
+      VALUES ('ws_default','delete-channel','accessToken','encrypted',?,?)`).run(now, now);
+    database.prepare(`INSERT INTO webhook_events (event_key,channel_id,event_type,received_at,workspace_id)
+      VALUES ('delete-webhook','delete-channel','message',?,'ws_default')`).run(now);
+
+    const deletedChannelResponse = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/channels/delete-channel', { method: 'DELETE', headers }
+    ), env);
+    assert.equal(deletedChannelResponse.status, 200);
+    const deletedChannel = await deletedChannelResponse.json();
+    assert.equal(deletedChannel.localOnly, true);
+    assert.equal(deletedChannel.deletedConversations, 2);
+    assert.equal(deletedChannel.deletedMessages, 2);
+    assert.equal(providerCalls, 0);
+    for (const table of ['channels', 'channel_credentials', 'webhook_events']) {
+      const column = table === 'webhook_events' ? 'channel_id' : 'channel_id';
+      assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column}='delete-channel'`).get().count, 0);
+    }
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM conversations WHERE channel_id='delete-channel'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE channel_id='delete-channel'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM outbox WHERE message_id='message-delete'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM outbound_payloads WHERE message_id='message-delete'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM external_api_requests WHERE message_id='message-delete'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contacts WHERE contact_id='delete-exclusive'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contacts WHERE contact_id='delete-shared'").get().count, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM conversations WHERE conversation_id='conversation-keep'").get().count, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE message_id='message-keep'").get().count, 1);
+
+    const deletedConversationResponse = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-keep', { method: 'DELETE', headers }
+    ), env);
+    assert.equal(deletedConversationResponse.status, 200);
+    assert.equal((await deletedConversationResponse.json()).deletedMessages, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM conversations WHERE conversation_id='conversation-keep'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE message_id='message-keep'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contacts WHERE contact_id='delete-shared'").get().count, 1);
+
+    database.prepare(`INSERT INTO conversations
+        (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+      VALUES ('contact-conversation','delete-shared','keep-channel','closed','Shared B',?,0,?,?,'ws_default')`)
+      .run(now, now, now);
+    database.prepare(`INSERT INTO messages
+        (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
+      VALUES ('contact-message','contact-conversation','delete-shared','keep-channel','inbound','text','Delete contact','received',?,'ws_default')`)
+      .run(now);
+    const deletedContactResponse = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/contacts/delete-shared', { method: 'DELETE', headers }
+    ), env);
+    assert.equal(deletedContactResponse.status, 200);
+    const deletedContact = await deletedContactResponse.json();
+    assert.deepEqual(deletedContact.conversationIds, ['contact-conversation']);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contacts WHERE contact_id='delete-shared'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channel_identities WHERE contact_id='delete-shared'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM conversations WHERE contact_id='delete-shared'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE contact_id='delete-shared'").get().count, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('team member deletion follows role hierarchy, revokes access, and protects the last active owner', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, { ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true' });
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 3600000).toISOString();
+  const adminToken = 'delete-admin-session-token-that-is-long-enough';
+  for (const [userId, sub, email, name] of [
+    ['delete-owner', 'delete-owner-sub', 'delete-owner@example.com', 'Delete owner'],
+    ['delete-admin', 'delete-admin-sub', 'delete-admin@example.com', 'Delete admin'],
+    ['delete-agent-one', 'delete-agent-one-sub', 'delete-agent-one@example.com', 'Delete agent one'],
+    ['delete-agent-two', 'delete-agent-two-sub', 'delete-agent-two@example.com', 'Delete agent two']
+  ]) {
+    database.prepare(`INSERT INTO users
+        (user_id,google_sub,email,display_name,email_verified,last_login_at,created_at,updated_at)
+      VALUES (?,?,?,?,1,?,?,?)`).run(userId, sub, email, name, now, now, now);
+  }
+  for (const [membershipId, userId, role] of [
+    ['delete-owner-membership', 'delete-owner', 'owner'],
+    ['delete-admin-membership', 'delete-admin', 'admin'],
+    ['delete-agent-one-membership', 'delete-agent-one', 'agent'],
+    ['delete-agent-two-membership', 'delete-agent-two', 'agent']
+  ]) {
+    database.prepare(`INSERT INTO memberships
+        (membership_id,workspace_id,user_id,role,status,created_at,updated_at)
+      VALUES (?,'ws_default',?,?,'active',?,?)`).run(membershipId, userId, role, now, now);
+  }
+  database.prepare(`INSERT INTO sessions
+      (session_id,token_hash,user_id,workspace_id,expires_at,last_seen_at,created_at)
+    VALUES ('delete-admin-session',?,'delete-admin','ws_default',?,?,?),
+      ('delete-agent-session','agent-session-hash','delete-agent-one','ws_default',?,?,?)`)
+    .run(await hashToken(adminToken), expiresAt, now, now, expiresAt, now, now);
+  database.prepare(`INSERT INTO channels
+      (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+    VALUES ('team-delete-channel','Team','telegram','telegram',1,'["text"]','{}','TEAM',?,?, 'ws_default')`).run(now, now);
+  database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+    VALUES ('team-delete-contact','Assigned contact',?,?, 'ws_default')`).run(now, now);
+  database.prepare(`INSERT INTO conversations
+      (conversation_id,contact_id,channel_id,status,assigned_to,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+    VALUES ('team-delete-conversation','team-delete-contact','team-delete-channel','open','delete-agent-one@example.com','Assigned',?,0,?,?,'ws_default')`)
+    .run(now, now, now);
+
+  const adminHeaders = {
+    Cookie: `__Host-helixcer_session=${adminToken}`,
+    Origin: 'https://chat.helixcer.com'
+  };
+  const deniedOwner = await handleRequest(new Request(
+    'https://api.chat.helixcer.com/api/team/members/delete-owner-membership', { method: 'DELETE', headers: adminHeaders }
+  ), env);
+  assert.equal(deniedOwner.status, 403);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM memberships WHERE membership_id='delete-owner-membership'").get().count, 1);
+
+  const removedAgent = await handleRequest(new Request(
+    'https://api.chat.helixcer.com/api/team/members/delete-agent-one-membership', { method: 'DELETE', headers: adminHeaders }
+  ), env);
+  assert.equal(removedAgent.status, 200);
+  assert.equal((await removedAgent.json()).deleted, true);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM memberships WHERE membership_id='delete-agent-one-membership'").get().count, 0);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM users WHERE user_id='delete-agent-one'").get().count, 0);
+  assert.equal(database.prepare("SELECT assigned_to FROM conversations WHERE conversation_id='team-delete-conversation'").get().assigned_to, '');
+
+  const protectedOwner = await handleRequest(new Request(
+    'https://api.chat.helixcer.com/api/team/members/delete-owner-membership', {
+      method: 'DELETE', headers: { Authorization: 'Bearer recovery-secret' }
+    }
+  ), env);
+  assert.equal(protectedOwner.status, 409);
+  assert.match((await protectedOwner.json()).error, /at least one active owner/i);
+
+  const removedSecondAgent = await handleRequest(new Request(
+    'https://api.chat.helixcer.com/api/team/members/delete-agent-two-membership', { method: 'DELETE', headers: adminHeaders }
+  ), env);
+  assert.equal(removedSecondAgent.status, 200);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM memberships WHERE membership_id='delete-agent-two-membership'").get().count, 0);
   database.close();
 });
