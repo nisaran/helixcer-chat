@@ -21,7 +21,7 @@ VAPID_SUBJECT = "mailto:nisaran@helixcer.com"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "helixcer-chat-v2"
+database_name = "helixcer-chat-db"
 database_id = "45386cc5-53bf-481c-b678-01fc1ae2c58c"
 migrations_dir = "worker/migrations"
 
