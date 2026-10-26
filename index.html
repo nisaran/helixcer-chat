@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261026-10">
-  <script src="./assets/app.js?v=20261026-10" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261026-11">
+  <script src="./assets/app.js?v=20261026-11" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -176,13 +176,29 @@
               <kbd class="search-shortcut">/</kbd>
             </div>
 
+            <div class="conversation-filter-desktop" id="conversationFilterPicker">
+              <button class="conversation-filter-trigger" id="conversationFilterToggle" type="button" data-action="toggle-conversation-filters" aria-expanded="false" aria-controls="conversationFilterMenu">
+                <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg><strong>Filters</strong><em id="conversationFilterSummary">Open</em></span>
+                <span><b id="conversationFilterCount">1</b><svg class="filter-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></span>
+              </button>
+              <div class="conversation-filter-menu" id="conversationFilterMenu" role="group" aria-label="Filter conversations" hidden>
+                <label class="conversation-filter-option"><input type="checkbox" value="all" data-conversation-filter-option><span>All conversations</span><small data-filter-count="all">0</small></label>
+                <label class="conversation-filter-option"><input type="checkbox" value="mine" data-conversation-filter-option><span>Mine</span><small data-filter-count="mine">0</small></label>
+                <label class="conversation-filter-option"><input type="checkbox" value="unassigned" data-conversation-filter-option><span>Unassigned</span><small data-filter-count="unassigned">0</small></label>
+                <label class="conversation-filter-option"><input type="checkbox" value="open" data-conversation-filter-option checked><span>Open</span><small data-filter-count="open">0</small></label>
+                <label class="conversation-filter-option"><input type="checkbox" value="unread" data-conversation-filter-option><span>Unread</span><small data-filter-count="unread">0</small></label>
+                <label class="conversation-filter-option"><input type="checkbox" value="closed" data-conversation-filter-option><span>Closed</span><small data-filter-count="closed">0</small></label>
+                <button class="conversation-filter-clear" type="button" data-action="clear-conversation-filters">Show all conversations</button>
+              </div>
+            </div>
+
             <div class="filter-row" id="conversationFilters" aria-label="Conversation filters">
-              <button class="filter-chip" type="button" data-filter="all">All <span id="allCount">0</span></button>
-              <button class="filter-chip" type="button" data-filter="mine">Mine <span id="mineCount">0</span></button>
-              <button class="filter-chip" type="button" data-filter="unassigned">Unassigned <span id="unassignedCount">0</span></button>
-              <button class="filter-chip is-active" type="button" data-filter="open">Open <span id="openCount">0</span></button>
-              <button class="filter-chip" type="button" data-filter="unread">Unread <span id="unreadCount">0</span></button>
-              <button class="filter-chip" type="button" data-filter="closed">Closed</button>
+              <button class="filter-chip" type="button" data-filter="all">All <span id="allCount" data-filter-count="all">0</span></button>
+              <button class="filter-chip" type="button" data-filter="mine">Mine <span id="mineCount" data-filter-count="mine">0</span></button>
+              <button class="filter-chip" type="button" data-filter="unassigned">Unassigned <span id="unassignedCount" data-filter-count="unassigned">0</span></button>
+              <button class="filter-chip is-active" type="button" data-filter="open">Open <span id="openCount" data-filter-count="open">0</span></button>
+              <button class="filter-chip" type="button" data-filter="unread">Unread <span id="unreadCount" data-filter-count="unread">0</span></button>
+              <button class="filter-chip" type="button" data-filter="closed">Closed <span id="closedCount" data-filter-count="closed">0</span></button>
             </div>
 
             <div class="conversation-list" id="conversationList" role="list" aria-live="polite"></div>
@@ -239,6 +255,10 @@
               </div>
               <form class="composer" id="messageForm">
                 <div class="composer-box">
+                  <div class="composer-reply" id="composerReply" hidden>
+                    <div><strong id="composerReplyAuthor">Replying to message</strong><span id="composerReplyPreview"></span></div>
+                    <button class="composer-reply-close" type="button" data-action="cancel-reply" aria-label="Cancel reply">×</button>
+                  </div>
                   <textarea id="messageInput" rows="1" maxlength="4000" enterkeyhint="enter" placeholder="Write a reply…" aria-label="Message"></textarea>
                   <input class="sr-only" id="attachmentInput" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/3gpp,audio/aac,audio/amr,audio/mpeg,audio/mp4,audio/ogg,application/pdf,text/plain,text/csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv" tabindex="-1">
                   <div class="attachment-queue" id="attachmentQueue" aria-label="Files ready to send" hidden></div>
@@ -633,25 +653,42 @@
       <p class="modal-copy">Choose an approved template, then map every required value from this contact or enter it manually.</p>
       <div class="form-grid">
         <label class="field-label form-span">Approved template
-          <span class="searchable-select">
-            <input class="text-field searchable-select-input" id="templateSearch" type="search" placeholder="Search templates…" autocomplete="off" aria-controls="templateSelect">
-            <select class="text-field" name="templateId" id="templateSelect" required disabled><option value="">Loading templates…</option></select>
+          <span class="searchable-combobox" id="templateCombobox">
+            <input class="text-field searchable-combobox-input" id="templateSearch" type="search" placeholder="Search or choose a template…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="templateOptions" disabled>
+            <input type="hidden" name="templateId" id="templateSelect">
+            <span class="searchable-combobox-menu" id="templateOptions" role="listbox" aria-label="Approved templates" hidden></span>
           </span>
         </label>
         <div class="template-load-state form-span" id="templateLoadStatus" role="status">Loading approved templates from WhatsApp…</div>
         <div class="template-summary form-span" id="templateSummary" hidden></div>
-        <div class="template-variable-fields form-span" id="templateVariableFields"></div>
         <input type="hidden" name="previewText" id="templatePreviewText">
-        <section class="template-composer-preview form-span" id="templateMessagePreview" aria-live="polite" hidden>
-          <span class="field-label">Message preview</span>
-          <div class="template-preview-phone"><div class="template-preview-message" id="templatePreviewContent"></div></div>
-        </section>
+        <div class="template-composer-layout form-span">
+          <div class="template-variable-fields" id="templateVariableFields"></div>
+          <section class="template-composer-preview" id="templateMessagePreview" aria-live="polite" hidden>
+            <span class="field-label">Message preview</span>
+            <div class="template-preview-phone"><div class="template-preview-message" id="templatePreviewContent"></div></div>
+          </section>
+        </div>
       </div>
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-template">Cancel</button>
         <button class="primary-button" id="templateSubmit" type="submit">Send template</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog class="modal attachment-preview-dialog" id="attachmentPreviewDialog" aria-labelledby="attachmentPreviewTitle">
+    <div class="modal-card attachment-preview-card">
+      <div class="modal-head">
+        <div><p class="eyebrow">Attachment</p><h2 id="attachmentPreviewTitle">File preview</h2></div>
+        <button class="icon-button" type="button" data-action="close-attachment-preview" aria-label="Close attachment preview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="attachment-preview-body" id="attachmentPreviewBody"></div>
+      <div class="modal-actions attachment-preview-actions">
+        <button class="secondary-button" type="button" data-action="close-attachment-preview">Close</button>
+        <a class="primary-button" id="attachmentPreviewDownload" href="" download>Download</a>
+      </div>
+    </div>
   </dialog>
 
   <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>

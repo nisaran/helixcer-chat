@@ -210,14 +210,22 @@ test("WhatsApp inbox supports rendered templates, queued attachments, and reply-
 
 test("template composer searches templates and variables, previews substitutions, and uploads media", () => {
   assert.match(html, /id="templateSearch" type="search"/);
+  assert.match(html, /id="templateSearch"[^>]*role="combobox"/);
+  assert.match(html, /type="hidden" name="templateId" id="templateSelect"/);
+  assert.doesNotMatch(html, /<select[^>]+id="templateSelect"/);
   assert.match(html, /id="templateMessagePreview"/);
   assert.match(html, /id="templatePreviewText"/);
-  assert.match(app, /function renderTemplateSelectOptions\(query = ""\)/);
+  assert.match(app, /function renderTemplateSelectOptions\(query = "", \{ open = true \} = \{\}\)/);
   assert.match(app, /function filterTemplateSourceOptions\(row, query\)/);
+  assert.match(app, /function searchableComboboxOptions/);
+  assert.match(app, /function chooseTemplateSource/);
+  assert.match(app, /source\.type = "hidden"/);
+  assert.match(app, /comboInput\.setAttribute\("role", "combobox"\)/);
   assert.match(app, /function replaceTemplatePlaceholders/);
   assert.match(app, /function renderTemplateComposerPreview/);
   assert.match(app, /template-media/);
-  assert.match(app, /\[\["url", "Use media URL"\], \["upload", "Upload a file"\]\]/);
+  assert.match(app, /\[\["upload", "Upload a file"\], \["url", "Use media URL"\]\]/);
+  assert.match(app, /source\.value = descriptor\.kind === "media" \? "upload"/);
   assert.match(app, /function revokeTemplatePreviewUrl\(\)/);
   assert.match(app, /templateDialog"\)\.addEventListener\("close"[\s\S]*?revokeTemplatePreviewUrl\(\)/);
   assert.match(app, /source === "upload" \? row\?\.querySelector\("\.template-media-file"\)/);
@@ -225,12 +233,22 @@ test("template composer searches templates and variables, previews substitutions
   assert.match(app, /referrerPolicy = "no-referrer"/);
   assert.match(html, /img-src 'self' data: blob: https:; media-src 'self' blob: https:/);
   assert.doesNotMatch(app, /image\/jpeg,image\/png,image\/webp/);
-  assert.match(app, /const selectedOption = templateSourceOptions\.find/);
-  assert.match(app, /if \(selectedOption && !options\.some/);
-  assert.match(app, /event\.key === "Enter" && event\.target\.matches\("#templateSearch, \.template-source-search"\)/);
+  assert.match(app, /searchableComboboxInputKeydown/);
+  assert.match(app, /event\.key === "Enter"/);
+  assert.match(styles, /\.template-composer-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.15fr\) minmax\(300px, \.85fr\)/);
+  assert.match(styles, /@media \(max-width: 830px\)[\s\S]*?\.template-composer-layout\s*\{\s*grid-template-columns:\s*1fr/);
   assert.match(app, /if \(mediaPreview\) request\.mediaPreview = mediaPreview/);
   assert.match(app, /model\.text = textParts\.join\("\\n"\)\.trim\(\) \|\|/);
   assert.doesNotMatch(app, /model\.text = [^\n]+\.slice\(0, 4096\)/);
+  const templateSelectionInvalidation = app.slice(app.indexOf("function invalidateTemplateSelection"), app.indexOf("function renderTemplateSelectOptions"));
+  assert.match(templateSelectionInvalidation, /select\.value = ""/);
+  assert.match(templateSelectionInvalidation, /delete input\.dataset\.selectedLabel/);
+  assert.match(templateSelectionInvalidation, /templateSubmit"\)\.disabled = true/);
+  const sourceSelectionInvalidation = app.slice(app.indexOf("function invalidateTemplateSourceSelection"), app.indexOf("function searchableComboboxInputKeydown"));
+  assert.match(sourceSelectionInvalidation, /source\.value = ""/);
+  assert.match(sourceSelectionInvalidation, /syncTemplateVariableSource\(row\)/);
+  assert.match(app, /invalidateTemplateSelection\(event\.target\);\s*renderTemplateSelectOptions\(event\.target\.value\)/);
+  assert.match(app, /invalidateTemplateSourceSelection\(row, event\.target\);\s*filterTemplateSourceOptions\(row, event\.target\.value\)/);
 });
 
 test("attachments queue without auto-send and render provider-backed previews for WhatsApp and Telegram", () => {
@@ -258,6 +276,79 @@ test("attachments queue without auto-send and render provider-backed previews fo
   assert.doesNotMatch(queueFunction, /sendAttachment\(/);
 });
 
+test("provider-native replies and in-page attachment previews are available in chat", () => {
+  assert.match(html, /id="composerReply"[^>]*hidden/);
+  assert.match(html, /id="attachmentPreviewDialog"/);
+  assert.match(app, /replyToMessageId/);
+  assert.match(app, /function startReplyToMessage\(messageId\)/);
+  assert.match(app, /formData\.append\("replyToMessageId", replyToMessageId\)/);
+  assert.match(app, /data\.action = "reply-to-message"|dataset\.action = "reply-to-message"/);
+  assert.match(app, /offset >= 52/);
+  assert.match(app, /function renderQuotedReply\(reply, conversation\)/);
+  assert.match(app, /function openAttachmentPreview\(messageId\)/);
+  const attachmentRenderer = app.slice(app.indexOf("function renderMessageAttachment"), app.indexOf("function messageDisplayText"));
+  assert.doesNotMatch(attachmentRenderer, /target = "_blank"/);
+  assert.match(styles, /\.message-quote \{/);
+  assert.match(styles, /\.attachment-preview-body \{/);
+  assert.match(styles, /dialog\.attachment-preview-dialog\s*\{[^}]*width:\s*min\(940px,[^}]*max-width:\s*none[^}]*overflow:\s*hidden/);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?dialog\.attachment-preview-dialog\s*\{[^}]*width:\s*100vw[^}]*height:\s*100dvh[^}]*margin:\s*0/);
+  assert.match(styles, /\.attachment-preview-card\s*\{[^}]*width:\s*100%[^}]*max-width:\s*100%/);
+});
+
+test("realtime messages reconcile silently across resumed browsers", () => {
+  const realtimeHandler = app.slice(app.indexOf("async function handleRealtimeEvent"), app.indexOf("function isIosDevice"));
+  assert.match(realtimeHandler, /type === "connected"/);
+  assert.match(realtimeHandler, /upsertRenderedMessage\(message, conversationId\)/);
+  assert.doesNotMatch(realtimeHandler, /renderMessages\(\{ preserveScroll: true \}\)/);
+  assert.doesNotMatch(realtimeHandler, /state\.messages\.delete\(state\.selectedConversationId\)/);
+  assert.match(app, /ensureRealtimeConnected\?\.\(\{ resume: true \}\)/);
+  assert.match(app, /window\.addEventListener\("pagehide", \(\) => state\.disconnectRealtime\?\.\(\)\)/);
+  assert.match(app, /window\.addEventListener\("pageshow", resumeLiveWorkspace\)/);
+  assert.match(app, /window\.addEventListener\("online", resumeLiveWorkspace\)/);
+  assert.match(app, /socket\.send\("ping"\)/);
+});
+
+test("reconnect reconciliation expires stale histories and marks a visible selected chat read", () => {
+  const loadAll = app.slice(app.indexOf("async function loadAll"), app.indexOf("async function reconcileWorkspace"));
+  const reconcile = app.slice(app.indexOf("async function reconcileWorkspace"), app.indexOf("function renderAll"));
+  const realtimeHandler = app.slice(app.indexOf("async function handleRealtimeEvent"), app.indexOf("function isIosDevice"));
+  assert.match(loadAll, /mergeConversationSnapshots\(fetchedConversations, realtimeRevisionAtStart\)/);
+  assert.match(reconcile, /const realtimeRevisionAtStart = state\.realtimeRevision/);
+  assert.match(reconcile, /mergeConversationSnapshots\(fetchedConversations, realtimeRevisionAtStart\)/);
+  assert.match(realtimeHandler, /markConversationRealtimeMutation\(conversationId\)/);
+  assert.match(realtimeHandler, /markConversationRealtimeMutation\(incoming\.conversationId\)/);
+  assert.match(reconcile, /for \(const cachedConversationId of state\.messages\.keys\(\)\)/);
+  assert.match(reconcile, /cachedConversationId !== activeSelectedId\) state\.messages\.delete\(cachedConversationId\)/);
+  assert.match(reconcile, /selectedConversation\.unreadCount > 0 && document\.visibilityState === "visible"/);
+  assert.match(reconcile, /updateConversation\(activeSelectedId, \{ markRead: true \}\)\.catch/);
+  assert.match(reconcile, /\["pending", "closed"\]\.includes\(selectedConversation\.status\)[\s\S]*?clearSelectedConversation/);
+  const helperStart = app.indexOf("function markConversationRealtimeMutation");
+  const helperEnd = app.indexOf("function normalizeContact", helperStart);
+  const localState = {
+    realtimeRevision: 2,
+    conversationRevisions: new Map([["changed", 2], ["new-live", 2]]),
+    conversations: [
+      { conversationId: "changed", lastMessage: "live", unreadCount: 2 },
+      { conversationId: "new-live", lastMessage: "new", unreadCount: 1 },
+    ],
+  };
+  const mergeConversations = Function("state", `${app.slice(helperStart, helperEnd)}\nreturn mergeConversationSnapshots;`)(localState);
+  assert.deepEqual(mergeConversations([
+    { conversationId: "changed", lastMessage: "stale", unreadCount: 1 },
+    { conversationId: "steady", lastMessage: "stored", unreadCount: 0 },
+  ], 1).map((item) => [item.conversationId, item.lastMessage]), [
+    ["new-live", "new"], ["changed", "live"], ["steady", "stored"],
+  ]);
+});
+
+test("realtime sockets ignore superseded close events and time out stalled handshakes", () => {
+  const connect = app.slice(app.indexOf("connect(listener, onState)"), app.indexOf("ensureRealtimeConnected", app.indexOf("connect(listener, onState)")));
+  assert.match(connect, /Realtime connection timed out/);
+  assert.match(connect, /if \(this\.socket !== socket\) return;[\s\S]*?this\.socket = null/);
+  assert.match(connect, /if \(this\.socket !== socket \|\| this\.closedByClient\) return;[\s\S]*?listener\(JSON\.parse\(event\.data\)\)/);
+  assert.match(connect, /event\.code === 1008[\s\S]*?helixcer:unauthorized/);
+});
+
 test("settings expose permission-aware browser notifications", () => {
   assert.match(html, /data-route="settings"/);
   assert.match(html, /id="settingsRoute" data-route-panel="settings"/);
@@ -279,7 +370,8 @@ test("settings expose permission-aware browser notifications", () => {
   assert.match(app, /site-controls icon beside the address bar/);
   assert.match(app, /Android Settings → Apps → Chrome → Notifications/);
   assert.match(app, /new Notification\(/);
-  assert.match(app, /type === "webhook\.received"[\s\S]*?await loadAll\(\)[\s\S]*?notifyInboundMessage/);
+  assert.match(app, /type === "webhook\.received"[\s\S]*?!event\.granular[\s\S]*?reconcileWorkspace/);
+  assert.match(app, /type === "message\.created"[\s\S]*?notifyInboundMessage/);
   assert.match(app, /lastNotificationAt: new Map\(\)/);
 });
 
@@ -328,7 +420,7 @@ test("contacts open in a right-side editor backed by contact detail endpoints", 
   assert.match(app, /Channel is locked because this contact already has message history/);
   const saveContactBody = app.match(/async function saveContactEdits\(form\) \{([\s\S]*?)\n  \}/)?.[1] || "";
   assert.doesNotMatch(saveContactBody, /channelProfileId\s*:/);
-  assert.match(app, /type === "contact\.updated"[\s\S]*?await loadAll\(\)[\s\S]*?await selectContact/);
+  assert.match(app, /type === "contact\.updated"[\s\S]*?await reconcileWorkspace\(\)[\s\S]*?await selectContact/);
   assert.match(app, /\["channelProfileId", "Channel Profile ID"\]/);
 });
 
@@ -356,9 +448,11 @@ test("delivery status realtime updates patch only the existing message status", 
   const realtimeHandler = app.slice(app.indexOf("async function handleRealtimeEvent"), app.indexOf("function isIosDevice"));
   assert.match(app, /function updateRenderedMessageStatus\(message\)/);
   assert.match(app, /querySelector\("\.delivery-status, \.message-failed"\)/);
-  assert.match(realtimeHandler, /received === 0 && statuses > 0\) return/);
+  assert.match(realtimeHandler, /if \(!event\.granular\) await reconcileWorkspace\(\)/);
   assert.match(realtimeHandler, /const statusOnly = type === "message\.updated"/);
   assert.match(realtimeHandler, /if \(statusOnly\)[\s\S]*?updateRenderedMessageStatus\(message\);[\s\S]*?return/);
+  assert.match(realtimeHandler, /const replyBecameAvailable = Boolean\(existingMessage && !existingMessage\.channelMessageId && message\.channelMessageId\)/);
+  assert.match(realtimeHandler, /if \(replyBecameAvailable\) upsertRenderedMessage\(message, conversationId\)/);
   const missingStatusFallback = realtimeHandler.slice(realtimeHandler.indexOf("if (!existingMessage"), realtimeHandler.indexOf("const statusOnly"));
   assert.doesNotMatch(missingStatusFallback, /loadAll\(\)/);
 });
@@ -367,7 +461,7 @@ test("outbound status reconciliation is monotonic and permits explicit retry tra
   const start = app.indexOf("function mergeOutboundMessageStatus");
   const end = app.indexOf("function updateRenderedMessageStatus", start);
   assert.ok(start >= 0 && end > start);
-  const mergeStatus = Function(`${app.slice(start, end)}\nreturn mergeOutboundMessageStatus;`)();
+  const { mergeStatus, mergeSnapshots } = Function(`${app.slice(start, end)}\nreturn { mergeStatus: mergeOutboundMessageStatus, mergeSnapshots: mergeMessageSnapshots };`)();
   assert.equal(mergeStatus("submitted", "pending"), "submitted");
   assert.equal(mergeStatus("delivered", "sent"), "delivered");
   assert.equal(mergeStatus("read", "delivered"), "read");
@@ -375,6 +469,13 @@ test("outbound status reconciliation is monotonic and permits explicit retry tra
   assert.equal(mergeStatus("failed", "submitted"), "failed");
   assert.equal(mergeStatus("failed", "retrying"), "retrying");
   assert.equal(mergeStatus("retrying", "submitted"), "submitted");
+  const merged = mergeSnapshots(
+    [{ messageId: "live", direction: "outbound", status: "delivered", channelMessageId: "provider-live" }],
+    [{ messageId: "stored", direction: "inbound", status: "received" }, { messageId: "live", direction: "outbound", status: "sent" }],
+  );
+  assert.deepEqual(merged.map((item) => item.messageId), ["stored", "live"]);
+  assert.equal(merged.find((item) => item.messageId === "live").status, "delivered");
+  assert.equal(merged.find((item) => item.messageId === "live").channelMessageId, "provider-live");
 });
 
 test("the composer sends only from the Send CTA and Enter inserts a newline", () => {
@@ -392,7 +493,7 @@ test("pending and closed status updates clear the selected chat only after the s
   assert.ok(statusHandler.indexOf("await state.api.updateConversation") < statusHandler.indexOf("clearSelectedConversation()"));
   assert.match(app, /state\.selectedConversationId = null;[\s\S]*?classList\.remove\("chat-open", "has-details"\)/);
   assert.match(app, /event\.conversationId \|\| rawConversation\.conversationId/);
-  assert.match(app, /await loadAll\(\);[\s\S]*?refreshed\.status !== previousStatus[\s\S]*?clearSelectedConversation\(\)/);
+  assert.match(app, /incoming\.conversationId === state\.selectedConversationId[\s\S]*?\["pending", "closed"\]\.includes\(incoming\.status\)[\s\S]*?clearSelectedConversation\(\)/);
 });
 
 test("opening a conversation clears its unread badge before the first list render", () => {
@@ -421,16 +522,27 @@ test("opening unread conversations preserves a WhatsApp-style unread divider unt
 
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {
   const messageRenderer = app.slice(app.indexOf("function renderMessages"), app.indexOf("function isWhatsAppConversation"));
-  assert.match(messageRenderer, /host\.scrollTop = host\.scrollHeight/);
+  assert.match(messageRenderer, /host\.scrollTop = stayAtBottom \? host\.scrollHeight/);
   assert.doesNotMatch(messageRenderer, /requestAnimationFrame/);
   assert.match(styles, /\.message-thread \{[^}]*scroll-behavior: auto/);
   assert.doesNotMatch(styles, /\.message-thread \{[^}]*scroll-behavior: smooth/);
 });
 
-test("the inbox opens on the Open conversation filter without selecting a chat", () => {
-  assert.match(app, /filter:\s*"open"/);
+test("conversation filters are multi-selectable with responsive desktop and mobile controls", () => {
+  assert.match(app, /filters:\s*new Set\(\["open"\]\)/);
+  assert.match(html, /id="conversationFilterToggle"[^>]*aria-controls="conversationFilterMenu"/);
+  assert.match(html, /data-conversation-filter-option[^>]*value="mine"|value="mine"[^>]*data-conversation-filter-option/);
   assert.match(html, /class="filter-chip is-active"[^>]*data-filter="open"/);
-  assert.doesNotMatch(html, /class="filter-chip is-active"[^>]*data-filter="all"/);
+  assert.match(app, /const statusFilters = \["open", "closed"\]\.filter/);
+  assert.match(app, /const assignmentFilters = \["mine", "unassigned"\]\.filter/);
+  assert.match(app, /selected\.has\("unread"\)/);
+  assert.match(app, /toggleConversationFilter\(button\.dataset\.filter\)/);
+  assert.match(styles, /\.conversation-filter-desktop \{/);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.conversation-filter-desktop \{ display: none; \}[\s\S]*?\.filter-row \{ display: flex; \}/);
+});
+
+test("the inbox opens on the Open conversation filter without selecting a chat", () => {
+  assert.match(app, /filters:\s*new Set\(\["open"\]\)/);
   assert.match(app, /selectedConversationId:\s*null/);
 });
 

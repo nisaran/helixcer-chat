@@ -76,7 +76,7 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
     contacts: [{ wa_id: '919999999999', profile: { name: 'Asha' } }],
     messages: [
       { id: 'wamid.1', from: '919999999999', timestamp: '1761360000', type: 'text', text: { body: 'Hello' } },
-      { id: 'wamid.2', from: '919999999999', timestamp: '1761360002', type: 'image',
+      { id: 'wamid.2', from: '919999999999', timestamp: '1761360002', type: 'image', context: { id: 'wamid.1' },
         image: { id: 'wa-media-2', mime_type: 'image/jpeg', caption: 'Receipt' } }
     ],
     statuses: [{ id: 'wamid.out', status: 'delivered', timestamp: '1761360001', biz_opaque_callback_data: 'internal-message-1' }]
@@ -88,20 +88,22 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
     type: 'image', filename: 'image-wamid.2.jpeg', mimeType: 'image/jpeg', size: 0,
     caption: 'Receipt', providerMediaId: 'wa-media-2'
   });
+  assert.deepEqual(result.messages[1].reply, { channelMessageId: 'wamid.1' });
   assert.equal(result.statuses[0].status, 'delivered');
   assert.equal(result.statuses[0].internalMessageId, 'internal-message-1');
   assert.deepEqual(result.phoneNumberIds, ['123456789']);
 });
 
-test('dashboard reloads the Inbox when a webhook arrives', async () => {
+test('dashboard applies granular webhooks without flashing or clearing selected history', async () => {
   const appSource = await readFile(new URL('../../assets/app.js', import.meta.url), 'utf8');
   const start = appSource.indexOf('function handleRealtimeEvent(event)');
   const end = appSource.indexOf('async function refreshMessages', start);
   assert.ok(start >= 0 && end > start);
   const handler = appSource.slice(start, end);
   assert.match(handler, /type === "webhook\.received"/);
-  assert.match(handler, /state\.messages\.delete\(state\.selectedConversationId\)/);
-  assert.match(handler, /loadAll\(\)/);
+  assert.match(handler, /if \(!event\.granular\) await reconcileWorkspace\(\)/);
+  assert.doesNotMatch(handler, /state\.messages\.delete\(state\.selectedConversationId\)/);
+  assert.doesNotMatch(handler, /await loadAll\(\)/);
 });
 
 test('normalizes WhatsApp recipients and classifies retryable provider failures', () => {
@@ -138,14 +140,16 @@ test('normalizes Telegram bot updates', () => {
   assert.equal(result.channelProfileId, '12345');
   assert.equal(result.displayName, 'Ravi K');
   assert.equal(result.text, 'Need help');
-  assert.equal(result.providerMessageId, 'update:7');
+  assert.equal(result.providerMessageId, '44');
+  assert.equal(result.dedupeKey, 'update:7');
   const sameMessageNumber = normalizeTelegram({ message: {
     message_id: 44, date: 1761360000, chat: { id: 99999 }, from: { first_name: 'Other' }, text: 'Different chat'
   } });
-  assert.equal(sameMessageNumber.providerMessageId, 'chat:99999:message:44');
-  assert.notEqual(sameMessageNumber.providerMessageId, normalizeTelegram({ message: {
+  assert.equal(sameMessageNumber.providerMessageId, '44');
+  assert.equal(sameMessageNumber.dedupeKey, 'chat:99999:message:44');
+  assert.notEqual(sameMessageNumber.dedupeKey, normalizeTelegram({ message: {
     message_id: 44, chat: { id: 12345 }, text: 'Original chat'
-  } }).providerMessageId);
+  } }).dedupeKey);
   const photo = normalizeTelegram({ update_id: 8, message: {
     message_id: 45, date: 1761360010, chat: { id: 12345 }, from: { first_name: 'Ravi' }, caption: 'Invoice photo',
     photo: [{ file_id: 'small', file_size: 1200 }, { file_id: 'large', file_size: 9200 }]
@@ -160,6 +164,15 @@ test('normalizes Telegram bot updates', () => {
   } });
   assert.equal(voice.messageType, 'audio');
   assert.equal(voice.attachment.providerFileId, 'voice-file');
+
+  const reply = normalizeTelegram({ update_id: 9, message: {
+    message_id: 47, date: 1761360020, chat: { id: 12345 }, from: { first_name: 'Ravi' }, text: 'Yes',
+    reply_to_message: { message_id: 40, from: { id: 777000, is_bot: true, first_name: 'Helixcer' },
+      text: 'Can you confirm?' }
+  } });
+  assert.deepEqual(reply.reply, {
+    channelMessageId: '40', direction: 'outbound', text: 'Can you confirm?', messageType: 'text'
+  });
 });
 
 test('normalizes Instagram messages, echoes, delivery receipts, and read watermarks', () => {

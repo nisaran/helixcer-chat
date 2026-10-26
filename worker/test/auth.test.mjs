@@ -81,6 +81,34 @@ function withRunFailures(DB, patterns) {
   };
 }
 
+function withConcurrentConversationMutation(DB, mutate) {
+  let injected = false;
+  const wrap = (statement, isConversationPatch) => ({
+    bind(...values) { return wrap(statement.bind(...values), isConversationPatch); },
+    async run() {
+      if (isConversationPatch && !injected) {
+        injected = true;
+        mutate();
+      }
+      return statement.run();
+    },
+    first() { return statement.first(); },
+    all() { return statement.all(); }
+  });
+  return {
+    prepare(sql) {
+      return wrap(DB.prepare(sql), /^UPDATE conversations SET[\s\S]*status=CASE/i.test(sql.trim()));
+    },
+    batch(statements) { return DB.batch(statements); }
+  };
+}
+
+function withConcurrentUnreadIncrement(DB, database, conversationId) {
+  return withConcurrentConversationMutation(DB, () => {
+    database.prepare('UPDATE conversations SET unread_count=unread_count+1 WHERE conversation_id=?').run(conversationId);
+  });
+}
+
 async function testDatabase() {
   const database = new DatabaseSync(':memory:');
   database.exec(await readFile(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8'));
@@ -898,6 +926,14 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
       credentials: { accessToken: 'unverified-access-token-value-1234567890', appSecret, verifyToken: 'verify-token-value' } })
   }), env);
   assert.equal(created.status, 201);
+  const broadcasts = [];
+  env.INBOX_HUB = {
+    idFromName: value => value,
+    get: () => ({ fetch: async (url, init = {}) => {
+      if (String(url).endsWith('/broadcast')) broadcasts.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    } })
+  };
   const before = JSON.parse(database.prepare('SELECT config_json FROM channels WHERE channel_id=?').get(channelId).config_json);
   assert.equal(before.credentialsVerifiedAt, undefined);
   assert.equal(before.webhookVerifiedAt, undefined);
@@ -934,11 +970,43 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
     assert.equal(conversation.status, 'open');
     assert.equal(conversation.subject, 'Asha');
     assert.equal(conversation.unread_count, 1);
-    const message = database.prepare(`SELECT direction,text,status,provider_message_id FROM messages
+    const message = database.prepare(`SELECT message_id,direction,text,status,provider_message_id FROM messages
       WHERE channel_id=?`).get(channelId);
-    assert.deepEqual({ ...message }, {
-      direction: 'inbound', text: 'Hello Helixcer', status: 'received', provider_message_id: 'wamid.inbound-first'
+    assert.equal(message.direction, 'inbound');
+    assert.equal(message.text, 'Hello Helixcer');
+    assert.equal(message.status, 'received');
+    assert.equal(message.provider_message_id, 'wamid.inbound-first');
+    const inboundEvent = broadcasts.find(event => event.type === 'message.created' && event.messageId === message.message_id);
+    assert.ok(inboundEvent);
+    assert.equal(inboundEvent.conversationId, conversation.conversation_id);
+    assert.equal(inboundEvent.source, 'webhook');
+    assert.deepEqual(inboundEvent.message, {
+      messageId: message.message_id,
+      conversationId: conversation.conversation_id,
+      channelId,
+      direction: 'inbound',
+      messageType: 'text',
+      text: 'Hello Helixcer',
+      status: 'received',
+      timestamp: new Date(1761360000 * 1000).toISOString(),
+      channelMessageId: 'wamid.inbound-first',
+      error: '',
+      senderName: 'Asha',
+      attachment: null,
+      reply: null
     });
+    assert.equal(inboundEvent.conversation.conversationId, conversation.conversation_id);
+    assert.equal(inboundEvent.conversation.subject, 'Asha');
+    assert.equal(inboundEvent.conversation.unreadCount, 1);
+    assert.equal(inboundEvent.conversation.lastMessage, 'Hello Helixcer');
+    assert.equal(inboundEvent.conversation.connectorType, 'whatsapp_cloud');
+    assert.equal(inboundEvent.conversation.channelProfileId, '919999999999');
+    const aggregateEvent = broadcasts.find(event => event.type === 'webhook.received');
+    assert.ok(aggregateEvent);
+    assert.equal(aggregateEvent.granular, true);
+    assert.equal(aggregateEvent.received, 1);
+    assert.equal(aggregateEvent.statuses, 0);
+    assert.ok(broadcasts.indexOf(inboundEvent) < broadcasts.indexOf(aggregateEvent));
     const after = JSON.parse(database.prepare('SELECT config_json FROM channels WHERE channel_id=?').get(channelId).config_json);
     assert.ok(after.webhookVerifiedAt);
     assert.ok(after.lastWebhookAt);
@@ -954,6 +1022,7 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signed.signature }, body: signed.raw
     }), env);
     assert.equal((await replay.json()).received, 0);
+    assert.equal(broadcasts.filter(event => event.type === 'message.created').length, 1);
     assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 1);
     assert.equal(database.prepare('SELECT unread_count FROM conversations WHERE conversation_id=?').get(conversation.conversation_id).unread_count, 1);
 
@@ -962,6 +1031,7 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
     const reopenedPayload = structuredClone(payload);
     reopenedPayload.entry[0].changes[0].value.messages[0] = {
       from: '919999999999', id: 'wamid.inbound-reopens', timestamp: '1761360060', type: 'text',
+      context: { id: 'wamid.inbound-first' },
       text: { body: 'I have another question' }
     };
     const reopenedSigned = await sign(reopenedPayload);
@@ -969,6 +1039,23 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': reopenedSigned.signature }, body: reopenedSigned.raw
     }), env);
     assert.deepEqual(await reopened.json(), { ok: true, received: 1, statuses: 0 });
+    const conversationMessages = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/conversations/${conversation.conversation_id}/messages`, {
+        headers: { Authorization: 'Bearer recovery-secret' }
+      }), env);
+    const reopenedMessage = (await conversationMessages.json()).items.find(item => item.channelMessageId === 'wamid.inbound-reopens');
+    assert.deepEqual(reopenedMessage.reply, {
+      messageId: message.message_id, channelMessageId: 'wamid.inbound-first', direction: 'inbound',
+      text: 'Hello Helixcer', messageType: 'text'
+    });
+    const reopenedEvent = broadcasts.find(event => event.type === 'message.created' &&
+      event.message?.channelMessageId === 'wamid.inbound-reopens');
+    assert.ok(reopenedEvent);
+    assert.deepEqual(reopenedEvent.message.reply, reopenedMessage.reply);
+    assert.equal(reopenedEvent.conversation.conversationId, conversation.conversation_id);
+    assert.equal(reopenedEvent.conversation.status, 'open');
+    assert.equal(reopenedEvent.conversation.unreadCount, 1);
+    assert.equal(reopenedEvent.conversation.lastMessage, 'I have another question');
     assert.equal(database.prepare('SELECT COUNT(*) AS count FROM conversations WHERE channel_id=?').get(channelId).count, 1);
     assert.deepEqual({ ...database.prepare(`SELECT conversation_id,status,unread_count FROM conversations
       WHERE channel_id=?`).get(channelId) }, {
@@ -986,6 +1073,105 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
     assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 2);
   } finally {
     globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('Telegram and generic webhooks publish normalized granular message events', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2),
+    GENERIC_REALTIME_WEBHOOK_TOKEN: 'generic-webhook-secret'
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const telegramCreated = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      channelId: 'telegram-realtime', name: 'Telegram realtime', connectorType: 'telegram',
+      credentials: {
+        botToken: '123456789:abcdefghijklmnopqrstuvwxyz',
+        webhookSecret: 'telegram-realtime-secret'
+      }
+    })
+  }), env);
+  assert.equal(telegramCreated.status, 201);
+  const genericCreated = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      channelId: 'generic-realtime', name: 'Generic realtime', connectorType: 'generic_http',
+      secretKey: 'GENERIC_REALTIME'
+    })
+  }), env);
+  assert.equal(genericCreated.status, 201);
+
+  const broadcasts = [];
+  env.INBOX_HUB = {
+    idFromName: value => value,
+    get: () => ({ fetch: async (url, init = {}) => {
+      if (String(url).endsWith('/broadcast')) broadcasts.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    } })
+  };
+  const pending = [];
+  const ctx = { waitUntil(promise) { pending.push(promise); } };
+  try {
+    const telegram = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/webhooks/telegram/telegram-realtime', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Telegram-Bot-Api-Secret-Token': 'telegram-realtime-secret'
+        },
+        body: JSON.stringify({
+          update_id: 7001,
+          message: {
+            message_id: 81,
+            date: 1761360100,
+            chat: { id: 91910001 },
+            from: { first_name: 'Telegram', last_name: 'Customer' },
+            text: 'Telegram inbound'
+          }
+        })
+      }), env, ctx);
+    assert.deepEqual(await telegram.json(), { ok: true, received: 1 });
+
+    const generic = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/webhooks/generic/generic-realtime', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Webhook-Token': 'generic-webhook-secret' },
+        body: JSON.stringify({
+          id: 'generic-message-1', from: 'generic-user-1', senderName: 'Generic Customer',
+          text: 'Generic inbound', timestamp: '2026-10-25T02:43:00.000Z', type: 'text'
+        })
+      }), env, ctx);
+    assert.deepEqual(await generic.json(), { ok: true, received: 1 });
+    await Promise.all(pending);
+
+    const telegramEvent = broadcasts.find(event => event.type === 'message.created' &&
+      event.message?.channelMessageId === '81');
+    assert.ok(telegramEvent);
+    assert.equal(telegramEvent.message.direction, 'inbound');
+    assert.equal(telegramEvent.message.text, 'Telegram inbound');
+    assert.equal(telegramEvent.message.senderName, 'Telegram Customer');
+    assert.equal(telegramEvent.conversation.connectorType, 'telegram');
+    assert.equal(telegramEvent.conversation.channelProfileId, '91910001');
+    assert.equal(telegramEvent.conversation.lastMessage, 'Telegram inbound');
+
+    const genericEvent = broadcasts.find(event => event.type === 'message.created' &&
+      event.message?.channelMessageId === 'generic-message-1');
+    assert.ok(genericEvent);
+    assert.equal(genericEvent.message.direction, 'inbound');
+    assert.equal(genericEvent.message.text, 'Generic inbound');
+    assert.equal(genericEvent.message.senderName, 'Generic Customer');
+    assert.equal(genericEvent.conversation.connectorType, 'generic_http');
+    assert.equal(genericEvent.conversation.channelProfileId, 'generic-user-1');
+    assert.equal(genericEvent.conversation.lastMessage, 'Generic inbound');
+
+    const aggregates = broadcasts.filter(event => event.type === 'webhook.received');
+    assert.equal(aggregates.length, 2);
+    assert.ok(aggregates.every(event => event.granular === true && event.received === 1 && event.statuses === 0));
+  } finally {
     database.close();
   }
 });
@@ -1075,6 +1261,14 @@ test('shared Instagram app webhook verifies all matches and routes each account 
   assert.equal(await handshake.text(), 'challenge-123');
   assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM channels
     WHERE provider_type='instagram' AND json_extract(config_json,'$.webhookVerifiedAt')<>''`).get().count, 2);
+  const broadcasts = [];
+  env.INBOX_HUB = {
+    idFromName: value => value,
+    get: () => ({ fetch: async (url, init = {}) => {
+      if (String(url).endsWith('/broadcast')) broadcasts.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    } })
+  };
 
   const payload = { object: 'instagram', entry: [
     { id: '17841400000000011', messaging: [{ sender: { id: '5550001' }, recipient: { id: '17841400000000011' },
@@ -1097,6 +1291,22 @@ test('shared Instagram app webhook verifies all matches and routes each account 
   assert.equal(routed.length, 2);
   assert.equal(routed[0].channel_id, 'ig-account-one');
   assert.equal(routed[1].channel_id, 'ig-account-two');
+  const createdEvents = broadcasts.filter(event => event.type === 'message.created');
+  assert.equal(createdEvents.length, 2);
+  const firstCreated = createdEvents.find(event => event.message.channelMessageId === 'ig-app-message-one');
+  const secondCreated = createdEvents.find(event => event.message.channelMessageId === 'ig-app-message-two');
+  assert.ok(firstCreated);
+  assert.ok(secondCreated);
+  assert.equal(firstCreated.message.text, 'First account');
+  assert.equal(firstCreated.message.direction, 'inbound');
+  assert.equal(firstCreated.conversation.channelId, 'ig-account-one');
+  assert.equal(firstCreated.conversation.channelProfileId, '5550001');
+  assert.equal(secondCreated.message.text, 'Second account');
+  assert.equal(secondCreated.conversation.channelId, 'ig-account-two');
+  assert.equal(secondCreated.conversation.channelProfileId, '5550002');
+  const deliveryAggregates = broadcasts.filter(event => event.type === 'webhook.received');
+  assert.equal(deliveryAggregates.length, 2);
+  assert.ok(deliveryAggregates.every(event => event.granular === true && event.received === 1));
 
   const firstConversation = database.prepare(`SELECT conversation_id,contact_id FROM conversations
     WHERE channel_id='ig-account-one'`).get();
@@ -1268,8 +1478,16 @@ test('Telegram bot identity is reserved before webhook registration', async () =
   const originalFetch = globalThis.fetch;
   let setWebhookCalls = 0;
   let telegramMediaSendCalls = 0;
+  const telegramReplyBodies = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
+    if (url.pathname.includes('/sendMessage')) {
+      const body = JSON.parse(init.body);
+      telegramReplyBodies.push(body);
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 80 } }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
     if (url.pathname.includes('/sendDocument')) {
       telegramMediaSendCalls++;
       const chatId = init.body.get('chat_id');
@@ -1281,6 +1499,7 @@ test('Telegram bot identity is reserved before webhook registration', async () =
       assert.ok(['telegram.pdf', 'preview.webp', 'delivered-once.pdf', 'provider-failure.pdf'].includes(filename));
       assert.equal(init.body.get('caption'), retryFixture ? 'Delivered once'
         : failureFixture ? 'Provider failure' : webpFixture ? null : 'Telegram file');
+      assert.equal(init.body.get('reply_parameters'), filename === 'telegram.pdf' ? JSON.stringify({ message_id: 52 }) : null);
       if (failureFixture) {
         return new Response(JSON.stringify({ ok: false, description: 'Bad Gateway' }), {
           status: 502, headers: { 'Content-Type': 'application/json' }
@@ -1334,9 +1553,30 @@ test('Telegram bot identity is reserved before webhook registration', async () =
     database.prepare(`INSERT INTO conversations
         (conversation_id,contact_id,channel_id,status,subject,last_message_at,created_at,updated_at,workspace_id)
       VALUES ('conversation-telegram-file','contact-telegram-file','telegram-one','open','Ravi',?,?,?,'ws_default')`).run(now, now, now);
+    database.prepare(`INSERT INTO messages
+        (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,provider_message_id,status,timestamp,workspace_id)
+      VALUES ('telegram-inbound-52','conversation-telegram-file','contact-telegram-file','telegram-one','inbound','text',
+        'Please confirm','52','received',?,'ws_default')`).run(now);
+
+    const telegramReplyPending = [];
+    const telegramReplyResponse = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-telegram-file/messages', {
+        method: 'POST', headers,
+        body: JSON.stringify({ text: 'Confirmed', replyToMessageId: 'telegram-inbound-52' })
+      }), env, { waitUntil(promise) { telegramReplyPending.push(promise); } });
+    assert.equal(telegramReplyResponse.status, 202);
+    const telegramReplyItem = (await telegramReplyResponse.json()).item;
+    await Promise.all(telegramReplyPending);
+    assert.deepEqual(telegramReplyBodies, [{ chat_id: '778899', text: 'Confirmed', reply_parameters: { message_id: 52 } }]);
+    const savedTelegramReply = JSON.parse(database.prepare('SELECT payload_json FROM messages WHERE message_id=?')
+      .get(telegramReplyItem.messageId).payload_json);
+    assert.equal(savedTelegramReply.reply.messageId, 'telegram-inbound-52');
+    assert.equal(savedTelegramReply.reply.channelMessageId, '52');
+
     const telegramUpload = new FormData();
     telegramUpload.set('file', new Blob(['telegram file data'], { type: 'application/pdf' }), 'telegram.pdf');
     telegramUpload.set('caption', 'Telegram file');
+    telegramUpload.set('replyToMessageId', 'telegram-inbound-52');
     const telegramAttachment = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-telegram-file/attachments', {
       method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: telegramUpload
     }), env);
@@ -1441,6 +1681,14 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
         appSecret: '1234567890abcdef1234567890abcdef', verifyToken: 'dashboard-verify-token' } })
   }), env);
   assert.equal(created.status, 201);
+  const broadcasts = [];
+  env.INBOX_HUB = {
+    idFromName: value => value,
+    get: () => ({ fetch: async (url, init = {}) => {
+      if (String(url).endsWith('/broadcast')) broadcasts.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    } })
+  };
 
   const now = new Date().toISOString();
   database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
@@ -1452,8 +1700,9 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
       (conversation_id,contact_id,channel_id,status,subject,last_message_at,created_at,updated_at,workspace_id)
     VALUES ('conversation-dashboard','contact-dashboard','wa-dashboard','open','Asha',?,?,?,'ws_default')`).run(now, now, now);
   database.prepare(`INSERT INTO messages
-      (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
-    VALUES ('inbound-dashboard','conversation-dashboard','contact-dashboard','wa-dashboard','inbound','text','Hello','received',?,'ws_default')`).run(now);
+      (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,provider_message_id,status,timestamp,workspace_id)
+    VALUES ('inbound-dashboard','conversation-dashboard','contact-dashboard','wa-dashboard','inbound','text','Hello',
+      'wamid.inbound-dashboard','received',?,'ws_default')`).run(now);
 
   const conversations = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
     headers: { Authorization: 'Bearer recovery-secret' }
@@ -1524,6 +1773,10 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal(templateItem.attachment.filename, 'template-header.pdf');
     assert.equal(templateItem.attachment.type, 'document');
     assert.equal(templateItem.attachment.available, true);
+    const templateCreatedEvent = broadcasts.find(event => event.type === 'message.created' &&
+      event.messageId === templateItem.messageId);
+    assert.ok(templateCreatedEvent);
+    assert.deepEqual(templateCreatedEvent.message, templateItem);
     await Promise.all(pending.splice(0));
     assert.equal(providerBodies[0].type, 'template');
     assert.equal(providerBodies[0].template.name, 'order_update');
@@ -1531,6 +1784,7 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     const uploadBody = new FormData();
     uploadBody.set('file', new Blob(['invoice data'], { type: 'application/pdf' }), 'invoice.pdf');
     uploadBody.set('caption', 'Your invoice');
+    uploadBody.set('replyToMessageId', 'inbound-dashboard');
     const attachmentResponse = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/attachments', {
       method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: uploadBody
     }), env, ctx);
@@ -1538,11 +1792,86 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     const attachmentItem = (await attachmentResponse.json()).item;
     assert.equal(attachmentItem.messageType, 'document');
     assert.equal(attachmentItem.attachment.filename, 'invoice.pdf');
+    const attachmentCreatedEvent = broadcasts.find(event => event.type === 'message.created' &&
+      event.messageId === attachmentItem.messageId);
+    assert.ok(attachmentCreatedEvent);
+    assert.deepEqual(attachmentCreatedEvent.message, attachmentItem);
     await Promise.all(pending.splice(0));
     assert.equal(mediaUploadCalls, 2);
     assert.equal(providerBodies[1].type, 'document');
     assert.equal(providerBodies[1].document.id, 'media-dashboard-2');
     assert.equal(providerBodies[1].document.filename, 'invoice.pdf');
+    assert.deepEqual(providerBodies[1].context, { message_id: 'wamid.inbound-dashboard' });
+
+    const replyResponse = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-dashboard/messages', {
+        method: 'POST', headers: jsonHeaders,
+        body: JSON.stringify({ text: 'Replying to your message', replyToMessageId: 'inbound-dashboard' })
+      }), env, ctx);
+    assert.equal(replyResponse.status, 202);
+    const replyItem = (await replyResponse.json()).item;
+    assert.equal(replyItem.reply.messageId, 'inbound-dashboard');
+    assert.equal(replyItem.reply.channelMessageId, 'wamid.inbound-dashboard');
+    const replyCreatedEvent = broadcasts.find(event => event.type === 'message.created' &&
+      event.messageId === replyItem.messageId);
+    assert.ok(replyCreatedEvent);
+    assert.deepEqual(replyCreatedEvent.message, replyItem);
+    await Promise.all(pending.splice(0));
+    assert.deepEqual(providerBodies[2].context, { message_id: 'wamid.inbound-dashboard' });
+    assert.equal(providerBodies[2].biz_opaque_callback_data, replyItem.messageId);
+    const replyStatusEvent = broadcasts.find(event => event.type === 'message.updated' &&
+      event.messageId === replyItem.messageId && event.status === 'submitted');
+    assert.ok(replyStatusEvent);
+    assert.equal(replyStatusEvent.channelMessageId, 'wamid.dashboard-3');
+    assert.equal(replyStatusEvent.message.channelMessageId, 'wamid.dashboard-3');
+
+    database.prepare("UPDATE conversations SET unread_count=4 WHERE conversation_id='conversation-dashboard'").run();
+    const racingEnv = {
+      ...env,
+      DB: withConcurrentUnreadIncrement(DB, database, 'conversation-dashboard')
+    };
+    const ordinaryPatch = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-dashboard', {
+        method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ status: 'open' })
+      }), racingEnv);
+    assert.equal(ordinaryPatch.status, 200);
+    assert.equal((await ordinaryPatch.json()).item.unreadCount, 5);
+    assert.equal(database.prepare("SELECT unread_count FROM conversations WHERE conversation_id='conversation-dashboard'").get().unread_count, 5);
+
+    const markReadRaceEnv = {
+      ...env,
+      DB: withConcurrentConversationMutation(DB, () => {
+        database.prepare(`UPDATE conversations SET status='closed',assigned_to='concurrent@example.com'
+          WHERE conversation_id='conversation-dashboard'`).run();
+      })
+    };
+    const markReadOnly = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-dashboard', {
+        method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ markRead: true })
+      }), markReadRaceEnv);
+    assert.equal(markReadOnly.status, 200);
+    const markReadItem = (await markReadOnly.json()).item;
+    assert.equal(markReadItem.status, 'closed');
+    assert.equal(markReadItem.assignedTo, 'concurrent@example.com');
+    assert.equal(markReadItem.unreadCount, 0);
+
+    const patchedConversation = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-dashboard', {
+        method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ status: 'pending' })
+      }), env);
+    assert.equal(patchedConversation.status, 200);
+    const patchedItem = (await patchedConversation.json()).item;
+    assert.equal(patchedItem.conversationId, 'conversation-dashboard');
+    assert.equal(patchedItem.status, 'pending');
+    assert.equal(patchedItem.unreadCount, 0);
+    assert.equal(patchedItem.subject, 'Asha');
+    assert.equal(patchedItem.connectorType, 'whatsapp_cloud');
+    assert.equal(patchedItem.channelProfileId, '919999999999');
+    assert.equal(patchedItem.lastMessage, 'Replying to your message');
+    const conversationEvent = broadcasts.filter(event => event.type === 'conversation.updated' &&
+      event.conversationId === 'conversation-dashboard').at(-1);
+    assert.ok(conversationEvent);
+    assert.deepEqual(conversationEvent.conversation, patchedItem);
 
     const messages = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/messages', {
       headers: { Authorization: 'Bearer recovery-secret' }
@@ -1558,7 +1887,13 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal(documentMessage.attachment.available, true);
     assert.match(documentMessage.attachment.url, /\/api\/messages\/.+\/attachment$/);
     assert.equal(documentMessage.channelMessageId, 'wamid.dashboard-2');
+    assert.equal(documentMessage.reply.messageId, 'inbound-dashboard');
+    assert.equal(documentMessage.reply.text, 'Hello');
     assert.equal(Object.hasOwn(documentMessage, 'providerMessageId'), false);
+    const listedReply = messageBody.items.find(item => item.messageId === replyItem.messageId);
+    assert.equal(listedReply.status, 'submitted');
+    assert.equal(listedReply.reply.text, 'Hello');
+    assert.equal(listedReply.reply.direction, 'inbound');
 
     const protectedTemplateMedia = await handleRequest(new Request(`https://api.chat.helixcer.com${templateMessage.attachment.url}`, {
       headers: { Authorization: 'Bearer recovery-secret' }

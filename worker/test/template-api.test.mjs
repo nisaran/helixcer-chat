@@ -274,6 +274,29 @@ test('external template API persists once, dispatches, replays safely, and scope
     assert.equal(accepted.status, true);
     assert.equal(accepted.messageStatus, 'pending');
     assert.equal(Object.hasOwn(accepted, 'ok'), false);
+    const createdEvent = broadcasts.find(event => event.type === 'message.created' &&
+      event.messageId === accepted.messageId);
+    assert.ok(createdEvent);
+    assert.deepEqual(createdEvent.message, {
+      messageId: accepted.messageId,
+      conversationId: accepted.conversationId,
+      channelId: 'wa-sales',
+      direction: 'outbound',
+      messageType: 'template',
+      text: 'Template: order_update (en_US)',
+      status: 'pending',
+      timestamp: accepted.createdAt,
+      channelMessageId: '',
+      error: '',
+      reply: null
+    });
+    assert.ok(createdEvent.conversation);
+    assert.equal(createdEvent.conversation.conversationId, accepted.conversationId);
+    assert.equal(createdEvent.conversation.contactId, accepted.contactId);
+    assert.equal(createdEvent.conversation.channelId, 'wa-sales');
+    assert.equal(createdEvent.conversation.subject, 'Asha');
+    assert.equal(createdEvent.conversation.lastMessage, 'Template: order_update (en_US)');
+    assert.equal(createdEvent.conversation.unreadCount, 0);
     assert.equal(database.prepare('SELECT count(*) AS count FROM messages').get().count, 1);
     assert.equal(database.prepare('SELECT count(*) AS count FROM external_api_requests').get().count, 1);
     assert.equal(database.prepare('SELECT count(*) AS count FROM outbox').get().count, 1);
@@ -303,10 +326,14 @@ test('external template API persists once, dispatches, replays safely, and scope
     assert.ok(realtimeDelivery);
     assert.equal(realtimeDelivery.messageId, accepted.messageId);
     assert.equal(realtimeDelivery.conversationId, accepted.conversationId);
+    assert.equal(realtimeDelivery.channelMessageId, 'wamid.template-1');
     assert.deepEqual(realtimeDelivery.message, {
       messageId: accepted.messageId, conversationId: accepted.conversationId,
-      status: 'delivered', error: ''
+      status: 'delivered', error: '', channelMessageId: 'wamid.template-1'
     });
+    const statusAggregate = broadcasts.find(event => event.type === 'webhook.received' && event.statuses === 1);
+    assert.ok(statusAggregate);
+    assert.equal(statusAggregate.granular, true);
     const stalePayload = statusPayload.replace('"delivered"', '"sent"').replace('1761360001', '1761360002');
     const staleStatus = await handleRequest(new Request('https://api.chat.helixcer.com/webhooks/whatsapp/wa-sales', {
       method: 'POST',

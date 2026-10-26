@@ -339,7 +339,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (conversationMatch && request.method === 'PATCH') {
       const id = decodeURIComponent(conversationMatch[1]);
       const item = await updateConversation(env, workspaceId, id, await readJson(request), principal);
-      await broadcast(env, workspaceId, { type: 'conversation.updated', conversationId: id });
+      await broadcast(env, workspaceId, { type: 'conversation.updated', conversationId: id, conversation: item });
       return withCors(json({ ok: true, item }), cors);
     }
     const messagesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/messages$/);
@@ -354,7 +354,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (messagesMatch && request.method === 'POST') {
       const id = decodeURIComponent(messagesMatch[1]);
       const result = await createOutboundMessage(env, workspaceId, id, await readJson(request), principal);
-      await broadcast(env, workspaceId, { type: 'message.created', conversationId: id, messageId: result.message.messageId });
+      await broadcast(env, workspaceId, {
+        type: 'message.created', conversationId: id, messageId: result.message.messageId, message: result.message
+      });
       ctx.waitUntil(sendOrQueue(env, result.message.messageId));
       return withCors(json({ ok: true, item: result.message }, 202), cors);
     }
@@ -372,7 +374,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (templateMessageMatch && request.method === 'POST') {
       const id = decodeURIComponent(templateMessageMatch[1]);
       const result = await createConversationTemplateMessage(env, workspaceId, id, await readJson(request), principal);
-      await broadcast(env, workspaceId, { type: 'message.created', conversationId: id, messageId: result.message.messageId });
+      await broadcast(env, workspaceId, {
+        type: 'message.created', conversationId: id, messageId: result.message.messageId, message: result.message
+      });
       ctx.waitUntil(sendOrQueue(env, result.message.messageId));
       return withCors(json({ ok: true, item: result.message }, 202), cors);
     }
@@ -385,7 +389,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (attachmentMessageMatch && request.method === 'POST') {
       const id = decodeURIComponent(attachmentMessageMatch[1]);
       const result = await createConversationAttachmentMessage(env, workspaceId, id, request, principal);
-      await broadcast(env, workspaceId, { type: 'message.created', conversationId: id, messageId: result.message.messageId });
+      await broadcast(env, workspaceId, {
+        type: 'message.created', conversationId: id, messageId: result.message.messageId, message: result.message
+      });
       if (result.message.status === 'pending') ctx.waitUntil(sendOrQueue(env, result.message.messageId));
       return withCors(json({ ok: true, item: result.message }, 202), cors);
     }
@@ -696,8 +702,15 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   await auditApiKey(env, principal, 'send_template', 'message', messageId, {
     channelId: channel.channelId, templateName: input.template.name
   });
+  const realtimeMessage = {
+    messageId, conversationId: identity.conversationId, channelId: channel.channelId,
+    direction: 'outbound', messageType: 'template', text: preview, status: 'pending', timestamp: now,
+    channelMessageId: '', error: '', reply: null
+  };
+  const realtimeConversation = await getConversationItem(env, principal.workspaceId, identity.conversationId);
   await broadcast(env, principal.workspaceId, {
-    type: 'message.created', conversationId: identity.conversationId, messageId
+    type: 'message.created', conversationId: identity.conversationId, messageId, message: realtimeMessage,
+    conversation: realtimeConversation
   });
   ctx.waitUntil(sendOrQueue(env, messageId));
   return externalMessageResponse({
@@ -988,6 +1001,7 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
     if (stored) {
       received++;
       latestInbound = stored;
+      await broadcastStoredInbound(env, channel, stored);
     }
   }
   for (const status of normalized.statuses) {
@@ -999,7 +1013,9 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
     webhookVerifiedAt: channel.config?.webhookVerifiedAt || receivedAt
   });
   await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
-  if (received || normalized.statuses.length) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: normalized.statuses.length });
+  if (received || normalized.statuses.length) await broadcast(env, channel.workspaceId, {
+    type: 'webhook.received', channelId, received, statuses: normalized.statuses.length, granular: true
+  });
   if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
   return json({ ok: true, received, statuses: normalized.statuses.length });
 }
@@ -1021,6 +1037,7 @@ async function handleGenericWebhook(request, env, channelId, ctx) {
     if (stored) {
       received++;
       latestInbound = stored;
+      await broadcastStoredInbound(env, channel, stored);
     }
   }
   let updatedStatuses = 0;
@@ -1032,7 +1049,9 @@ async function handleGenericWebhook(request, env, channelId, ctx) {
   }
   await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
   if (received || updatedStatuses) {
-    await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: updatedStatuses });
+    await broadcast(env, channel.workspaceId, {
+      type: 'webhook.received', channelId, received, statuses: updatedStatuses, granular: true
+    });
   }
   if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
   return json({ ok: true, received });
@@ -1052,7 +1071,10 @@ async function handleTelegramWebhook(request, env, channelId, ctx) {
   const storedInbound = event ? await storeInbound(env, channel, event, payload) : null;
   const received = storedInbound ? 1 : 0;
   await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
-  if (received) await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received });
+  if (storedInbound) await broadcastStoredInbound(env, channel, storedInbound);
+  if (received) await broadcast(env, channel.workspaceId, {
+    type: 'webhook.received', channelId, received, statuses: 0, granular: true
+  });
   if (storedInbound) scheduleInboundPush(ctx, env, channel, storedInbound);
   return json({ ok: true, received });
 }
@@ -1094,6 +1116,7 @@ async function handleInstagramWebhook(request, env, channelId, ctx) {
     if (stored) {
       received++;
       latestInbound = stored;
+      await broadcastStoredInbound(env, channel, stored);
     }
   }
   let updatedStatuses = 0;
@@ -1111,7 +1134,9 @@ async function handleInstagramWebhook(request, env, channelId, ctx) {
   await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
   await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
   if (received || updatedStatuses) {
-    await broadcast(env, channel.workspaceId, { type: 'webhook.received', channelId, received, statuses: updatedStatuses });
+    await broadcast(env, channel.workspaceId, {
+      type: 'webhook.received', channelId, received, statuses: updatedStatuses, granular: true
+    });
   }
   if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
   return json({ ok: true, received });
@@ -1182,6 +1207,7 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
         received++;
         channelReceived++;
         latestInbound = stored;
+        await broadcastStoredInbound(env, route.channel, stored);
       }
     }
     let channelStatuses = 0;
@@ -1200,7 +1226,8 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
     await broadcastMessageStatusChanges(env, route.channel.workspaceId, statusChanges);
     if (channelReceived || channelStatuses) {
       await broadcast(env, route.channel.workspaceId, {
-        type: 'webhook.received', channelId: route.channel.channelId, received: channelReceived, statuses: channelStatuses
+        type: 'webhook.received', channelId: route.channel.channelId, received: channelReceived,
+        statuses: channelStatuses, granular: true
       });
     }
     if (latestInbound) scheduleInboundPush(ctx, env, route.channel, latestInbound);
@@ -1216,6 +1243,18 @@ function scheduleInboundPush(ctx, env, channel, inbound) {
     message: cleanError(error)
   }));
   if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(delivery);
+}
+
+async function broadcastStoredInbound(env, channel, stored) {
+  if (!stored?.message || !stored.conversationId || !stored.messageId) return;
+  await broadcast(env, channel.workspaceId, {
+    type: 'message.created',
+    conversationId: stored.conversationId,
+    messageId: stored.messageId,
+    message: stored.message,
+    conversation: stored.conversation || null,
+    source: 'webhook'
+  });
 }
 
 export function inboundPushNotification(channel, inbound = {}) {
@@ -1912,24 +1951,42 @@ async function listConversations(env, workspaceId, url) {
   const cursor = url.searchParams.get('cursor') || '';
   const result = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.status,c.assigned_to,
       c.subject,c.last_message_at,c.unread_count,c.tags_json,ch.name AS channel_name,ch.connector_type,ch.provider_type,
+      i.channel_profile_id,
       (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id ORDER BY timestamp DESC LIMIT 1) AS last_message,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
     FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id
+    LEFT JOIN channel_identities i ON i.workspace_id=c.workspace_id AND i.contact_id=c.contact_id AND i.channel_id=c.channel_id
     WHERE c.workspace_id=?1 AND ch.workspace_id=?1 AND (?2='' OR c.status=?2) AND (?3='' OR c.channel_id=?3)
       AND (?4='' OR c.subject LIKE '%'||?4||'%' OR c.conversation_id LIKE '%'||?4||'%')
       AND (?5='' OR c.last_message_at<?5)
     ORDER BY c.last_message_at DESC LIMIT ?6`).bind(workspaceId, status, channelId, q, cursor, limit).all();
-  return result.results.map(row => {
-    const connectorType = logicalConnectorType(row);
-    return {
-      conversationId: row.conversation_id, contactId: row.contact_id, channelId: row.channel_id,
-      channelName: row.channel_name, connectorType, status: row.status, assignedTo: row.assigned_to,
-      subject: row.subject, lastMessageAt: row.last_message_at, unreadCount: row.unread_count,
-      tags: safeJsonParse(row.tags_json, []), lastMessage: row.last_message || '',
-      ...whatsappReplyWindowState(connectorType, row.last_inbound_at)
-    };
-  });
+  return result.results.map(conversationListItem);
+}
+
+function conversationListItem(row) {
+  const connectorType = logicalConnectorType(row);
+  return {
+    conversationId: row.conversation_id, contactId: row.contact_id, channelId: row.channel_id,
+    channelName: row.channel_name, connectorType, status: row.status, assignedTo: row.assigned_to,
+    subject: row.subject, lastMessageAt: row.last_message_at, unreadCount: Number(row.unread_count || 0),
+    tags: safeJsonParse(row.tags_json, []), lastMessage: row.last_message || '',
+    channelProfileId: row.channel_profile_id || '',
+    ...whatsappReplyWindowState(connectorType, row.last_inbound_at)
+  };
+}
+
+async function getConversationItem(env, workspaceId, conversationId) {
+  const row = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.status,c.assigned_to,
+      c.subject,c.last_message_at,c.unread_count,c.tags_json,ch.name AS channel_name,ch.connector_type,ch.provider_type,
+      i.channel_profile_id,
+      (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id ORDER BY timestamp DESC LIMIT 1) AS last_message,
+      (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
+        AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
+    FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
+    LEFT JOIN channel_identities i ON i.workspace_id=c.workspace_id AND i.contact_id=c.contact_id AND i.channel_id=c.channel_id
+    WHERE c.workspace_id=?1 AND c.conversation_id=?2 LIMIT 1`).bind(workspaceId, conversationId).first();
+  return row ? conversationListItem(row) : null;
 }
 
 async function getConversationReplyWindow(env, workspaceId, conversationId) {
@@ -2145,19 +2202,46 @@ async function listMessages(env, workspaceId, conversationId, url) {
   const result = await env.DB.prepare(`SELECT message_id,direction,text,message_type,status,timestamp,channel_id,provider_message_id,error,payload_json
     FROM messages WHERE workspace_id=?1 AND conversation_id=?2 AND (?3='' OR timestamp<?3) ORDER BY timestamp DESC LIMIT ?4`)
     .bind(workspaceId, conversationId, before, limit).all();
-  return result.results.reverse().map(row => ({
-    messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
-    status: row.status, timestamp: row.timestamp, channelId: row.channel_id,
-    channelMessageId: row.provider_message_id, error: row.error,
-    attachment: messageAttachmentView(row.message_type, safeJsonParse(row.payload_json, {}), row.message_id)
-  }));
+  return result.results.reverse().map(row => {
+    const payload = safeJsonParse(row.payload_json, {});
+    return {
+      messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
+      status: row.status, timestamp: row.timestamp, channelId: row.channel_id,
+      channelMessageId: row.provider_message_id, error: row.error,
+      attachment: messageAttachmentView(row.message_type, payload, row.message_id),
+      reply: messageReplyView(payload)
+    };
+  });
+}
+
+function messageReplyView(payload) {
+  const reply = isPlainObject(payload?.reply) ? payload.reply : null;
+  if (!reply) return null;
+  const messageId = /^[A-Za-z0-9_-]{1,100}$/.test(String(reply.messageId || '')) ? String(reply.messageId) : '';
+  const channelMessageId = String(reply.channelMessageId || '').trim().slice(0, 512);
+  if (!messageId && !channelMessageId) return null;
+  const messageType = String(reply.messageType || 'text').slice(0, 40);
+  const attachment = isPlainObject(reply.attachment) ? {
+    type: String(reply.attachment.type || '').slice(0, 40),
+    filename: safeAttachmentFilename(reply.attachment.filename || '')
+  } : null;
+  return {
+    messageId,
+    channelMessageId,
+    direction: ['inbound', 'outbound'].includes(reply.direction) ? reply.direction : '',
+    text: String(reply.text || '').slice(0, 1000),
+    messageType,
+    ...(attachment?.type ? { attachment } : {})
+  };
 }
 
 async function updateConversation(env, workspaceId, id, payload, principal) {
   const existing = await env.DB.prepare('SELECT * FROM conversations WHERE conversation_id=?1 AND workspace_id=?2').bind(id, workspaceId).first();
   if (!existing) throw httpError(404, 'Conversation not found.');
+  const hasStatusPatch = payload.status !== undefined && payload.status !== null;
   const status = payload.status ?? existing.status;
   if (!['open', 'pending', 'closed'].includes(status)) throw httpError(400, 'Invalid conversation status.');
+  const hasAssigneePatch = payload.assignedTo !== undefined;
   let assignedTo = payload.assignedTo === undefined ? existing.assigned_to : String(payload.assignedTo).trim().slice(0, 160);
   if (payload.assignedTo !== undefined && assignedTo) {
     const assignee = await env.DB.prepare(`SELECT u.email FROM memberships m JOIN users u ON u.user_id=m.user_id
@@ -2165,12 +2249,19 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
     if (!assignee) throw httpError(400, 'Assignee is not an active workspace member.');
     assignedTo = assignee.email;
   }
-  const unreadCount = payload.markRead ? 0 : existing.unread_count;
+  const markRead = Boolean(payload.markRead);
+  const fallbackUnreadCount = markRead ? 0 : existing.unread_count;
   const now = new Date().toISOString();
-  await env.DB.prepare('UPDATE conversations SET status=?3,assigned_to=?4,unread_count=?5,updated_at=?6 WHERE conversation_id=?1 AND workspace_id=?2')
-    .bind(id, workspaceId, status, assignedTo, unreadCount, now).run();
-  await audit(env, principal, 'update', 'conversation', id, { status, assignedTo, markRead: Boolean(payload.markRead) });
-  return { conversationId: id, status, assignedTo, unreadCount, updatedAt: now };
+  await env.DB.prepare(`UPDATE conversations SET
+      status=CASE WHEN ?3=1 THEN ?4 ELSE status END,
+      assigned_to=CASE WHEN ?5=1 THEN ?6 ELSE assigned_to END,
+      unread_count=CASE WHEN ?7=1 THEN 0 ELSE unread_count END,updated_at=?8
+    WHERE conversation_id=?1 AND workspace_id=?2`)
+    .bind(id, workspaceId, hasStatusPatch ? 1 : 0, status, hasAssigneePatch ? 1 : 0, assignedTo,
+      markRead ? 1 : 0, now).run();
+  await audit(env, principal, 'update', 'conversation', id, { status, assignedTo, markRead });
+  return await getConversationItem(env, workspaceId, id) ||
+    { conversationId: id, status, assignedTo, unreadCount: fallbackUnreadCount, updatedAt: now };
 }
 
 async function createContact(env, workspaceId, payload, principal) {
@@ -2225,6 +2316,8 @@ async function createContact(env, workspaceId, payload, principal) {
 }
 
 async function createOutboundMessage(env, workspaceId, conversationId, payload, principal) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Message payload must be an object.');
+  rejectUnknownKeys(payload, new Set(['text', 'replyToMessageId']), 'message request');
   const text = cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH);
   const row = await env.DB.prepare(`SELECT c.contact_id,c.channel_id,i.channel_profile_id,ch.connector_type,ch.provider_type,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
@@ -2234,16 +2327,57 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
     JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
     WHERE c.conversation_id=?1 AND c.workspace_id=?2`).bind(conversationId, workspaceId).first();
   if (!row) throw httpError(404, 'Conversation or channel identity not found.');
-  assertFreeformReplyAllowed(logicalConnectorType(row), row.last_inbound_at);
+  const connectorType = logicalConnectorType(row);
+  assertFreeformReplyAllowed(connectorType, row.last_inbound_at);
+  const reply = await resolveReplyTarget(env, workspaceId, conversationId, row.channel_id,
+    connectorType, payload.replyToMessageId);
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
-      VALUES (?1,?2,?3,?4,'outbound','text',?5,'pending',?6,?7)`).bind(messageId, conversationId, row.contact_id, row.channel_id, text, now, workspaceId),
+    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,payload_json,workspace_id)
+      VALUES (?1,?2,?3,?4,'outbound','text',?5,'pending',?6,?7,?8)`).bind(messageId, conversationId, row.contact_id,
+        row.channel_id, text, now, reply ? JSON.stringify({ reply }) : '{}', workspaceId),
     env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2').bind(conversationId, workspaceId, now)
   ]);
-  await audit(env, principal, 'send_message', 'conversation', conversationId, { channelId: row.channel_id, messageId });
-  return { message: { messageId, conversationId, channelId: row.channel_id, direction: 'outbound', messageType: 'text', text, status: 'pending', timestamp: now } };
+  await audit(env, principal, 'send_message', 'conversation', conversationId, {
+    channelId: row.channel_id, messageId, ...(reply ? { replyToMessageId: reply.messageId } : {})
+  });
+  return { message: {
+    messageId, conversationId, channelId: row.channel_id, direction: 'outbound', messageType: 'text',
+    text, status: 'pending', timestamp: now, reply: reply || null
+  } };
+}
+
+async function resolveReplyTarget(env, workspaceId, conversationId, channelId, connectorType, replyToMessageId) {
+  if (replyToMessageId === undefined || replyToMessageId === null || String(replyToMessageId).trim() === '') return null;
+  if (!['whatsapp_cloud', 'telegram'].includes(connectorType)) {
+    throw httpError(409, 'Replying to a specific message is available only for WhatsApp and Telegram conversations.');
+  }
+  const messageId = String(replyToMessageId).trim();
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(messageId)) throw httpError(400, 'Reply message ID is invalid.');
+  const row = await env.DB.prepare(`SELECT message_id,provider_message_id,direction,text,message_type,payload_json
+    FROM messages WHERE message_id=?1 AND workspace_id=?2 AND conversation_id=?3 AND channel_id=?4`)
+    .bind(messageId, workspaceId, conversationId, channelId).first();
+  if (!row) throw httpError(404, 'The message being replied to was not found in this conversation.');
+  const channelMessageId = String(row.provider_message_id || '').trim();
+  if (!channelMessageId) throw httpError(409, 'This message cannot be replied to until the channel confirms it.');
+  if (connectorType === 'telegram' && !/^\d{1,20}$/.test(channelMessageId)) {
+    throw httpError(409, 'This older Telegram message does not have a reply-compatible channel message ID.');
+  }
+  return replyMetadataFromRow(row);
+}
+
+function replyMetadataFromRow(row) {
+  const payload = safeJsonParse(row.payload_json, {});
+  const attachment = messageAttachmentView(row.message_type, payload, '');
+  return {
+    messageId: String(row.message_id || ''),
+    channelMessageId: String(row.provider_message_id || ''),
+    direction: ['inbound', 'outbound'].includes(row.direction) ? row.direction : '',
+    text: String(row.text || '').slice(0, 1000),
+    messageType: String(row.message_type || 'text').slice(0, 40),
+    ...(attachment?.type ? { attachment: { type: attachment.type, filename: attachment.filename || '' } } : {})
+  };
 }
 
 function assertFreeformReplyAllowed(connectorType, lastInboundAt) {
@@ -2703,6 +2837,8 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   if (target.connectorType === 'whatsapp_cloud' && attachment.type === 'audio' && attachment.caption) {
     throw httpError(400, 'WhatsApp audio messages do not support captions. Remove the text or send it as a separate message.');
   }
+  const reply = await resolveReplyTarget(env, workspaceId, conversationId, target.channel_id,
+    target.connectorType, form.get('replyToMessageId'));
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
   const preview = attachment.caption || `[${attachment.type}: ${attachment.filename}]`;
@@ -2713,15 +2849,16 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
           provider_message_id,status,timestamp,payload_json,workspace_id)
         VALUES (?1,?2,?3,?4,'outbound',?5,?6,'','pending',?7,?8,?9)`)
         .bind(messageId, conversationId, target.contact_id, target.channel_id, attachment.type, preview, now,
-          JSON.stringify({ attachment: safeAttachment }), workspaceId),
+          JSON.stringify({ attachment: safeAttachment, ...(reply ? { reply } : {}) }), workspaceId),
       env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2')
         .bind(conversationId, workspaceId, now)
     ]);
     let sent;
     try {
-      sent = await sendTelegramMedia(env, target.channel, target.channel_profile_id, file, attachment);
+      sent = await sendTelegramMedia(env, target.channel, target.channel_profile_id, file, attachment,
+        reply?.channelMessageId || '');
       safeAttachment = { ...attachment, providerFileId: sent.providerFileId };
-      await persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, safeAttachment);
+      await persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, safeAttachment, reply);
     } catch (error) {
       const failure = cleanError(error);
       let failurePersisted = false;
@@ -2742,7 +2879,7 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
       return { message: {
         messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
         text: preview, status: 'failed', error: failure, timestamp: now, channelMessageId: '',
-        attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId)
+        attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null
       } };
     }
     await auditAttachmentBestEffort(env, principal, conversationId, {
@@ -2751,7 +2888,7 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
     return { message: {
       messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
       text: preview, status: sent.status, timestamp: now, channelMessageId: sent.providerMessageId,
-      attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId)
+      attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null
     } };
   }
 
@@ -2763,7 +2900,7 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
       provider_message_id,status,timestamp,payload_json,workspace_id)
     VALUES (?1,?2,?3,?4,'outbound',?5,?6,'','pending',?7,?8,?9)`)
     .bind(messageId, conversationId, target.contact_id, target.channel_id, attachment.type, preview,
-      now, JSON.stringify({ attachment: safeAttachment }), workspaceId),
+      now, JSON.stringify({ attachment: safeAttachment, ...(reply ? { reply } : {}) }), workspaceId),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, workspaceId, encryptedPayload, now),
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
@@ -2779,17 +2916,17 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   return { message: {
     messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
     text: preview, status: 'pending', timestamp: now, channelMessageId: '',
-    attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId)
+    attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null
   } };
 }
 
-async function persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, attachment) {
+async function persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, attachment, reply = null) {
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await env.DB.prepare(`UPDATE messages SET provider_message_id=?2,status=?3,payload_json=?4,error=''
         WHERE message_id=?1 AND workspace_id=?5`).bind(messageId, sent.providerMessageId, sent.status,
-          JSON.stringify({ attachment }), workspaceId).run();
+          JSON.stringify({ attachment, ...(reply ? { reply } : {}) }), workspaceId).run();
       return true;
     } catch (error) {
       lastError = error;
@@ -3033,7 +3170,8 @@ async function sendOrQueue(env, messageId) {
   try {
     await markMessageSent(env, messageId, await dispatchOutbound(env, messageId));
   } catch (error) {
-    const message = await env.DB.prepare('SELECT workspace_id,conversation_id,status FROM messages WHERE message_id=?1').bind(messageId).first();
+    const message = await env.DB.prepare(`SELECT workspace_id,conversation_id,status,provider_message_id
+      FROM messages WHERE message_id=?1`).bind(messageId).first();
     if (!message) throw error;
     if (isTerminalProviderStatus(message.status)) {
       await env.DB.batch([
@@ -3049,7 +3187,8 @@ async function sendOrQueue(env, messageId) {
         env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(messageId)
       ]);
       await broadcastMessageStatusChanges(env, message.workspace_id, [{
-        messageId, conversationId: message.conversation_id, status: 'failed', error: cleanError(error)
+        messageId, conversationId: message.conversation_id, status: 'failed', error: cleanError(error),
+        channelMessageId: String(message.provider_message_id || '')
       }]);
       return;
     }
@@ -3064,7 +3203,8 @@ async function sendOrQueue(env, messageId) {
         .bind(crypto.randomUUID(), messageId, next, cleanError(error), now.toISOString(), message.workspace_id)
     ]);
     await broadcastMessageStatusChanges(env, message.workspace_id, [{
-      messageId, conversationId: message.conversation_id, status: 'retrying', error: cleanError(error)
+      messageId, conversationId: message.conversation_id, status: 'retrying', error: cleanError(error),
+      channelMessageId: String(message.provider_message_id || '')
     }]);
   }
 }
@@ -3084,6 +3224,8 @@ async function dispatchOutbound(env, messageId) {
     config: safeJsonParse(row.config_json, {}),
     secretKey: row.secret_key
   };
+  const messagePayload = safeJsonParse(row.payload_json, {});
+  const replyChannelMessageId = String(messagePayload?.reply?.channelMessageId || '');
   let result;
   if (channel.connectorType === 'whatsapp_cloud' && row.message_type === 'template') {
     const stored = await env.DB.prepare(`SELECT encrypted_payload FROM outbound_payloads
@@ -3106,27 +3248,35 @@ async function dispatchOutbound(env, messageId) {
     } catch {
       throw nonRetryableError('The encrypted attachment payload could not be decrypted.');
     }
-    result = await sendWhatsAppMedia(env, channel, row.channel_profile_id, outbound.media, messageId);
-  } else if (channel.connectorType === 'whatsapp_cloud') result = await sendWhatsApp(env, channel, row.channel_profile_id, row.text);
-  else if (channel.connectorType === 'telegram') result = await sendTelegram(env, channel, row.channel_profile_id, row.text);
-  else if (channel.connectorType === 'instagram') result = await sendInstagram(env, channel, row.channel_profile_id, row.text);
+    result = await sendWhatsAppMedia(env, channel, row.channel_profile_id, outbound.media, messageId, replyChannelMessageId);
+  } else if (channel.connectorType === 'whatsapp_cloud') {
+    result = await sendWhatsApp(env, channel, row.channel_profile_id, row.text, replyChannelMessageId, messageId);
+  } else if (channel.connectorType === 'telegram') {
+    result = await sendTelegram(env, channel, row.channel_profile_id, row.text, replyChannelMessageId);
+  } else if (channel.connectorType === 'instagram') result = await sendInstagram(env, channel, row.channel_profile_id, row.text);
   else if (channel.connectorType === 'generic_http') result = await sendGeneric(env, channel, row);
   else if (channel.connectorType === 'web_chat') result = { status: 'sent', providerMessageId: row.message_id, httpStatus: 200 };
   else throw new Error(`Outbound connector ${channel.connectorType} is not implemented yet.`);
   return { ...result, workspaceId: row.workspace_id };
 }
 
-async function sendWhatsApp(env, channel, recipient, text) {
+async function sendWhatsApp(env, channel, recipient, text, replyChannelMessageId = '', messageId = '') {
   const credentials = await readChannelCredentials(env, channel);
   const token = credentials.accessToken;
   const phoneNumberId = channel.config?.phoneNumberId;
   if (!token || !phoneNumberId) throw nonRetryableError('WhatsApp credentials are not configured.');
   const normalizedRecipient = normalizeWhatsAppRecipient(recipient);
   const version = metaApiVersion(channel.config?.apiVersion);
+  const body = {
+    messaging_product: 'whatsapp', recipient_type: 'individual', to: normalizedRecipient,
+    type: 'text', text: { preview_url: false, body: text },
+    ...(replyChannelMessageId ? { context: { message_id: String(replyChannelMessageId) } } : {}),
+    ...(messageId ? { biz_opaque_callback_data: String(messageId).slice(0, 512) } : {})
+  };
   const response = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneNumberId)}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: normalizedRecipient, type: 'text', text: { preview_url: false, body: text } })
+    body: JSON.stringify(body)
   });
   const raw = await response.text();
   const data = safeJsonParse(raw, {});
@@ -3163,7 +3313,7 @@ async function sendWhatsAppTemplate(env, channel, recipient, template, messageId
   return { status: 'submitted', providerMessageId: data.messages?.[0]?.id || '', httpStatus: response.status };
 }
 
-async function sendWhatsAppMedia(env, channel, recipient, media, messageId) {
+async function sendWhatsAppMedia(env, channel, recipient, media, messageId, replyChannelMessageId = '') {
   const credentials = await readChannelCredentials(env, channel);
   const token = credentials.accessToken;
   const phoneNumberId = channel.config?.phoneNumberId;
@@ -3179,7 +3329,8 @@ async function sendWhatsAppMedia(env, channel, recipient, media, messageId) {
   const body = {
     messaging_product: 'whatsapp', recipient_type: 'individual',
     to: normalizeWhatsAppRecipient(recipient), type, [type]: item,
-    biz_opaque_callback_data: String(messageId).slice(0, 512)
+    biz_opaque_callback_data: String(messageId).slice(0, 512),
+    ...(replyChannelMessageId ? { context: { message_id: String(replyChannelMessageId) } } : {})
   };
   const response = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneNumberId)}/messages`, {
     method: 'POST',
@@ -3229,13 +3380,15 @@ async function sendGeneric(env, channel, row) {
   };
 }
 
-async function sendTelegram(env, channel, chatId, text) {
+async function sendTelegram(env, channel, chatId, text, replyChannelMessageId = '') {
   const credentials = await readChannelCredentials(env, channel);
   const token = credentials.botToken;
   if (!token) throw nonRetryableError('Telegram bot token is not configured.');
+  const body = { chat_id: chatId, text };
+  if (replyChannelMessageId) body.reply_parameters = { message_id: Number(replyChannelMessageId) };
   const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text })
+    body: JSON.stringify(body)
   });
   const raw = await response.text();
   const data = safeJsonParse(raw, {});
@@ -3247,7 +3400,7 @@ async function sendTelegram(env, channel, chatId, text) {
   return { status: 'sent', providerMessageId: String(data.result?.message_id || ''), httpStatus: response.status };
 }
 
-async function sendTelegramMedia(env, channel, chatId, file, attachment) {
+async function sendTelegramMedia(env, channel, chatId, file, attachment, replyChannelMessageId = '') {
   const credentials = await readChannelCredentials(env, channel);
   const token = credentials.botToken;
   if (!token) throw nonRetryableError('Telegram bot token is not configured.');
@@ -3261,6 +3414,7 @@ async function sendTelegramMedia(env, channel, chatId, file, attachment) {
     : attachment.type === 'video' ? 'video' : voice ? 'voice' : attachment.type === 'audio' ? 'audio' : 'document';
   const body = new FormData();
   body.set('chat_id', String(chatId));
+  if (replyChannelMessageId) body.set('reply_parameters', JSON.stringify({ message_id: Number(replyChannelMessageId) }));
   body.set(field, file, attachment.filename);
   if (attachment.caption) body.set('caption', attachment.caption);
   const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', body });
@@ -3308,17 +3462,23 @@ async function markMessageSent(env, messageId, result) {
     env.DB.prepare(`UPDATE messages SET
         status=CASE WHEN status IN ('sent','delivered','read','failed') THEN status ELSE ?2 END,
         provider_message_id=CASE WHEN provider_message_id='' THEN ?3 ELSE provider_message_id END,
-        payload_json=CASE WHEN message_type='template' OR status IN ('sent','delivered','read','failed') THEN payload_json ELSE ?4 END,
+        payload_json=CASE
+          WHEN message_type='template' OR status IN ('sent','delivered','read','failed') THEN payload_json
+          WHEN json_type(payload_json,'$.reply')='object' THEN payload_json
+          ELSE ?4
+        END,
         error=CASE WHEN status='failed' THEN error ELSE '' END
       WHERE message_id=?1`)
       .bind(messageId, result.status || 'submitted', result.providerMessageId || '', JSON.stringify(result)),
     env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId),
     env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(messageId)
   ]);
-  const stored = await env.DB.prepare('SELECT conversation_id,status,error FROM messages WHERE message_id=?1').bind(messageId).first();
+  const stored = await env.DB.prepare(`SELECT conversation_id,status,error,provider_message_id
+    FROM messages WHERE message_id=?1`).bind(messageId).first();
   await broadcastMessageStatusChanges(env, result.workspaceId, [{
     messageId, conversationId: stored?.conversation_id,
-    status: stored?.status || result.status || 'submitted', error: stored?.error || ''
+    status: stored?.status || result.status || 'submitted', error: stored?.error || '',
+    channelMessageId: String(stored?.provider_message_id || result.providerMessageId || '')
   }]);
 }
 
@@ -3344,7 +3504,8 @@ async function retryDueMessages(env) {
     try {
       await markMessageSent(env, job.message_id, await dispatchOutbound(env, job.message_id));
     } catch (error) {
-      const latest = await env.DB.prepare('SELECT conversation_id,status FROM messages WHERE message_id=?1').bind(job.message_id).first();
+      const latest = await env.DB.prepare(`SELECT conversation_id,status,provider_message_id
+        FROM messages WHERE message_id=?1`).bind(job.message_id).first();
       if (latest && isTerminalProviderStatus(latest.status)) {
         await env.DB.batch([
           env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(job.message_id),
@@ -3366,7 +3527,8 @@ async function retryDueMessages(env) {
       await env.DB.batch(statements);
       await broadcastMessageStatusChanges(env, job.workspace_id, [{
         messageId: job.message_id, conversationId: latest?.conversation_id,
-        status: exhausted ? 'failed' : 'retrying', error: cleanError(error)
+        status: exhausted ? 'failed' : 'retrying', error: cleanError(error),
+        channelMessageId: String(latest?.provider_message_id || '')
       }]);
     }
   }
@@ -3374,7 +3536,8 @@ async function retryDueMessages(env) {
 
 async function storeInbound(env, channel, event, rawPayload) {
   if (!event.channelProfileId || (!event.text && !event.providerMessageId)) return false;
-  const eventKey = `${channel.workspaceId}:${channel.channelId}:message:${event.providerMessageId || await hashText(JSON.stringify(event))}`;
+  const providerEventKey = String(event.dedupeKey || event.providerMessageId || await hashText(JSON.stringify(event)));
+  const eventKey = `${channel.workspaceId}:${channel.channelId}:message:${providerEventKey}`;
   const dedupe = await env.DB.prepare(`INSERT OR IGNORE INTO webhook_events (event_key,channel_id,event_type,received_at,workspace_id)
     VALUES (?1,?2,'message',?3,?4)`).bind(eventKey, channel.channelId, new Date().toISOString(), channel.workspaceId).run();
   if (!dedupe.meta?.changes) return false;
@@ -3424,8 +3587,14 @@ async function storeInbound(env, channel, event, rawPayload) {
     }
   }
   const messageId = crypto.randomUUID();
-  const storedPayload = event.attachment
-    ? { attachment: event.attachment, providerMessageId: String(event.providerMessageId || '') }
+  const reply = await resolveInboundReply(env, channel.workspaceId, conversation.conversation_id,
+    channel.channelId, event.reply);
+  const storedPayload = event.attachment || reply
+    ? {
+        ...(event.attachment ? { attachment: event.attachment } : {}),
+        ...(reply ? { reply } : {}),
+        providerMessageId: String(event.providerMessageId || '')
+      }
     : rawPayload;
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
@@ -3435,18 +3604,41 @@ async function storeInbound(env, channel, event, rawPayload) {
     env.DB.prepare("UPDATE conversations SET status='open',last_message_at=?3,unread_count=unread_count+1,updated_at=?4 WHERE conversation_id=?1 AND workspace_id=?2")
       .bind(conversation.conversation_id, channel.workspaceId, timestamp, now)
   ]);
+  const messageType = String(event.messageType || 'text').slice(0, 40);
+  const text = String(event.text || '').slice(0, MAX_TEXT_LENGTH);
+  const senderName = String(identity.contact_display_name || event.displayName || event.channelProfileId);
+  const message = {
+    messageId, conversationId: conversation.conversation_id, channelId: channel.channelId,
+    direction: 'inbound', messageType, text, status: 'received', timestamp,
+    channelMessageId: String(event.providerMessageId || ''), error: '', senderName,
+    attachment: messageAttachmentView(messageType, storedPayload, messageId),
+    reply: messageReplyView(storedPayload)
+  };
+  const conversationItem = await getConversationItem(env, channel.workspaceId, conversation.conversation_id);
   return {
     messageId,
     conversationId: conversation.conversation_id,
-    senderName: String(identity.contact_display_name || event.displayName || event.channelProfileId),
-    preview: String(event.text || ''),
-    messageType: String(event.messageType || 'message')
+    senderName,
+    preview: text,
+    messageType,
+    message,
+    conversation: conversationItem
   };
   } catch (error) {
     // Let a provider retry process the event if storage failed after claiming its dedupe key.
     await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(eventKey).run();
     throw error;
   }
+}
+
+async function resolveInboundReply(env, workspaceId, conversationId, channelId, providerReply) {
+  const channelMessageId = String(providerReply?.channelMessageId || '').trim();
+  if (!channelMessageId) return null;
+  const row = await env.DB.prepare(`SELECT message_id,provider_message_id,direction,text,message_type,payload_json
+    FROM messages WHERE workspace_id=?1 AND conversation_id=?2 AND channel_id=?3 AND provider_message_id=?4
+    ORDER BY timestamp DESC LIMIT 1`).bind(workspaceId, conversationId, channelId, channelMessageId).first();
+  if (row) return replyMetadataFromRow(row);
+  return messageReplyView({ reply: providerReply });
 }
 
 async function applyProviderStatus(env, workspaceId, channelId, event, rawPayload) {
@@ -3470,6 +3662,7 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
         END,
         payload_json=CASE
           WHEN message_type IN ('image','video','audio','document','template') THEN payload_json
+          WHEN json_type(payload_json,'$.reply')='object' THEN payload_json
           WHEN status='failed' THEN payload_json
           WHEN ?4='failed' THEN ?5
           WHEN status='read' THEN payload_json
@@ -3492,7 +3685,7 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
       await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
       return [];
     }
-    const changed = await env.DB.prepare(`SELECT message_id,conversation_id,status,error FROM messages
+    const changed = await env.DB.prepare(`SELECT message_id,conversation_id,status,error,provider_message_id FROM messages
       WHERE workspace_id=?1 AND channel_id=?2
         AND ((?3<>'' AND provider_message_id=?3) OR (?4<>'' AND message_id=?4))`)
       .bind(workspaceId, channelId, providerMessageId, internalMessageId).all();
@@ -3522,6 +3715,7 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
         END,
         payload_json=CASE
           WHEN message_type IN ('image','video','audio','document','template') THEN payload_json
+          WHEN json_type(payload_json,'$.reply')='object' THEN payload_json
           WHEN status='failed' THEN payload_json
           WHEN status='read' THEN payload_json
           WHEN status='delivered' AND ?5='delivered' THEN payload_json
@@ -3534,7 +3728,7 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
           WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3)`)
       .bind(workspaceId, channelId, channelProfileId, timestamp, status, truncateJson(rawPayload)).run();
     if (!updated.meta?.changes) return [];
-    const changed = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.status,m.error FROM messages m
+    const changed = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.status,m.error,m.provider_message_id FROM messages m
       WHERE m.workspace_id=?1 AND m.channel_id=?2 AND m.direction='outbound' AND m.timestamp<=?4
         AND m.provider_message_id<>'' AND m.status IN ('submitted','sent','delivered','read')
         AND m.contact_id IN (SELECT contact_id FROM channel_identities
@@ -3552,7 +3746,8 @@ function realtimeMessageStatus(row) {
     messageId: String(row.message_id || ''),
     conversationId: String(row.conversation_id || ''),
     status: String(row.status || ''),
-    error: String(row.error || '')
+    error: String(row.error || ''),
+    channelMessageId: String(row.provider_message_id || row.channelMessageId || '')
   };
 }
 
@@ -3568,6 +3763,7 @@ async function broadcastMessageStatusChanges(env, workspaceId, changes) {
       messageId: change.messageId,
       conversationId: change.conversationId,
       status: change.status,
+      channelMessageId: String(change.channelMessageId || ''),
       message: change
     });
   }
@@ -3608,12 +3804,14 @@ export function normalizeWhatsApp(payload) {
         const contact = contacts.find(item => String(item.wa_id) === String(message.from)) || {};
         const text = whatsappInboundText(message);
         const attachment = whatsappInboundAttachment(message);
+        const reply = whatsappInboundReply(message);
         messages.push({
           channelProfileId: String(message.from || ''), displayName: contact.profile?.name || String(message.from || ''),
           text, providerMessageId: String(message.id || ''),
           timestamp: message.timestamp ? new Date(Number(message.timestamp) * 1000).toISOString() : '',
           messageType: attachment?.type || String(message.type || 'text'),
-          ...(attachment ? { attachment } : {})
+          ...(attachment ? { attachment } : {}),
+          ...(reply ? { reply } : {})
         });
       }
       for (const status of value.statuses || []) {
@@ -3659,6 +3857,11 @@ function whatsappInboundAttachment(message) {
     caption: String(media.caption || message?.caption || '').slice(0, MAX_ATTACHMENT_CAPTION_LENGTH),
     providerMediaId: String(media.id)
   };
+}
+
+function whatsappInboundReply(message) {
+  const channelMessageId = String(message?.context?.id || '').trim();
+  return channelMessageId ? { channelMessageId } : null;
 }
 
 export function normalizeWhatsAppRecipient(value) {
@@ -3720,15 +3923,29 @@ export function normalizeTelegram(payload) {
   if (!message?.chat?.id) return null;
   const name = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(' ') || message.chat.title || String(message.chat.id);
   const attachment = telegramInboundAttachment(message);
+  const reply = telegramInboundReply(message.reply_to_message);
   return {
     channelProfileId: String(message.chat.id), displayName: name,
     text: message.text || message.caption || '',
-    providerMessageId: payload.update_id !== undefined && payload.update_id !== null
-      ? `update:${payload.update_id}`
-      : `chat:${message.chat.id}:message:${message.message_id || ''}`,
+    providerMessageId: String(message.message_id || ''),
+    dedupeKey: payload.update_id !== undefined && payload.update_id !== null
+      ? `update:${payload.update_id}` : `chat:${message.chat.id}:message:${message.message_id || ''}`,
     timestamp: message.date ? new Date(Number(message.date) * 1000).toISOString() : '',
     messageType: message.text ? 'text' : attachment?.type || 'message',
-    ...(attachment ? { attachment } : {})
+    ...(attachment ? { attachment } : {}),
+    ...(reply ? { reply } : {})
+  };
+}
+
+function telegramInboundReply(message) {
+  if (!message?.message_id) return null;
+  const attachment = telegramInboundAttachment(message);
+  return {
+    channelMessageId: String(message.message_id),
+    direction: message.from?.is_bot ? 'outbound' : 'inbound',
+    text: String(message.text || message.caption || '').slice(0, 1000),
+    messageType: message.text ? 'text' : attachment?.type || 'message',
+    ...(attachment?.type ? { attachment: { type: attachment.type, filename: attachment.filename || '' } } : {})
   };
 }
 

@@ -4,14 +4,14 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-10";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-11";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
   const $ = (id) => document.getElementById(id);
   const state = {
     route: "inbox",
-    filter: "open",
+    filters: new Set(["open"]),
     search: "",
     contactSearch: "",
     channels: [],
@@ -34,6 +34,7 @@
     },
     pendingConversationId: null,
     unreadMarker: null,
+    replyingTo: null,
     recentVerifyTokens: new Map(),
     selectedConversationId: null,
     selectedContactId: null,
@@ -46,6 +47,10 @@
     authStatus: "checking",
     api: null,
     disconnectRealtime: null,
+    realtimeConnectedOnce: false,
+    realtimeRevision: 0,
+    conversationRevisions: new Map(),
+    reconcilePromise: null,
     notificationsEnabled: localStorage.getItem(NOTIFICATION_PREFERENCE_KEY) === "true",
     serviceWorkerRegistration: null,
     pushConfig: null,
@@ -154,14 +159,14 @@
       ],
       messages: {
         "cv-ananya": [
-          { messageId: "msg-a1", direction: "inbound", text: "Hi! I placed an order yesterday and wanted to check the delivery date.", timestamp: ago(31), status: "received", senderName: "Ananya" },
-          { messageId: "msg-a2", direction: "outbound", text: "Hello Ananya — happy to help. Could you share the last four digits of your order number?", timestamp: ago(27), status: "delivered", senderName: "Nisar" },
-          { messageId: "msg-a3", direction: "inbound", text: "It ends in 4821.", timestamp: ago(7), status: "received", senderName: "Ananya" },
-          { messageId: "msg-a4", direction: "inbound", text: "Could you confirm when my order will arrive?", timestamp: ago(3), status: "received", senderName: "Ananya" },
+          { messageId: "msg-a1", channelMessageId: "wa-demo-a1", direction: "inbound", text: "Hi! I placed an order yesterday and wanted to check the delivery date.", timestamp: ago(31), status: "received", senderName: "Ananya" },
+          { messageId: "msg-a2", channelMessageId: "wa-demo-a2", direction: "outbound", text: "Hello Ananya — happy to help. Could you share the last four digits of your order number?", timestamp: ago(27), status: "delivered", senderName: "Nisar" },
+          { messageId: "msg-a3", channelMessageId: "wa-demo-a3", direction: "inbound", text: "It ends in 4821.", timestamp: ago(7), status: "received", senderName: "Ananya" },
+          { messageId: "msg-a4", channelMessageId: "wa-demo-a4", direction: "inbound", text: "Could you confirm when my order will arrive?", timestamp: ago(3), status: "received", senderName: "Ananya", reply: { messageId: "msg-a2", channelMessageId: "wa-demo-a2", direction: "outbound", text: "Hello Ananya — happy to help. Could you share the last four digits of your order number?", messageType: "text" } },
         ],
         "cv-david": [
-          { messageId: "msg-d1", direction: "inbound", text: "Hello, I found you through your website.", timestamp: ago(24), status: "received", senderName: "David" },
-          { messageId: "msg-d2", direction: "inbound", text: "I need help choosing the right plan.", timestamp: ago(18), status: "received", senderName: "David" },
+          { messageId: "msg-d1", channelMessageId: "101", direction: "inbound", text: "Hello, I found you through your website.", timestamp: ago(24), status: "received", senderName: "David" },
+          { messageId: "msg-d2", channelMessageId: "102", direction: "inbound", text: "I need help choosing the right plan.", timestamp: ago(18), status: "received", senderName: "David" },
         ],
         "cv-meera": [
           { messageId: "msg-m1", direction: "inbound", text: "Does the starter package include onboarding?", timestamp: ago(75), status: "received", senderName: "Meera" },
@@ -285,14 +290,24 @@
       return { items: clone(this.data.messages[conversationId] || []) };
     }
 
-    async sendMessage(conversationId, text) {
+    async sendMessage(conversationId, text, replyToMessageId = "") {
+      const replyTarget = (this.data.messages[conversationId] || []).find((message) => message.messageId === replyToMessageId);
       const item = {
         messageId: `demo-${Date.now()}`,
+        channelMessageId: `demo-channel-${Date.now()}`,
         direction: "outbound",
         text,
         timestamp: new Date().toISOString(),
         status: "sent",
         senderName: "You",
+        reply: replyTarget ? {
+          messageId: replyTarget.messageId,
+          channelMessageId: replyTarget.channelMessageId || "",
+          direction: replyTarget.direction,
+          text: replyTarget.text || "",
+          messageType: replyTarget.messageType || "text",
+          ...(replyTarget.attachment ? { attachment: { type: replyTarget.attachment.type, filename: replyTarget.attachment.filename || "" } } : {}),
+        } : null,
       };
       this.data.messages[conversationId] ||= [];
       this.data.messages[conversationId].push(item);
@@ -370,7 +385,8 @@
     async sendAttachment(conversationId, formData) {
       const file = formData.get("file");
       const caption = String(formData.get("caption") || "").trim();
-      const result = await this.sendMessage(conversationId, caption || `[Attachment: ${file?.name || "file"}]`);
+      const replyToMessageId = String(formData.get("replyToMessageId") || "");
+      const result = await this.sendMessage(conversationId, caption || `[Attachment: ${file?.name || "file"}]`, replyToMessageId);
       result.item.messageType = file?.type?.startsWith("image/") ? "image"
         : file?.type?.startsWith("video/") ? "video" : file?.type?.startsWith("audio/") ? "audio" : "document";
       result.item.attachment = {
@@ -528,6 +544,8 @@
       this.demo = this.isDemo ? new DemoApi() : null;
       this.socket = null;
       this.reconnectTimer = null;
+      this.lastSocketActivity = 0;
+      this.openSocket = null;
       this.closedByClient = false;
     }
 
@@ -581,12 +599,12 @@
         : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=100`);
     }
 
-    sendMessage(conversationId, text) {
+    sendMessage(conversationId, text, replyToMessageId = "") {
       return this.isDemo
-        ? this.demo.sendMessage(conversationId, text)
+        ? this.demo.sendMessage(conversationId, text, replyToMessageId)
         : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
           method: "POST",
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text, ...(replyToMessageId ? { replyToMessageId } : {}) }),
         });
     }
 
@@ -762,33 +780,85 @@
       }
       this.closedByClient = false;
       const openSocket = () => {
+        if (this.closedByClient || [WebSocket.OPEN, WebSocket.CONNECTING].includes(this.socket?.readyState)) return;
+        clearTimeout(this.reconnectTimer);
         const url = new URL(this.base);
         url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
         url.pathname = `${url.pathname.replace(/\/$/, "")}/api/realtime`;
         url.search = "";
         onState("connecting");
         const socket = new WebSocket(url);
+        let heartbeatTimer = null;
+        const connectTimer = setTimeout(() => {
+          if (this.socket === socket && socket.readyState === WebSocket.CONNECTING) {
+            try { socket.close(4000, "Realtime connection timed out"); }
+            catch { /* The browser will surface its own connection error. */ }
+          }
+        }, 15_000);
         this.socket = socket;
-        socket.addEventListener("open", () => onState("online"));
+        socket.addEventListener("open", () => {
+          clearTimeout(connectTimer);
+          if (this.socket !== socket || this.closedByClient) {
+            socket.close(1000, "Superseded realtime connection");
+            return;
+          }
+          this.lastSocketActivity = Date.now();
+          onState("online");
+          heartbeatTimer = setInterval(() => {
+            if (this.socket !== socket) {
+              clearInterval(heartbeatTimer);
+              return;
+            }
+            if (socket.readyState !== WebSocket.OPEN) return;
+            if (Date.now() - this.lastSocketActivity > 70_000) {
+              socket.close(4000, "Realtime heartbeat timed out");
+              return;
+            }
+            socket.send("ping");
+          }, 25_000);
+        });
         socket.addEventListener("message", (event) => {
+          if (this.socket !== socket || this.closedByClient) return;
+          this.lastSocketActivity = Date.now();
+          if (event.data === "pong") return;
           try { listener(JSON.parse(event.data)); }
           catch { /* Ignore non-JSON keepalives. */ }
         });
-        socket.addEventListener("error", () => onState("error"));
-        socket.addEventListener("close", () => {
+        socket.addEventListener("error", () => {
+          if (this.socket === socket && !this.closedByClient) onState("error");
+        });
+        socket.addEventListener("close", (event) => {
+          clearTimeout(connectTimer);
+          clearInterval(heartbeatTimer);
+          if (this.socket !== socket) return;
           this.socket = null;
           if (this.closedByClient) return;
+          if (event.code === 1008) {
+            onState("error");
+            window.dispatchEvent(new CustomEvent("helixcer:unauthorized"));
+            return;
+          }
           onState("offline");
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = setTimeout(openSocket, 3500);
         });
       };
+      this.openSocket = openSocket;
       openSocket();
       return () => {
         this.closedByClient = true;
         clearTimeout(this.reconnectTimer);
         if (this.socket) this.socket.close();
       };
+    }
+
+    ensureRealtimeConnected({ resume = false } = {}) {
+      if (this.isDemo || this.recoveryToken) return;
+      if (resume) this.closedByClient = false;
+      if (this.closedByClient) return;
+      if ([WebSocket.OPEN, WebSocket.CONNECTING].includes(this.socket?.readyState)) return;
+      clearTimeout(this.reconnectTimer);
+      this.openSocket?.();
     }
   }
 
@@ -991,6 +1061,26 @@
     };
   }
 
+  function markConversationRealtimeMutation(conversationId) {
+    if (!conversationId) return;
+    state.realtimeRevision += 1;
+    state.conversationRevisions.set(conversationId, state.realtimeRevision);
+  }
+
+  function mergeConversationSnapshots(fetchedConversations, revisionAtStart) {
+    const localById = new Map(state.conversations.map((conversation) => [conversation.conversationId, conversation]));
+    const fetchedIds = new Set(fetchedConversations.map((conversation) => conversation.conversationId));
+    const liveOnly = state.conversations.filter((conversation) =>
+      !fetchedIds.has(conversation.conversationId)
+      && (state.conversationRevisions.get(conversation.conversationId) || 0) > revisionAtStart);
+    const merged = fetchedConversations.map((conversation) => {
+      const local = localById.get(conversation.conversationId);
+      const localRevision = state.conversationRevisions.get(conversation.conversationId) || 0;
+      return local && localRevision > revisionAtStart ? { ...conversation, ...local } : conversation;
+    });
+    return [...liveOnly, ...merged];
+  }
+
   function normalizeContact(raw) {
     return {
       ...raw,
@@ -1010,6 +1100,18 @@
   }
 
   function normalizeMessage(raw) {
+    const replySource = raw?.reply && typeof raw.reply === "object" ? raw.reply : null;
+    const reply = replySource ? {
+      messageId: String(replySource.messageId || ""),
+      channelMessageId: String(replySource.channelMessageId || replySource.providerMessageId || ""),
+      direction: replySource.direction === "outbound" ? "outbound" : replySource.direction === "inbound" ? "inbound" : "",
+      text: String(replySource.text || ""),
+      messageType: String(replySource.messageType || "text"),
+      attachment: replySource.attachment && typeof replySource.attachment === "object" ? {
+        type: String(replySource.attachment.type || "document"),
+        filename: String(replySource.attachment.filename || ""),
+      } : null,
+    } : null;
     return {
       ...raw,
       messageId: String(raw.messageId || raw.id || `message-${Date.now()}-${Math.random().toString(36).slice(2)}`),
@@ -1019,6 +1121,7 @@
       status: raw.status || (raw.direction === "outbound" ? "sent" : "received"),
       senderName: raw.senderName || raw.sender || "",
       channelMessageId: raw.channelMessageId || raw.providerMessageId || "",
+      reply,
     };
   }
 
@@ -1057,6 +1160,26 @@
     return incomingValue;
   }
 
+  function mergeMessageSnapshots(cachedMessages = [], fetchedMessages = []) {
+    const merged = new Map(fetchedMessages.map((message) => [message.messageId, message]));
+    for (const cached of cachedMessages || []) {
+      const fetched = merged.get(cached.messageId);
+      if (!fetched) {
+        merged.set(cached.messageId, cached);
+        continue;
+      }
+      const combined = { ...cached, ...fetched };
+      if (cached.direction === "outbound" || fetched.direction === "outbound") {
+        combined.status = mergeOutboundMessageStatus(cached.status, fetched.status);
+      }
+      combined.channelMessageId = fetched.channelMessageId || cached.channelMessageId || "";
+      combined.reply = fetched.reply || cached.reply || null;
+      combined.attachment = fetched.attachment || cached.attachment;
+      merged.set(cached.messageId, combined);
+    }
+    return [...merged.values()];
+  }
+
   function updateRenderedMessageStatus(message) {
     if (!message?.messageId || message.direction !== "outbound") return false;
     const row = document.querySelector(`#messageThread .message-row[data-message-id="${CSS.escape(message.messageId)}"]`);
@@ -1093,6 +1216,7 @@
     state.loading = true;
     renderConversationList();
     try {
+      const realtimeRevisionAtStart = state.realtimeRevision;
       const data = await state.api.bootstrap();
       if (data.me) {
         state.currentUser = normalizeAuth(data.me);
@@ -1101,7 +1225,8 @@
         applyPermissions();
       }
       state.channels = asItems(data.channels).map(normalizeChannel);
-      state.conversations = asItems(data.conversations).map(normalizeConversation);
+      const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
+      state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart);
       state.contacts = asItems(data.contacts).map(normalizeContact);
       if (!state.contacts.length) state.contacts = deriveContacts(state.conversations);
       if (!preserveSelection || !state.conversations.some((item) => item.conversationId === state.selectedConversationId)) {
@@ -1120,6 +1245,68 @@
     }
   }
 
+  async function reconcileWorkspace({ includeSelectedMessages = true } = {}) {
+    if (!state.api || state.api.isDemo || state.authStatus !== "authenticated") return;
+    if (state.reconcilePromise) return state.reconcilePromise;
+    state.reconcilePromise = (async () => {
+      const selectedId = state.selectedConversationId;
+      const realtimeRevisionAtStart = state.realtimeRevision;
+      const thread = $("messageThread");
+      const distanceFromBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+      const wasNearBottom = distanceFromBottom < 90;
+      const previousScrollTop = thread.scrollTop;
+      const [data, messageData] = await Promise.all([
+        state.api.bootstrap(),
+        selectedId && includeSelectedMessages ? state.api.getMessages(selectedId).catch(() => null) : Promise.resolve(null),
+      ]);
+      if (data.me) {
+        state.currentUser = normalizeAuth(data.me);
+        state.workspace = state.currentUser.workspace || state.workspace;
+        renderCurrentUser();
+        applyPermissions();
+      }
+      state.channels = asItems(data.channels).map(normalizeChannel);
+      const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
+      state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart);
+      state.contacts = asItems(data.contacts).map(normalizeContact);
+      if (!state.contacts.length) state.contacts = deriveContacts(state.conversations);
+      const activeSelectedId = state.selectedConversationId;
+      const selectionUnchanged = activeSelectedId === selectedId;
+      // A reconnect has no event replay. Cached histories that were not refreshed here
+      // must be fetched again when opened or they can hide messages received while the
+      // browser was suspended.
+      for (const cachedConversationId of state.messages.keys()) {
+        if (cachedConversationId !== activeSelectedId) state.messages.delete(cachedConversationId);
+      }
+      const selectedConversation = state.conversations.find((item) => item.conversationId === activeSelectedId);
+      if (selectionUnchanged && activeSelectedId && !selectedConversation) {
+        clearSelectedConversation({ updateUrl: false });
+      } else if (selectionUnchanged && selectedConversation && ["pending", "closed"].includes(selectedConversation.status)) {
+        clearSelectedConversation({ updateUrl: false });
+      } else if (selectedConversation) {
+        const shouldMarkRead = selectedConversation.unreadCount > 0 && document.visibilityState === "visible";
+        selectedConversation.unreadCount = 0;
+        if (selectionUnchanged && messageData) {
+          const fetchedMessages = asItems(messageData).map(normalizeMessage);
+          state.messages.set(activeSelectedId, mergeMessageSnapshots(state.messages.get(activeSelectedId), fetchedMessages));
+          if (typeof messageData.freeformAllowed === "boolean") selectedConversation.freeformAllowed = messageData.freeformAllowed;
+          if (messageData.replyWindowExpiresAt) selectedConversation.replyWindowExpiresAt = messageData.replyWindowExpiresAt;
+          if (messageData.replyWindowReason) selectedConversation.replyWindowReason = messageData.replyWindowReason;
+        }
+        if (shouldMarkRead) state.api.updateConversation(activeSelectedId, { markRead: true }).catch(() => {});
+      }
+      renderAll();
+      if (selectedConversation && selectionUnchanged && state.selectedConversationId === selectedId) {
+        thread.scrollTop = wasNearBottom ? thread.scrollHeight : Math.min(previousScrollTop, Math.max(0, thread.scrollHeight - thread.clientHeight));
+      }
+    })().catch((error) => {
+      console.warn("Realtime reconciliation failed", error);
+    }).finally(() => {
+      state.reconcilePromise = null;
+    });
+    return state.reconcilePromise;
+  }
+
   function renderAll() {
     renderConversationList();
     renderCounts();
@@ -1134,27 +1321,72 @@
 
   function renderCounts() {
     const open = state.conversations.filter((item) => item.status !== "closed").length;
+    const closed = state.conversations.filter((item) => item.status === "closed").length;
     const unread = state.conversations.filter((item) => item.unreadCount > 0).length;
     const mine = state.conversations.filter((item) => isAssignedToCurrentUser(item)).length;
     const unassigned = state.conversations.filter((item) => !item.assignedTo || item.assignedTo === "Unassigned").length;
-    $("allCount").textContent = String(state.conversations.length);
-    $("mineCount").textContent = String(mine);
-    $("unassignedCount").textContent = String(unassigned);
-    $("openCount").textContent = String(open);
-    $("unreadCount").textContent = String(unread);
+    const counts = { all: state.conversations.length, mine, unassigned, open, unread, closed };
+    Object.entries(counts).forEach(([filter, count]) => {
+      document.querySelectorAll(`[data-filter-count="${filter}"]`).forEach((node) => { node.textContent = String(count); });
+    });
     $("sidebarUnread").textContent = unread ? String(unread) : "";
     $("conversationSummary").textContent = `${open} active · ${unread} unread`;
+    renderConversationFilterControls();
+  }
+
+  const conversationFilterLabels = {
+    mine: "Mine", unassigned: "Unassigned", open: "Open", unread: "Unread", closed: "Closed",
+  };
+
+  function renderConversationFilterControls() {
+    const selected = state.filters;
+    const activeLabels = [...selected].map((filter) => conversationFilterLabels[filter]).filter(Boolean);
+    $("conversationFilterSummary").textContent = activeLabels.length ? activeLabels.join(" · ") : "All conversations";
+    $("conversationFilterCount").textContent = String(selected.size);
+    $("conversationFilterCount").hidden = selected.size === 0;
+    document.querySelectorAll("[data-conversation-filter-option]").forEach((input) => {
+      input.checked = input.value === "all" ? selected.size === 0 : selected.has(input.value);
+    });
+    document.querySelectorAll("#conversationFilters [data-filter]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.filter === "all" ? selected.size === 0 : selected.has(button.dataset.filter));
+      button.setAttribute("aria-pressed", String(button.classList.contains("is-active")));
+    });
+  }
+
+  function toggleConversationFilter(filter) {
+    if (filter === "all") state.filters.clear();
+    else if (state.filters.has(filter)) state.filters.delete(filter);
+    else state.filters.add(filter);
+    renderConversationFilterControls();
+    renderConversationList();
+  }
+
+  function toggleConversationFilterMenu(force = null, { restoreFocus = false } = {}) {
+    const menu = $("conversationFilterMenu");
+    const trigger = $("conversationFilterToggle");
+    const open = force === null ? menu.hidden : Boolean(force);
+    menu.hidden = !open;
+    trigger.setAttribute("aria-expanded", String(open));
+    if (open) menu.querySelector("[data-conversation-filter-option]")?.focus();
+    else if (restoreFocus) trigger.focus();
+  }
+
+  function closeConversationFilterMenu(options = {}) {
+    if (!$("conversationFilterMenu").hidden) toggleConversationFilterMenu(false, options);
   }
 
   function filteredConversations() {
     const search = state.search.trim().toLocaleLowerCase();
+    const selected = state.filters;
+    const statusFilters = ["open", "closed"].filter((filter) => selected.has(filter));
+    const assignmentFilters = ["mine", "unassigned"].filter((filter) => selected.has(filter));
     return [...state.conversations]
       .filter((item) => {
-        if (state.filter === "open" && item.status === "closed") return false;
-        if (state.filter === "closed" && item.status !== "closed") return false;
-        if (state.filter === "unread" && item.unreadCount <= 0) return false;
-        if (state.filter === "mine" && !isAssignedToCurrentUser(item)) return false;
-        if (state.filter === "unassigned" && item.assignedTo && item.assignedTo !== "Unassigned") return false;
+        if (statusFilters.length && !statusFilters.some((filter) => filter === "open" ? item.status !== "closed" : item.status === "closed")) return false;
+        if (assignmentFilters.length && !assignmentFilters.some((filter) => filter === "mine"
+          ? isAssignedToCurrentUser(item)
+          : !item.assignedTo || item.assignedTo === "Unassigned")) return false;
+        if (selected.has("unread") && item.unreadCount <= 0) return false;
         if (!search) return true;
         return `${item.subject} ${item.lastMessage} ${item.channelId}`.toLocaleLowerCase().includes(search);
       })
@@ -1218,6 +1450,7 @@
     const changingConversation = state.selectedConversationId !== conversationId;
     if (changingConversation) {
       state.unreadMarker = markRead && unreadCount > 0 ? { conversationId, count: unreadCount } : null;
+      state.replyingTo = null;
     }
     const shouldMarkRead = markRead && unreadCount > 0;
     if (shouldMarkRead) {
@@ -1235,7 +1468,8 @@
       renderMessageLoading();
       try {
         const data = await state.api.getMessages(conversationId);
-        state.messages.set(conversationId, asItems(data).map(normalizeMessage));
+        const fetchedMessages = asItems(data).map(normalizeMessage);
+        state.messages.set(conversationId, mergeMessageSnapshots(state.messages.get(conversationId), fetchedMessages));
         if (typeof data?.freeformAllowed === "boolean") conversation.freeformAllowed = data.freeformAllowed;
         if (data?.replyWindowExpiresAt) conversation.replyWindowExpiresAt = data.replyWindowExpiresAt;
         if (data?.replyWindowReason) conversation.replyWindowReason = data.replyWindowReason;
@@ -1247,7 +1481,7 @@
     renderSelectedConversation();
   }
 
-  function renderSelectedConversation() {
+  function renderSelectedConversation({ preserveScroll = false, renderThread = true } = {}) {
     const conversation = selectedConversation();
     $("emptyConversation").hidden = Boolean(conversation);
     $("chatContent").hidden = !conversation;
@@ -1286,7 +1520,7 @@
     tagHost.replaceChildren();
     const tags = contact?.tags?.length ? contact.tags : ["No tags"];
     tags.forEach((tag) => tagHost.append(element("span", "tag", tag)));
-    renderMessages();
+    if (renderThread) renderMessages({ preserveScroll });
     renderComposerState();
   }
 
@@ -1324,13 +1558,12 @@
     const url = messageAttachmentUrl(message);
     const card = element("div", `message-attachment is-${type}`);
     if (url && type === "image") {
-      const link = document.createElement("a");
+      const link = document.createElement("button");
+      link.type = "button";
       link.className = "message-media-link";
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.referrerPolicy = "no-referrer";
-      link.setAttribute("aria-label", `Open ${filename}`);
+      link.dataset.action = "preview-attachment";
+      link.dataset.messageId = message.messageId;
+      link.setAttribute("aria-label", `Preview ${filename}`);
       const image = document.createElement("img");
       image.className = "message-media-preview";
       if (attachment.external === true) image.referrerPolicy = "no-referrer";
@@ -1368,14 +1601,11 @@
       download.href = messageAttachmentUrl(message, true);
       download.setAttribute("download", filename);
       download.referrerPolicy = "no-referrer";
-      if (type !== "document") {
-        const open = element("a", "message-attachment-action", "View");
-        open.href = url;
-        open.target = "_blank";
-        open.rel = "noopener";
-        open.referrerPolicy = "no-referrer";
-        actions.append(open);
-      }
+      const open = element("button", "message-attachment-action", "Preview");
+      open.type = "button";
+      open.dataset.action = "preview-attachment";
+      open.dataset.messageId = message.messageId;
+      actions.append(open);
       actions.append(download);
       info.append(actions);
     } else {
@@ -1385,10 +1615,137 @@
     return card;
   }
 
-  function renderMessages() {
+  function messageDisplayText(message) {
+    if (!message) return "Message";
+    if (message.attachment) {
+      const caption = String(message.attachment.caption || "").trim();
+      if (caption) return caption;
+      const filename = String(message.attachment.filename || "").trim();
+      if (filename) return filename;
+      return `${capitalize(message.attachment.type || message.messageType || "file")} attachment`;
+    }
+    return String(message.text || `[${message.messageType || "Message"}]`);
+  }
+
+  function replyAuthor(reply, conversation = selectedConversation()) {
+    if (reply?.direction === "outbound") return "You";
+    if (reply?.direction === "inbound") return conversation?.subject || "Customer";
+    return "Referenced message";
+  }
+
+  function renderQuotedReply(reply, conversation) {
+    if (!reply) return null;
+    const quote = element("button", `message-quote is-${reply.direction || "inbound"}`);
+    quote.type = "button";
+    if (reply.messageId) {
+      quote.dataset.action = "jump-to-message";
+      quote.dataset.messageId = reply.messageId;
+    } else quote.disabled = true;
+    quote.append(element("strong", "", replyAuthor(reply, conversation)));
+    const preview = reply.attachment?.filename || reply.text || `${capitalize(reply.messageType || "message")} message`;
+    quote.append(element("span", "", preview));
+    quote.setAttribute("aria-label", `Reply to ${replyAuthor(reply, conversation)}: ${preview}`);
+    return quote;
+  }
+
+  function canReplyToMessage(conversation, message) {
+    if (!conversation || !message?.messageId || !message.channelMessageId) return false;
+    const connectorType = conversation.connectorType || channelFor(conversation.channelId).connectorType;
+    return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot"].includes(connectorType);
+  }
+
+  function createMessageRow(message, conversation) {
+    const row = element("div", `message-row${message.direction === "outbound" ? " is-outbound" : ""}`);
+    row.dataset.messageId = message.messageId;
+    row.dataset.messageTimestamp = String(new Date(message.timestamp).getTime() || 0);
+    row.dataset.messageDate = dateLabel(message.timestamp);
+    if (canReplyToMessage(conversation, message)) row.dataset.replyable = "true";
+    const bubble = element("div", "message-bubble");
+    if (message.direction === "inbound" && message.senderName) bubble.append(element("p", "message-sender", message.senderName));
+    const quoted = renderQuotedReply(message.reply, conversation);
+    if (quoted) bubble.append(quoted);
+    const attachment = renderMessageAttachment(message);
+    if (attachment) bubble.append(attachment);
+    const visibleText = message.attachment
+      ? String(message.attachment.caption || (!/^\[[^\]]+\]$/.test(message.text || "") ? message.text || "" : ""))
+      : messageDisplayText(message);
+    if (visibleText) bubble.append(element("p", "message-text", visibleText));
+    const foot = element("div", "message-foot");
+    foot.append(element("time", "", formatClock(message.timestamp)));
+    if (message.direction === "outbound") {
+      const delivery = outboundDeliveryStatus(message.status);
+      const status = element("span", delivery.className, delivery.label);
+      status.title = `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`;
+      status.setAttribute("aria-label", status.title);
+      foot.append(status);
+    }
+    bubble.append(foot);
+    row.append(bubble);
+    if (canReplyToMessage(conversation, message)) {
+      const replyButton = element("button", "message-reply-button", "↩");
+      replyButton.type = "button";
+      replyButton.dataset.action = "reply-to-message";
+      replyButton.dataset.messageId = message.messageId;
+      replyButton.setAttribute("aria-label", `Reply to ${messageDisplayText(message)}`);
+      row.append(replyButton);
+    }
+    return row;
+  }
+
+  function syncMessageDateDividers(host) {
+    host.querySelectorAll(".date-divider").forEach((divider) => divider.remove());
+    let previousDate = "";
+    host.querySelectorAll(".message-row").forEach((row) => {
+      const currentDate = row.dataset.messageDate || "";
+      if (currentDate && currentDate !== previousDate) {
+        const divider = element("div", "date-divider", currentDate);
+        const anchor = row.previousElementSibling?.classList.contains("unread-divider")
+          ? row.previousElementSibling : row;
+        anchor.before(divider);
+        previousDate = currentDate;
+      }
+    });
+  }
+
+  function upsertRenderedMessage(message, conversationId = message?.conversationId) {
+    const conversation = selectedConversation();
+    if (!conversation || conversation.conversationId !== conversationId) return false;
+    const host = $("messageThread");
+    const distanceFromBottom = host.scrollHeight - host.scrollTop - host.clientHeight;
+    const stayAtBottom = distanceFromBottom < 90;
+    const visibleAnchor = [...host.querySelectorAll(".message-row")]
+      .find((row) => row.offsetTop + row.offsetHeight >= host.scrollTop);
+    const anchorId = visibleAnchor?.dataset.messageId || "";
+    const anchorOffset = visibleAnchor ? visibleAnchor.offsetTop - host.scrollTop : 0;
+    host.querySelector(".empty-list")?.remove();
+    const replacement = createMessageRow(message, conversation);
+    const existing = host.querySelector(`.message-row[data-message-id="${CSS.escape(message.messageId)}"]`);
+    if (existing) {
+      existing.replaceWith(replacement);
+    } else {
+      const timestamp = Number(replacement.dataset.messageTimestamp || 0);
+      const nextRow = [...host.querySelectorAll(".message-row")]
+        .find((row) => Number(row.dataset.messageTimestamp || 0) > timestamp);
+      if (nextRow) host.insertBefore(replacement, nextRow);
+      else host.append(replacement);
+    }
+    syncMessageDateDividers(host);
+    if (stayAtBottom) host.scrollTop = host.scrollHeight;
+    else if (anchorId) {
+      const restoredAnchor = host.querySelector(`.message-row[data-message-id="${CSS.escape(anchorId)}"]`);
+      if (restoredAnchor) host.scrollTop = Math.max(0, restoredAnchor.offsetTop - anchorOffset);
+    }
+    renderComposerState();
+    return true;
+  }
+
+  function renderMessages({ preserveScroll = false } = {}) {
     const conversation = selectedConversation();
     if (!conversation) return;
     const host = $("messageThread");
+    const distanceFromBottom = host.scrollHeight - host.scrollTop - host.clientHeight;
+    const stayAtBottom = !preserveScroll || distanceFromBottom < 90;
+    const previousScrollTop = host.scrollTop;
     host.replaceChildren();
     const messages = state.messages.get(conversation.conversationId);
     if (!messages) {
@@ -1412,43 +1769,22 @@
       ? marker.count > inboundIndexes.length ? 0 : inboundIndexes[inboundIndexes.length - marker.count]
       : -1;
     sortedMessages.forEach((message, index) => {
-        const currentDate = dateLabel(message.timestamp);
-        if (currentDate !== dateKey) {
-          host.append(element("div", "date-divider", currentDate));
-          dateKey = currentDate;
-        }
-        if (index === unreadStartIndex) {
-          const label = `${marker.count} unread message${marker.count === 1 ? "" : "s"}`;
-          const divider = element("div", "unread-divider", label);
-          divider.setAttribute("role", "separator");
-          divider.setAttribute("aria-label", label);
-          host.append(divider);
-        }
-        const row = element("div", `message-row${message.direction === "outbound" ? " is-outbound" : ""}`);
-        row.dataset.messageId = message.messageId;
-        const bubble = element("div", "message-bubble");
-        if (message.direction === "inbound" && message.senderName) bubble.append(element("p", "message-sender", message.senderName));
-        const attachment = renderMessageAttachment(message);
-        if (attachment) bubble.append(attachment);
-        const visibleText = message.attachment
-          ? String(message.attachment.caption || (!/^\[[^\]]+\]$/.test(message.text || "") ? message.text || "" : ""))
-          : message.text || `[${message.messageType || "Message"}]`;
-        if (visibleText) bubble.append(element("p", "message-text", visibleText));
-        const foot = element("div", "message-foot");
-        foot.append(element("time", "", formatClock(message.timestamp)));
-        if (message.direction === "outbound") {
-          const delivery = outboundDeliveryStatus(message.status);
-          const status = element("span", delivery.className, delivery.label);
-          status.title = `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`;
-          status.setAttribute("aria-label", status.title);
-          foot.append(status);
-        }
-        bubble.append(foot);
-        row.append(bubble);
-        host.append(row);
-      });
+      const currentDate = dateLabel(message.timestamp);
+      if (currentDate !== dateKey) {
+        host.append(element("div", "date-divider", currentDate));
+        dateKey = currentDate;
+      }
+      if (index === unreadStartIndex) {
+        const label = `${marker.count} unread message${marker.count === 1 ? "" : "s"}`;
+        const divider = element("div", "unread-divider", label);
+        divider.setAttribute("role", "separator");
+        divider.setAttribute("aria-label", label);
+        host.append(divider);
+      }
+      host.append(createMessageRow(message, conversation));
+    });
     renderComposerState();
-    host.scrollTop = host.scrollHeight;
+    host.scrollTop = stayAtBottom ? host.scrollHeight : Math.min(previousScrollTop, host.scrollHeight - host.clientHeight);
   }
 
   function isWhatsAppConversation(conversation = selectedConversation()) {
@@ -1465,6 +1801,112 @@
 
   function currentAttachmentQueue(conversation = selectedConversation()) {
     return conversation ? state.pendingAttachments.get(conversation.conversationId) || [] : [];
+  }
+
+  function selectedMessageById(messageId) {
+    const conversation = selectedConversation();
+    if (!conversation || !messageId) return null;
+    return (state.messages.get(conversation.conversationId) || []).find((message) => message.messageId === messageId) || null;
+  }
+
+  function renderComposerReply() {
+    const host = $("composerReply");
+    const conversation = selectedConversation();
+    const active = state.replyingTo?.conversationId === conversation?.conversationId
+      ? selectedMessageById(state.replyingTo.messageId) || state.replyingTo.message
+      : null;
+    host.hidden = !active;
+    if (!active) return;
+    $("composerReplyAuthor").textContent = `Replying to ${active.direction === "outbound" ? "your message" : active.senderName || conversation.subject}`;
+    $("composerReplyPreview").textContent = messageDisplayText(active);
+  }
+
+  function startReplyToMessage(messageId) {
+    const conversation = selectedConversation();
+    const message = selectedMessageById(messageId);
+    if (!conversation || !message || !canReplyToMessage(conversation, message)) {
+      showToast("Reply is unavailable", "This message does not have a reply-compatible channel reference yet.", true);
+      return;
+    }
+    if (isWhatsAppConversation(conversation) && !whatsappReplyWindow(conversation).allowed) {
+      showToast("Use a WhatsApp template", "A specific-message reply can only be sent inside the 24-hour reply window.", true);
+      return;
+    }
+    state.replyingTo = { conversationId: conversation.conversationId, messageId: message.messageId, message };
+    renderComposerReply();
+    $("messageInput").focus();
+  }
+
+  function clearReplyTarget() {
+    state.replyingTo = null;
+    renderComposerReply();
+  }
+
+  function jumpToMessage(messageId) {
+    const row = [...document.querySelectorAll("#messageThread .message-row")]
+      .find((item) => item.dataset.messageId === messageId);
+    if (!row) return;
+    row.scrollIntoView({ block: "center", behavior: "smooth" });
+    row.classList.remove("is-located");
+    requestAnimationFrame(() => row.classList.add("is-located"));
+    setTimeout(() => row.classList.remove("is-located"), 1400);
+  }
+
+  function closeAttachmentPreview() {
+    const dialog = $("attachmentPreviewDialog");
+    dialog.querySelectorAll("video,audio").forEach((media) => {
+      media.pause();
+      media.removeAttribute("src");
+      media.load();
+    });
+    $("attachmentPreviewBody").replaceChildren();
+    if (dialog.open) dialog.close();
+  }
+
+  function openAttachmentPreview(messageId) {
+    const message = selectedMessageById(messageId);
+    const attachment = message?.attachment;
+    const url = messageAttachmentUrl(message);
+    if (!message || !attachment || !url) {
+      showToast("Preview unavailable", "This attachment is not available from the channel yet.", true);
+      return;
+    }
+    const type = String(attachment.type || message.messageType || "document");
+    const filename = attachment.filename || `${capitalize(type)} attachment`;
+    const body = $("attachmentPreviewBody");
+    body.replaceChildren();
+    let media;
+    if (type === "image") {
+      media = document.createElement("img");
+      media.alt = filename;
+    } else if (type === "video") {
+      media = document.createElement("video");
+      media.controls = true;
+      media.preload = "metadata";
+    } else if (type === "audio") {
+      media = document.createElement("audio");
+      media.controls = true;
+      media.preload = "none";
+    }
+    if (media) {
+      media.className = "attachment-preview-media";
+      if (attachment.external === true) media.referrerPolicy = "no-referrer";
+      else media.crossOrigin = "use-credentials";
+      media.src = url;
+      body.append(media);
+    } else {
+      const documentPreview = element("div", "attachment-document-preview");
+      documentPreview.append(element("span", "attachment-document-icon", "DOC"));
+      documentPreview.append(element("strong", "", filename));
+      documentPreview.append(element("small", "", [attachment.mimeType, attachment.size ? formatFileSize(attachment.size) : ""].filter(Boolean).join(" · ") || "Document"));
+      body.append(documentPreview);
+    }
+    $("attachmentPreviewTitle").textContent = filename;
+    const download = $("attachmentPreviewDownload");
+    download.href = messageAttachmentUrl(message, true);
+    download.download = filename;
+    download.referrerPolicy = "no-referrer";
+    $("attachmentPreviewDialog").showModal();
   }
 
   function renderAttachmentQueue() {
@@ -1521,6 +1963,7 @@
     const greeting = document.querySelector('#messageForm [data-action="insert-greeting"]');
     const template = $("templateButton");
     const notice = $("replyWindowNotice");
+    renderComposerReply();
     template.hidden = !whatsapp;
     notice.hidden = !blocked;
     input.disabled = blocked;
@@ -2654,6 +3097,8 @@
     const input = $("messageInput");
     const text = input.value.trim();
     const queued = currentAttachmentQueue(conversation);
+    const replyToMessageId = state.replyingTo?.conversationId === conversation?.conversationId
+      ? state.replyingTo.messageId : "";
     if (!conversation || (!text && !queued.length)) return;
     if (isWhatsAppConversation(conversation) && !whatsappReplyWindow(conversation).allowed) {
       renderComposerState();
@@ -2668,13 +3113,14 @@
     resizeComposer();
     $("sendButton").disabled = true;
     try {
-      const result = await state.api.sendMessage(conversation.conversationId, text);
+      const result = await state.api.sendMessage(conversation.conversationId, text, replyToMessageId);
       const message = normalizeMessage(result.item || { text, direction: "outbound", status: "sent" });
       upsertMessage(conversation.conversationId, message);
       conversation.lastMessage = message.text;
       conversation.lastMessageAt = message.timestamp;
-      renderMessages();
+      upsertRenderedMessage(message, conversation.conversationId);
       renderConversationList();
+      if (replyToMessageId) clearReplyTarget();
     } catch (error) {
       input.value = text;
       resizeComposer();
@@ -2807,6 +3253,19 @@
     const preview = row.querySelector(".template-source-preview");
     if (!select || !input || !preview) return;
     if (row.dataset.kind === "media") {
+      if (!select.value) {
+        const fileInput = row.querySelector(".template-media-file");
+        input.hidden = true;
+        input.required = false;
+        fileInput.hidden = true;
+        fileInput.required = false;
+        row._templateFile = null;
+        preview.hidden = false;
+        preview.textContent = "Choose upload or URL";
+        preview.classList.add("is-missing");
+        renderTemplateComposerPreview();
+        return;
+      }
       const upload = select.value === "upload";
       const fileInput = row.querySelector(".template-media-file");
       input.hidden = upload;
@@ -2840,22 +3299,95 @@
     ["company", "Company"], ["tags", "Tags"], ["channelName", "Channel name"], ["manual", "Manual entry"],
   ];
 
-  function filterTemplateSourceOptions(row, query) {
-    const select = row.querySelector(".template-source-select");
-    if (!select || row.dataset.kind === "media") return;
-    const selected = select.value;
+  function setSearchableComboboxOpen(input, menu, open) {
+    if (!input || !menu) return;
+    menu.hidden = !open;
+    input.setAttribute("aria-expanded", String(open));
+  }
+
+  function searchableComboboxOptions(menu, options, query, selectedValue = "") {
     const needle = String(query || "").trim().toLocaleLowerCase();
-    const options = templateSourceOptions.filter(([, label]) => !needle || label.toLocaleLowerCase().includes(needle));
-    const selectedOption = templateSourceOptions.find(([value]) => value === selected);
-    if (selectedOption && !options.some(([value]) => value === selected)) options.unshift(selectedOption);
-    select.replaceChildren();
-    options.forEach(([value, label]) => {
-      const option = new Option(label, value);
-      if (!value) option.disabled = true;
-      select.append(option);
+    const filtered = options.filter(([value, label]) => value && (!needle || label.toLocaleLowerCase().includes(needle)));
+    menu.replaceChildren();
+    if (!filtered.length) {
+      menu.append(element("span", "searchable-combobox-empty", "No matching options"));
+      return 0;
+    }
+    filtered.forEach(([value, label]) => {
+      const option = element("button", "searchable-combobox-option", label);
+      option.type = "button";
+      option.setAttribute("role", "option");
+      option.dataset.value = value;
+      option.dataset.label = label;
+      option.setAttribute("aria-selected", String(value === selectedValue));
+      option.classList.toggle("is-active", value === selectedValue);
+      menu.append(option);
     });
-    select.value = selected;
+    return filtered.length;
+  }
+
+  function templateSourceLabel(row) {
+    const value = row.querySelector(".template-source-select")?.value || "";
+    return row._sourceOptions?.find(([optionValue]) => optionValue === value)?.[1] || "";
+  }
+
+  function filterTemplateSourceOptions(row, query) {
+    const source = row.querySelector(".template-source-select");
+    const input = row.querySelector(".template-source-combobox-input");
+    const menu = row.querySelector(".template-source-menu");
+    if (!source || !input || !menu) return;
+    searchableComboboxOptions(menu, row._sourceOptions || templateSourceOptions, query, source.value);
+    setSearchableComboboxOpen(input, menu, true);
+  }
+
+  function chooseTemplateSource(row, value, label) {
+    const source = row.querySelector(".template-source-select");
+    const input = row.querySelector(".template-source-combobox-input");
+    const menu = row.querySelector(".template-source-menu");
+    if (!source || !input || !menu) return;
+    source.value = value;
+    input.value = label;
+    input.dataset.selectedLabel = label;
+    setSearchableComboboxOpen(input, menu, false);
     syncTemplateVariableSource(row);
+  }
+
+  function invalidateTemplateSourceSelection(row, input) {
+    const source = row?.querySelector(".template-source-select");
+    if (!source || !input || input.value === input.dataset.selectedLabel) return;
+    source.value = "";
+    delete input.dataset.selectedLabel;
+    syncTemplateVariableSource(row);
+  }
+
+  function searchableComboboxInputKeydown(event, input, menu) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSearchableComboboxOpen(input, menu, true);
+      menu.querySelector(".searchable-combobox-option")?.focus();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      if (!menu.hidden) menu.querySelector(".searchable-combobox-option")?.click();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      input.value = input.dataset.selectedLabel || "";
+      setSearchableComboboxOpen(input, menu, false);
+    }
+  }
+
+  function searchableComboboxOptionKeydown(event, input, menu) {
+    const options = [...menu.querySelectorAll(".searchable-combobox-option")];
+    const index = options.indexOf(event.target);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      options[(index + direction + options.length) % options.length]?.focus();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      input.value = input.dataset.selectedLabel || "";
+      setSearchableComboboxOpen(input, menu, false);
+      input.focus();
+    }
   }
 
   function renderTemplateVariables() {
@@ -2882,26 +3414,34 @@
       row.dataset.variableId = descriptor.id;
       row.dataset.kind = descriptor.kind;
       const label = element("label", "field-label", descriptor.label);
-      const search = document.createElement("input");
-      search.className = "text-field template-source-search";
-      search.type = "search";
-      search.placeholder = "Search contact fields…";
-      search.autocomplete = "off";
-      search.setAttribute("aria-label", `Search sources for ${descriptor.label}`);
-      const source = document.createElement("select");
-      source.className = "text-field template-source-select";
-      source.setAttribute("aria-label", `${descriptor.label} source`);
-      const options = descriptor.kind === "media" ? [["url", "Use media URL"], ["upload", "Upload a file"]] : templateSourceOptions;
-      options.forEach(([value, text]) => {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = text;
-        if (!value) option.disabled = true;
-        source.append(option);
-      });
-      source.value = descriptor.kind === "media" ? "url" : suggestedTemplateSource(descriptor);
-      if (descriptor.kind !== "media") label.append(search);
-      label.append(source);
+      const options = descriptor.kind === "media" ? [["upload", "Upload a file"], ["url", "Use media URL"]] : templateSourceOptions;
+      row._sourceOptions = options;
+      const source = document.createElement("input");
+      source.type = "hidden";
+      source.className = "template-source-select";
+      source.value = descriptor.kind === "media" ? "upload" : suggestedTemplateSource(descriptor);
+      const combo = element("span", "searchable-combobox template-source-combobox");
+      const comboInput = document.createElement("input");
+      const menuId = `template-source-options-${descriptor.id}`;
+      comboInput.className = "text-field searchable-combobox-input template-source-combobox-input";
+      comboInput.type = "search";
+      comboInput.placeholder = descriptor.kind === "media" ? "Choose upload or URL…" : "Search or choose a contact field…";
+      comboInput.autocomplete = "off";
+      comboInput.setAttribute("role", "combobox");
+      comboInput.setAttribute("aria-autocomplete", "list");
+      comboInput.setAttribute("aria-expanded", "false");
+      comboInput.setAttribute("aria-controls", menuId);
+      comboInput.setAttribute("aria-label", `${descriptor.label} source`);
+      const menu = element("span", "searchable-combobox-menu template-source-menu");
+      menu.id = menuId;
+      menu.hidden = true;
+      menu.setAttribute("role", "listbox");
+      menu.setAttribute("aria-label", `${descriptor.label} sources`);
+      const selectedLabel = options.find(([value]) => value === source.value)?.[1] || "";
+      comboInput.value = selectedLabel;
+      comboInput.dataset.selectedLabel = selectedLabel;
+      combo.append(comboInput, source, menu);
+      label.append(combo);
       const manual = document.createElement("input");
       manual.className = "text-field template-manual-value";
       manual.type = descriptor.kind === "media" ? "url" : "text";
@@ -2923,6 +3463,7 @@
       if (descriptor.kind === "media") row.append(file);
       row.append(preview);
       host.append(row);
+      searchableComboboxOptions(menu, options, "", source.value);
       syncTemplateVariableSource(row);
     });
     renderTemplateComposerPreview();
@@ -3080,24 +3621,50 @@
     return parts.filter(Boolean).join(" ").toLocaleLowerCase();
   }
 
-  function renderTemplateSelectOptions(query = "") {
+  function templateOptionLabel(template) {
+    const language = template.language?.code || template.language || "";
+    return `${template.name}${language ? ` · ${language}` : ""}`;
+  }
+
+  function chooseTemplateOption(value, label) {
     const select = $("templateSelect");
+    const search = $("templateSearch");
+    const menu = $("templateOptions");
+    select.value = value;
+    search.value = label;
+    search.dataset.selectedLabel = label;
+    setSearchableComboboxOpen(search, menu, false);
+    $("templateSubmit").disabled = !value;
+    renderTemplateVariables();
+  }
+
+  function invalidateTemplateSelection(input) {
+    const select = $("templateSelect");
+    if (!input || input.value === input.dataset.selectedLabel) return;
+    select.value = "";
+    delete input.dataset.selectedLabel;
+    $("templateSubmit").disabled = true;
+    renderTemplateVariables();
+  }
+
+  function renderTemplateSelectOptions(query = "", { open = true } = {}) {
+    const select = $("templateSelect");
+    const search = $("templateSearch");
+    const menu = $("templateOptions");
     const templates = state.templatesByConversation.get(state.templateConversationId) || [];
     const selected = select.value;
     const needle = String(query || "").trim().toLocaleLowerCase();
     const filtered = templates.filter((template) => !needle || templateSearchText(template).includes(needle));
-    select.replaceChildren(new Option(filtered.length ? "Choose a template" : "No matching templates", ""));
-    filtered.forEach((template) => {
-      const language = template.language?.code || template.language || "";
-      select.append(new Option(`${template.name}${language ? ` · ${language}` : ""}`, template._selectionKey));
-    });
-    if (filtered.some((template) => template._selectionKey === selected)) select.value = selected;
-    else {
-      select.value = "";
-      renderTemplateVariables();
+    const options = filtered.map((template) => [template._selectionKey, templateOptionLabel(template)]);
+    searchableComboboxOptions(menu, options, "", selected);
+    const selectedTemplate = templates.find((template) => template._selectionKey === selected);
+    if (selectedTemplate) {
+      const label = templateOptionLabel(selectedTemplate);
+      search.dataset.selectedLabel = label;
     }
-    select.disabled = !filtered.length;
-    $("templateSubmit").disabled = !filtered.length;
+    search.disabled = !templates.length;
+    $("templateSubmit").disabled = !selected;
+    setSearchableComboboxOpen(search, menu, open && !search.disabled);
   }
 
   async function loadConversationTemplates(conversationId, { refresh = false } = {}) {
@@ -3106,12 +3673,16 @@
     const status = $("templateLoadStatus");
     const submit = $("templateSubmit");
     select.disabled = true;
+    select.value = "";
     search.disabled = true;
+    search.value = "";
+    delete search.dataset.selectedLabel;
     submit.disabled = true;
     status.hidden = false;
     status.classList.remove("is-error");
     status.textContent = "Loading approved templates from WhatsApp…";
-    select.replaceChildren(new Option("Loading templates…", ""));
+    $("templateOptions").replaceChildren(element("span", "searchable-combobox-empty", "Loading templates…"));
+    setSearchableComboboxOpen(search, $("templateOptions"), false);
     $("templateVariableFields").replaceChildren();
     $("templateSummary").hidden = true;
     try {
@@ -3126,9 +3697,9 @@
         state.templatesByConversation.set(conversationId, templates);
       }
       if (state.templateConversationId !== conversationId) return;
-      renderTemplateSelectOptions(search.value);
+      renderTemplateSelectOptions("", { open: false });
       search.disabled = !templates.length;
-      submit.disabled = !templates.length;
+      submit.disabled = true;
       status.textContent = templates.length
         ? `${templates.length} approved template${templates.length === 1 ? "" : "s"} available.`
         : "No approved templates are available for this WhatsApp connection.";
@@ -3146,7 +3717,8 @@
       retry.type = "button";
       retry.dataset.action = "reload-templates";
       status.append(retry);
-      select.replaceChildren(new Option("Templates unavailable", ""));
+      $("templateOptions").replaceChildren(element("span", "searchable-combobox-empty", "Templates unavailable"));
+      setSearchableComboboxOpen(search, $("templateOptions"), false);
       search.disabled = true;
     }
   }
@@ -3160,6 +3732,8 @@
     const form = $("templateForm");
     form.reset();
     $("templateSearch").value = "";
+    delete $("templateSearch").dataset.selectedLabel;
+    $("templateSelect").value = "";
     state.templateConversationId = conversation.conversationId;
     $("templateDialog").showModal();
     loadConversationTemplates(conversation.conversationId);
@@ -3184,7 +3758,7 @@
       const manual = row?.querySelector(".template-manual-value")?.value?.trim() || "";
       if (!source) {
         showToast("Choose a template source", `Choose a contact field or manual entry for ${descriptor.label}.`, true);
-        row?.querySelector(".template-source-select")?.focus();
+        row?.querySelector(".template-source-combobox-input")?.focus();
         return;
       }
       const file = descriptor.kind === "media" && source === "upload"
@@ -3195,7 +3769,7 @@
       if (!value) {
         showToast("Template value required", `${descriptor.label} does not have a value. Choose another source or enter it manually.`, true);
         row?.querySelector(source === "upload" ? ".template-media-file" : source === "manual" || source === "url"
-          ? ".template-manual-value" : ".template-source-select")?.focus();
+          ? ".template-manual-value" : ".template-source-combobox-input")?.focus();
         return;
       }
       resolvedDescriptors.push({ descriptor, row, source, value, file });
@@ -3255,7 +3829,7 @@
       conversation.lastMessage = message.text || fallback;
       conversation.lastMessageAt = message.timestamp;
       closeTemplateDialog();
-      renderMessages();
+      upsertRenderedMessage(message, conversation.conversationId);
       renderConversationList();
       showToast("Template queued", `${name} is being sent through WhatsApp.`);
     } catch (error) {
@@ -3353,6 +3927,8 @@
       status.classList.remove("is-error");
     }
     let sent = 0;
+    const replyToMessageId = state.replyingTo?.conversationId === conversation.conversationId
+      ? state.replyingTo.messageId : "";
     try {
       while (queue.length) {
         const item = queue[0];
@@ -3360,15 +3936,18 @@
         const formData = new FormData();
         formData.append("file", item.file, item.file.name);
         if (sent === 0 && caption) formData.append("caption", caption);
+        if (sent === 0 && replyToMessageId) formData.append("replyToMessageId", replyToMessageId);
         const result = await state.api.sendAttachment(conversation.conversationId, formData);
         const fallback = sent === 0 && caption ? caption : `[Attachment: ${item.file.name}]`;
         const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "document" });
         upsertMessage(conversation.conversationId, message);
         conversation.lastMessage = message.text || fallback;
         conversation.lastMessageAt = message.timestamp;
+        if (stillSelected()) upsertRenderedMessage(message, conversation.conversationId);
         queue.shift();
         if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
         sent++;
+        if (sent === 1 && replyToMessageId && stillSelected()) clearReplyTarget();
         if (sent === 1 && caption && stillSelected() && input.value.trim() === caption) {
           input.value = "";
           resizeComposer();
@@ -3378,7 +3957,6 @@
       state.pendingAttachments.delete(conversation.conversationId);
       if (stillSelected()) {
         status.textContent = `${sent} file${sent === 1 ? "" : "s"} sent`;
-        renderMessages();
         setTimeout(() => { if (stillSelected()) status.hidden = true; }, 3500);
       }
       renderConversationList();
@@ -3387,7 +3965,6 @@
       if (stillSelected()) {
         status.classList.add("is-error");
         status.textContent = `${sent ? `${sent} sent; ` : ""}${queue.length} not sent: ${error.message}`;
-        renderMessages();
       }
       showToast("Attachment sending stopped", `${error.message} Remaining files are still ready to send.`, true);
       renderConversationList();
@@ -3419,27 +3996,16 @@
 
   async function handleRealtimeEvent(event) {
     const type = event.type || event.event;
+    if (type === "connected") {
+      const reconnected = state.realtimeConnectedOnce;
+      state.realtimeConnectedOnce = true;
+      if (!state.loading && (reconnected || state.conversations.length)) await reconcileWorkspace();
+      return;
+    }
     if (type === "webhook.received") {
-      const received = Math.max(0, Number(event.received) || 0);
-      const statuses = Math.max(0, Number(event.statuses) || 0);
-      if (received === 0 && statuses > 0) return;
-      const before = new Map(state.conversations.map((conversation) => [conversation.conversationId, {
-        lastMessageAt: new Date(conversation.lastMessageAt).getTime() || 0,
-        unreadCount: conversation.unreadCount,
-      }]));
-      if (state.selectedConversationId) state.messages.delete(state.selectedConversationId);
-      await loadAll();
-      state.conversations.forEach((conversation) => {
-        const previous = before.get(conversation.conversationId);
-        const timestamp = new Date(conversation.lastMessageAt).getTime() || 0;
-        const isNewInbound = timestamp > (previous?.lastMessageAt || 0)
-          && (!previous || conversation.unreadCount > previous.unreadCount || conversation.conversationId === state.selectedConversationId);
-        if (isNewInbound) notifyInboundMessage(conversation, {
-          direction: "inbound",
-          text: conversation.lastMessage,
-          timestamp: conversation.lastMessageAt,
-        });
-      });
+      // Current Workers already emitted granular message/status events. The aggregate
+      // exists for metrics only; older Workers fall back to a silent reconciliation.
+      if (!event.granular) await reconcileWorkspace();
       return;
     }
     if (type === "message.created" || type === "message.updated") {
@@ -3454,33 +4020,56 @@
         }
       }
       if (!conversationId) return;
-      const existingMessage = (state.messages.get(conversationId) || []).find((item) => item.messageId === String(rawMessage.messageId || rawMessage.id || ""));
+      const cachedMessages = state.messages.get(conversationId);
+      const existingMessage = (cachedMessages || []).find((item) => item.messageId === String(rawMessage.messageId || rawMessage.id || ""));
       if (!existingMessage && rawMessage.text === undefined && rawMessage.direction === undefined) {
         if (conversationId === state.selectedConversationId) await refreshMessages(conversationId);
+        else if (type === "message.created") await reconcileWorkspace({ includeSelectedMessages: false });
         return;
       }
       const statusOnly = type === "message.updated" && Boolean(existingMessage)
         && rawMessage.status !== undefined && rawMessage.text === undefined && rawMessage.direction === undefined;
-      const message = normalizeMessage({ ...existingMessage, ...rawMessage });
-      upsertMessage(conversationId, message);
+      const message = normalizeMessage({ ...existingMessage, ...rawMessage, conversationId });
+      const replyBecameAvailable = Boolean(existingMessage && !existingMessage.channelMessageId && message.channelMessageId);
+      if (cachedMessages || conversationId === state.selectedConversationId) upsertMessage(conversationId, message);
       if (statusOnly) {
-        if (conversationId === state.selectedConversationId) updateRenderedMessageStatus(message);
+        if (conversationId === state.selectedConversationId) {
+          if (replyBecameAvailable) upsertRenderedMessage(message, conversationId);
+          else updateRenderedMessageStatus(message);
+        }
         return;
       }
-      const conversation = state.conversations.find((item) => item.conversationId === conversationId);
+      const rawConversation = event.conversation && typeof event.conversation === "object" ? event.conversation : null;
+      let conversation = state.conversations.find((item) => item.conversationId === conversationId);
+      if (rawConversation) {
+        const incomingConversation = normalizeConversation({ ...conversation, ...rawConversation, conversationId });
+        const conversationIndex = state.conversations.findIndex((item) => item.conversationId === conversationId);
+        if (conversationIndex >= 0) state.conversations[conversationIndex] = incomingConversation;
+        else state.conversations.unshift(incomingConversation);
+        conversation = incomingConversation;
+      }
       if (conversation) {
-        conversation.lastMessage = message.text;
-        conversation.lastMessageAt = message.timestamp;
+        if (!rawConversation) {
+          conversation.lastMessage = messageDisplayText(message);
+          conversation.lastMessageAt = message.timestamp;
+        }
         if (message.direction === "inbound") {
           conversation.freeformAllowed = true;
           conversation.replyWindowExpiresAt = new Date(new Date(message.timestamp).getTime() + 24 * 60 * 60 * 1000).toISOString();
-          if (conversationId !== state.selectedConversationId) conversation.unreadCount += 1;
+          if (conversationId === state.selectedConversationId) {
+            conversation.unreadCount = 0;
+            state.api.updateConversation(conversationId, { markRead: true }).catch(() => {});
+          } else if (!rawConversation) conversation.unreadCount += 1;
           if (type === "message.created" && !existingMessage) notifyInboundMessage(conversation, message);
         }
+        markConversationRealtimeMutation(conversationId);
       }
       renderCounts();
       renderConversationList();
-      if (conversationId === state.selectedConversationId) renderMessages();
+      if (conversationId === state.selectedConversationId) {
+        if (state.messages.has(conversationId)) upsertRenderedMessage(message, conversationId);
+        else await refreshMessages(conversationId);
+      }
       return;
     }
     if (type === "conversation.updated" || type === "conversation.created") {
@@ -3488,13 +4077,7 @@
       const eventConversationId = String(event.conversationId || rawConversation.conversationId || rawConversation.id || "");
       const existing = state.conversations.find((item) => item.conversationId === eventConversationId);
       if (!rawConversation.subject && !rawConversation.status) {
-        const wasSelected = eventConversationId && eventConversationId === state.selectedConversationId;
-        const previousStatus = existing?.status || "";
-        await loadAll();
-        const refreshed = state.conversations.find((item) => item.conversationId === eventConversationId);
-        if (wasSelected && refreshed && refreshed.status !== previousStatus && ["pending", "closed"].includes(refreshed.status)) {
-          clearSelectedConversation();
-        }
+        await reconcileWorkspace();
         return;
       }
       const incoming = normalizeConversation({ ...existing, ...rawConversation });
@@ -3502,15 +4085,21 @@
       const index = state.conversations.findIndex((item) => item.conversationId === incoming.conversationId);
       if (index >= 0) state.conversations[index] = { ...state.conversations[index], ...incoming };
       else state.conversations.unshift(incoming);
+      markConversationRealtimeMutation(incoming.conversationId);
       if (incoming.conversationId === state.selectedConversationId && ["pending", "closed"].includes(incoming.status)) {
         clearSelectedConversation();
+      } else {
+        renderCounts();
+        renderConversationList();
+        if (incoming.conversationId === state.selectedConversationId) {
+          renderSelectedConversation({ preserveScroll: true, renderThread: false });
+        }
       }
-      renderAll();
       return;
     }
     if (type === "contact.updated") {
       const selectedContactId = state.selectedContactId;
-      await loadAll();
+      await reconcileWorkspace();
       if (selectedContactId && state.contacts.some((contact) => contact.contactId === selectedContactId)) {
         await selectContact(selectedContactId);
       }
@@ -3518,7 +4107,7 @@
     }
     if (["channel.updated", "channel.deleted", "bootstrap.changed"].includes(type)) {
       state.whatsappTemplatesLoaded = false;
-      await loadAll();
+      await reconcileWorkspace();
       if (state.route === "whatsapp-templates") await loadWhatsAppTemplateLibrary({ refresh: true });
     }
   }
@@ -3822,12 +4411,13 @@
   async function refreshMessages(conversationId) {
     try {
       const data = await state.api.getMessages(conversationId);
-      state.messages.set(conversationId, asItems(data).map(normalizeMessage));
+      const fetchedMessages = asItems(data).map(normalizeMessage);
+      state.messages.set(conversationId, mergeMessageSnapshots(state.messages.get(conversationId), fetchedMessages));
       const conversation = state.conversations.find((item) => item.conversationId === conversationId);
       if (conversation && typeof data?.freeformAllowed === "boolean") conversation.freeformAllowed = data.freeformAllowed;
       if (conversation && data?.replyWindowExpiresAt) conversation.replyWindowExpiresAt = data.replyWindowExpiresAt;
       if (conversation && data?.replyWindowReason) conversation.replyWindowReason = data.replyWindowReason;
-      if (conversationId === state.selectedConversationId) renderMessages();
+      if (conversationId === state.selectedConversationId) renderMessages({ preserveScroll: true });
     } catch {
       // A later reconnect or manual refresh will retry without disrupting the agent.
     }
@@ -4358,6 +4948,7 @@
     state.selectedConversationId = null;
     state.pendingConversationId = null;
     state.unreadMarker = null;
+    state.replyingTo = null;
     state.detailsOpen = false;
     $("inboxGrid").classList.remove("chat-open", "has-details");
     renderConversationList();
@@ -4462,6 +5053,7 @@
   function bindEvents() {
     document.addEventListener("click", (event) => {
       if (!event.target.closest(".template-filter")) closeTemplateFilterMenus();
+      if (!event.target.closest(".conversation-filter-desktop")) closeConversationFilterMenu();
       const routeButton = event.target.closest("[data-route]");
       if (routeButton) { setRoute(routeButton.dataset.route); return; }
       const actionButton = event.target.closest("[data-action]");
@@ -4476,6 +5068,17 @@
         }
         if (actionButton.dataset.action === "toggle-template-filter") {
           toggleTemplateFilterMenu(actionButton.dataset.filterType);
+          return;
+        }
+        if (actionButton.dataset.action === "toggle-conversation-filters") {
+          toggleConversationFilterMenu();
+          return;
+        }
+        if (actionButton.dataset.action === "clear-conversation-filters") {
+          state.filters.clear();
+          renderConversationFilterControls();
+          renderConversationList();
+          closeConversationFilterMenu({ restoreFocus: true });
           return;
         }
         if (actionButton.dataset.action === "clear-template-filter") {
@@ -4536,6 +5139,18 @@
           removeQueuedAttachment(actionButton.dataset.attachmentId);
           return;
         }
+        if (actionButton.dataset.action === "reply-to-message") {
+          startReplyToMessage(actionButton.dataset.messageId);
+          return;
+        }
+        if (actionButton.dataset.action === "jump-to-message") {
+          jumpToMessage(actionButton.dataset.messageId);
+          return;
+        }
+        if (actionButton.dataset.action === "preview-attachment") {
+          openAttachmentPreview(actionButton.dataset.messageId);
+          return;
+        }
         if (actionButton.dataset.action === "edit-webhook-token") {
           openWebhookTokenDialog(actionButton.dataset.channelId);
           return;
@@ -4562,6 +5177,8 @@
             else closeContactEditor();
           },
           "choose-attachment": () => $("attachmentInput").click(),
+          "cancel-reply": clearReplyTarget,
+          "close-attachment-preview": closeAttachmentPreview,
           "open-template": openTemplateDialog,
           "close-template": closeTemplateDialog,
           "reload-templates": () => state.templateConversationId && loadConversationTemplates(state.templateConversationId, { refresh: true }),
@@ -4626,6 +5243,39 @@
       if (item) selectConversation(item.dataset.conversationId);
     });
 
+    let replySwipe = null;
+    const messageThread = $("messageThread");
+    messageThread.addEventListener("pointerdown", (event) => {
+      const row = event.target.closest(".message-row[data-replyable='true']");
+      if (!row || event.button > 0 || event.target.closest("button,a,input,video,audio")) return;
+      replySwipe = { row, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, offset: 0, horizontal: false };
+      row.setPointerCapture?.(event.pointerId);
+    });
+    messageThread.addEventListener("pointermove", (event) => {
+      if (!replySwipe || replySwipe.pointerId !== event.pointerId) return;
+      const dx = event.clientX - replySwipe.startX;
+      const dy = event.clientY - replySwipe.startY;
+      if (!replySwipe.horizontal && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      if (!replySwipe.horizontal && Math.abs(dy) > Math.abs(dx)) {
+        replySwipe = null;
+        return;
+      }
+      replySwipe.horizontal = true;
+      replySwipe.offset = Math.max(0, Math.min(72, dx));
+      replySwipe.row.style.setProperty("--reply-swipe", `${replySwipe.offset}px`);
+      replySwipe.row.classList.toggle("is-swipe-ready", replySwipe.offset >= 52);
+    });
+    const finishReplySwipe = (event) => {
+      if (!replySwipe || (event.pointerId !== undefined && replySwipe.pointerId !== event.pointerId)) return;
+      const { row, offset } = replySwipe;
+      row.style.removeProperty("--reply-swipe");
+      row.classList.remove("is-swipe-ready");
+      replySwipe = null;
+      if (offset >= 52) startReplyToMessage(row.dataset.messageId);
+    };
+    messageThread.addEventListener("pointerup", finishReplySwipe);
+    messageThread.addEventListener("pointercancel", finishReplySwipe);
+
     $("contactTableBody").addEventListener("click", (event) => {
       const row = event.target.closest("[data-contact-id]");
       if (row) selectContact(row.dataset.contactId);
@@ -4641,9 +5291,11 @@
     $("conversationFilters").addEventListener("click", (event) => {
       const button = event.target.closest("[data-filter]");
       if (!button) return;
-      state.filter = button.dataset.filter;
-      document.querySelectorAll("[data-filter]").forEach((item) => item.classList.toggle("is-active", item === button));
-      renderConversationList();
+      toggleConversationFilter(button.dataset.filter);
+    });
+    $("conversationFilterMenu").addEventListener("change", (event) => {
+      const input = event.target.closest("[data-conversation-filter-option]");
+      if (input) toggleConversationFilter(input.value);
     });
 
     $("conversationSearch").addEventListener("input", (event) => { state.search = event.target.value; renderConversationList(); });
@@ -4726,25 +5378,85 @@
     $("contactChannelId").addEventListener("change", updateContactIdentityField);
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
     $("contactEditForm").addEventListener("submit", (event) => { event.preventDefault(); saveContactEdits(event.currentTarget); });
-    $("templateSelect").addEventListener("change", renderTemplateVariables);
-    $("templateSearch").addEventListener("input", (event) => renderTemplateSelectOptions(event.target.value));
+    $("templateSearch").addEventListener("focus", (event) => {
+      const query = event.target.value === event.target.dataset.selectedLabel ? "" : event.target.value;
+      renderTemplateSelectOptions(query);
+    });
+    $("templateSearch").addEventListener("click", (event) => {
+      const query = event.target.value === event.target.dataset.selectedLabel ? "" : event.target.value;
+      renderTemplateSelectOptions(query);
+    });
+    $("templateSearch").addEventListener("input", (event) => {
+      invalidateTemplateSelection(event.target);
+      renderTemplateSelectOptions(event.target.value);
+    });
+    $("templateSearch").addEventListener("keydown", (event) => {
+      searchableComboboxInputKeydown(event, event.currentTarget, $("templateOptions"));
+    });
+    $("templateOptions").addEventListener("click", (event) => {
+      const option = event.target.closest(".searchable-combobox-option");
+      if (option) chooseTemplateOption(option.dataset.value, option.dataset.label);
+    });
+    $("templateOptions").addEventListener("keydown", (event) => {
+      if (event.target.matches(".searchable-combobox-option")) {
+        searchableComboboxOptionKeydown(event, $("templateSearch"), $("templateOptions"));
+      }
+    });
     $("templateVariableFields").addEventListener("change", (event) => {
       const row = event.target.closest(".template-variable-row");
       if (row) syncTemplateVariableSource(row);
     });
+    $("templateVariableFields").addEventListener("focusin", (event) => {
+      if (!event.target.matches(".template-source-combobox-input")) return;
+      const row = event.target.closest(".template-variable-row");
+      const query = event.target.value === event.target.dataset.selectedLabel ? "" : event.target.value;
+      filterTemplateSourceOptions(row, query);
+    });
+    $("templateVariableFields").addEventListener("click", (event) => {
+      const option = event.target.closest(".template-source-menu .searchable-combobox-option");
+      if (option) {
+        chooseTemplateSource(option.closest(".template-variable-row"), option.dataset.value, option.dataset.label);
+        return;
+      }
+      if (event.target.matches(".template-source-combobox-input")) {
+        const row = event.target.closest(".template-variable-row");
+        const query = event.target.value === event.target.dataset.selectedLabel ? "" : event.target.value;
+        filterTemplateSourceOptions(row, query);
+      }
+    });
     $("templateVariableFields").addEventListener("input", (event) => {
       const row = event.target.closest(".template-variable-row");
       if (!row) return;
-      if (event.target.matches(".template-source-search")) filterTemplateSourceOptions(row, event.target.value);
+      if (event.target.matches(".template-source-combobox-input")) {
+        invalidateTemplateSourceSelection(row, event.target);
+        filterTemplateSourceOptions(row, event.target.value);
+      }
       else syncTemplateVariableSource(row);
     });
-    $("templateForm").addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && event.target.matches("#templateSearch, .template-source-search")) event.preventDefault();
+    $("templateVariableFields").addEventListener("keydown", (event) => {
+      const row = event.target.closest(".template-variable-row");
+      if (!row) return;
+      const input = row.querySelector(".template-source-combobox-input");
+      const menu = row.querySelector(".template-source-menu");
+      if (event.target === input) searchableComboboxInputKeydown(event, input, menu);
+      else if (event.target.matches(".searchable-combobox-option")) searchableComboboxOptionKeydown(event, input, menu);
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (event.target.closest(".searchable-combobox")) return;
+      document.querySelectorAll(".searchable-combobox-input").forEach((input) => {
+        const menu = document.getElementById(input.getAttribute("aria-controls"));
+        input.value = input.dataset.selectedLabel || input.value;
+        setSearchableComboboxOpen(input, menu, false);
+      });
     });
     $("templateForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentTemplate(event.currentTarget); });
     $("templateDialog").addEventListener("close", () => {
       revokeTemplatePreviewUrl();
       state.templateConversationId = null;
+    });
+    $("attachmentPreviewDialog").addEventListener("close", () => {
+      $("attachmentPreviewDialog").querySelectorAll("video,audio").forEach((media) => media.pause());
+      $("attachmentPreviewBody").replaceChildren();
     });
     $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
     $("apiKeyForm").addEventListener("submit", (event) => { event.preventDefault(); createDeveloperApiKey(event.currentTarget); });
@@ -4763,6 +5475,7 @@
     });
     window.addEventListener("hashchange", () => applyLocationRoute().catch(() => {}));
     window.addEventListener("focus", () => prepareBrowserPush().catch(() => {}));
+    window.addEventListener("pagehide", () => state.disconnectRealtime?.());
     window.addEventListener("beforeunload", () => state.disconnectRealtime?.());
     window.addEventListener("helixcer:unauthorized", () => showSignedOut("Your session expired. Sign in again to continue."));
     document.addEventListener("keydown", (event) => {
@@ -4773,12 +5486,22 @@
       }
       if (event.key === "Escape") {
         closeTemplateFilterMenus("", { restoreFocus: true });
+        closeConversationFilterMenu({ restoreFocus: true });
         closeMobileMenu();
       }
     });
+    const resumeLiveWorkspace = () => {
+      if (state.authStatus !== "authenticated") return;
+      state.api?.ensureRealtimeConnected?.({ resume: true });
+      reconcileWorkspace().catch(() => {});
+    };
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") prepareBrowserPush().catch(() => {});
+      if (document.visibilityState !== "visible") return;
+      prepareBrowserPush().catch(() => {});
+      resumeLiveWorkspace();
     });
+    window.addEventListener("pageshow", resumeLiveWorkspace);
+    window.addEventListener("online", resumeLiveWorkspace);
   }
 
   async function init() {
