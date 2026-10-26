@@ -1375,7 +1375,10 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     }), env);
     const messageBody = await messages.json();
     assert.equal(messageBody.freeformAllowed, true);
-    assert.equal(messageBody.items.find(item => item.messageType === 'document').attachment.caption, 'Your invoice');
+    const documentMessage = messageBody.items.find(item => item.messageType === 'document');
+    assert.equal(documentMessage.attachment.caption, 'Your invoice');
+    assert.equal(documentMessage.channelMessageId, 'wamid.dashboard-2');
+    assert.equal(Object.hasOwn(documentMessage, 'providerMessageId'), false);
 
     const unsupportedBody = new FormData();
     unsupportedBody.set('file', new Blob(['binary'], { type: 'application/x-msdownload' }), 'unsafe.exe');
@@ -1558,7 +1561,7 @@ test('conversation template discovery is authenticated, workspace scoped, pagina
   }
 });
 
-test('contact detail and update APIs preserve conversations, keep provider IDs immutable, and stay workspace scoped', async () => {
+test('contact detail and update APIs preserve conversations, keep Channel Profile IDs immutable, and stay workspace scoped', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB, {
     ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
@@ -1642,12 +1645,12 @@ test('contact detail and update APIs preserve conversations, keep provider IDs i
   assert.equal(preservedConversation.subject, 'Asha R.');
   assert.deepEqual(JSON.parse(preservedConversation.tags_json), ['Priority', 'West']);
 
-  const immutableProviderId = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+  const immutableChannelProfileId = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
     method: 'PATCH', headers: jsonHeaders,
     body: JSON.stringify({ channelProfileId: '+91 99999 99992' })
   }), env);
-  assert.equal(immutableProviderId.status, 400);
-  assert.match((await immutableProviderId.json()).error, /Provider ID cannot be changed/i);
+  assert.equal(immutableChannelProfileId.status, 400);
+  assert.match((await immutableChannelProfileId.json()).error, /Channel Profile ID cannot be changed/i);
 
   const reassigned = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
     method: 'PATCH', headers: jsonHeaders,
@@ -1686,7 +1689,7 @@ test('contact detail and update APIs preserve conversations, keep provider IDs i
     method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ channelProfileId: '919999999993' })
   }), env);
   assert.equal(conflict.status, 400);
-  assert.match((await conflict.json()).error, /Provider ID cannot be changed/i);
+  assert.match((await conflict.json()).error, /Channel Profile ID cannot be changed/i);
   assert.equal(database.prepare('SELECT channel_profile_id FROM channel_identities WHERE contact_id=?').get(contactId).channel_profile_id,
     '919999999991');
   assert.equal(database.prepare('SELECT count(*) AS count FROM conversations WHERE conversation_id=?').get(conversationId).count, 1);

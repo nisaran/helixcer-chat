@@ -4,28 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Helixcer Developer and Messaging API documentation. Available now: WhatsApp template messages from external applications.">
-  <meta name="theme-color" content="#1d292a">
+  <meta name="theme-color" content="#171827">
   <title>Developer API · Helixcer</title>
   <style>
     :root {
       color-scheme: light;
-      --brand:#b84a2d; --brand-deep:#8f2e19; --brand-soft:#fff0ea;
-      --ink:#182124; --muted:#667274; --line:#e3e7e3; --line-strong:#cdd4cf;
-      --canvas:#f4f5f2; --panel:#fff; --warm:#fcfbf8; --sidebar:#1d292a;
+      --brand:#6d3bea; --brand-deep:#5124bd; --brand-soft:#f2eeff;
+      --ink:#172033; --muted:#667085; --line:#e7eaf0; --line-strong:#d6dbe5;
+      --canvas:#f5f7fb; --panel:#fff; --warm:#f8fafc; --sidebar:#171827;
       --green:#177a55; --green-soft:#e8f7f0; --blue:#286699; --blue-soft:#eaf3fb;
       --amber:#986008; --amber-soft:#fff5da; --red:#a63b2a; --red-soft:#fff0ed;
       --code:#172324; --code-ink:#e6eeeb; --radius:16px;
-      --shadow:0 16px 48px rgba(29,41,42,.08); --sidebar-width:272px;
-      font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      --shadow:0 16px 48px rgba(16,24,40,.08); --sidebar-width:272px;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI Variable","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
     }
     *{box-sizing:border-box} html{scroll-behavior:smooth;scroll-padding-top:84px}
     body{margin:0;background:var(--canvas);color:var(--ink);font-size:15px;line-height:1.66;text-rendering:optimizeLegibility}
     a{color:var(--brand-deep);text-underline-offset:3px} a:hover{color:var(--brand)}
     button{font:inherit} code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace}
     .skip{position:fixed;z-index:100;top:-70px;left:16px;border-radius:8px;background:#fff;color:var(--ink);padding:10px 14px;box-shadow:var(--shadow)} .skip:focus{top:12px}
-    .topbar{position:fixed;z-index:50;inset:0 0 auto;display:flex;align-items:center;justify-content:space-between;min-height:64px;border-bottom:1px solid rgba(255,255,255,.09);background:rgba(29,41,42,.97);color:#fff;padding:0 28px;backdrop-filter:blur(14px)}
-    .brand{display:inline-flex;align-items:center;gap:10px;color:#fff;text-decoration:none;font-size:17px;letter-spacing:-.25px}.brand strong{color:#ef8a6b}
-    .brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px 10px 10px 4px;background:linear-gradient(145deg,#d56343,#96341d);box-shadow:0 6px 18px rgba(0,0,0,.2),inset 0 1px rgba(255,255,255,.25);font:750 17px/1 Georgia,serif}
+    .topbar{position:fixed;z-index:50;inset:0 0 auto;display:flex;align-items:center;justify-content:space-between;min-height:64px;border-bottom:1px solid rgba(255,255,255,.09);background:rgba(23,24,39,.97);color:#fff;padding:0 28px;backdrop-filter:blur(14px)}
+    .brand{display:inline-flex;align-items:center;gap:10px;color:#fff;text-decoration:none;font-size:17px;letter-spacing:-.25px}.brand strong{color:#c4b5fd}
+    .brand-mark{display:grid;place-items:center;width:34px;height:34px;overflow:hidden;border-radius:10px 10px 10px 4px;background:#5124bd;box-shadow:0 6px 18px rgba(0,0,0,.2),inset 0 1px rgba(255,255,255,.25)}.brand-mark img{display:block;width:100%;height:100%;object-fit:cover}
     .top-meta{display:flex;align-items:center;gap:12px;color:#b9c6c3;font-size:12px}.version{border:1px solid rgba(255,255,255,.15);border-radius:99px;padding:4px 9px;color:#e6ecea}
     .menu{display:none;border:0;background:transparent;color:#fff;padding:8px;cursor:pointer}.menu svg{display:block;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2}
     .layout{display:grid;grid-template-columns:var(--sidebar-width) minmax(0,1fr);min-height:100vh;padding-top:64px}
@@ -33,12 +33,12 @@
     .nav-label{margin:0 10px 9px;color:#8a9491;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
     .nav-list{display:grid;gap:2px;margin:0 0 24px;padding:0;list-style:none}.nav-list a{display:block;border-radius:9px;color:#52605e;padding:7px 10px;text-decoration:none;font-size:12px;font-weight:650;transition:.16s}.nav-list a:hover{background:#eef1ed;color:var(--ink)}.nav-list a.active{background:var(--brand-soft);color:var(--brand-deep)}
     .nav-channel{display:flex;align-items:center;gap:8px;margin:0 10px 5px;color:var(--ink);font-size:12px;font-weight:850}.nav-channel::before{width:7px;height:7px;border-radius:50%;background:#25d366;content:""}.nav-list.nav-sublist{margin-left:9px;border-left:1px solid #d9dfda;padding-left:8px}.nav-list.nav-sublist a{padding-left:13px}
-    .sidebar-card{border:1px solid #dfd9d3;border-radius:12px;background:#fffaf5;padding:13px;color:#6c625b;font-size:11px;line-height:1.55}.sidebar-card strong{display:block;margin-bottom:4px;color:var(--ink);font-size:12px}
+    .sidebar-card{border:1px solid var(--line);border-radius:12px;background:#f7f5ff;padding:13px;color:#667085;font-size:11px;line-height:1.55}.sidebar-card strong{display:block;margin-bottom:4px;color:var(--ink);font-size:12px}
     main{grid-column:2;width:min(1160px,100%);margin:0 auto;padding:46px 48px 90px} section{margin-top:74px} section:first-child{margin-top:0}
     .eyebrow{margin:0 0 12px;color:var(--brand);font-size:11px;font-weight:850;letter-spacing:.14em;text-transform:uppercase}
-    h1,h2,h3{color:#17201f;scroll-margin-top:84px}h1{max-width:810px;margin:0;font:700 clamp(39px,6vw,68px)/.98 Georgia,"Times New Roman",serif;letter-spacing:-2.3px}h2{margin:0 0 12px;font:700 clamp(27px,4vw,39px)/1.1 Georgia,"Times New Roman",serif;letter-spacing:-1px}h3{margin:32px 0 10px;font-size:17px;line-height:1.3;letter-spacing:-.25px}p{margin:0 0 15px}
+    h1,h2,h3{color:#172033;scroll-margin-top:84px}h1{max-width:810px;margin:0;font:740 clamp(39px,6vw,68px)/.98 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-2.6px}h2{margin:0 0 12px;font:730 clamp(27px,4vw,39px)/1.1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-1.2px}h3{margin:32px 0 10px;font-size:17px;line-height:1.3;letter-spacing:-.25px}p{margin:0 0 15px}
     .lead{max-width:760px;margin:21px 0 26px;color:#52605e;font-size:clamp(17px,2vw,20px);line-height:1.6}.intro{max-width:800px;color:var(--muted)}
-    .hero{position:relative;overflow:hidden;border:1px solid #e3ded8;border-radius:24px;background:radial-gradient(circle at 92% 8%,rgba(184,74,45,.14),transparent 34%),radial-gradient(circle at 72% 95%,rgba(23,122,85,.08),transparent 31%),var(--warm);padding:clamp(32px,6vw,64px);box-shadow:var(--shadow)}
+    .hero{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:22px;background:radial-gradient(circle at 92% 8%,rgba(109,59,234,.14),transparent 34%),radial-gradient(circle at 72% 95%,rgba(23,122,85,.07),transparent 31%),var(--warm);padding:clamp(32px,6vw,64px);box-shadow:var(--shadow)}
     .hero:after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.28;background-image:radial-gradient(circle at 1px 1px,rgba(35,54,50,.15) 1px,transparent 0);background-size:22px 22px;mask-image:linear-gradient(90deg,transparent 50%,#000)}.hero>*{position:relative;z-index:1}
     .actions{display:flex;flex-wrap:wrap;gap:10px}.button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;border:1px solid var(--brand);border-radius:10px;background:var(--brand);color:#fff;padding:9px 15px;text-decoration:none;font-size:12px;font-weight:800}.button:hover{background:var(--brand-deep);color:#fff}.button.secondary{border-color:var(--line-strong);background:#fff;color:var(--ink)}
     .quick-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:27px}.quick-card{border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.86);padding:16px}.quick-card small{display:block;margin-bottom:5px;color:#83908d;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.quick-card code{color:#263532;font-size:11px;font-weight:650;overflow-wrap:anywhere}
@@ -55,7 +55,7 @@
     .response-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:22px 0}.response{border:1px solid var(--line);border-radius:14px;background:#fff;padding:17px}.response-code{display:inline-block;border-radius:7px;margin-bottom:10px;padding:4px 8px;font-size:11px;font-weight:900}.response h3{margin:0 0 6px;font-size:14px}.response p{margin:0;color:var(--muted);font-size:11px}.created .response-code{background:var(--green-soft);color:var(--green)}.queued .response-code{background:var(--blue-soft);color:var(--blue)}.failed .response-code{background:var(--red-soft);color:var(--red)}
     .flow{display:grid;grid-template-columns:repeat(7,auto);align-items:center;justify-content:start;gap:10px;margin:28px 0;overflow:auto;padding:4px 0 10px}.flow-node{min-width:122px;border:1px solid var(--line);border-radius:12px;background:#fff;padding:13px;text-align:center}.flow-node strong{display:block;font-size:12px}.flow-node small{color:var(--muted);font-size:9px}.flow-arrow{color:var(--brand);font-size:18px}
     .checklist{display:grid;gap:9px;margin:20px 0 0;padding:0;list-style:none}.checklist li{position:relative;border-bottom:1px solid var(--line);padding:0 0 9px 29px;color:#53615e;font-size:13px}.checklist li:before{content:"✓";position:absolute;left:0;top:0;display:grid;place-items:center;width:19px;height:19px;border-radius:6px;background:var(--green-soft);color:var(--green);font-size:11px;font-weight:900}.checklist li:last-child{border:0}
-    .official{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:22px}.official a{display:block;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);padding:14px 16px;text-decoration:none}.official a:hover{border-color:#c9a99d;box-shadow:0 8px 24px rgba(29,41,42,.06);color:var(--brand-deep)}.official strong{display:block;font-size:12px}.official span{color:var(--muted);font-size:10px}
+    .official{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:22px}.official a{display:block;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);padding:14px 16px;text-decoration:none}.official a:hover{border-color:#cfc3f8;box-shadow:0 8px 24px rgba(16,24,40,.06);color:var(--brand-deep)}.official strong{display:block;font-size:12px}.official span{color:var(--muted);font-size:10px}
     footer{border-top:1px solid var(--line);margin-top:76px;padding-top:24px;color:#7a8783;font-size:11px}
     @media(max-width:1000px){.quick-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.two-col{grid-template-columns:1fr}.response-grid{grid-template-columns:1fr}}
     @media(max-width:780px){html{scroll-padding-top:74px}.topbar{min-height:58px;padding:0 17px}.top-meta{display:none}.menu{display:block}.layout{display:block;padding-top:58px}.sidebar{top:58px;width:min(310px,88vw);transform:translateX(-105%);transition:transform .2s;box-shadow:18px 0 50px rgba(29,41,42,.14)}.sidebar.open{transform:translateX(0)}main{width:100%;padding:28px 18px 64px}h1{font-size:clamp(37px,13vw,53px)}.hero{padding:30px 23px;border-radius:18px}section{margin-top:59px}.three-col,.official{grid-template-columns:1fr}.flow{grid-template-columns:1fr;justify-items:stretch}.flow-arrow{transform:rotate(90deg);text-align:center}}
@@ -66,7 +66,7 @@
 <body>
   <a class="skip" href="#content">Skip to documentation</a>
   <header class="topbar">
-    <a class="brand" href="#overview" aria-label="Helixcer API documentation"><span class="brand-mark" aria-hidden="true">H</span><span>Helixcer <strong>API</strong></span></a>
+    <a class="brand" href="#overview" aria-label="Helixcer API documentation"><span class="brand-mark" aria-hidden="true"><img src="assets/helixcer-mark.jpg" alt=""></span><span>Helixcer <strong>API</strong></span></a>
     <div class="top-meta"><span>Messaging API</span><span class="version">v1</span></div>
     <button class="menu" type="button" aria-label="Open documentation navigation" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   </header>
@@ -380,7 +380,7 @@ Content-Type: application/json</code></pre></div>
   "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
   "messageStatus": "pending",
-  "providerMessageId": "",
+  "channelMessageId": "",
   "error": "",
   "clientReference": "order-1001",
   "createdAt": "2026-10-25T10:30:12.442Z",
@@ -404,7 +404,7 @@ Content-Type: application/json</code></pre></div>
   "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
   "messageStatus": "delivered",
-  "providerMessageId": "wamid.HBgMOTE5OTk5OTk5OTk5FQIAERgS...",
+  "channelMessageId": "wamid.HBgMOTE5OTk5OTk5OTk5FQIAERgS...",
   "error": "",
   "clientReference": "order-1001",
   "createdAt": "2026-10-25T10:30:12.442Z",

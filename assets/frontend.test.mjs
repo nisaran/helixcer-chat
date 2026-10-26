@@ -202,7 +202,9 @@ test("channel cards collapse by default and use provider artwork throughout the 
   assert.match(app, /provider-telegram\.svg/);
   assert.match(app, /provider-instagram\.svg/);
   assert.match(html, /id="chatProviderLogo"/);
+  assert.match(html, /id="chatChannelProfileId"/);
   assert.match(app, /\$\("chatChannel"\)\.textContent = channel\?\.name/);
+  assert.match(app, /contact\?\.channelProfileId \|\| conversation\.channelProfileId/);
 });
 
 test("contacts open in a right-side editor backed by contact detail endpoints", () => {
@@ -211,8 +213,8 @@ test("contacts open in a right-side editor backed by contact detail endpoints", 
   assert.match(html, /id="contactEditName"/);
   assert.match(html, /id="contactEditChannel"/);
   assert.match(html, /id="contactEditChannelHelp"/);
-  assert.match(html, /id="contactEditProviderId"[^>]*readonly[^>]*aria-readonly="true"/);
-  assert.match(html, /Assigned by the provider and cannot be edited/);
+  assert.match(html, /Channel Profile ID<input[^>]*id="contactEditChannelProfileId"[^>]*readonly[^>]*aria-readonly="true"/);
+  assert.match(html, /Assigned by the channel and cannot be edited/);
   assert.match(html, /id="contactEditCompany"/);
   assert.match(html, /id="contactEditTags"/);
   assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`\)/);
@@ -222,6 +224,16 @@ test("contacts open in a right-side editor backed by contact detail endpoints", 
   const saveContactBody = app.match(/async function saveContactEdits\(form\) \{([\s\S]*?)\n  \}/)?.[1] || "";
   assert.doesNotMatch(saveContactBody, /channelProfileId\s*:/);
   assert.match(app, /type === "contact\.updated"[\s\S]*?await loadAll\(\)[\s\S]*?await selectContact/);
+  assert.match(app, /\["channelProfileId", "Channel Profile ID"\]/);
+});
+
+test("expanded channel cards expose the internal channel ID with a copy action", () => {
+  assert.match(app, /channel-id-block/);
+  assert.match(app, /"Channel ID"/);
+  assert.match(app, /dataset\.action = "copy-channel-id"/);
+  assert.match(app, /dataset\.copyValue = channel\.channelId/);
+  assert.match(app, /setAttribute\("aria-label", "Copy Channel ID"\)/);
+  assert.match(app, /copyDeveloperApiValue\(actionButton\.dataset\.copyValue, "Channel ID copied"\)/);
 });
 
 test("outbound messages expose sent, delivered, read, retry, and failure states for every provider", () => {
@@ -339,6 +351,9 @@ test("Developer API documentation is channel-organized and keeps the send contra
   assert.match(apiDocs, /"status": true/);
   assert.match(apiDocs, /"messageStatus": "pending"/);
   assert.match(apiDocs, /"messageStatus": "delivered"/);
+  assert.match(apiDocs, /"channelMessageId": ""/);
+  assert.match(apiDocs, /"channelMessageId": "wamid\./);
+  assert.doesNotMatch(apiDocs, /"providerMessageId"/);
   assert.match(apiDocs, /"status": false/);
   assert.match(apiDocs, /status<\/code> reports whether the API request succeeded/);
   assert.doesNotMatch(apiDocs, /"ok": (?:true|false)/);

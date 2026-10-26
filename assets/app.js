@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-6";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-7";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -935,6 +935,7 @@
       timestamp: raw.timestamp || raw.createdAt || raw.sentAt || new Date().toISOString(),
       status: raw.status || (raw.direction === "outbound" ? "sent" : "received"),
       senderName: raw.senderName || raw.sender || "",
+      channelMessageId: raw.channelMessageId || raw.providerMessageId || "",
     };
   }
 
@@ -1142,6 +1143,10 @@
     $("chatAvatar").textContent = initials(conversation.subject);
     $("chatChannel").textContent = channel?.name || style.label;
     $("chatChannelBadge").title = style.label;
+    const channelProfileId = contact?.channelProfileId || conversation.channelProfileId || "";
+    $("chatChannelProfileId").textContent = channelProfileId === "—" ? "" : channelProfileId;
+    $("chatChannelProfileId").title = channelProfileId === "—" ? "" : channelProfileId;
+    $("chatChannelProfileId").hidden = !channelProfileId || channelProfileId === "—";
     const chatLogo = $("chatProviderLogo");
     const logoPath = providerLogoPaths[channel?.connectorType];
     chatLogo.hidden = !logoPath;
@@ -1375,7 +1380,7 @@
     $("contactEditChannelHelp").textContent = normalized.channelEditable
       ? "You can change the channel until the first message is sent or received."
       : "Channel is locked because this contact already has message history.";
-    $("contactEditProviderId").value = normalized.channelProfileId === "—" ? "" : normalized.channelProfileId;
+    $("contactEditChannelProfileId").value = normalized.channelProfileId === "—" ? "" : normalized.channelProfileId;
     $("contactEditCompany").value = normalized.company;
     $("contactEditTags").value = normalized.tags.join(", ");
   }
@@ -1552,6 +1557,20 @@
       readinessItem("Webhook", webhookVerified)
     );
     setup.append(readiness);
+
+    const channelIdBlock = element("div", "callback-block channel-id-block");
+    channelIdBlock.append(element("span", "callback-label", "Channel ID"));
+    const channelIdRow = element("div", "meta-callback-row");
+    channelIdRow.append(element("code", "channel-callback", channel.channelId));
+    const copyChannelId = element("button", "secondary-button compact-button", "Copy ID");
+    copyChannelId.type = "button";
+    copyChannelId.setAttribute("aria-label", "Copy Channel ID");
+    copyChannelId.title = "Copy Channel ID";
+    copyChannelId.dataset.action = "copy-channel-id";
+    copyChannelId.dataset.copyValue = channel.channelId;
+    channelIdRow.append(copyChannelId);
+    channelIdBlock.append(channelIdRow);
+    setup.append(channelIdBlock);
 
     const callbackUrl = channel.setup?.webhookUrl || state.api.webhookUrl(channel);
     const callbackBlock = element("div", "callback-block");
@@ -2246,7 +2265,7 @@
       [
         ["", "Choose source"],
         ["displayName", "Contact name"],
-        ["channelProfileId", "Provider ID"],
+        ["channelProfileId", "Channel Profile ID"],
         ["company", "Company"],
         ["tags", "Tags"],
         ["channelName", "Channel name"],
@@ -3519,6 +3538,10 @@
         }
         if (actionButton.dataset.action === "copy-webhook-callback") {
           copyWebhookCallback(actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "copy-channel-id") {
+          copyDeveloperApiValue(actionButton.dataset.copyValue, "Channel ID copied");
           return;
         }
         if (actionButton.dataset.action === "copy-webhook-token") {

@@ -6,8 +6,8 @@
   "start_url": "/#inbox",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f7f7f3",
-  "theme_color": "#8f2e19",
+  "background_color": "#f5f7fb",
+  "theme_color": "#171827",
   "icons": [
     {
       "src": "/assets/favicon.svg",

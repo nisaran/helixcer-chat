@@ -175,6 +175,8 @@ test('external template API accepts requests without an Idempotency-Key', async 
     const accepted = await response.json();
     assert.equal(accepted.status, true);
     assert.equal(accepted.messageStatus, 'pending');
+    assert.equal(accepted.channelMessageId, '');
+    assert.equal(Object.hasOwn(accepted, 'providerMessageId'), false);
     assert.equal(Object.hasOwn(accepted, 'ok'), false);
     assert.equal(database.prepare('SELECT count(*) AS count FROM messages').get().count, 1);
     const storedRequest = database.prepare('SELECT idempotency_key_hash FROM external_api_requests').get();
@@ -346,7 +348,8 @@ test('external template API persists once, dispatches, replays safely, and scope
     }), env);
     assert.equal(status.status, 200);
     const statusBody = await status.json();
-    assert.equal(statusBody.providerMessageId, 'wamid.template-1');
+    assert.equal(statusBody.channelMessageId, 'wamid.template-1');
+    assert.equal(Object.hasOwn(statusBody, 'providerMessageId'), false);
     assert.equal(statusBody.status, true);
     assert.equal(statusBody.messageStatus, 'delivered');
     assert.equal(Object.hasOwn(statusBody, 'ok'), false);

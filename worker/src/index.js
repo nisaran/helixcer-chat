@@ -18,7 +18,7 @@ import {
   sendWorkspacePush
 } from './push.js';
 
-const API_VERSION = '2026-10-26-chat-deeplinks';
+const API_VERSION = '2026-10-26-channel-contract';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
@@ -685,7 +685,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   ctx.waitUntil(sendOrQueue(env, messageId));
   return externalMessageResponse({
     messageId, conversationId: identity.conversationId, contactId: identity.contactId,
-    channelId: channel.channelId, messageStatus: 'pending', providerMessageId: '', error: '',
+    channelId: channel.channelId, messageStatus: 'pending', channelMessageId: '', error: '',
     clientReference: input.clientReference, createdAt: now,
     statusUrl: new URL(`/api/v1/messages/${encodeURIComponent(messageId)}`, url.origin).toString()
   }, requestId, false, suppliedIdempotencyKey !== null);
@@ -711,7 +711,7 @@ async function getExternalMessageStatus(env, principal, messageId, url) {
     contactId: row.contact_id,
     channelId: row.channel_id,
     messageStatus: row.status,
-    providerMessageId: row.provider_message_id || '',
+    channelMessageId: row.provider_message_id || '',
     error: row.error || '',
     clientReference: row.client_reference || '',
     createdAt: row.timestamp,
@@ -2054,12 +2054,12 @@ async function updateContact(env, workspaceId, contactId, payload, principal) {
   let channelId = existing.channel_id || '';
   const channelProfileId = existing.channel_profile_id || '';
   if (payload.channelProfileId !== undefined) {
-    if (typeof payload.channelProfileId !== 'string') throw httpError(400, 'Provider ID must be text.');
+    if (typeof payload.channelProfileId !== 'string') throw httpError(400, 'Channel Profile ID must be text.');
     const suppliedProfileId = payload.channelProfileId.trim();
     const comparableProfileId = logicalConnectorType(existing) === 'whatsapp_cloud'
       ? normalizeWhatsAppRecipient(suppliedProfileId)
       : suppliedProfileId;
-    if (comparableProfileId !== channelProfileId) throw httpError(400, 'Provider ID cannot be changed.');
+    if (comparableProfileId !== channelProfileId) throw httpError(400, 'Channel Profile ID cannot be changed.');
   }
   const identityFieldsSupplied = payload.channelId !== undefined || payload.channelProfileId !== undefined;
   if (identityFieldsSupplied) {
@@ -2123,7 +2123,7 @@ async function listMessages(env, workspaceId, conversationId, url) {
   return result.results.reverse().map(row => ({
     messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
     status: row.status, timestamp: row.timestamp, channelId: row.channel_id,
-    providerMessageId: row.provider_message_id, error: row.error,
+    channelMessageId: row.provider_message_id, error: row.error,
     attachment: messageAttachmentView(row.message_type, safeJsonParse(row.payload_json, {}))
   }));
 }
