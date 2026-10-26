@@ -90,16 +90,22 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.doesNotMatch(`${html}\n${app}`, /WA_MAIN_(?:ACCESS_TOKEN|APP_SECRET|VERIFY_TOKEN|PHONE_NUMBER_ID)/);
 });
 
-test("Channel navigation nests configuration and the WhatsApp template library", () => {
-  const channelNav = html.match(/<div class="nav-group is-open" id="channelNavGroup"[\s\S]*?<\/div>\s*<button class="nav-button" type="button" data-route="developer"/)?.[0] || "";
+test("Channel navigation is collapsed by default and nests the WhatsApp template library", () => {
+  const channelNav = html.match(/<div class="nav-group" id="channelNavGroup"[\s\S]*?<button class="nav-button" type="button" data-route="developer"/)?.[0] || "";
   assert.match(channelNav, /data-admin-only/);
   assert.match(channelNav, />Channel<\/span>/);
+  assert.match(channelNav, /id="channelNavToggle"[^>]*aria-expanded="false"/);
+  assert.match(channelNav, /id="channelNavChildren" hidden/);
   assert.match(channelNav, /data-route="channels"[\s\S]*?>Channels<\/span>/);
   assert.match(channelNav, />Channel Data<\/span>/);
+  assert.match(channelNav, /id="channelDataNavToggle"[^>]*aria-expanded="false"/);
+  assert.match(channelNav, /id="channelDataNavChildren" hidden/);
   assert.match(channelNav, /data-route="whatsapp-templates"[\s\S]*?>WhatsApp Templates<\/span>/);
   assert.match(html, /id="whatsappTemplatesRoute" data-route-panel="whatsapp-templates"/);
   assert.match(app, /"whatsapp-templates": "WhatsApp Templates"/);
   assert.match(app, /\["channels", "whatsapp-templates", "developer", "team"\]/);
+  assert.match(app, /if \(channelSectionActive\)[\s\S]*?channelNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
+  assert.match(app, /if \(route === "whatsapp-templates"\)[\s\S]*?channelDataNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
   assert.match(styles, /\.nav-submenu/);
 });
 
@@ -246,6 +252,11 @@ test("channel cards collapse by default and use provider artwork throughout the 
   assert.match(app, /provider-instagram\.svg/);
   assert.match(html, /id="chatProviderLogo"/);
   assert.match(html, /id="chatChannelProfileId"/);
+  assert.match(html, /class="chat-contact-card"[^>]*data-action="toggle-details"/);
+  assert.match(html, /class="chat-person-title-row"[\s\S]*?id="chatTitle"[\s\S]*?id="chatChannelProfileId"/);
+  assert.match(styles, /\.chat-contact-card\s*\{/);
+  assert.match(styles, /\.chat-person-title-row\s*\{/);
+  assert.match(styles, /\.chat-profile-id \{ max-width: min\(30vw, 140px\); \}/);
   assert.match(app, /\$\("chatChannel"\)\.textContent = channel\?\.name/);
   assert.match(app, /contact\?\.channelProfileId \|\| conversation\.channelProfileId/);
 });

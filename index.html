@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261026-8">
-  <script src="./assets/app.js?v=20261026-8" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261026-9">
+  <script src="./assets/app.js?v=20261026-9" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -69,24 +69,24 @@
           </span>
           <span>Contacts</span>
         </button>
-        <div class="nav-group is-open" id="channelNavGroup" data-admin-only>
-          <button class="nav-button nav-group-toggle" id="channelNavToggle" type="button" data-action="toggle-channel-nav" aria-expanded="true" aria-controls="channelNavChildren">
+        <div class="nav-group" id="channelNavGroup" data-admin-only>
+          <button class="nav-button nav-group-toggle" id="channelNavToggle" type="button" data-action="toggle-channel-nav" aria-expanded="false" aria-controls="channelNavChildren">
             <span class="nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8m12.8 0a9 9 0 0 0 0-12.8M8.5 8.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7"/></svg>
             </span>
             <span>Channel</span>
             <svg class="nav-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
           </button>
-          <div class="nav-submenu" id="channelNavChildren">
+          <div class="nav-submenu" id="channelNavChildren" hidden>
             <button class="nav-button nav-subitem" type="button" data-route="channels" data-admin-only>
               <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg></span>
               <span>Channels</span>
             </button>
-            <button class="nav-section-toggle" id="channelDataNavToggle" type="button" data-action="toggle-channel-data-nav" aria-expanded="true" aria-controls="channelDataNavChildren">
+            <button class="nav-section-toggle" id="channelDataNavToggle" type="button" data-action="toggle-channel-data-nav" aria-expanded="false" aria-controls="channelDataNavChildren">
               <span>Channel Data</span>
               <svg class="nav-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
             </button>
-            <div class="nav-submenu nav-submenu-nested" id="channelDataNavChildren">
+            <div class="nav-submenu nav-submenu-nested" id="channelDataNavChildren" hidden>
               <button class="nav-button nav-subitem" type="button" data-route="whatsapp-templates">
                 <span class="nav-icon nav-provider-icon" aria-hidden="true"><img src="./assets/provider-whatsapp.svg" alt=""></span>
                 <span>WhatsApp Templates</span>
@@ -200,15 +200,19 @@
                 <button class="icon-button mobile-back" id="mobileBack" type="button" aria-label="Back to conversations">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
                 </button>
-                <span class="avatar contact-avatar" id="chatAvatar" aria-hidden="true">—</span>
-                <div class="chat-person">
-                  <h2 id="chatTitle">Conversation</h2>
-                  <div class="chat-meta">
-                    <span class="chat-channel-badge" id="chatChannelBadge"><img id="chatProviderLogo" alt="" src="./assets/provider-whatsapp.svg"><span id="chatChannel">Channel</span></span>
-                    <span class="chat-profile-id" id="chatChannelProfileId" title=""></span>
-                    <span id="chatPresence">Recently active</span>
-                  </div>
-                </div>
+                <button class="chat-contact-card" type="button" data-action="toggle-details" aria-label="View contact details" aria-controls="detailsPanel" aria-expanded="false">
+                  <span class="avatar contact-avatar" id="chatAvatar" aria-hidden="true">—</span>
+                  <span class="chat-person">
+                    <span class="chat-person-title-row">
+                      <span class="chat-title" id="chatTitle">Conversation</span>
+                      <span class="chat-profile-id" id="chatChannelProfileId" title=""></span>
+                    </span>
+                    <span class="chat-meta">
+                      <span class="chat-channel-badge" id="chatChannelBadge"><img id="chatProviderLogo" alt="" src="./assets/provider-whatsapp.svg"><span id="chatChannel">Channel</span></span>
+                      <span id="chatPresence">Recently active</span>
+                    </span>
+                  </span>
+                </button>
                 <div class="chat-actions">
                   <label class="sr-only" for="conversationAssignee">Assigned agent</label>
                   <select class="compact-select assignee-select" id="conversationAssignee" aria-label="Assigned agent">
@@ -220,7 +224,7 @@
                     <option value="pending">Pending</option>
                     <option value="closed">Closed</option>
                   </select>
-                  <button class="icon-button" type="button" data-action="toggle-details" aria-label="View contact details">
+                  <button class="icon-button" type="button" data-action="toggle-details" aria-label="View contact details" aria-controls="detailsPanel" aria-expanded="false">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.2v.1"/></svg>
                   </button>
                 </div>
@@ -263,7 +267,7 @@
           <aside class="details-panel" id="detailsPanel" aria-label="Contact details" hidden>
             <div class="details-head">
               <h2>Contact details</h2>
-              <button class="icon-button" type="button" data-action="toggle-details" aria-label="Close contact details">
+              <button class="icon-button" type="button" data-action="toggle-details" aria-label="Close contact details" aria-controls="detailsPanel" aria-expanded="false">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
               </button>
             </div>

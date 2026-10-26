@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-8";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-9";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -3398,6 +3398,9 @@
   function updateDetailsVisibility() {
     $("detailsPanel").hidden = !state.detailsOpen;
     $("inboxGrid").classList.toggle("has-details", state.detailsOpen);
+    document.querySelectorAll('[data-action="toggle-details"]').forEach((button) => {
+      button.setAttribute("aria-expanded", String(state.detailsOpen));
+    });
   }
 
   async function logout() {
