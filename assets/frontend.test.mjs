@@ -58,6 +58,26 @@ test("role-aware single-workspace UI includes team management and no billing sur
   assert.doesNotMatch(html, /data-route="billing"/i);
 });
 
+test("single workspace profile stores organisation, address, and GST details", () => {
+  assert.match(html, /data-route="workspace"/);
+  assert.match(html, /id="workspaceRoute" data-route-panel="workspace"/);
+  assert.match(html, /Single workspace/);
+  for (const field of ["workspaceDisplayName", "workspaceRegisteredName", "workspaceAddressLine1", "workspaceAddressLine2", "workspaceCity", "workspaceState", "workspacePostalCode", "workspaceCountry", "workspaceGstin", "workspaceTaxDetails"]) {
+    assert.match(html, new RegExp(`id="${field}"`));
+  }
+  assert.match(app, /getWorkspace\(\)[\s\S]*?request\("\/api\/workspace"\)/);
+  assert.match(app, /updateWorkspace\(payload\)[\s\S]*?request\("\/api\/workspace", \{ method: "PATCH"/);
+  assert.match(app, /loadWorkspaceProfile\(\)/);
+  assert.match(app, /type === "workspace\.updated"[\s\S]*?updateWorkspaceIdentity/);
+  assert.match(app, /if \(data\.workspace\)[\s\S]*?state\.workspaceProfileLoaded = true/);
+  assert.match(app, /const editable = admin && state\.workspaceProfileLoaded/);
+  assert.match(html, /Only workspace owners and admins can edit these details/);
+  assert.match(app, /\["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "workspace", "settings"\]/);
+  assert.match(styles, /\.workspace-form-grid \{[^}]*grid-template-columns: repeat\(2/);
+  assert.match(styles, /\.workspace-profile-form \.text-field\[readonly\]/);
+  assert.doesNotMatch(`${html}\n${app}`, /createWorkspace|deleteWorkspace|workspaceSwitcher/i);
+});
+
 test("channel management supports multiple provider accounts without hardcoded credentials", () => {
   assert.match(html, /<h2 id="channelsTitle">Channels<\/h2>/);
   assert.match(html, /data-action="open-channel"/);
@@ -478,12 +498,15 @@ test("outbound status reconciliation is monotonic and permits explicit retry tra
   assert.equal(merged.find((item) => item.messageId === "live").channelMessageId, "provider-live");
 });
 
-test("the composer sends only from the Send CTA and Enter inserts a newline", () => {
+test("desktop Enter sends while mobile Enter and Shift+Enter insert a newline", () => {
   assert.match(html, /<textarea id="messageInput"[^>]*enterkeyhint="enter"/);
   assert.match(html, /<button class="send-button" id="sendButton" type="button"/);
-  assert.doesNotMatch(html, /Enter to send/);
+  assert.match(html, /<span class="send-hint" id="sendHint">Use Send to send<\/span>/);
   assert.match(app, /\$\("sendButton"\)\.addEventListener\("click", sendCurrentMessage\)/);
-  assert.doesNotMatch(app, /\$\("messageInput"\)\.addEventListener\("keydown"[\s\S]*?sendCurrentMessage\(\)/);
+  assert.match(app, /function usesMobileComposerKeyboard\(\)[\s\S]*?userAgentData\?\.mobile[\s\S]*?pointer: coarse/);
+  assert.match(app, /function handleComposerKeydown\(event\)[\s\S]*?event\.key !== "Enter" \|\| event\.shiftKey \|\| event\.isComposing \|\| usesMobileComposerKeyboard\(\)[\s\S]*?event\.preventDefault\(\)[\s\S]*?sendCurrentMessage\(\)/);
+  assert.match(app, /\$\("messageInput"\)\.addEventListener\("keydown", handleComposerKeydown\)/);
+  assert.match(app, /"Enter to send · Shift\+Enter for a new line"/);
 });
 
 test("pending and closed status updates clear the selected chat only after the server accepts them", () => {

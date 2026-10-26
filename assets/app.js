@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-11";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-12";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -42,6 +42,9 @@
     detailsOpen: false,
     currentUser: null,
     workspace: { name: DEFAULT_WORKSPACE, workspaceId: "default", slug: "helixcer" },
+    workspaceProfile: null,
+    workspaceProfileLoaded: false,
+    workspaceProfileLoading: false,
     team: { members: [], invitations: [] },
     apiKeys: [],
     authStatus: "checking",
@@ -116,14 +119,20 @@
   const demoSeed = () => {
     const now = Date.now();
     const ago = (minutes) => new Date(now - minutes * 60_000).toISOString();
+    const workspaceProfile = {
+      workspaceId: "demo", displayName: "Helixcer workspace", registeredName: "Helixcer Technologies",
+      addressLine1: "", addressLine2: "", city: "", state: "", postalCode: "", country: "India",
+      gstin: "", taxDetails: "",
+    };
     return {
       appName: "Helixcer Chat",
       me: {
         authenticated: true,
         user: { userId: "demo-owner", email: "owner@helixcer.example", displayName: "Nisar", avatarUrl: "" },
-        workspace: { workspaceId: "demo", name: "Helixcer workspace", slug: "helixcer" },
+        workspace: { ...workspaceProfile, name: workspaceProfile.displayName, slug: "helixcer" },
         membership: { membershipId: "demo-membership-owner", role: "owner", status: "active" },
       },
+      workspaceProfile,
       team: {
         members: [
           { membershipId: "demo-membership-owner", userId: "demo-owner", email: "owner@helixcer.example", displayName: "Nisar", avatarUrl: "", role: "owner", status: "active", createdAt: ago(43200) },
@@ -214,6 +223,22 @@
     async me() {
       await smallDelay(120);
       return clone(this.data.me);
+    }
+
+    async getWorkspace() {
+      await smallDelay(100);
+      return { item: clone(this.data.workspaceProfile) };
+    }
+
+    async updateWorkspace(payload) {
+      await smallDelay(140);
+      this.data.workspaceProfile = { ...this.data.workspaceProfile, ...payload };
+      this.data.me.workspace = {
+        ...this.data.me.workspace,
+        ...this.data.workspaceProfile,
+        name: this.data.workspaceProfile.displayName,
+      };
+      return { ok: true, item: clone(this.data.workspaceProfile) };
     }
 
     async logout() {
@@ -593,6 +618,16 @@
       return this.isDemo ? this.demo.bootstrap() : this.request("/api/bootstrap");
     }
 
+    getWorkspace() {
+      return this.isDemo ? this.demo.getWorkspace() : this.request("/api/workspace");
+    }
+
+    updateWorkspace(payload) {
+      return this.isDemo
+        ? this.demo.updateWorkspace(payload)
+        : this.request("/api/workspace", { method: "PATCH", body: JSON.stringify(payload) });
+    }
+
     getMessages(conversationId) {
       return this.isDemo
         ? this.demo.getMessages(conversationId)
@@ -903,12 +938,124 @@
     };
   }
 
+  function normalizeWorkspaceProfile(raw = {}) {
+    return {
+      workspaceId: String(raw.workspaceId || state.workspace?.workspaceId || ""),
+      displayName: String(raw.displayName || raw.name || state.workspace?.displayName || state.workspace?.name || DEFAULT_WORKSPACE),
+      registeredName: String(raw.registeredName || ""),
+      addressLine1: String(raw.addressLine1 || ""),
+      addressLine2: String(raw.addressLine2 || ""),
+      city: String(raw.city || ""),
+      state: String(raw.state || ""),
+      postalCode: String(raw.postalCode || ""),
+      country: String(raw.country || ""),
+      gstin: String(raw.gstin || "").toUpperCase(),
+      taxDetails: String(raw.taxDetails || ""),
+    };
+  }
+
   function canAdmin() {
     return state.currentUser && ["owner", "admin"].includes(state.currentUser.role);
   }
 
   function isOwner() {
     return state.currentUser?.role === "owner";
+  }
+
+  function updateWorkspaceIdentity(profile = state.workspaceProfile || normalizeWorkspaceProfile(state.workspace)) {
+    const displayName = profile.displayName || DEFAULT_WORKSPACE;
+    $("sidebarWorkspaceName").textContent = displayName;
+    state.workspace = { ...state.workspace, ...profile, name: displayName };
+    if (state.currentUser?.workspace) state.currentUser.workspace = { ...state.currentUser.workspace, ...profile, name: displayName };
+  }
+
+  function setWorkspaceFormBusy(busy) {
+    state.workspaceProfileLoading = busy;
+    const admin = canAdmin();
+    const editable = admin && state.workspaceProfileLoaded;
+    $("workspaceProfileForm").querySelectorAll("input, textarea").forEach((field) => {
+      field.readOnly = busy || !editable;
+      field.setAttribute("aria-readonly", String(busy || !editable));
+    });
+    $("workspaceSaveButton").disabled = busy || !editable;
+    $("workspaceReadonlyNote").hidden = admin;
+  }
+
+  function renderWorkspaceProfile() {
+    const profile = state.workspaceProfile || normalizeWorkspaceProfile(state.workspace);
+    const values = {
+      workspaceDisplayName: profile.displayName,
+      workspaceRegisteredName: profile.registeredName,
+      workspaceAddressLine1: profile.addressLine1,
+      workspaceAddressLine2: profile.addressLine2,
+      workspaceCity: profile.city,
+      workspaceState: profile.state,
+      workspacePostalCode: profile.postalCode,
+      workspaceCountry: profile.country,
+      workspaceGstin: profile.gstin,
+      workspaceTaxDetails: profile.taxDetails,
+    };
+    Object.entries(values).forEach(([id, value]) => { $(id).value = value || ""; });
+    updateWorkspaceIdentity(profile);
+    setWorkspaceFormBusy(false);
+  }
+
+  async function loadWorkspaceProfile({ force = false } = {}) {
+    if (!state.api || state.authStatus !== "authenticated") return;
+    if (state.workspaceProfileLoading || (state.workspaceProfileLoaded && !force)) {
+      if (state.workspaceProfileLoaded) renderWorkspaceProfile();
+      return;
+    }
+    $("workspaceSaveState").textContent = "Loading…";
+    setWorkspaceFormBusy(true);
+    try {
+      const response = await state.api.getWorkspace();
+      state.workspaceProfile = normalizeWorkspaceProfile(response?.item || response?.workspace || response);
+      state.workspaceProfileLoaded = true;
+      renderWorkspaceProfile();
+      $("workspaceSaveState").textContent = "";
+    } catch (error) {
+      $("workspaceSaveState").textContent = "Unable to load workspace details";
+      setWorkspaceFormBusy(false);
+      if (state.route === "workspace") showToast("Workspace details were not loaded", error.message, true);
+    }
+  }
+
+  async function saveWorkspaceProfile(form) {
+    if (!canAdmin() || state.workspaceProfileLoading) return;
+    const gstinField = $("workspaceGstin");
+    const gstin = gstinField.value.trim().toUpperCase();
+    gstinField.value = gstin;
+    gstinField.setCustomValidity(gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstin)
+      ? "Enter a valid 15-character GSTIN." : "");
+    if (!form.reportValidity()) return;
+    const data = new FormData(form);
+    const payload = {
+      displayName: String(data.get("displayName") || "").trim(),
+      registeredName: String(data.get("registeredName") || "").trim(),
+      addressLine1: String(data.get("addressLine1") || "").trim(),
+      addressLine2: String(data.get("addressLine2") || "").trim(),
+      city: String(data.get("city") || "").trim(),
+      state: String(data.get("state") || "").trim(),
+      postalCode: String(data.get("postalCode") || "").trim(),
+      country: String(data.get("country") || "").trim(),
+      gstin,
+      taxDetails: String(data.get("taxDetails") || "").trim(),
+    };
+    $("workspaceSaveState").textContent = "Saving…";
+    setWorkspaceFormBusy(true);
+    try {
+      const response = await state.api.updateWorkspace(payload);
+      state.workspaceProfile = normalizeWorkspaceProfile(response?.item || response?.workspace || { ...state.workspaceProfile, ...payload });
+      state.workspaceProfileLoaded = true;
+      renderWorkspaceProfile();
+      $("workspaceSaveState").textContent = "Saved";
+      showToast("Workspace saved", "The workspace profile is now up to date.");
+    } catch (error) {
+      $("workspaceSaveState").textContent = "Changes not saved";
+      setWorkspaceFormBusy(false);
+      showToast("Workspace was not updated", error.message, true);
+    }
   }
 
   function showAuthChecking() {
@@ -921,6 +1068,8 @@
   function showSignedOut(message = "") {
     state.authStatus = "signed-out";
     state.currentUser = null;
+    state.workspaceProfile = null;
+    state.workspaceProfileLoaded = false;
     state.recentVerifyTokens.clear();
     if (state.disconnectRealtime) state.disconnectRealtime();
     state.disconnectRealtime = null;
@@ -962,6 +1111,7 @@
     $("currentUserInitials").hidden = Boolean(safeAvatar);
     if (safeAvatar) avatarImage.src = safeAvatar;
     else avatarImage.removeAttribute("src");
+    updateWorkspaceIdentity();
     $("sidebarMode").textContent = state.api.isDemo ? "Demo workspace" : `${capitalize(user.role)} access`;
   }
 
@@ -969,6 +1119,7 @@
     const admin = canAdmin();
     document.querySelectorAll("[data-admin-only]").forEach((node) => { node.hidden = !admin; });
     document.querySelectorAll("[data-owner-only]").forEach((node) => { node.hidden = !isOwner(); node.disabled = !isOwner(); });
+    setWorkspaceFormBusy(state.workspaceProfileLoading);
     if (!admin && ["channels", "whatsapp-templates", "developer", "team"].includes(state.route)) setRoute("inbox");
   }
 
@@ -1224,6 +1375,12 @@
         renderCurrentUser();
         applyPermissions();
       }
+      if (data.workspace) {
+        state.workspaceProfile = normalizeWorkspaceProfile(data.workspace);
+        state.workspaceProfileLoaded = true;
+        if (state.route === "workspace") renderWorkspaceProfile();
+        else updateWorkspaceIdentity(state.workspaceProfile);
+      }
       state.channels = asItems(data.channels).map(normalizeChannel);
       const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
       state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart);
@@ -1264,6 +1421,12 @@
         state.workspace = state.currentUser.workspace || state.workspace;
         renderCurrentUser();
         applyPermissions();
+      }
+      if (data.workspace) {
+        state.workspaceProfile = normalizeWorkspaceProfile(data.workspace);
+        state.workspaceProfileLoaded = true;
+        if (state.route === "workspace") renderWorkspaceProfile();
+        else updateWorkspaceIdentity(state.workspaceProfile);
       }
       state.channels = asItems(data.channels).map(normalizeChannel);
       const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
@@ -4105,6 +4268,18 @@
       }
       return;
     }
+    if (type === "workspace.updated") {
+      const workspace = event.workspace || event.item || event.data;
+      if (workspace && typeof workspace === "object") {
+        state.workspaceProfile = normalizeWorkspaceProfile(workspace);
+        state.workspaceProfileLoaded = true;
+        if (state.route === "workspace") renderWorkspaceProfile();
+        else updateWorkspaceIdentity(state.workspaceProfile);
+      } else {
+        await loadWorkspaceProfile({ force: true });
+      }
+      return;
+    }
     if (["channel.updated", "channel.deleted", "bootstrap.changed"].includes(type)) {
       state.whatsappTemplatesLoaded = false;
       await reconcileWorkspace();
@@ -4451,7 +4626,7 @@
     const raw = String(value || "").replace(/^#/, "");
     const separator = raw.indexOf("/");
     const requestedRoute = separator >= 0 ? raw.slice(0, separator) : raw;
-    const allowedRoutes = ["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "settings"];
+    const allowedRoutes = ["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "workspace", "settings"];
     const route = allowedRoutes.includes(requestedRoute) ? requestedRoute : "inbox";
     if (route !== "inbox" || separator < 0) return { route, conversationId: "" };
     let conversationId = "";
@@ -4490,7 +4665,7 @@
   }
 
   function setRoute(route, { preserveLocation = false } = {}) {
-    if (!["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "settings"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "workspace", "settings"].includes(route)) route = "inbox";
     if (!canAdmin() && ["channels", "whatsapp-templates", "developer", "team"].includes(route)) route = "inbox";
     if (!preserveLocation) {
       state.pendingConversationId = null;
@@ -4519,9 +4694,10 @@
       $("channelDataNavToggle").setAttribute("aria-expanded", "true");
       $("channelDataNavChildren").hidden = false;
     }
-    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", "whatsapp-templates": "WhatsApp Templates", developer: "Developer API", team: "Team", settings: "Settings" };
+    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", "whatsapp-templates": "WhatsApp Templates", developer: "Developer API", team: "Team", workspace: "Workspace", settings: "Settings" };
     $("pageTitle").textContent = labels[route];
     if (route === "settings") renderNotificationSetting();
+    if (route === "workspace") loadWorkspaceProfile().catch(() => {});
     if (route === "whatsapp-templates") loadWhatsAppTemplateLibrary().catch(() => {});
     if (!preserveLocation) replaceAppHash(`#${route}`);
     closeMobileMenu();
@@ -5050,6 +5226,24 @@
     input.style.height = `${Math.min(input.scrollHeight, 150)}px`;
   }
 
+  function usesMobileComposerKeyboard() {
+    if (typeof navigator.userAgentData?.mobile === "boolean") return navigator.userAgentData.mobile;
+    if (/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent || "")) return true;
+    return navigator.maxTouchPoints > 1 && window.matchMedia?.("(pointer: coarse)")?.matches === true;
+  }
+
+  function updateComposerKeyboardHint() {
+    $("sendHint").textContent = usesMobileComposerKeyboard()
+      ? "Use Send to send"
+      : "Enter to send · Shift+Enter for a new line";
+  }
+
+  function handleComposerKeydown(event) {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing || usesMobileComposerKeyboard()) return;
+    event.preventDefault();
+    if (!event.repeat) sendCurrentMessage();
+  }
+
   function bindEvents() {
     document.addEventListener("click", (event) => {
       if (!event.target.closest(".template-filter")) closeTemplateFilterMenus();
@@ -5317,7 +5511,7 @@
     });
     $("refreshButton").addEventListener("click", () => state.route === "whatsapp-templates"
       ? loadWhatsAppTemplateLibrary({ refresh: true })
-      : loadAll());
+      : state.route === "workspace" ? loadWorkspaceProfile({ force: true }) : loadAll());
     $("mobileMenu").addEventListener("click", openMobileMenu);
     $("mobileScrim").addEventListener("click", closeMobileMenu);
     $("mobileBack").addEventListener("click", () => clearSelectedConversation());
@@ -5325,8 +5519,17 @@
     $("messageForm").addEventListener("submit", (event) => { event.preventDefault(); });
     $("sendButton").addEventListener("click", sendCurrentMessage);
     $("messageInput").addEventListener("input", resizeComposer);
+    $("messageInput").addEventListener("keydown", handleComposerKeydown);
     $("attachmentInput").addEventListener("change", (event) => queueCurrentAttachments(event.target.files));
     $("pushNotificationsToggle").addEventListener("click", (event) => setBrowserNotifications(event.target.checked));
+    $("workspaceProfileForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveWorkspaceProfile(event.currentTarget);
+    });
+    $("workspaceGstin").addEventListener("input", (event) => {
+      event.target.value = event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      event.target.setCustomValidity("");
+    });
 
     $("conversationStatus").addEventListener("change", async (event) => {
       const conversation = selectedConversation();
@@ -5506,6 +5709,7 @@
 
   async function init() {
     bindEvents();
+    updateComposerKeyboardHint();
     await applyLocationRoute();
     await initializeSession();
   }

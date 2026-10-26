@@ -320,6 +320,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const contactProfiles = await readFile(new URL('../migrations/0006_contact_profiles.sql', import.meta.url), 'utf8');
   const conversationUniqueness = await readFile(new URL('../migrations/0007_conversation_uniqueness.sql', import.meta.url), 'utf8');
   const pushSubscriptions = await readFile(new URL('../migrations/0008_push_subscriptions.sql', import.meta.url), 'utf8');
+  const workspaceProfile = await readFile(new URL('../migrations/0009_workspace_profile.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -361,6 +362,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   `);
   database.exec(conversationUniqueness);
   database.exec(pushSubscriptions);
+  database.exec(workspaceProfile);
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
   for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'channel_credentials',
     'contacts', 'messages', 'audit_log', 'api_keys', 'outbound_payloads', 'external_api_requests', 'push_subscriptions']) {
@@ -382,6 +384,10 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   assert.equal(database.prepare("SELECT actor_email FROM audit_log WHERE audit_id='legacy-audit'").get().actor_email, 'legacy@example.com');
   assert.equal(database.prepare('SELECT count(*) AS count FROM memberships').get().count, 0);
   assert.equal(database.prepare("SELECT name FROM workspaces WHERE workspace_id='ws_default'").get().name, 'Helixcer Chat');
+  assert.deepEqual({ ...database.prepare(`SELECT registered_name,address_line1,address_line2,city,state,postal_code,country,gstin,tax_details
+    FROM workspaces WHERE workspace_id='ws_default'`).get() }, {
+    registered_name: '', address_line1: '', address_line2: '', city: '', state: '', postal_code: '', country: '', gstin: '', tax_details: ''
+  });
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE channel_id='wa-main'").get().count, 0);
   assert.equal(database.prepare("SELECT provider_type FROM channels WHERE channel_id='legacy-channel'").get().provider_type, 'web_chat');
   assert.equal(database.prepare("SELECT company FROM contacts WHERE contact_id='legacy-contact'").get().company, '');
@@ -417,6 +423,8 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   editedDatabase.exec(templateApi);
   editedDatabase.exec(contactProfiles);
   editedDatabase.exec(conversationUniqueness);
+  editedDatabase.exec(pushSubscriptions);
+  editedDatabase.exec(workspaceProfile);
   assert.equal(editedDatabase.prepare("SELECT name FROM channels WHERE channel_id='wa-main'").get().name, 'Edited WhatsApp');
   editedDatabase.close();
 });

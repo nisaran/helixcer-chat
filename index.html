@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261026-11">
-  <script src="./assets/app.js?v=20261026-11" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261026-12">
+  <script src="./assets/app.js?v=20261026-12" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -106,6 +106,12 @@
           </span>
           <span>Team</span>
         </button>
+        <button class="nav-button" type="button" data-route="workspace">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 11h2v2H9zm4 0h2v2h-2zm-4 5h2v2H9zm4 0h2v2h-2z"/></svg>
+          </span>
+          <span>Workspace</span>
+        </button>
         <button class="nav-button" type="button" data-route="settings">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
@@ -118,7 +124,7 @@
         <div class="workspace-card">
           <span class="presence-dot" aria-hidden="true"></span>
           <div>
-            <strong>Helixcer workspace</strong>
+            <strong id="sidebarWorkspaceName">Helixcer workspace</strong>
             <span id="sidebarMode">Demo workspace</span>
           </div>
         </div>
@@ -273,7 +279,7 @@
                       <button class="template-button" id="templateButton" type="button" data-action="open-template" hidden>Template</button>
                     </div>
                     <div class="send-group">
-                      <span class="send-hint">Use Send to send</span>
+                      <span class="send-hint" id="sendHint">Use Send to send</span>
                       <button class="send-button" id="sendButton" type="button" aria-label="Send message">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 17 8-17 8 3-8Zm3 8h14"/></svg>
                       </button>
@@ -479,6 +485,50 @@
           <div class="surface-toolbar"><div><strong>Pending invitations</strong><span class="subtle" id="invitationCount">0 pending</span></div></div>
           <div class="invitation-list" id="invitationList"></div>
         </div>
+      </section>
+
+      <section class="route content-route workspace-route" id="workspaceRoute" data-route-panel="workspace" aria-labelledby="workspaceTitle" hidden>
+        <div class="route-heading">
+          <div><p class="eyebrow">Organisation profile</p><h2 id="workspaceTitle">Workspace</h2><p>Keep the business identity used across this single Helixcer workspace up to date.</p></div>
+          <span class="single-workspace-badge">Single workspace</span>
+        </div>
+        <section class="surface workspace-profile-surface" aria-labelledby="workspaceProfileTitle">
+          <div class="surface-toolbar workspace-profile-toolbar">
+            <div><strong id="workspaceProfileTitle">Workspace details</strong><span class="subtle">Visible to every member of this workspace.</span></div>
+            <span class="workspace-save-state" id="workspaceSaveState" role="status" aria-live="polite"></span>
+          </div>
+          <form class="workspace-profile-form" id="workspaceProfileForm">
+            <fieldset class="workspace-form-section">
+              <legend>Identity</legend>
+              <div class="workspace-form-grid">
+                <label class="field-label">Workspace display name<input class="text-field" id="workspaceDisplayName" name="displayName" required maxlength="120" autocomplete="organization" placeholder="Helixcer workspace"></label>
+                <label class="field-label">Registered company name<input class="text-field" id="workspaceRegisteredName" name="registeredName" maxlength="180" autocomplete="organization" placeholder="Legal registered name"></label>
+              </div>
+            </fieldset>
+            <fieldset class="workspace-form-section">
+              <legend>Registered address</legend>
+              <div class="workspace-form-grid">
+                <label class="field-label form-span">Address line 1<input class="text-field" id="workspaceAddressLine1" name="addressLine1" maxlength="180" autocomplete="address-line1" placeholder="Building, street or area"></label>
+                <label class="field-label form-span"><span>Address line 2 <span class="field-optional">Optional</span></span><input class="text-field" id="workspaceAddressLine2" name="addressLine2" maxlength="180" autocomplete="address-line2" placeholder="Suite, floor or landmark"></label>
+                <label class="field-label">City<input class="text-field" id="workspaceCity" name="city" maxlength="100" autocomplete="address-level2"></label>
+                <label class="field-label">State / region<input class="text-field" id="workspaceState" name="state" maxlength="100" autocomplete="address-level1"></label>
+                <label class="field-label">Postal code<input class="text-field" id="workspacePostalCode" name="postalCode" maxlength="24" autocomplete="postal-code"></label>
+                <label class="field-label">Country<input class="text-field" id="workspaceCountry" name="country" maxlength="100" autocomplete="country-name" placeholder="India"></label>
+              </div>
+            </fieldset>
+            <fieldset class="workspace-form-section">
+              <legend>Tax details</legend>
+              <div class="workspace-form-grid">
+                <label class="field-label"><span>GSTIN <span class="field-optional">Optional</span></span><input class="text-field text-uppercase" id="workspaceGstin" name="gstin" maxlength="15" inputmode="text" autocomplete="off" placeholder="22AAAAA0000A1Z5"></label>
+                <label class="field-label form-span"><span>Additional tax details <span class="field-optional">Optional</span></span><textarea class="text-field workspace-textarea" id="workspaceTaxDetails" name="taxDetails" rows="3" maxlength="500" placeholder="Tax registration, billing or invoice notes"></textarea></label>
+              </div>
+            </fieldset>
+            <div class="workspace-form-actions">
+              <p class="workspace-readonly-note" id="workspaceReadonlyNote" hidden>Only workspace owners and admins can edit these details.</p>
+              <button class="primary-button" id="workspaceSaveButton" type="submit" data-admin-only>Save workspace</button>
+            </div>
+          </form>
+        </section>
       </section>
 
       <section class="route content-route" id="settingsRoute" data-route-panel="settings" aria-labelledby="settingsTitle" hidden>

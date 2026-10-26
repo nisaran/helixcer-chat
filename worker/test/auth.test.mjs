@@ -119,6 +119,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0006_contact_profiles.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0007_conversation_uniqueness.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0008_push_subscriptions.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0009_workspace_profile.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -564,6 +565,71 @@ test('session-authenticated bootstrap is workspace scoped and returns verified i
   assert.deepEqual(body.channels.map(channel => channel.channelId), ['default-channel']);
   assert.equal(body.me.user.email, 'owner@example.com');
   assert.equal(body.me.workspace.workspaceId, 'ws_default');
+  database.close();
+});
+
+test('single workspace profile is readable by members and writable only by admins', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const { sessionToken } = await performOwnerLogin(env);
+  const headers = {
+    Cookie: `__Host-helixcer_session=${encodeURIComponent(sessionToken)}`,
+    Origin: 'https://chat.helixcer.com'
+  };
+
+  const initial = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', { headers }), env);
+  assert.equal(initial.status, 200);
+  assert.deepEqual(await initial.json(), { item: {
+    workspaceId: 'ws_default', displayName: 'Helixcer Chat', registeredName: '', addressLine1: '', addressLine2: '',
+    city: '', state: '', postalCode: '', country: '', gstin: '', taxDetails: ''
+  } });
+
+  database.prepare("UPDATE memberships SET role='agent' WHERE workspace_id='ws_default'").run();
+  const memberRead = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', { headers }), env);
+  assert.equal(memberRead.status, 200);
+  const memberWrite = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', {
+    method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayName: 'Not allowed' })
+  }), env);
+  assert.equal(memberWrite.status, 403);
+
+  database.prepare("UPDATE memberships SET role='owner' WHERE workspace_id='ws_default'").run();
+  const update = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', {
+    method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      displayName: 'Helixcer Operations', registeredName: 'Helixcer Private Limited',
+      addressLine1: '42 Market Road', addressLine2: 'Second Floor', city: 'Kochi', state: 'Kerala',
+      postalCode: '682001', country: 'India', gstin: '32abcde1234f1z5',
+      taxDetails: 'Registered under regular GST scheme.\nInvoices use the registered address.'
+    })
+  }), env);
+  assert.equal(update.status, 200);
+  const updated = await update.json();
+  assert.equal(updated.item.displayName, 'Helixcer Operations');
+  assert.equal(updated.item.registeredName, 'Helixcer Private Limited');
+  assert.equal(updated.item.gstin, '32ABCDE1234F1Z5');
+  assert.match(updated.item.taxDetails, /\nInvoices/);
+
+  const partial = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', {
+    method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ city: 'Ernakulam' })
+  }), env);
+  assert.equal(partial.status, 200);
+  const partialBody = await partial.json();
+  assert.equal(partialBody.item.city, 'Ernakulam');
+  assert.equal(partialBody.item.displayName, 'Helixcer Operations');
+  assert.equal(partialBody.item.gstin, '32ABCDE1234F1Z5');
+
+  const bootstrap = await handleRequest(new Request('https://api.chat.helixcer.com/api/bootstrap', { headers }), env);
+  assert.equal(bootstrap.status, 200);
+  assert.equal((await bootstrap.json()).workspace.registeredName, 'Helixcer Private Limited');
+  assert.equal(database.prepare("SELECT action FROM audit_log WHERE target_type='workspace'").get().action, 'update');
+
+  const invalidGstin = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', {
+    method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gstin: 'invalid' })
+  }), env);
+  assert.equal(invalidGstin.status, 400);
   database.close();
 });
 

@@ -276,18 +276,28 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return inboxHub(env, workspaceId).fetch('https://hub.internal/connect', { headers });
     }
     if (url.pathname === '/api/bootstrap' && request.method === 'GET') {
-      const [channels, conversations, contacts] = await Promise.all([
+      const [channels, conversations, contacts, workspace] = await Promise.all([
         listChannels(env, workspaceId, principal.membership.role !== 'agent'),
-        listConversations(env, workspaceId, url), listContacts(env, workspaceId, url)
+        listConversations(env, workspaceId, url), listContacts(env, workspaceId, url),
+        getWorkspaceProfile(env, workspaceId)
       ]);
       return withCors(json({
-        appName: env.APP_NAME || 'Helixcer Chat', channels, conversations, contacts, me: principalView(principal),
+        appName: env.APP_NAME || 'Helixcer Chat', channels, conversations, contacts, workspace, me: principalView(principal),
         connectorTypes: [
           { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: ['text'] },
           { value: 'telegram', label: 'Telegram Bot', capabilities: ['text'] },
           { value: 'instagram', label: 'Instagram Messaging', capabilities: ['text'] }
         ]
       }), cors);
+    }
+    if (url.pathname === '/api/workspace' && request.method === 'GET') {
+      return withCors(json({ item: await getWorkspaceProfile(env, workspaceId) }), cors);
+    }
+    if (url.pathname === '/api/workspace' && request.method === 'PATCH') {
+      requireRole(principal, 'admin');
+      const item = await updateWorkspaceProfile(env, workspaceId, await readJson(request), principal);
+      await broadcast(env, workspaceId, { type: 'workspace.updated', workspace: item });
+      return withCors(json({ ok: true, item }), cors);
     }
     if (url.pathname === '/api/channels' && request.method === 'GET') {
       requireRole(principal, 'admin');
@@ -1336,6 +1346,105 @@ function partitionInstagramAppPayload(payload) {
   }
   if (!groups.size) throw httpError(400, 'Instagram webhook could not be routed.');
   return groups;
+}
+
+async function getWorkspaceProfile(env, workspaceId) {
+  const row = await env.DB.prepare(`SELECT workspace_id,name,registered_name,address_line1,address_line2,
+      city,state,postal_code,country,gstin,tax_details
+    FROM workspaces WHERE workspace_id=?1 LIMIT 1`).bind(workspaceId).first();
+  if (!row) throw httpError(404, 'Workspace not found.');
+  return workspaceProfileView(row);
+}
+
+function workspaceProfileView(row) {
+  return {
+    workspaceId: String(row.workspace_id || ''),
+    displayName: String(row.name || ''),
+    registeredName: String(row.registered_name || ''),
+    addressLine1: String(row.address_line1 || ''),
+    addressLine2: String(row.address_line2 || ''),
+    city: String(row.city || ''),
+    state: String(row.state || ''),
+    postalCode: String(row.postal_code || ''),
+    country: String(row.country || ''),
+    gstin: String(row.gstin || ''),
+    taxDetails: String(row.tax_details || '')
+  };
+}
+
+async function updateWorkspaceProfile(env, workspaceId, payload, principal) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Workspace profile must be an object.');
+  const fields = [
+    ['displayName', 'Workspace display name', 120, false],
+    ['registeredName', 'Registered company name', 200, true],
+    ['addressLine1', 'Address line 1', 240, true],
+    ['addressLine2', 'Address line 2', 240, true],
+    ['city', 'City', 120, true],
+    ['state', 'State or region', 120, true],
+    ['postalCode', 'Postal code', 32, true],
+    ['country', 'Country', 120, true],
+    ['gstin', 'GSTIN', 15, true],
+    ['taxDetails', 'Tax details', 2000, true]
+  ];
+  rejectUnknownKeys(payload, new Set(fields.map(([key]) => key)), 'workspace profile');
+  if (!Object.keys(payload).length) throw httpError(400, 'At least one workspace field is required.');
+  const values = {};
+  for (const [key, label, maximum, optional] of fields) {
+    if (payload[key] === undefined) continue;
+    values[key] = optional
+      ? (key === 'taxDetails' ? cleanWorkspaceMultiline(payload[key], label, maximum) : cleanOptionalText(payload[key], label, maximum))
+      : cleanRequiredWorkspaceText(payload[key], label, maximum);
+  }
+  if (values.gstin) {
+    values.gstin = values.gstin.toUpperCase();
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(values.gstin)) {
+      throw httpError(400, 'GSTIN must be a valid 15-character Indian GST number.');
+    }
+  }
+  const present = key => Object.prototype.hasOwnProperty.call(values, key);
+  const now = new Date().toISOString();
+  const result = await env.DB.prepare(`UPDATE workspaces SET
+      name=CASE WHEN ?2=1 THEN ?3 ELSE name END,
+      registered_name=CASE WHEN ?4=1 THEN ?5 ELSE registered_name END,
+      address_line1=CASE WHEN ?6=1 THEN ?7 ELSE address_line1 END,
+      address_line2=CASE WHEN ?8=1 THEN ?9 ELSE address_line2 END,
+      city=CASE WHEN ?10=1 THEN ?11 ELSE city END,
+      state=CASE WHEN ?12=1 THEN ?13 ELSE state END,
+      postal_code=CASE WHEN ?14=1 THEN ?15 ELSE postal_code END,
+      country=CASE WHEN ?16=1 THEN ?17 ELSE country END,
+      gstin=CASE WHEN ?18=1 THEN ?19 ELSE gstin END,
+      tax_details=CASE WHEN ?20=1 THEN ?21 ELSE tax_details END,
+      updated_at=?22
+    WHERE workspace_id=?1`)
+    .bind(workspaceId,
+      present('displayName') ? 1 : 0, values.displayName || '',
+      present('registeredName') ? 1 : 0, values.registeredName || '',
+      present('addressLine1') ? 1 : 0, values.addressLine1 || '',
+      present('addressLine2') ? 1 : 0, values.addressLine2 || '',
+      present('city') ? 1 : 0, values.city || '',
+      present('state') ? 1 : 0, values.state || '',
+      present('postalCode') ? 1 : 0, values.postalCode || '',
+      present('country') ? 1 : 0, values.country || '',
+      present('gstin') ? 1 : 0, values.gstin || '',
+      present('taxDetails') ? 1 : 0, values.taxDetails || '', now).run();
+  if (!result.meta?.changes) throw httpError(404, 'Workspace not found.');
+  await audit(env, principal, 'update', 'workspace', workspaceId, { fields: Object.keys(values) });
+  return getWorkspaceProfile(env, workspaceId);
+}
+
+function cleanRequiredWorkspaceText(value, label, maximum) {
+  if (typeof value !== 'string') throw httpError(400, `${label} must be text.`);
+  const text = cleanRequired(value, label, maximum);
+  if (/[\u0000-\u001f\u007f]/.test(text)) throw httpError(400, `${label} contains invalid characters.`);
+  return text;
+}
+
+function cleanWorkspaceMultiline(value, label, maximum) {
+  if (typeof value !== 'string') throw httpError(400, `${label} must be text.`);
+  const text = value.replace(/\r\n?/g, '\n').trim();
+  if (text.length > maximum) throw httpError(400, `${label} is too long.`);
+  if (/[\u0000-\u0009\u000b-\u001f\u007f]/.test(text)) throw httpError(400, `${label} contains invalid characters.`);
+  return text;
 }
 
 async function listChannels(env, workspaceId, includeConfiguration = false) {
