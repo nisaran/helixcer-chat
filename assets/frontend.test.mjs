@@ -90,6 +90,49 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.doesNotMatch(`${html}\n${app}`, /WA_MAIN_(?:ACCESS_TOKEN|APP_SECRET|VERIFY_TOKEN|PHONE_NUMBER_ID)/);
 });
 
+test("Channel navigation nests configuration and the WhatsApp template library", () => {
+  const channelNav = html.match(/<div class="nav-group is-open" id="channelNavGroup"[\s\S]*?<\/div>\s*<button class="nav-button" type="button" data-route="developer"/)?.[0] || "";
+  assert.match(channelNav, /data-admin-only/);
+  assert.match(channelNav, />Channel<\/span>/);
+  assert.match(channelNav, /data-route="channels"[\s\S]*?>Channels<\/span>/);
+  assert.match(channelNav, />Channel Data<\/span>/);
+  assert.match(channelNav, /data-route="whatsapp-templates"[\s\S]*?>WhatsApp Templates<\/span>/);
+  assert.match(html, /id="whatsappTemplatesRoute" data-route-panel="whatsapp-templates"/);
+  assert.match(app, /"whatsapp-templates": "WhatsApp Templates"/);
+  assert.match(app, /\["channels", "whatsapp-templates", "developer", "team"\]/);
+  assert.match(styles, /\.nav-submenu/);
+});
+
+test("WhatsApp template library aggregates, previews, searches, and multi-filters every account", () => {
+  assert.match(app, /request\("\/api\/channel-data\/whatsapp-templates"\)/);
+  assert.match(app, /async function loadWhatsAppTemplateLibrary/);
+  assert.match(app, /state\.whatsappTemplateErrors = asItems\(data\?\.errors\)/);
+  assert.match(app, /state\.whatsappTemplateTruncatedChannels = asItems\(data\?\.truncatedChannels\)/);
+  assert.match(app, /state\.whatsappTemplateFilterOptions = data\?\.filterOptions/);
+  assert.match(html, /id="whatsappTemplateSearch"[^>]*type="search"/);
+  for (const type of ["channel", "category", "status", "language"]) {
+    assert.match(html, new RegExp(`data-template-filter="${type}"`));
+    assert.match(html, new RegExp(`data-template-filter-search="${type}"`));
+    assert.match(html, new RegExp(`data-template-filter-options="${type}"`));
+  }
+  assert.match(app, /input\.type = "checkbox"/);
+  assert.match(app, /state\.whatsappTemplateFilters\[type\]\.add\(event\.target\.value\)/);
+  assert.match(app, /templateLibrarySearchText\(template\)\.includes\(search\)/);
+  assert.match(app, /function renderWhatsAppTemplatePreview/);
+  assert.match(app, /templateLibraryComponent\(template, "HEADER"\)/);
+  assert.match(app, /Array\.isArray\(template\?\.variables\) && template\.variables\.length/);
+  assert.match(app, /templateLibraryComponent\(template, "BODY"\)/);
+  assert.match(app, /templateLibraryComponent\(template, "FOOTER"\)/);
+  assert.match(app, /templateLibraryButtons\(template\)/);
+  assert.match(app, /Templates from the remaining channels are shown/);
+  assert.match(app, /providerDisplayName && providerDisplayName\.toLocaleLowerCase\(\) !== label\.toLocaleLowerCase\(\)/);
+  assert.match(app, /closeTemplateFilterMenus\("", \{ restoreFocus: true \}\)/);
+  assert.match(styles, /\.template-library-grid\s*\{/);
+  assert.match(styles, /\.whatsapp-template-preview\s*\{/);
+  assert.match(styles, /\.template-filter-menu\s*\{/);
+  assert.match(styles, /\.template-filter:nth-child\(even\) \.template-filter-menu/);
+});
+
 test("channel secrets are masked, optional on edit, and never prefilled", () => {
   assert.match(html, /name="whatsappAccessToken" type="password"/);
   assert.match(html, /name="whatsappAppSecret" type="password"/);

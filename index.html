@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261026-7">
-  <script src="./assets/app.js?v=20261026-7" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261026-8">
+  <script src="./assets/app.js?v=20261026-8" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -69,12 +69,31 @@
           </span>
           <span>Contacts</span>
         </button>
-        <button class="nav-button" type="button" data-route="channels" data-admin-only>
-          <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8m12.8 0a9 9 0 0 0 0-12.8M8.5 8.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7"/></svg>
-          </span>
-          <span>Channels</span>
-        </button>
+        <div class="nav-group is-open" id="channelNavGroup" data-admin-only>
+          <button class="nav-button nav-group-toggle" id="channelNavToggle" type="button" data-action="toggle-channel-nav" aria-expanded="true" aria-controls="channelNavChildren">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8m12.8 0a9 9 0 0 0 0-12.8M8.5 8.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7"/></svg>
+            </span>
+            <span>Channel</span>
+            <svg class="nav-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+          </button>
+          <div class="nav-submenu" id="channelNavChildren">
+            <button class="nav-button nav-subitem" type="button" data-route="channels" data-admin-only>
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg></span>
+              <span>Channels</span>
+            </button>
+            <button class="nav-section-toggle" id="channelDataNavToggle" type="button" data-action="toggle-channel-data-nav" aria-expanded="true" aria-controls="channelDataNavChildren">
+              <span>Channel Data</span>
+              <svg class="nav-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+            </button>
+            <div class="nav-submenu nav-submenu-nested" id="channelDataNavChildren">
+              <button class="nav-button nav-subitem" type="button" data-route="whatsapp-templates">
+                <span class="nav-icon nav-provider-icon" aria-hidden="true"><img src="./assets/provider-whatsapp.svg" alt=""></span>
+                <span>WhatsApp Templates</span>
+              </button>
+            </div>
+          </div>
+        </div>
         <button class="nav-button" type="button" data-route="developer" data-admin-only>
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="m8 5-6 7 6 7m8-14 6 7-6 7M14 3l-4 18"/></svg>
@@ -321,6 +340,64 @@
         </div>
         <div class="stats-grid" id="channelStats"></div>
         <div class="channel-grid" id="channelGrid"></div>
+      </section>
+
+      <section class="route content-route template-library-route" id="whatsappTemplatesRoute" data-route-panel="whatsapp-templates" aria-labelledby="whatsappTemplatesTitle" hidden>
+        <div class="route-heading">
+          <div><p class="eyebrow">Channel data · WhatsApp</p><h2 id="whatsappTemplatesTitle">WhatsApp Templates</h2><p>Search and preview templates from every connected WhatsApp account.</p></div>
+          <button class="secondary-button" id="refreshWhatsAppTemplates" type="button" data-action="refresh-whatsapp-templates"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15"/></svg>Refresh</button>
+        </div>
+
+        <section class="surface template-library-surface" aria-label="WhatsApp template library">
+          <div class="template-library-toolbar">
+            <label class="template-library-search" for="whatsappTemplateSearch">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+              <span class="sr-only">Search templates</span>
+              <input id="whatsappTemplateSearch" type="search" autocomplete="off" placeholder="Search name, content, channel…">
+            </label>
+            <div class="template-filter-bar" aria-label="Template filters">
+              <div class="template-filter" data-template-filter="channel">
+                <button class="template-filter-trigger" type="button" data-action="toggle-template-filter" data-filter-type="channel" aria-expanded="false" aria-controls="templateChannelFilterMenu"><span>Channel</span><strong data-template-filter-count="channel" hidden>0</strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></button>
+                <div class="template-filter-menu" id="templateChannelFilterMenu" data-template-filter-menu="channel" hidden>
+                  <label class="template-filter-search"><span class="sr-only">Search channels</span><input type="search" autocomplete="off" placeholder="Search channels" data-template-filter-search="channel"></label>
+                  <div class="template-filter-options" data-template-filter-options="channel" role="group" aria-label="Channels"></div>
+                  <button class="template-filter-clear" type="button" data-action="clear-template-filter" data-filter-type="channel">Clear channel filter</button>
+                </div>
+              </div>
+              <div class="template-filter" data-template-filter="category">
+                <button class="template-filter-trigger" type="button" data-action="toggle-template-filter" data-filter-type="category" aria-expanded="false" aria-controls="templateCategoryFilterMenu"><span>Category</span><strong data-template-filter-count="category" hidden>0</strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></button>
+                <div class="template-filter-menu" id="templateCategoryFilterMenu" data-template-filter-menu="category" hidden>
+                  <label class="template-filter-search"><span class="sr-only">Search categories</span><input type="search" autocomplete="off" placeholder="Search categories" data-template-filter-search="category"></label>
+                  <div class="template-filter-options" data-template-filter-options="category" role="group" aria-label="Categories"></div>
+                  <button class="template-filter-clear" type="button" data-action="clear-template-filter" data-filter-type="category">Clear category filter</button>
+                </div>
+              </div>
+              <div class="template-filter" data-template-filter="status">
+                <button class="template-filter-trigger" type="button" data-action="toggle-template-filter" data-filter-type="status" aria-expanded="false" aria-controls="templateStatusFilterMenu"><span>Status</span><strong data-template-filter-count="status" hidden>0</strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></button>
+                <div class="template-filter-menu" id="templateStatusFilterMenu" data-template-filter-menu="status" hidden>
+                  <label class="template-filter-search"><span class="sr-only">Search statuses</span><input type="search" autocomplete="off" placeholder="Search statuses" data-template-filter-search="status"></label>
+                  <div class="template-filter-options" data-template-filter-options="status" role="group" aria-label="Statuses"></div>
+                  <button class="template-filter-clear" type="button" data-action="clear-template-filter" data-filter-type="status">Clear status filter</button>
+                </div>
+              </div>
+              <div class="template-filter" data-template-filter="language">
+                <button class="template-filter-trigger" type="button" data-action="toggle-template-filter" data-filter-type="language" aria-expanded="false" aria-controls="templateLanguageFilterMenu"><span>Language</span><strong data-template-filter-count="language" hidden>0</strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></button>
+                <div class="template-filter-menu" id="templateLanguageFilterMenu" data-template-filter-menu="language" hidden>
+                  <label class="template-filter-search"><span class="sr-only">Search languages</span><input type="search" autocomplete="off" placeholder="Search languages" data-template-filter-search="language"></label>
+                  <div class="template-filter-options" data-template-filter-options="language" role="group" aria-label="Languages"></div>
+                  <button class="template-filter-clear" type="button" data-action="clear-template-filter" data-filter-type="language">Clear language filter</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="template-library-active-row">
+            <div class="template-active-filters" id="whatsappTemplateActiveFilters" aria-label="Active template filters"></div>
+            <button class="template-clear-all" id="clearWhatsAppTemplateFilters" type="button" data-action="clear-all-template-filters" hidden>Clear all</button>
+            <span class="template-result-count" id="whatsappTemplateResultCount" role="status">Loading templates…</span>
+          </div>
+          <div class="template-library-notice" id="whatsappTemplateLibraryNotice" role="status" hidden></div>
+          <div class="template-library-grid" id="whatsappTemplateGrid" aria-live="polite"></div>
+        </section>
       </section>
 
       <section class="route content-route" id="developerRoute" data-route-panel="developer" aria-labelledby="developerApiTitle" hidden>

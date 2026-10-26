@@ -18,7 +18,7 @@ import {
   sendWorkspacePush
 } from './push.js';
 
-const API_VERSION = '2026-10-26-channel-contract';
+const API_VERSION = '2026-10-26-template-library';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
@@ -289,6 +289,10 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (url.pathname === '/api/channels' && request.method === 'GET') {
       requireRole(principal, 'admin');
       return withCors(json({ items: await listChannels(env, workspaceId, true) }), cors);
+    }
+    if (url.pathname === '/api/channel-data/whatsapp-templates' && request.method === 'GET') {
+      requireRole(principal, 'admin');
+      return withCors(json(await listWorkspaceWhatsAppTemplates(env, workspaceId)), cors);
     }
     if (url.pathname === '/api/channels' && request.method === 'POST') {
       requireRole(principal, 'admin');
@@ -2261,53 +2265,144 @@ async function listConversationTemplates(env, workspaceId, conversationId) {
     throw httpError(409, 'Templates are available only for WhatsApp conversations.');
   }
   if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
-  const wabaId = String(target.channel.config?.wabaId || '').trim();
+  return listWhatsAppChannelTemplates(env, target.channel, { approvedOnly: true });
+}
+
+async function listWorkspaceWhatsAppTemplates(env, workspaceId) {
+  const result = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled,config_json,secret_key,workspace_id
+    FROM channels WHERE workspace_id=?1 ORDER BY name COLLATE NOCASE,channel_id`)
+    .bind(workspaceId).all();
+  const channels = (result.results || []).filter(row => logicalConnectorType(row) === 'whatsapp_cloud').map(row => {
+    const config = safeJsonParse(row.config_json, {});
+    return {
+      channelId: row.channel_id,
+      channelName: row.name,
+      channelEnabled: Boolean(row.enabled),
+      providerDisplayName: providerText(config.verifiedName || config.verifiedPhoneNumber, 160),
+      connectorType: 'whatsapp_cloud',
+      config,
+      secretKey: row.secret_key,
+      workspaceId: row.workspace_id
+    };
+  });
+  const items = [];
+  const errors = [];
+  const truncatedChannels = [];
+  const channelResults = await Promise.all(channels.map(async channel => {
+    try {
+      return { channel, templateResult: await listWhatsAppChannelTemplates(env, channel, { approvedOnly: false, includeMetadata: true }) };
+    } catch (error) {
+      return { channel, error };
+    }
+  }));
+  for (const result of channelResults) {
+    const { channel } = result;
+    if (result.error) {
+      errors.push({
+        channelId: channel.channelId,
+        channelName: channel.channelName,
+        channelEnabled: channel.channelEnabled,
+        error: cleanError(result.error)
+      });
+      continue;
+    }
+    if (result.templateResult.truncated) {
+      truncatedChannels.push({
+        channelId: channel.channelId,
+        channelName: channel.channelName,
+        channelEnabled: channel.channelEnabled,
+        limit: result.templateResult.limit
+      });
+    }
+    for (const template of result.templateResult.items) {
+      items.push({
+        ...template,
+        channelId: channel.channelId,
+        channelName: channel.channelName,
+        channelEnabled: channel.channelEnabled,
+        providerDisplayName: channel.providerDisplayName
+      });
+    }
+  }
+  items.sort((left, right) => left.name.localeCompare(right.name) ||
+    left.language.code.localeCompare(right.language.code) ||
+    left.channelName.localeCompare(right.channelName));
+  const uniqueOptions = values => [...new Set(values.filter(Boolean))].sort((left, right) => left.localeCompare(right));
+  return {
+    items,
+    errors,
+    truncatedChannels,
+    filterOptions: {
+      channels: channels.map(channel => ({
+        value: channel.channelId,
+        label: channel.channelName,
+        channelEnabled: channel.channelEnabled,
+        providerDisplayName: channel.providerDisplayName
+      })),
+      categories: uniqueOptions(items.map(item => item.category)),
+      statuses: uniqueOptions(items.map(item => item.status)),
+      languages: uniqueOptions(items.map(item => item.language.code))
+    }
+  };
+}
+
+async function listWhatsAppChannelTemplates(env, channel, { approvedOnly = true, includeMetadata = false } = {}) {
+  const templateLabel = approvedOnly ? 'approved WhatsApp templates' : 'WhatsApp templates';
+  const wabaId = String(channel.config?.wabaId || '').trim();
   if (!/^\d{5,40}$/.test(wabaId)) throw httpError(409, 'The WhatsApp Business Account ID is not configured.');
-  const credentials = await readChannelCredentials(env, target.channel);
+  const credentials = await readChannelCredentials(env, channel);
   if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
-  const version = metaApiVersion(target.channel.config?.apiVersion);
+  const version = metaApiVersion(channel.config?.apiVersion);
   const items = [];
   const seen = new Set();
+  const maximumPages = approvedOnly ? 3 : 10;
+  const maximumItems = maximumPages * 100;
   let after = '';
-  for (let page = 0; page < 3 && items.length < 300; page++) {
+  let moreAvailable = false;
+  for (let page = 0; page < maximumPages && items.length < maximumItems; page++) {
     const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/message_templates`);
     endpoint.searchParams.set('fields', 'id,name,language,status,category,components');
-    endpoint.searchParams.set('status', 'APPROVED');
+    if (approvedOnly) endpoint.searchParams.set('status', 'APPROVED');
     endpoint.searchParams.set('limit', '100');
     if (after) endpoint.searchParams.set('after', after);
     let response;
     try {
       response = await fetch(endpoint, { headers: { Authorization: `Bearer ${credentials.accessToken}` } });
     } catch {
-      throw httpError(502, 'Meta could not load approved WhatsApp templates.');
+      throw httpError(502, `Meta could not load ${templateLabel}.`);
     }
     const data = safeJsonParse(await response.text(), {});
     if (!response.ok) {
       const detail = redactProviderSecret(providerError(data, response.status), credentials.accessToken);
-      throw httpError(422, `Meta could not load approved WhatsApp templates: ${detail}`);
+      throw httpError(422, `Meta could not load ${templateLabel}: ${detail}`);
     }
     if (!Array.isArray(data.data)) {
       throw httpError(502, 'Meta returned an invalid WhatsApp template response.');
     }
+    let discardedCurrentPage = false;
     for (const value of data.data) {
+      if (items.length >= maximumItems) {
+        discardedCurrentPage = true;
+        break;
+      }
       const template = sanitizeWhatsAppTemplateDefinition(value);
-      if (!template || template.status !== 'APPROVED') continue;
+      if (!template || (approvedOnly && template.status !== 'APPROVED')) continue;
       const key = `${template.name}\n${template.language.code}`;
       if (seen.has(key)) continue;
       seen.add(key);
       items.push(template);
-      if (items.length >= 300) break;
     }
     const next = typeof data.paging?.cursors?.after === 'string'
       ? data.paging.cursors.after.trim().slice(0, 1024)
       : '';
     const hasNext = (typeof data.paging?.next === 'string' && Boolean(data.paging.next.trim())) || data.data.length === 100;
-    if (!hasNext || !next || next === after) break;
+    moreAvailable = discardedCurrentPage || (hasNext && Boolean(next) && next !== after);
+    if (!moreAvailable) break;
     after = next;
   }
   items.sort((left, right) => left.name.localeCompare(right.name) ||
     left.language.code.localeCompare(right.language.code));
-  return items;
+  return includeMetadata ? { items, truncated: moreAvailable, limit: maximumItems } : items;
 }
 
 export function sanitizeWhatsAppTemplateDefinition(value) {

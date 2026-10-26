@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-7";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-8";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -20,6 +20,17 @@
     messages: new Map(),
     templatesByConversation: new Map(),
     templateConversationId: null,
+    whatsappTemplates: [],
+    whatsappTemplateErrors: [],
+    whatsappTemplateTruncatedChannels: [],
+    whatsappTemplateFilterOptions: {},
+    whatsappTemplatesLoaded: false,
+    whatsappTemplatesLoading: false,
+    whatsappTemplatesError: "",
+    whatsappTemplateSearch: "",
+    whatsappTemplateFilters: {
+      channel: new Set(), category: new Set(), status: new Set(), language: new Set(),
+    },
     pendingConversationId: null,
     unreadMarker: null,
     recentVerifyTokens: new Map(),
@@ -122,6 +133,7 @@
       ],
       channels: [
         { channelId: "wa-sales", name: "Sales WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", config: { wabaId: "123456789012345", phoneNumberId: "123456789012346" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(120), webhookVerifiedAt: ago(118), lastWebhookAt: ago(3), verifiedName: "Helixcer Sales", verifiedPhoneNumber: "+91 98765 43210" } },
+        { channelId: "wa-service", name: "Service WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", config: { wabaId: "123456789012347", phoneNumberId: "123456789012348" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(95), webhookVerifiedAt: ago(94), lastWebhookAt: ago(11), verifiedName: "Helixcer Service", verifiedPhoneNumber: "+91 91234 56780" } },
         { channelId: "telegram-support", name: "Support Bot", connectorType: "telegram", enabled: true, health: "connected", config: {}, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(160), webhookVerifiedAt: ago(158), lastWebhookAt: ago(18), verifiedName: "helixcer_support_bot" } },
         { channelId: "instagram-main", name: "Helixcer Instagram", connectorType: "instagram", enabled: true, health: "connected", config: { instagramAccountId: "17841400000000000", appId: "123456789012345", username: "helixcer", authMode: "instagram_login" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(200), webhookVerifiedAt: ago(198), lastWebhookAt: ago(57), verifiedName: "helixcer" } },
       ],
@@ -309,6 +321,43 @@
           { type: "BODY", text: "Welcome {{1}}. We are happy to help." },
         ] },
       ]) };
+    }
+
+    async getWhatsAppTemplates() {
+      await smallDelay(180);
+      const items = [
+        { channelId: "wa-sales", channelName: "Sales WhatsApp", providerDisplayName: "Helixcer Sales", templateId: "demo-order", name: "order_confirmation", language: { code: "en_US" }, status: "APPROVED", category: "UTILITY", components: [
+          { type: "HEADER", format: "IMAGE" },
+          { type: "BODY", text: "Hi {{customer_name}}, your order {{2}} is confirmed and will be prepared shortly." },
+          { type: "FOOTER", text: "Thank you for shopping with Helixcer." },
+          { type: "BUTTONS", buttons: [{ type: "URL", text: "View order", url: "https://example.com/orders/{{1}}" }] },
+        ] },
+        { channelId: "wa-sales", channelName: "Sales WhatsApp", providerDisplayName: "Helixcer Sales", templateId: "demo-welcome", name: "welcome_message", language: { code: "en_US" }, status: "APPROVED", category: "MARKETING", components: [
+          { type: "BODY", text: "Welcome {{1}}. Explore our latest collection and let us know if you need any help." },
+          { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Show products" }, { type: "QUICK_REPLY", text: "Talk to support" }] },
+        ] },
+        { channelId: "wa-sales", channelName: "Sales WhatsApp", providerDisplayName: "Helixcer Sales", templateId: "demo-login", name: "login_code", language: { code: "en" }, status: "APPROVED", category: "AUTHENTICATION", components: [
+          { type: "BODY", text: "{{1}} is your verification code. For your security, do not share this code." },
+          { type: "FOOTER", text: "This code expires in 10 minutes." },
+          { type: "BUTTONS", buttons: [{ type: "OTP", text: "Copy code" }] },
+        ] },
+        { channelId: "wa-service", channelName: "Service WhatsApp", providerDisplayName: "Helixcer Service", templateId: "demo-delivery", name: "delivery_update", language: { code: "en_GB" }, status: "PENDING", category: "UTILITY", components: [
+          { type: "HEADER", format: "TEXT", text: "Delivery update" },
+          { type: "BODY", text: "Hello {{1}}, shipment {{2}} is now {{3}}. Track it using the button below." },
+          { type: "BUTTONS", buttons: [{ type: "URL", text: "Track shipment", url: "https://example.com/track/{{1}}" }] },
+        ] },
+        { channelId: "wa-service", channelName: "Service WhatsApp", providerDisplayName: "Helixcer Service", templateId: "demo-feedback", name: "service_feedback", language: { code: "ml" }, status: "PAUSED", category: "MARKETING", components: [
+          { type: "BODY", text: "Thank you for contacting us. Please rate your support experience." },
+          { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Excellent" }, { type: "QUICK_REPLY", text: "Needs improvement" }] },
+        ] },
+      ];
+      return {
+        items: clone(items), errors: [], truncatedChannels: [],
+        filterOptions: {
+          channels: [{ value: "wa-sales", label: "Sales WhatsApp" }, { value: "wa-service", label: "Service WhatsApp" }],
+          categories: ["AUTHENTICATION", "MARKETING", "UTILITY"], statuses: ["APPROVED", "PAUSED", "PENDING"], languages: ["en", "en_GB", "en_US", "ml"],
+        },
+      };
     }
 
     async sendAttachment(conversationId, formData) {
@@ -540,6 +589,12 @@
       return this.isDemo
         ? this.demo.getTemplates(conversationId)
         : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/templates`);
+    }
+
+    getWhatsAppTemplates() {
+      return this.isDemo
+        ? this.demo.getWhatsAppTemplates()
+        : this.request("/api/channel-data/whatsapp-templates");
     }
 
     sendAttachment(conversationId, formData) {
@@ -816,7 +871,7 @@
     const admin = canAdmin();
     document.querySelectorAll("[data-admin-only]").forEach((node) => { node.hidden = !admin; });
     document.querySelectorAll("[data-owner-only]").forEach((node) => { node.hidden = !isOwner(); node.disabled = !isOwner(); });
-    if (!admin && ["channels", "developer", "team"].includes(state.route)) setRoute("inbox");
+    if (!admin && ["channels", "whatsapp-templates", "developer", "team"].includes(state.route)) setRoute("inbox");
   }
 
   async function initializeSession() {
@@ -1657,6 +1712,314 @@
     return card;
   }
 
+  function normalizeWhatsAppTemplate(raw, index) {
+    const channelId = String(raw?.channelId || "").trim();
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    const languageCode = String(raw?.language?.code || raw?.language || "Unknown").trim() || "Unknown";
+    return {
+      ...raw,
+      channelId,
+      channelName: String(raw?.channelName || channel?.name || "WhatsApp channel").trim(),
+      channelEnabled: raw?.channelEnabled !== false,
+      providerDisplayName: String(raw?.providerDisplayName || channel?.setup?.verifiedName || "").trim(),
+      templateId: String(raw?.templateId || raw?.id || `${channelId || "channel"}-${index}`).trim(),
+      name: String(raw?.name || "Untitled template").trim(),
+      languageCode,
+      category: String(raw?.category || "UNCATEGORIZED").trim().toUpperCase(),
+      status: String(raw?.status || "UNKNOWN").trim().toUpperCase(),
+      components: asItems(raw?.components),
+      variables: asItems(raw?.variables),
+    };
+  }
+
+  function templateLibraryComponent(template, type) {
+    return template.components.find((component) => String(component?.type || "").toUpperCase() === type) || null;
+  }
+
+  function templateLibraryButtons(template) {
+    return asItems(templateLibraryComponent(template, "BUTTONS")?.buttons);
+  }
+
+  function templateLibrarySearchText(template) {
+    const componentText = template.components.flatMap((component) => [
+      component?.text,
+      component?.format,
+      ...asItems(component?.buttons).flatMap((button) => [button?.text, button?.type, button?.url]),
+    ]);
+    return [template.name, template.templateId, template.channelName, template.providerDisplayName,
+      template.category, template.status, template.languageCode, ...componentText]
+      .filter(Boolean).join(" ").toLocaleLowerCase();
+  }
+
+  function templateFilterValue(template, type) {
+    if (type === "channel") return template.channelId;
+    if (type === "language") return template.languageCode;
+    return String(template[type] || "");
+  }
+
+  function templateFilterLabel(type, value) {
+    if (type === "channel") {
+      const template = state.whatsappTemplates.find((item) => item.channelId === value);
+      const configured = asItems(state.whatsappTemplateFilterOptions?.channels)
+        .find((item) => String(item?.value || item?.channelId || item) === value);
+      const label = String(configured?.label || configured?.channelName || template?.channelName || value);
+      const providerDisplayName = String(configured?.providerDisplayName || template?.providerDisplayName || "").trim();
+      return providerDisplayName && providerDisplayName.toLocaleLowerCase() !== label.toLocaleLowerCase()
+        ? `${label} · ${providerDisplayName}`
+        : label;
+    }
+    return type === "language" ? value : value.replaceAll("_", " ").toLocaleLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function configuredTemplateFilterValues(type) {
+    const key = { channel: "channels", category: "categories", status: "statuses", language: "languages" }[type];
+    return asItems(state.whatsappTemplateFilterOptions?.[key]).map((item) => String(item?.value || item?.channelId || item || "").trim()).filter(Boolean);
+  }
+
+  function availableTemplateFilterValues(type) {
+    return [...new Set([
+      ...configuredTemplateFilterValues(type),
+      ...state.whatsappTemplates.map((template) => templateFilterValue(template, type)).filter(Boolean),
+      ...state.whatsappTemplateFilters[type],
+    ])].sort((left, right) => templateFilterLabel(type, left).localeCompare(templateFilterLabel(type, right)));
+  }
+
+  function filteredWhatsAppTemplates() {
+    const search = state.whatsappTemplateSearch.trim().toLocaleLowerCase();
+    return state.whatsappTemplates.filter((template) => {
+      if (search && !templateLibrarySearchText(template).includes(search)) return false;
+      return Object.entries(state.whatsappTemplateFilters).every(([type, selected]) =>
+        !selected.size || selected.has(templateFilterValue(template, type)));
+    });
+  }
+
+  function closeTemplateFilterMenus(exceptType = "", { restoreFocus = false } = {}) {
+    let focusTarget = null;
+    document.querySelectorAll("[data-template-filter-menu]").forEach((menu) => {
+      if (exceptType && menu.dataset.templateFilterMenu === exceptType) return;
+      const wasOpen = !menu.hidden;
+      menu.hidden = true;
+      const trigger = document.querySelector(`[data-action="toggle-template-filter"][data-filter-type="${menu.dataset.templateFilterMenu}"]`);
+      trigger?.setAttribute("aria-expanded", "false");
+      if (restoreFocus && wasOpen && (menu.contains(document.activeElement) || trigger === document.activeElement)) focusTarget = trigger;
+    });
+    focusTarget?.focus();
+  }
+
+  function toggleTemplateFilterMenu(type) {
+    const menu = document.querySelector(`[data-template-filter-menu="${CSS.escape(type)}"]`);
+    const trigger = document.querySelector(`[data-action="toggle-template-filter"][data-filter-type="${CSS.escape(type)}"]`);
+    if (!menu || !trigger) return;
+    const opening = menu.hidden;
+    closeTemplateFilterMenus(type);
+    menu.hidden = !opening;
+    trigger.setAttribute("aria-expanded", String(opening));
+    if (opening) {
+      const search = menu.querySelector("[data-template-filter-search]");
+      renderTemplateFilterOptions(type, search?.value || "");
+      requestAnimationFrame(() => search?.focus());
+    }
+  }
+
+  function renderTemplateFilterOptions(type, query = "") {
+    const host = document.querySelector(`[data-template-filter-options="${CSS.escape(type)}"]`);
+    if (!host) return;
+    host.replaceChildren();
+    const needle = query.trim().toLocaleLowerCase();
+    const values = availableTemplateFilterValues(type).filter((value) => templateFilterLabel(type, value).toLocaleLowerCase().includes(needle));
+    if (!values.length) {
+      host.append(element("p", "template-filter-empty", "No matching options"));
+      return;
+    }
+    values.forEach((value) => {
+      const label = element("label", "template-filter-option");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = state.whatsappTemplateFilters[type].has(value);
+      input.dataset.templateFilterOption = type;
+      input.value = value;
+      label.append(input, element("span", "", templateFilterLabel(type, value)));
+      const count = state.whatsappTemplates.filter((template) => templateFilterValue(template, type) === value).length;
+      label.append(element("small", "", String(count)));
+      host.append(label);
+    });
+  }
+
+  function updateTemplateFilterControls() {
+    const chipHost = $("whatsappTemplateActiveFilters");
+    chipHost.replaceChildren();
+    let total = 0;
+    Object.entries(state.whatsappTemplateFilters).forEach(([type, selected]) => {
+      const counter = document.querySelector(`[data-template-filter-count="${type}"]`);
+      if (counter) {
+        counter.textContent = String(selected.size);
+        counter.hidden = selected.size === 0;
+      }
+      selected.forEach((value) => {
+        total += 1;
+        const chip = element("button", "template-filter-chip", `${type === "channel" ? "Channel" : capitalize(type)}: ${templateFilterLabel(type, value)}`);
+        chip.type = "button";
+        chip.dataset.action = "remove-template-filter";
+        chip.dataset.filterType = type;
+        chip.dataset.filterValue = value;
+        chip.setAttribute("aria-label", `Remove ${templateFilterLabel(type, value)} ${type} filter`);
+        chip.append(element("span", "", "×"));
+        chipHost.append(chip);
+      });
+    });
+    $("clearWhatsAppTemplateFilters").hidden = total === 0 && !state.whatsappTemplateSearch;
+  }
+
+  function renderWhatsAppTemplatePreview(template) {
+    const preview = element("div", "whatsapp-template-preview");
+    const header = templateLibraryComponent(template, "HEADER");
+    if (header) {
+      const format = String(header.format || "TEXT").toUpperCase();
+      if (format === "TEXT" && header.text) preview.append(element("strong", "template-preview-header", header.text));
+      else {
+        const media = element("div", "template-preview-media");
+        media.append(element("span", "", format === "VIDEO" ? "▶" : format === "DOCUMENT" ? "▤" : "▧"), element("small", "", `${capitalize(format.toLocaleLowerCase())} header`));
+        preview.append(media);
+      }
+    }
+    const bodyText = String(templateLibraryComponent(template, "BODY")?.text || "No body text provided.");
+    preview.append(element("p", "template-preview-body", bodyText));
+    const footerText = String(templateLibraryComponent(template, "FOOTER")?.text || "").trim();
+    if (footerText) preview.append(element("small", "template-preview-footer", footerText));
+    const buttons = templateLibraryButtons(template);
+    if (buttons.length) {
+      const buttonHost = element("div", "template-preview-buttons");
+      buttons.forEach((button) => buttonHost.append(element("span", "", String(button?.text || button?.type || "Action"))));
+      preview.append(buttonHost);
+    }
+    return preview;
+  }
+
+  function renderWhatsAppTemplateCard(template) {
+    const card = element("article", `whatsapp-template-card${template.channelEnabled ? "" : " is-channel-disabled"}`);
+    const head = element("div", "whatsapp-template-card-head");
+    const identity = element("div", "template-channel-identity");
+    const logo = document.createElement("img");
+    logo.src = providerLogoPaths.whatsapp_cloud;
+    logo.alt = "";
+    identity.append(logo);
+    const channelCopy = document.createElement("div");
+    const providerLine = [template.providerDisplayName || "WhatsApp account", template.channelEnabled ? "" : "Channel disabled"].filter(Boolean).join(" · ");
+    channelCopy.append(element("strong", "", template.channelName), element("span", "", providerLine));
+    identity.append(channelCopy);
+    const statusClass = template.status.toLocaleLowerCase().replace(/[^a-z0-9-]/g, "-");
+    head.append(identity, element("span", `template-status-badge is-${statusClass}`, template.status));
+    const title = element("div", "whatsapp-template-title");
+    title.append(element("h3", "", template.name), element("code", "", template.languageCode));
+    const meta = element("div", "whatsapp-template-meta");
+    meta.append(element("span", "", template.category), element("span", "", `${template.variables.length || templateVariableDescriptors(template).length} variable${(template.variables.length || templateVariableDescriptors(template).length) === 1 ? "" : "s"}`));
+    card.append(head, title, meta, renderWhatsAppTemplatePreview(template));
+    return card;
+  }
+
+  function renderWhatsAppTemplateResults() {
+    const host = $("whatsappTemplateGrid");
+    host.replaceChildren();
+    updateTemplateFilterControls();
+    if (state.whatsappTemplatesLoading) {
+      $("whatsappTemplateResultCount").textContent = "Loading templates…";
+      for (let index = 0; index < 6; index += 1) host.append(element("div", "whatsapp-template-card template-library-skeleton"));
+      return;
+    }
+    if (state.whatsappTemplatesError) {
+      $("whatsappTemplateResultCount").textContent = "Templates unavailable";
+      const empty = element("div", "template-library-empty");
+      empty.append(element("strong", "", "Templates could not be loaded"), element("span", "", state.whatsappTemplatesError));
+      const retry = element("button", "secondary-button", "Try again");
+      retry.type = "button";
+      retry.dataset.action = "refresh-whatsapp-templates";
+      empty.append(retry);
+      host.append(empty);
+      return;
+    }
+    const templates = filteredWhatsAppTemplates();
+    const totalChannels = new Set(templates.map((template) => template.channelId)).size;
+    $("whatsappTemplateResultCount").textContent = `${templates.length} of ${state.whatsappTemplates.length} template${state.whatsappTemplates.length === 1 ? "" : "s"}${templates.length ? ` · ${totalChannels} channel${totalChannels === 1 ? "" : "s"}` : ""}`;
+    if (!templates.length) {
+      const empty = element("div", "template-library-empty");
+      const hasTemplates = state.whatsappTemplates.length > 0;
+      empty.append(
+        element("strong", "", hasTemplates ? "No templates match these filters" : "No WhatsApp templates found"),
+        element("span", "", hasTemplates ? "Try a different search or clear one of the selected filters." : "Connect a WhatsApp account with templates, then refresh this page.")
+      );
+      if (hasTemplates) {
+        const clear = element("button", "secondary-button", "Clear filters");
+        clear.type = "button";
+        clear.dataset.action = "clear-all-template-filters";
+        empty.append(clear);
+      }
+      host.append(empty);
+      return;
+    }
+    templates.forEach((template) => host.append(renderWhatsAppTemplateCard(template)));
+  }
+
+  function renderWhatsAppTemplateLibrary() {
+    ["channel", "category", "status", "language"].forEach((type) => {
+      const search = document.querySelector(`[data-template-filter-search="${type}"]`);
+      renderTemplateFilterOptions(type, search?.value || "");
+    });
+    const notice = $("whatsappTemplateLibraryNotice");
+    const notices = [];
+    if (state.whatsappTemplateErrors.length) {
+      const channelNames = state.whatsappTemplateErrors.map((item) => item.channelName || "a WhatsApp channel");
+      notices.push(`${state.whatsappTemplateErrors.length} channel${state.whatsappTemplateErrors.length === 1 ? "" : "s"} could not be refreshed: ${channelNames.join(", ")}. Templates from the remaining channels are shown.`);
+    }
+    if (state.whatsappTemplateTruncatedChannels.length) {
+      const channelNames = state.whatsappTemplateTruncatedChannels.map((item) => item.channelName || "a WhatsApp channel");
+      const limit = Math.max(...state.whatsappTemplateTruncatedChannels.map((item) => Number(item.limit) || 1000));
+      notices.push(`Meta returned more than ${limit.toLocaleString()} templates for ${channelNames.join(", ")}. The first ${limit.toLocaleString()} per channel are shown.`);
+    }
+    if (notices.length) {
+      notice.textContent = notices.join(" ");
+      notice.classList.add("is-warning");
+      notice.hidden = false;
+    } else {
+      notice.hidden = true;
+      notice.classList.remove("is-warning");
+    }
+    $("refreshWhatsAppTemplates").disabled = state.whatsappTemplatesLoading;
+    renderWhatsAppTemplateResults();
+  }
+
+  async function loadWhatsAppTemplateLibrary({ refresh = false } = {}) {
+    if (state.whatsappTemplatesLoading || (state.whatsappTemplatesLoaded && !refresh)) {
+      renderWhatsAppTemplateLibrary();
+      return;
+    }
+    state.whatsappTemplatesLoading = true;
+    state.whatsappTemplatesError = "";
+    state.whatsappTemplateErrors = [];
+    state.whatsappTemplateTruncatedChannels = [];
+    renderWhatsAppTemplateLibrary();
+    try {
+      const data = await state.api.getWhatsAppTemplates();
+      state.whatsappTemplates = asItems(data).map(normalizeWhatsAppTemplate);
+      state.whatsappTemplateErrors = asItems(data?.errors);
+      state.whatsappTemplateTruncatedChannels = asItems(data?.truncatedChannels);
+      state.whatsappTemplateFilterOptions = data?.filterOptions && typeof data.filterOptions === "object" ? data.filterOptions : {};
+      state.whatsappTemplatesLoaded = true;
+    } catch (error) {
+      state.whatsappTemplatesError = error.message || "Unable to reach the template service.";
+    } finally {
+      state.whatsappTemplatesLoading = false;
+      renderWhatsAppTemplateLibrary();
+    }
+  }
+
+  function clearWhatsAppTemplateFilters() {
+    Object.values(state.whatsappTemplateFilters).forEach((selected) => selected.clear());
+    state.whatsappTemplateSearch = "";
+    $("whatsappTemplateSearch").value = "";
+    document.querySelectorAll("[data-template-filter-search]").forEach((input) => { input.value = ""; });
+    renderWhatsAppTemplateLibrary();
+  }
+
   function channelHealthView(channel) {
     const states = {
       setup_required: { label: "Setup required", className: "is-warning", summary: "Add the required provider IDs and credentials." },
@@ -2126,7 +2489,7 @@
   }
 
   function templateVariableDescriptors(template) {
-    if (Array.isArray(template?.variables)) {
+    if (Array.isArray(template?.variables) && template.variables.length) {
       return template.variables.map((variable, index) => {
         const componentType = String(variable.component || "body").toLowerCase();
         const sourceKind = String(variable.kind || "text").toLowerCase();
@@ -2595,7 +2958,11 @@
       }
       return;
     }
-    if (["channel.updated", "channel.deleted", "bootstrap.changed"].includes(type)) loadAll();
+    if (["channel.updated", "channel.deleted", "bootstrap.changed"].includes(type)) {
+      state.whatsappTemplatesLoaded = false;
+      await loadAll();
+      if (state.route === "whatsapp-templates") await loadWhatsAppTemplateLibrary({ refresh: true });
+    }
   }
 
   function isIosDevice() {
@@ -2936,7 +3303,7 @@
     const raw = String(value || "").replace(/^#/, "");
     const separator = raw.indexOf("/");
     const requestedRoute = separator >= 0 ? raw.slice(0, separator) : raw;
-    const allowedRoutes = ["inbox", "contacts", "channels", "developer", "team", "settings"];
+    const allowedRoutes = ["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "settings"];
     const route = allowedRoutes.includes(requestedRoute) ? requestedRoute : "inbox";
     if (route !== "inbox" || separator < 0) return { route, conversationId: "" };
     let conversationId = "";
@@ -2975,8 +3342,8 @@
   }
 
   function setRoute(route, { preserveLocation = false } = {}) {
-    if (!["inbox", "contacts", "channels", "developer", "team", "settings"].includes(route)) route = "inbox";
-    if (!canAdmin() && ["channels", "developer", "team"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "settings"].includes(route)) route = "inbox";
+    if (!canAdmin() && ["channels", "whatsapp-templates", "developer", "team"].includes(route)) route = "inbox";
     if (!preserveLocation) {
       state.pendingConversationId = null;
       if (route === "inbox") clearSelectedConversation({ updateUrl: false });
@@ -2993,11 +3360,33 @@
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     });
-    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", developer: "Developer API", team: "Team", settings: "Settings" };
+    const channelSectionActive = ["channels", "whatsapp-templates"].includes(route);
+    $("channelNavToggle").classList.toggle("is-active", channelSectionActive);
+    if (channelSectionActive) {
+      $("channelNavToggle").setAttribute("aria-expanded", "true");
+      $("channelNavChildren").hidden = false;
+      $("channelNavGroup").classList.add("is-open");
+    }
+    if (route === "whatsapp-templates") {
+      $("channelDataNavToggle").setAttribute("aria-expanded", "true");
+      $("channelDataNavChildren").hidden = false;
+    }
+    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", "whatsapp-templates": "WhatsApp Templates", developer: "Developer API", team: "Team", settings: "Settings" };
     $("pageTitle").textContent = labels[route];
     if (route === "settings") renderNotificationSetting();
+    if (route === "whatsapp-templates") loadWhatsAppTemplateLibrary().catch(() => {});
     if (!preserveLocation) replaceAppHash(`#${route}`);
     closeMobileMenu();
+  }
+
+  function toggleSidebarNavigation(toggleId, childrenId, groupId = "") {
+    const toggle = $(toggleId);
+    const children = $(childrenId);
+    const opening = children.hidden;
+    children.hidden = !opening;
+    toggle.setAttribute("aria-expanded", String(opening));
+    if (groupId) $(groupId).classList.toggle("is-open", opening);
+    if (opening) children.querySelector("[data-route]")?.focus();
   }
 
   function toggleDetails() {
@@ -3508,10 +3897,41 @@
 
   function bindEvents() {
     document.addEventListener("click", (event) => {
+      if (!event.target.closest(".template-filter")) closeTemplateFilterMenus();
       const routeButton = event.target.closest("[data-route]");
       if (routeButton) { setRoute(routeButton.dataset.route); return; }
       const actionButton = event.target.closest("[data-action]");
       if (actionButton) {
+        if (actionButton.dataset.action === "toggle-channel-nav") {
+          toggleSidebarNavigation("channelNavToggle", "channelNavChildren", "channelNavGroup");
+          return;
+        }
+        if (actionButton.dataset.action === "toggle-channel-data-nav") {
+          toggleSidebarNavigation("channelDataNavToggle", "channelDataNavChildren");
+          return;
+        }
+        if (actionButton.dataset.action === "toggle-template-filter") {
+          toggleTemplateFilterMenu(actionButton.dataset.filterType);
+          return;
+        }
+        if (actionButton.dataset.action === "clear-template-filter") {
+          state.whatsappTemplateFilters[actionButton.dataset.filterType]?.clear();
+          renderWhatsAppTemplateLibrary();
+          return;
+        }
+        if (actionButton.dataset.action === "clear-all-template-filters") {
+          clearWhatsAppTemplateFilters();
+          return;
+        }
+        if (actionButton.dataset.action === "remove-template-filter") {
+          state.whatsappTemplateFilters[actionButton.dataset.filterType]?.delete(actionButton.dataset.filterValue);
+          renderWhatsAppTemplateLibrary();
+          return;
+        }
+        if (actionButton.dataset.action === "refresh-whatsapp-templates") {
+          loadWhatsAppTemplateLibrary({ refresh: true });
+          return;
+        }
         if (actionButton.dataset.revokeApiKey) {
           revokeDeveloperApiKey(actionButton.dataset.revokeApiKey, actionButton);
           return;
@@ -3660,7 +4080,24 @@
 
     $("conversationSearch").addEventListener("input", (event) => { state.search = event.target.value; renderConversationList(); });
     $("contactSearch").addEventListener("input", (event) => { state.contactSearch = event.target.value; renderContacts(); });
-    $("refreshButton").addEventListener("click", () => loadAll());
+    $("whatsappTemplateSearch").addEventListener("input", (event) => {
+      state.whatsappTemplateSearch = event.target.value;
+      renderWhatsAppTemplateResults();
+    });
+    $("whatsappTemplatesRoute").addEventListener("input", (event) => {
+      const type = event.target.dataset.templateFilterSearch;
+      if (type) renderTemplateFilterOptions(type, event.target.value);
+    });
+    $("whatsappTemplatesRoute").addEventListener("change", (event) => {
+      const type = event.target.dataset.templateFilterOption;
+      if (!type || !state.whatsappTemplateFilters[type]) return;
+      if (event.target.checked) state.whatsappTemplateFilters[type].add(event.target.value);
+      else state.whatsappTemplateFilters[type].delete(event.target.value);
+      renderWhatsAppTemplateResults();
+    });
+    $("refreshButton").addEventListener("click", () => state.route === "whatsapp-templates"
+      ? loadWhatsAppTemplateLibrary({ refresh: true })
+      : loadAll());
     $("mobileMenu").addEventListener("click", openMobileMenu);
     $("mobileScrim").addEventListener("click", closeMobileMenu);
     $("mobileBack").addEventListener("click", () => clearSelectedConversation());
@@ -3761,7 +4198,10 @@
         setRoute("inbox");
         $("conversationSearch").focus();
       }
-      if (event.key === "Escape") closeMobileMenu();
+      if (event.key === "Escape") {
+        closeTemplateFilterMenus("", { restoreFocus: true });
+        closeMobileMenu();
+      }
     });
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") prepareBrowserPush().catch(() => {});

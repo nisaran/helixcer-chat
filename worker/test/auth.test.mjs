@@ -1561,6 +1561,164 @@ test('conversation template discovery is authenticated, workspace scoped, pagina
   }
 });
 
+test('workspace WhatsApp template library aggregates every account and contains partial provider failures', async () => {
+  const { database, DB } = await testDatabase();
+  const alphaToken = 'template-library-alpha-token-value-1234567890';
+  const betaToken = 'template-library-beta-token-value-1234567890';
+  const disabledToken = 'template-library-disabled-token-value-1234567890';
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const jsonHeaders = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const endpoint = 'https://api.chat.helixcer.com/api/channel-data/whatsapp-templates';
+
+  const denied = await handleRequest(new Request(endpoint), env);
+  assert.equal(denied.status, 401);
+
+  const now = new Date().toISOString();
+  const agentSessionToken = 'template-library-agent-session-token-long-enough';
+  database.prepare(`INSERT INTO users
+      (user_id,google_sub,email,display_name,email_verified,last_login_at,created_at,updated_at)
+    VALUES ('template-library-agent','template-library-agent-sub','library-agent@example.com','Library agent',1,?,?,?)`)
+    .run(now, now, now);
+  database.prepare(`INSERT INTO memberships
+      (membership_id,workspace_id,user_id,role,status,created_at,updated_at)
+    VALUES ('template-library-agent-membership','ws_default','template-library-agent','agent','active',?,?)`).run(now, now);
+  database.prepare(`INSERT INTO sessions
+      (session_id,token_hash,user_id,workspace_id,expires_at,last_seen_at,created_at)
+    VALUES ('template-library-agent-session',?,'template-library-agent','ws_default',?,?,?)`)
+    .run(await hashToken(agentSessionToken), new Date(Date.now() + 3600000).toISOString(), now, now);
+  const agentDenied = await handleRequest(new Request(endpoint, {
+    headers: { Cookie: `__Host-helixcer_session=${agentSessionToken}` }
+  }), env);
+  assert.equal(agentDenied.status, 403);
+
+  const channelDefinitions = [
+    {
+      channelId: 'wa-library-alpha', name: 'Alpha WhatsApp', enabled: true,
+      config: { wabaId: '111111111111111', phoneNumberId: '111111111111112', apiVersion: 'v26.0' },
+      credentials: { accessToken: alphaToken, appSecret: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', verifyToken: 'alpha-library-verify' }
+    },
+    {
+      channelId: 'wa-library-beta', name: 'Beta WhatsApp', enabled: true,
+      config: { wabaId: '222222222222222', phoneNumberId: '222222222222223', apiVersion: 'v25.0' },
+      credentials: { accessToken: betaToken, appSecret: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', verifyToken: 'beta-library-verify' }
+    },
+    {
+      channelId: 'wa-library-disabled', name: 'Disabled WhatsApp', enabled: false,
+      config: { wabaId: '333333333333333', phoneNumberId: '333333333333334', apiVersion: 'v26.0' },
+      credentials: { accessToken: disabledToken, appSecret: 'cccccccccccccccccccccccccccccccc', verifyToken: 'disabled-library-verify' }
+    }
+  ];
+  for (const definition of channelDefinitions) {
+    const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+      method: 'POST', headers: jsonHeaders,
+      body: JSON.stringify({ ...definition, connectorType: 'whatsapp_cloud' })
+    }), env);
+    assert.equal(created.status, 201);
+  }
+  const alphaConfig = JSON.parse(database.prepare("SELECT config_json FROM channels WHERE channel_id='wa-library-alpha'").get().config_json);
+  alphaConfig.verifiedName = 'Alpha Store';
+  alphaConfig.verifiedPhoneNumber = '+1 555 0100';
+  database.prepare("UPDATE channels SET config_json=? WHERE channel_id='wa-library-alpha'").run(JSON.stringify(alphaConfig));
+
+  const telegram = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ channelId: 'telegram-library', name: 'Telegram Library', connectorType: 'telegram',
+      credentials: { botToken: '123456789:abcdefghijklmnopqrstuvwxyz_123456', webhookSecret: 'telegram_library_secret' } })
+  }), env);
+  assert.equal(telegram.status, 201);
+
+  database.prepare(`INSERT INTO workspaces (workspace_id,slug,name,created_at,updated_at)
+    VALUES ('ws_library_other','library-other','Library Other',?,?)`).run(now, now);
+  database.prepare(`INSERT INTO channels
+      (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+    VALUES ('wa-library-other','Other Workspace WhatsApp','whatsapp_cloud','whatsapp_cloud',1,'["text"]',
+      '{"wabaId":"444444444444444","phoneNumberId":"444444444444445","apiVersion":"v26.0"}',
+      'DATABASE',?,?, 'ws_library_other')`).run(now, now);
+
+  const originalFetch = globalThis.fetch;
+  const providerRequests = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    const authorization = init.headers?.Authorization || '';
+    providerRequests.push({ url, authorization });
+    if (url.pathname.includes('/111111111111111/message_templates')) {
+      assert.equal(url.searchParams.has('status'), false);
+      if (!url.searchParams.get('after')) {
+        return new Response(JSON.stringify({
+          data: [
+            { id: 'alpha-approved', name: 'alpha_order_update', language: 'en_US', status: 'APPROVED', category: 'UTILITY',
+              components: [{ type: 'BODY', text: 'Order {{1}} is ready.' }] },
+            { id: 'alpha-pending', name: 'alpha_promotion', language: 'en_US', status: 'PENDING', category: 'MARKETING',
+              components: [{ type: 'BODY', text: 'Save {{1}} today.' }] }
+          ],
+          paging: { cursors: { after: 'alpha-page-two' }, next: 'https://graph.facebook.com/next' }
+        }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ data: [
+        { id: 'alpha-rejected', name: 'alpha_rejected', language: 'ml', status: 'REJECTED', category: 'AUTHENTICATION',
+          components: [{ type: 'BODY', text: 'Code {{1}}.' }] }
+      ] }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.pathname.includes('/222222222222222/message_templates')) {
+      return new Response(JSON.stringify({
+        error: { message: `Token ${betaToken} cannot read this WABA`, code: 100 }
+      }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.pathname.includes('/333333333333333/message_templates')) {
+      return new Response(JSON.stringify({ data: [
+        { id: 'disabled-approved', name: 'disabled_account_template', language: 'ar', status: 'APPROVED', category: 'UTILITY',
+          components: [{ type: 'BODY', text: 'Disabled account preview.' }] }
+      ] }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    throw new Error(`Unexpected provider request: ${url.pathname}`);
+  };
+  try {
+    const response = await handleRequest(new Request(endpoint, { headers: { Authorization: 'Bearer recovery-secret' } }), env);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.items.map(item => item.name), [
+      'alpha_order_update', 'alpha_promotion', 'alpha_rejected', 'disabled_account_template'
+    ]);
+    assert.deepEqual(body.items.map(item => item.status), ['APPROVED', 'PENDING', 'REJECTED', 'APPROVED']);
+    const alphaItem = body.items.find(item => item.name === 'alpha_order_update');
+    assert.equal(alphaItem.channelId, 'wa-library-alpha');
+    assert.equal(alphaItem.channelName, 'Alpha WhatsApp');
+    assert.equal(alphaItem.channelEnabled, true);
+    assert.equal(alphaItem.providerDisplayName, 'Alpha Store');
+    assert.ok(alphaItem.variables.some(variable => variable.key === '1'));
+    const disabledItem = body.items.find(item => item.name === 'disabled_account_template');
+    assert.equal(disabledItem.channelId, 'wa-library-disabled');
+    assert.equal(disabledItem.channelEnabled, false);
+
+    assert.deepEqual(body.errors.map(item => item.channelId), ['wa-library-beta']);
+    assert.equal(body.errors[0].channelEnabled, true);
+    assert.match(body.errors[0].error, /cannot read this WABA/);
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(betaToken));
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(alphaToken));
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(disabledToken));
+
+    assert.deepEqual(body.filterOptions.categories, ['AUTHENTICATION', 'MARKETING', 'UTILITY']);
+    assert.deepEqual(body.filterOptions.statuses, ['APPROVED', 'PENDING', 'REJECTED']);
+    assert.deepEqual(body.filterOptions.languages, ['ar', 'en_US', 'ml']);
+    assert.deepEqual(body.filterOptions.channels.map(item => item.value), [
+      'wa-library-alpha', 'wa-library-beta', 'wa-library-disabled'
+    ]);
+    assert.equal(body.filterOptions.channels.find(item => item.value === 'wa-library-disabled').channelEnabled, false);
+    assert.equal(providerRequests.length, 4);
+    assert.equal(providerRequests.some(item => item.url.pathname.includes('444444444444444')), false);
+    assert.equal(providerRequests.some(item => item.url.pathname.includes('telegram')), false);
+    assert.equal(providerRequests.find(item => item.url.pathname.includes('222222222222222')).url.pathname,
+      '/v25.0/222222222222222/message_templates');
+    assert.equal(providerRequests.filter(item => item.url.pathname.includes('111111111111111')).length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
 test('contact detail and update APIs preserve conversations, keep Channel Profile IDs immutable, and stay workspace scoped', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB, {

@@ -129,6 +129,7 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `POST /api/conversations/:id/attachments` (authenticated WhatsApp multipart upload)
 - `GET|POST /api/contacts`
 - `GET|PATCH /api/contacts/:contactId`
+- `GET /api/channel-data/whatsapp-templates`
 - `POST /api/demo/seed`
 - `GET /api/realtime` (WebSocket)
 - `POST /api/v1/whatsapp/template-messages` (server-to-server API key)
@@ -162,6 +163,8 @@ Credential rows are encrypted independently with a random nonce and authenticate
 For each WhatsApp conversation, list and message responses include `freeformAllowed`, `replyWindowExpiresAt`, and a human-readable reason when the window is closed. The Worker independently rejects free-form text and attachments outside the 24-hour customer-service window; the dashboard cannot bypass this check. `POST /api/conversations/:id/template` sends an already-approved template from the inbox and remains available after the window closes. The external API can also send approved WhatsApp templates. Creating or approving templates remains in Meta's tools, and Instagram messaging remains subject to Meta's own allowed messaging window and permissions.
 
 `GET /api/conversations/:id/templates` derives the WABA and encrypted access token from that conversation's workspace-scoped channel, requests approved templates from Graph API v26.0 (or the saved channel version), and follows at most three cursor pages. Its response never contains a provider token. Each item contains `templateId`, `name`, `language.code`, `status`, `category`, sanitized component definitions, and a flattened `variables` list for text, media-header, named-parameter, and dynamic URL-button inputs. Meta failures are returned as bounded provider errors.
+
+`GET /api/channel-data/whatsapp-templates` is restricted to workspace owners and administrators. It builds a read-only library from every saved WhatsApp Cloud account in the workspace, including disabled accounts, and requests every template status rather than only approved sendable templates. Each sanitized item includes `channelId`, `channelName`, `channelEnabled`, and `providerDisplayName` source metadata. The response also includes searchable filter options for channels, categories, statuses, and languages. One account's bounded, credential-redacted provider failure is returned in `errors` without hiding templates loaded from the other accounts. The Worker follows Meta pagination for up to 1,000 templates per account; accounts beyond that safety bound are listed in `truncatedChannels` so the UI never silently presents a partial library. Non-WhatsApp and cross-workspace channels are never queried.
 
 Contact list, bootstrap, and detail responses include `displayName`/`name`, `company`, `tags`, `channelId`, `channelName`, `connectorType`, and `channelProfileId`. Detail responses also expose `channelEditable`. `PATCH /api/contacts/:contactId` accepts a subset of those editable values, mirrors name and tag changes to existing conversations, and never deletes history. Channel Profile IDs are immutable after creation. A contact's channel can be corrected while its conversation is still empty, retaining the same Channel Profile ID; after any message is sent or received, the channel is locked so historical messages cannot be misattributed.
 
