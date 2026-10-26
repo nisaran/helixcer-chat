@@ -76,13 +76,18 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
     contacts: [{ wa_id: '919999999999', profile: { name: 'Asha' } }],
     messages: [
       { id: 'wamid.1', from: '919999999999', timestamp: '1761360000', type: 'text', text: { body: 'Hello' } },
-      { id: 'wamid.2', from: '919999999999', timestamp: '1761360002', type: 'image', image: {} }
+      { id: 'wamid.2', from: '919999999999', timestamp: '1761360002', type: 'image',
+        image: { id: 'wa-media-2', mime_type: 'image/jpeg', caption: 'Receipt' } }
     ],
     statuses: [{ id: 'wamid.out', status: 'delivered', timestamp: '1761360001', biz_opaque_callback_data: 'internal-message-1' }]
   } }] }] });
   assert.equal(result.messages[0].displayName, 'Asha');
   assert.equal(result.messages[0].text, 'Hello');
-  assert.equal(result.messages[1].text, '[WhatsApp image received]');
+  assert.equal(result.messages[1].text, 'Receipt');
+  assert.deepEqual(result.messages[1].attachment, {
+    type: 'image', filename: 'image-wamid.2.jpeg', mimeType: 'image/jpeg', size: 0,
+    caption: 'Receipt', providerMediaId: 'wa-media-2'
+  });
   assert.equal(result.statuses[0].status, 'delivered');
   assert.equal(result.statuses[0].internalMessageId, 'internal-message-1');
   assert.deepEqual(result.phoneNumberIds, ['123456789']);
@@ -141,6 +146,20 @@ test('normalizes Telegram bot updates', () => {
   assert.notEqual(sameMessageNumber.providerMessageId, normalizeTelegram({ message: {
     message_id: 44, chat: { id: 12345 }, text: 'Original chat'
   } }).providerMessageId);
+  const photo = normalizeTelegram({ update_id: 8, message: {
+    message_id: 45, date: 1761360010, chat: { id: 12345 }, from: { first_name: 'Ravi' }, caption: 'Invoice photo',
+    photo: [{ file_id: 'small', file_size: 1200 }, { file_id: 'large', file_size: 9200 }]
+  } });
+  assert.equal(photo.messageType, 'image');
+  assert.deepEqual(photo.attachment, {
+    type: 'image', filename: 'image-45.jpeg', mimeType: 'image/jpeg', size: 9200,
+    caption: 'Invoice photo', providerFileId: 'large'
+  });
+  const voice = normalizeTelegram({ message: {
+    message_id: 46, chat: { id: 12345 }, voice: { file_id: 'voice-file', file_size: 4000, mime_type: 'audio/ogg' }
+  } });
+  assert.equal(voice.messageType, 'audio');
+  assert.equal(voice.attachment.providerFileId, 'voice-file');
 });
 
 test('normalizes Instagram messages, echoes, delivery receipts, and read watermarks', () => {
@@ -217,7 +236,7 @@ test('sanitizes Meta template definitions while retaining positional, named, med
     ignored_secret: 'must not be copied',
     components: [
       { type: 'HEADER', format: 'IMAGE', example: { header_handle: ['https://secret.example/signed'] } },
-      { type: 'BODY', text: 'Hello {{customer_name}}, order {{2}} is ready.',
+      { type: 'BODY', text: 'Hello {{customer_name}},\norder {{2}} is ready.',
         example: { body_text: [['Asha', '1001']], body_text_named_params: [
           { param_name: 'customer_name', example: 'Asha', ignored: 'no' }
         ] } },
@@ -230,6 +249,7 @@ test('sanitizes Meta template definitions while retaining positional, named, med
   assert.equal(template.templateId, '123456789');
   assert.deepEqual(template.language, { code: 'en_US' });
   assert.equal(template.components[0].format, 'image');
+  assert.equal(template.components[1].text, 'Hello {{customer_name}},\norder {{2}} is ready.');
   assert.equal(template.components[1].example.body_text_named_params[0].param_name, 'customer_name');
   assert.deepEqual(template.variables.map(item => [item.component, item.key, item.kind]), [
     ['header', 'media', 'image'], ['body', 'customer_name', 'text'], ['body', '2', 'text'], ['button', '1', 'url']

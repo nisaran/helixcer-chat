@@ -448,6 +448,17 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .delivery-status.is-read { color: var(--blue); }
 .message-sender { margin: 0 0 4px; color: var(--brand); font-size: 10px; font-weight: 750; }
 .message-failed { color: #b33326; }
+.message-attachment { display: grid; gap: 8px; min-width: min(260px, 58vw); margin: -4px -6px 8px; overflow: hidden; border: 1px solid rgba(102,113,109,.14); border-radius: 11px; background: rgba(255,255,255,.72); }
+.message-media-link { display: block; line-height: 0; }
+.message-media-preview { display: block; width: 100%; max-width: 420px; max-height: 320px; object-fit: cover; background: #e9edeb; }
+.message-attachment audio { width: min(330px, 62vw); margin: 10px 10px 0; }
+.message-attachment-info { display: grid; gap: 2px; min-width: 0; padding: 9px 10px 10px; }
+.message-attachment-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.message-attachment-info > span { color: var(--muted); font-size: 9px; }
+.message-attachment-actions { display: flex; gap: 12px; margin-top: 5px; }
+.message-attachment-action { color: var(--brand); font-size: 10px; font-weight: 800; text-decoration: none; }
+.message-attachment-action:hover { text-decoration: underline; }
+.message-attachment-unavailable { line-height: 1.45; }
 
 .read-only-field[readonly] { cursor: default; background: #f2f4f1; color: #3f4a47; }
 
@@ -463,6 +474,15 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .composer-box:focus-within { border-color: #b8a5f3; box-shadow: 0 0 0 3px rgba(109,59,234,.09), 0 8px 24px rgba(16,24,40,.06); }
 .composer textarea { display: block; width: 100%; max-height: 150px; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); padding: 2px 2px 7px; line-height: 1.5; }
 .composer textarea::placeholder { color: #98a19f; }
+.attachment-queue { display: flex; gap: 8px; overflow-x: auto; border-top: 1px solid #edf0ed; margin: 2px -2px 8px; padding: 9px 2px 1px; }
+.attachment-queue-item { position: relative; display: grid; grid-template-columns: 42px minmax(90px, 1fr) 24px; align-items: center; gap: 7px; flex: 0 0 min(240px, 75vw); border: 1px solid var(--line); border-radius: 10px; background: #fafbf9; padding: 6px; }
+.attachment-queue-item img, .attachment-queue-icon { width: 42px; height: 42px; border-radius: 7px; object-fit: cover; }
+.attachment-queue-icon { display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); font-size: 10px; font-weight: 850; }
+.attachment-queue-copy { display: grid; min-width: 0; }
+.attachment-queue-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.attachment-queue-copy small { color: var(--muted); font-size: 9px; }
+.attachment-queue-remove { width: 24px; height: 24px; border-radius: 7px; color: #7c8582; font-size: 18px; }
+.attachment-queue-remove:hover { background: #f4e9e5; color: #a13f2f; }
 .composer-tools { display: flex; justify-content: space-between; align-items: center; }
 .composer-tools > div { display: flex; align-items: center; gap: 3px; }
 .composer-icon { width: 31px; height: 31px; border-radius: 8px; color: #77827f; }
@@ -690,16 +710,32 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .switch-control input:focus-visible + span { outline: 3px solid rgba(109,59,234,.24); outline-offset: 2px; }
 .switch-control input:disabled + span { opacity: .5; }
 .switch-control em { color: #53605d; font-size: 11px; font-style: normal; font-weight: 750; }
-#templateDialog { width: min(720px, calc(100vw - 28px)); max-height: calc(100dvh - 24px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+#templateDialog { width: min(840px, calc(100vw - 28px)); max-height: calc(100dvh - 24px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.searchable-select { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 8px; margin-top: 6px; }
+.field-label > .searchable-select .text-field { margin-top: 0; }
 .template-load-state { border-radius: 9px; background: #f4f6f3; color: var(--muted); padding: 9px 11px; font-size: 10px; line-height: 1.5; }
 .template-load-state.is-error { border: 1px solid #ecc9c0; background: #fff3ef; color: #913b2b; }
 .inline-retry { border: 0; background: transparent; color: var(--brand); padding: 0; text-decoration: underline; font: inherit; font-weight: 800; }
 .template-summary { border-left: 3px solid var(--green); background: #f2f8f4; color: #4f6960; padding: 9px 11px; font-size: 10px; font-weight: 700; }
 .template-variable-fields { display: grid; gap: 10px; }
 .template-variable-row { display: grid; grid-template-columns: minmax(170px, .85fr) minmax(220px, 1.15fr); align-items: end; gap: 10px; border: 1px solid var(--line); border-radius: 11px; background: #fafbf9; padding: 11px; }
+.template-variable-row .field-label { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); grid-column: 1 / -1; gap: 8px; }
+.template-variable-row .field-label .template-source-search, .template-variable-row .field-label .template-source-select { margin-top: 6px; }
 .template-source-preview { align-self: center; overflow-wrap: anywhere; border: 1px solid #dfe4df; border-radius: 9px; background: white; color: #4d5b57; padding: 10px 11px; font-size: 11px; }
 .template-source-preview.is-missing { border-color: #ead3cc; color: #9b4a39; }
 .template-no-variables { margin: 0; border-radius: 9px; background: #f5f7f4; color: var(--muted); padding: 10px 11px; font-size: 10px; }
+.template-composer-preview { display: grid; gap: 7px; }
+.template-preview-phone { border-radius: 14px; background: #e7eee9; padding: 18px; }
+.template-preview-message { display: grid; overflow: hidden; max-width: 390px; margin-left: auto; border-radius: 12px 12px 3px 12px; background: #e9e2ff; box-shadow: 0 2px 7px rgba(34,42,38,.12); }
+.template-preview-media { width: 100%; max-height: 240px; object-fit: cover; background: #dfe5e1; }
+.template-preview-document { margin: 10px 10px 3px; border-radius: 8px; background: rgba(255,255,255,.7); padding: 10px; font-size: 11px; font-weight: 750; overflow-wrap: anywhere; }
+.template-preview-location { margin: 10px 10px 3px; border-radius: 8px; background: rgba(255,255,255,.72); padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; font-weight: 700; }
+.template-preview-header, .template-preview-body, .template-preview-footer { margin: 0; padding-inline: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.template-preview-header { padding-top: 11px; font-size: 12px; }
+.template-preview-body { padding-top: 8px; font-size: 12px; line-height: 1.55; }
+.template-preview-footer { padding-block: 6px 9px; color: #68736f; font-size: 9px; }
+.template-preview-action { display: grid; gap: 2px; border-top: 1px solid rgba(109,59,234,.14); color: var(--brand); padding: 8px 12px; text-align: center; font-size: 10px; font-weight: 800; }
+.template-preview-action small { overflow: hidden; color: #746b8d; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; font-weight: 600; }
 .channel-empty-state { grid-column: 1 / -1; display: grid; justify-items: center; border: 1px dashed #cfd5d1; border-radius: var(--radius); background: rgba(255,255,255,.72); padding: clamp(34px, 7vw, 72px) 20px; text-align: center; }
 .channel-empty-icon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 15px; background: var(--brand-soft); color: var(--brand); font-size: 24px; font-weight: 500; }
 .channel-empty-state h3 { margin: 13px 0 3px; font: 720 20px/1.2 var(--font-sans); letter-spacing: -.35px; }
@@ -931,6 +967,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   .form-grid { grid-template-columns: 1fr; }
   .form-span { grid-column: auto; }
   .template-variable-row { grid-template-columns: 1fr; }
+  .searchable-select, .template-variable-row .field-label { grid-template-columns: 1fr; }
   .contacts-workspace.has-editor { display: block; }
   .contact-editor-panel { position: fixed; z-index: 45; top: 8px; right: 8px; bottom: 8px; width: min(360px, calc(100vw - 16px)); overflow-y: auto; box-shadow: -15px 0 40px rgba(35,42,39,.2); }
   .channel-modal { max-height: calc(100dvh - 16px); }

@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-9";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-10";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -18,6 +18,7 @@
     contacts: [],
     conversations: [],
     messages: new Map(),
+    pendingAttachments: new Map(),
     templatesByConversation: new Map(),
     templateConversationId: null,
     whatsappTemplates: [],
@@ -309,6 +310,12 @@
       return this.sendMessage(conversationId, payload.previewText || `[Template: ${templateName}]`);
     }
 
+    async uploadTemplateMedia(_conversationId, formData) {
+      const file = formData.get("file");
+      await smallDelay(120);
+      return { ok: true, mediaId: `demo-media-${Date.now()}`, filename: file?.name || "media" };
+    }
+
     async getTemplates() {
       await smallDelay(140);
       return { items: clone([
@@ -363,7 +370,14 @@
     async sendAttachment(conversationId, formData) {
       const file = formData.get("file");
       const caption = String(formData.get("caption") || "").trim();
-      return this.sendMessage(conversationId, caption || `[Attachment: ${file?.name || "file"}]`);
+      const result = await this.sendMessage(conversationId, caption || `[Attachment: ${file?.name || "file"}]`);
+      result.item.messageType = file?.type?.startsWith("image/") ? "image"
+        : file?.type?.startsWith("video/") ? "video" : file?.type?.startsWith("audio/") ? "audio" : "document";
+      result.item.attachment = {
+        type: result.item.messageType, filename: file?.name || "file", mimeType: file?.type || "",
+        size: Number(file?.size || 0), caption, available: false, url: ""
+      };
+      return result;
     }
 
     async updateConversation(conversationId, patch) {
@@ -585,6 +599,15 @@
         });
     }
 
+    uploadTemplateMedia(conversationId, formData) {
+      return this.isDemo
+        ? this.demo.uploadTemplateMedia(conversationId, formData)
+        : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/template-media`, {
+          method: "POST",
+          body: formData,
+        });
+    }
+
     getTemplates(conversationId) {
       return this.isDemo
         ? this.demo.getTemplates(conversationId)
@@ -604,6 +627,11 @@
           method: "POST",
           body: formData,
         });
+    }
+
+    attachmentUrl(messageId, { download = false } = {}) {
+      if (this.isDemo || !messageId) return "";
+      return `${this.base}/api/messages/${encodeURIComponent(messageId)}/attachment${download ? "?download=1" : ""}`;
     }
 
     updateConversation(conversationId, patch) {
@@ -1005,6 +1033,43 @@
     return { label: "Sent ✓", className: "delivery-status is-sent" };
   }
 
+  function mergeOutboundMessageStatus(currentValue, incomingValue) {
+    const current = String(currentValue || "").toLocaleLowerCase();
+    const incoming = String(incomingValue || "").toLocaleLowerCase();
+    if (!incoming) return currentValue || "";
+    if (!current || current === incoming) return incomingValue;
+    const failures = new Set(["failed", "error"]);
+    if (failures.has(incoming)) return incomingValue;
+    // A retry is the only normal transition out of a recorded failure. Once it
+    // starts, later provider states can advance through the ranked lifecycle.
+    if (failures.has(current)) return incoming === "retrying" ? incomingValue : currentValue;
+    const ranks = {
+      pending: 0, queued: 0,
+      retrying: 1,
+      submitted: 2, accepted: 2,
+      sent: 3,
+      delivered: 4,
+      read: 5, seen: 5,
+    };
+    const currentRank = ranks[current];
+    const incomingRank = ranks[incoming];
+    if (currentRank !== undefined && incomingRank !== undefined && incomingRank < currentRank) return currentValue;
+    return incomingValue;
+  }
+
+  function updateRenderedMessageStatus(message) {
+    if (!message?.messageId || message.direction !== "outbound") return false;
+    const row = document.querySelector(`#messageThread .message-row[data-message-id="${CSS.escape(message.messageId)}"]`);
+    const status = row?.querySelector(".delivery-status, .message-failed");
+    if (!status) return false;
+    const delivery = outboundDeliveryStatus(message.status);
+    status.className = delivery.className;
+    status.textContent = delivery.label;
+    status.title = `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`;
+    status.setAttribute("aria-label", status.title);
+    return true;
+  }
+
   function deriveContacts(conversations) {
     const byId = new Map();
     conversations.forEach((conversation) => {
@@ -1232,6 +1297,94 @@
     host.append(loading);
   }
 
+  function messageAttachmentUrl(message, download = false) {
+    const attachment = message?.attachment;
+    if (!attachment || attachment.available !== true) return "";
+    if (attachment.external === true) {
+      try {
+        const url = new URL(String(attachment.url || ""));
+        return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
+      } catch { return ""; }
+    }
+    if (state.api?.attachmentUrl) return state.api.attachmentUrl(message.messageId, { download });
+    const raw = String(attachment.url || "");
+    if (!raw) return "";
+    try {
+      const url = new URL(raw, state.api?.base || location.origin);
+      if (download) url.searchParams.set("download", "1");
+      return url.toString();
+    } catch { return ""; }
+  }
+
+  function renderMessageAttachment(message) {
+    const attachment = message?.attachment;
+    if (!attachment) return null;
+    const type = String(attachment.type || message.messageType || "document");
+    const filename = attachment.filename || `${capitalize(type)} attachment`;
+    const url = messageAttachmentUrl(message);
+    const card = element("div", `message-attachment is-${type}`);
+    if (url && type === "image") {
+      const link = document.createElement("a");
+      link.className = "message-media-link";
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.referrerPolicy = "no-referrer";
+      link.setAttribute("aria-label", `Open ${filename}`);
+      const image = document.createElement("img");
+      image.className = "message-media-preview";
+      if (attachment.external === true) image.referrerPolicy = "no-referrer";
+      else image.crossOrigin = "use-credentials";
+      image.src = url;
+      image.alt = filename;
+      image.loading = "lazy";
+      image.decoding = "async";
+      link.append(image);
+      card.append(link);
+    } else if (url && type === "video") {
+      const video = document.createElement("video");
+      video.className = "message-media-preview";
+      if (attachment.external === true) video.referrerPolicy = "no-referrer";
+      else video.crossOrigin = "use-credentials";
+      video.src = url;
+      video.controls = true;
+      video.preload = "metadata";
+      card.append(video);
+    } else if (url && type === "audio") {
+      const audio = document.createElement("audio");
+      if (attachment.external === true) audio.referrerPolicy = "no-referrer";
+      else audio.crossOrigin = "use-credentials";
+      audio.src = url;
+      audio.controls = true;
+      audio.preload = "metadata";
+      card.append(audio);
+    }
+    const info = element("div", "message-attachment-info");
+    info.append(element("strong", "", filename));
+    info.append(element("span", "", [attachment.mimeType, attachment.size ? formatFileSize(attachment.size) : ""].filter(Boolean).join(" · ") || capitalize(type)));
+    if (url) {
+      const actions = element("div", "message-attachment-actions");
+      const download = element("a", "message-attachment-action", "Download");
+      download.href = messageAttachmentUrl(message, true);
+      download.setAttribute("download", filename);
+      download.referrerPolicy = "no-referrer";
+      if (type !== "document") {
+        const open = element("a", "message-attachment-action", "View");
+        open.href = url;
+        open.target = "_blank";
+        open.rel = "noopener";
+        open.referrerPolicy = "no-referrer";
+        actions.append(open);
+      }
+      actions.append(download);
+      info.append(actions);
+    } else {
+      info.append(element("span", "message-attachment-unavailable", "Preview will be available after the provider accepts the file."));
+    }
+    card.append(info);
+    return card;
+  }
+
   function renderMessages() {
     const conversation = selectedConversation();
     if (!conversation) return;
@@ -1275,7 +1428,12 @@
         row.dataset.messageId = message.messageId;
         const bubble = element("div", "message-bubble");
         if (message.direction === "inbound" && message.senderName) bubble.append(element("p", "message-sender", message.senderName));
-        bubble.append(element("p", "message-text", message.text || `[${message.messageType || "Message"}]`));
+        const attachment = renderMessageAttachment(message);
+        if (attachment) bubble.append(attachment);
+        const visibleText = message.attachment
+          ? String(message.attachment.caption || (!/^\[[^\]]+\]$/.test(message.text || "") ? message.text || "" : ""))
+          : message.text || `[${message.messageType || "Message"}]`;
+        if (visibleText) bubble.append(element("p", "message-text", visibleText));
         const foot = element("div", "message-foot");
         foot.append(element("time", "", formatClock(message.timestamp)));
         if (message.direction === "outbound") {
@@ -1297,6 +1455,44 @@
     if (!conversation) return false;
     const connectorType = conversation.connectorType || channelFor(conversation.channelId).connectorType;
     return connectorType === "whatsapp" || connectorType === "whatsapp_cloud";
+  }
+
+  function supportsChatAttachments(conversation = selectedConversation()) {
+    if (!conversation) return false;
+    const connectorType = conversation.connectorType || channelFor(conversation.channelId).connectorType;
+    return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot"].includes(connectorType);
+  }
+
+  function currentAttachmentQueue(conversation = selectedConversation()) {
+    return conversation ? state.pendingAttachments.get(conversation.conversationId) || [] : [];
+  }
+
+  function renderAttachmentQueue() {
+    const host = $("attachmentQueue");
+    const queue = currentAttachmentQueue();
+    host.replaceChildren();
+    host.hidden = !queue.length;
+    queue.forEach((item) => {
+      const card = element("div", "attachment-queue-item");
+      if (item.previewUrl && item.file.type.startsWith("image/")) {
+        const image = document.createElement("img");
+        image.src = item.previewUrl;
+        image.alt = "";
+        card.append(image);
+      } else {
+        card.append(element("span", "attachment-queue-icon", item.file.type.startsWith("video/") ? "▶" : item.file.type.startsWith("audio/") ? "♪" : "DOC"));
+      }
+      const copy = element("span", "attachment-queue-copy");
+      copy.append(element("strong", "", item.file.name));
+      copy.append(element("small", "", formatFileSize(item.file.size)));
+      const remove = element("button", "attachment-queue-remove", "×");
+      remove.type = "button";
+      remove.dataset.action = "remove-queued-attachment";
+      remove.dataset.attachmentId = item.id;
+      remove.setAttribute("aria-label", `Remove ${item.file.name}`);
+      card.append(copy, remove);
+      host.append(card);
+    });
   }
 
   function whatsappReplyWindow(conversation = selectedConversation()) {
@@ -1329,11 +1525,13 @@
     notice.hidden = !blocked;
     input.disabled = blocked;
     send.disabled = blocked;
-    attach.disabled = blocked || !whatsapp;
+    const attachmentSupported = supportsChatAttachments(conversation);
+    attach.disabled = blocked || !attachmentSupported;
     greeting.disabled = blocked;
     input.placeholder = blocked ? "The WhatsApp reply window is closed" : "Write a reply…";
     $("messageForm").classList.toggle("is-window-closed", blocked);
-    attach.title = !whatsapp ? "Attachments are currently available for WhatsApp conversations" : blocked ? "Send an approved template to reopen the conversation" : "Attach a file";
+    attach.title = !attachmentSupported ? "Attachments are available for WhatsApp and Telegram conversations"
+      : blocked ? "Send an approved template to reopen the conversation" : "Attach files";
     if (blocked) {
       const expiry = windowState.expiresAt ? new Date(windowState.expiresAt) : null;
       const expiryCopy = expiry && !Number.isNaN(expiry.getTime())
@@ -1343,6 +1541,7 @@
       const templatePrompt = /approved template/i.test(reason) ? "" : " Send an approved template to continue.";
       $("replyWindowMessage").textContent = `${reason}${expiryCopy}${templatePrompt}`;
     }
+    renderAttachmentQueue();
   }
 
   function renderContacts() {
@@ -2454,10 +2653,15 @@
     const conversation = selectedConversation();
     const input = $("messageInput");
     const text = input.value.trim();
-    if (!conversation || !text) return;
+    const queued = currentAttachmentQueue(conversation);
+    if (!conversation || (!text && !queued.length)) return;
     if (isWhatsAppConversation(conversation) && !whatsappReplyWindow(conversation).allowed) {
       renderComposerState();
       showToast("Use a WhatsApp template", "The 24-hour reply window is closed for this conversation.", true);
+      return;
+    }
+    if (queued.length) {
+      await sendQueuedAttachments(conversation, text);
       return;
     }
     input.value = "";
@@ -2493,19 +2697,23 @@
       return template.variables.map((variable, index) => {
         const componentType = String(variable.component || "body").toLowerCase();
         const sourceKind = String(variable.kind || "text").toLowerCase();
-        const key = String(variable.key || variable.parameterIndex + 1 || index + 1);
+        const parameterIndex = Number.isFinite(Number(variable.parameterIndex)) ? Number(variable.parameterIndex) : index;
+        const key = String(variable.key || parameterIndex + 1);
         const media = ["image", "video", "document"].includes(sourceKind);
         const buttonIndex = Number(variable.buttonIndex ?? 0);
         return {
-          id: `${componentType}-${variable.componentIndex ?? 0}-${buttonIndex}-${variable.parameterIndex ?? index}-${key.replace(/[^a-z0-9_-]/gi, "-")}`,
+          id: `${componentType}-${variable.componentIndex ?? 0}-${buttonIndex}-${parameterIndex}-${key.replace(/[^a-z0-9_-]/gi, "-")}`,
           componentType,
+          componentIndex: Number(variable.componentIndex ?? 0),
+          parameterIndex,
           subType: componentType === "button" ? "url" : "",
           buttonIndex,
           kind: media ? "media" : sourceKind === "location" ? "location" : "text",
           mediaType: media ? sourceKind : "",
           parameterName: /^\d+$/.test(key) || key === "media" ? "" : key,
+          placeholder: media ? "" : key,
           label: media
-            ? `${capitalize(sourceKind)} header URL`
+            ? `${capitalize(sourceKind)} header`
             : sourceKind === "location" ? "Location header" : componentType === "button" ? `Button ${buttonIndex + 1} URL value` : `${capitalize(componentType)} variable ${key}`,
         };
       });
@@ -2515,14 +2723,18 @@
       const type = String(component.type || "").toUpperCase();
       const format = String(component.format || "").toLowerCase();
       if (type === "HEADER" && ["image", "video", "document"].includes(format)) {
-        descriptors.push({ id: `header-media-${format}`, componentType: "header", kind: "media", mediaType: format, label: `${capitalize(format)} header URL` });
+        descriptors.push({ id: `header-media-${format}`, componentType: "header", componentIndex: 0, parameterIndex: 0,
+          kind: "media", mediaType: format, parameterName: "", placeholder: "", label: `${capitalize(format)} header` });
       }
       if (type === "HEADER" || type === "BODY") {
         templatePlaceholders(component.text).forEach((placeholder, index) => descriptors.push({
           id: `${type.toLowerCase()}-text-${index}-${placeholder.replace(/[^a-z0-9_-]/gi, "-")}`,
           componentType: type.toLowerCase(),
+          componentIndex: 0,
+          parameterIndex: index,
           kind: "text",
           parameterName: /^\d+$/.test(placeholder) ? "" : placeholder,
+          placeholder,
           label: `${capitalize(type.toLowerCase())} variable ${placeholder}`,
         }));
       }
@@ -2532,10 +2744,13 @@
           templatePlaceholders(button.url).forEach((placeholder, index) => descriptors.push({
             id: `button-${buttonIndex}-${index}-${placeholder.replace(/[^a-z0-9_-]/gi, "-")}`,
             componentType: "button",
+            componentIndex: 0,
+            parameterIndex: index,
             subType: "url",
             buttonIndex,
             kind: "text",
             parameterName: /^\d+$/.test(placeholder) ? "" : placeholder,
+            placeholder,
             label: `${button.text || `Button ${buttonIndex + 1}`} URL value`,
           }));
         });
@@ -2587,9 +2802,27 @@
   }
 
   function syncTemplateVariableSource(row) {
-    const select = row.querySelector("select");
-    const input = row.querySelector("input");
+    const select = row.querySelector(".template-source-select");
+    const input = row.querySelector(".template-manual-value");
     const preview = row.querySelector(".template-source-preview");
+    if (!select || !input || !preview) return;
+    if (row.dataset.kind === "media") {
+      const upload = select.value === "upload";
+      const fileInput = row.querySelector(".template-media-file");
+      input.hidden = upload;
+      input.required = !upload;
+      fileInput.hidden = !upload;
+      fileInput.required = upload;
+      const file = fileInput.files?.[0] || null;
+      row._templateFile = file;
+      preview.hidden = false;
+      preview.textContent = upload
+        ? (file ? `${file.name} · ${formatFileSize(file.size)}` : "Choose a file to upload when you send")
+        : (input.value.trim() || "Enter a public media URL");
+      preview.classList.toggle("is-missing", upload ? !file : !input.value.trim());
+      renderTemplateComposerPreview();
+      return;
+    }
     const manual = select.value === "manual";
     input.hidden = !manual;
     input.required = manual;
@@ -2599,6 +2832,30 @@
       ? (resolved || "No saved value for this contact")
       : "Choose a contact field or manual entry";
     preview.classList.toggle("is-missing", !resolved);
+    renderTemplateComposerPreview();
+  }
+
+  const templateSourceOptions = [
+    ["", "Choose source"], ["displayName", "Contact name"], ["channelProfileId", "Channel Profile ID"],
+    ["company", "Company"], ["tags", "Tags"], ["channelName", "Channel name"], ["manual", "Manual entry"],
+  ];
+
+  function filterTemplateSourceOptions(row, query) {
+    const select = row.querySelector(".template-source-select");
+    if (!select || row.dataset.kind === "media") return;
+    const selected = select.value;
+    const needle = String(query || "").trim().toLocaleLowerCase();
+    const options = templateSourceOptions.filter(([, label]) => !needle || label.toLocaleLowerCase().includes(needle));
+    const selectedOption = templateSourceOptions.find(([value]) => value === selected);
+    if (selectedOption && !options.some(([value]) => value === selected)) options.unshift(selectedOption);
+    select.replaceChildren();
+    options.forEach(([value, label]) => {
+      const option = new Option(label, value);
+      if (!value) option.disabled = true;
+      select.append(option);
+    });
+    select.value = selected;
+    syncTemplateVariableSource(row);
   }
 
   function renderTemplateVariables() {
@@ -2608,6 +2865,7 @@
     host.replaceChildren();
     if (!template) {
       summary.hidden = true;
+      renderTemplateComposerPreview();
       return;
     }
     const languageCode = template.language?.code || template.language || "";
@@ -2616,31 +2874,33 @@
     const descriptors = templateVariableDescriptors(template);
     if (!descriptors.length) {
       host.append(element("p", "template-no-variables", "This template does not require any values."));
+      renderTemplateComposerPreview();
       return;
     }
     descriptors.forEach((descriptor) => {
       const row = element("div", "template-variable-row");
       row.dataset.variableId = descriptor.id;
+      row.dataset.kind = descriptor.kind;
       const label = element("label", "field-label", descriptor.label);
+      const search = document.createElement("input");
+      search.className = "text-field template-source-search";
+      search.type = "search";
+      search.placeholder = "Search contact fields…";
+      search.autocomplete = "off";
+      search.setAttribute("aria-label", `Search sources for ${descriptor.label}`);
       const source = document.createElement("select");
       source.className = "text-field template-source-select";
       source.setAttribute("aria-label", `${descriptor.label} source`);
-      [
-        ["", "Choose source"],
-        ["displayName", "Contact name"],
-        ["channelProfileId", "Channel Profile ID"],
-        ["company", "Company"],
-        ["tags", "Tags"],
-        ["channelName", "Channel name"],
-        ["manual", "Manual entry"],
-      ].forEach(([value, text]) => {
+      const options = descriptor.kind === "media" ? [["url", "Use media URL"], ["upload", "Upload a file"]] : templateSourceOptions;
+      options.forEach(([value, text]) => {
         const option = document.createElement("option");
         option.value = value;
         option.textContent = text;
         if (!value) option.disabled = true;
         source.append(option);
       });
-      source.value = suggestedTemplateSource(descriptor);
+      source.value = descriptor.kind === "media" ? "url" : suggestedTemplateSource(descriptor);
+      if (descriptor.kind !== "media") label.append(search);
       label.append(source);
       const manual = document.createElement("input");
       manual.className = "text-field template-manual-value";
@@ -2650,18 +2910,203 @@
         ? "https://example.com/media.jpg"
         : descriptor.kind === "location" ? "12.9716, 77.5946 | Location name | Address" : `Enter ${descriptor.label.toLowerCase()}`;
       manual.setAttribute("aria-label", `${descriptor.label} manual value`);
+      const file = document.createElement("input");
+      file.className = "text-field template-media-file";
+      file.type = "file";
+      file.hidden = true;
+      file.accept = descriptor.mediaType === "image" ? "image/jpeg,image/png"
+        : descriptor.mediaType === "video" ? "video/mp4,video/3gpp"
+          : "application/pdf,text/plain,text/csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx";
+      file.setAttribute("aria-label", `Upload ${descriptor.label.toLowerCase()}`);
       const preview = element("span", "template-source-preview");
-      row.append(label, manual, preview);
+      row.append(label, manual);
+      if (descriptor.kind === "media") row.append(file);
+      row.append(preview);
       host.append(row);
       syncTemplateVariableSource(row);
     });
+    renderTemplateComposerPreview();
+  }
+
+  function resolvedTemplateValue(row, descriptor, conversation = selectedConversation()) {
+    const source = row?.querySelector(".template-source-select")?.value || "";
+    const manual = row?.querySelector(".template-manual-value")?.value?.trim() || "";
+    if (descriptor.kind === "media") {
+      const file = row?.querySelector(".template-media-file")?.files?.[0] || null;
+      return source === "upload" ? (file?.name || "") : manual;
+    }
+    return source === "manual" ? manual : templateSourceValue(source, conversation);
+  }
+
+  function replaceTemplatePlaceholders(text, componentType, descriptors, values, buttonIndex = null) {
+    const candidates = descriptors.filter((descriptor) => descriptor.kind === "text"
+      && descriptor.componentType === componentType
+      && (componentType !== "button" || descriptor.buttonIndex === buttonIndex));
+    let positionalIndex = 0;
+    return String(text || "").replace(/{{\s*([^{}]+?)\s*}}/g, (match, rawKey) => {
+      const key = String(rawKey || "").trim();
+      const named = candidates.find((descriptor) => descriptor.parameterName === key || descriptor.placeholder === key);
+      const descriptor = named || candidates[positionalIndex++];
+      return descriptor && values.get(descriptor.id) ? values.get(descriptor.id) : match;
+    });
+  }
+
+  function safeTemplateMediaPreviewUrl(value) {
+    try {
+      const url = new URL(String(value || ""));
+      return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
+    } catch { return ""; }
+  }
+
+  function templateComposerModel({ includeMediaPreview = true } = {}) {
+    const template = currentTemplate();
+    if (!template) return null;
+    const descriptors = templateVariableDescriptors(template);
+    const values = new Map();
+    descriptors.forEach((descriptor) => {
+      const row = $("templateVariableFields").querySelector(`[data-variable-id="${CSS.escape(descriptor.id)}"]`);
+      values.set(descriptor.id, resolvedTemplateValue(row, descriptor));
+    });
+    const model = { header: "", body: "", footer: "", buttons: [], media: null, location: "", text: "" };
+    asItems(template.components).forEach((component) => {
+      const type = String(component.type || "").toUpperCase();
+      if (type === "HEADER") {
+        const mediaDescriptor = descriptors.find((descriptor) => descriptor.componentType === "header" && descriptor.kind === "media");
+        const locationDescriptor = descriptors.find((descriptor) => descriptor.componentType === "header" && descriptor.kind === "location");
+        if (mediaDescriptor) {
+          const row = $("templateVariableFields").querySelector(`[data-variable-id="${CSS.escape(mediaDescriptor.id)}"]`);
+          const source = row?.querySelector(".template-source-select")?.value || "";
+          const file = source === "upload" ? row?.querySelector(".template-media-file")?.files?.[0] || null : null;
+          const remoteUrl = source === "url" ? safeTemplateMediaPreviewUrl(values.get(mediaDescriptor.id)) : "";
+          model.media = {
+            type: mediaDescriptor.mediaType,
+            name: file?.name || values.get(mediaDescriptor.id) || `${capitalize(mediaDescriptor.mediaType)} attachment`,
+            previewUrl: includeMediaPreview && file && mediaDescriptor.mediaType !== "document"
+              ? URL.createObjectURL(file) : remoteUrl,
+            temporary: Boolean(includeMediaPreview && file && mediaDescriptor.mediaType !== "document"),
+            external: Boolean(remoteUrl)
+          };
+        } else if (locationDescriptor) {
+          model.location = values.get(locationDescriptor.id) || "Location";
+        } else if (component.text) {
+          model.header = replaceTemplatePlaceholders(component.text, "header", descriptors, values);
+        }
+      } else if (type === "BODY") {
+        model.body = replaceTemplatePlaceholders(component.text, "body", descriptors, values);
+      } else if (type === "FOOTER") {
+        model.footer = String(component.text || "");
+      } else if (type === "BUTTONS") {
+        model.buttons = asItems(component.buttons).map((button, index) => ({
+          text: String(button.text || button.type || `Button ${index + 1}`),
+          url: replaceTemplatePlaceholders(button.url, "button", descriptors, values, index)
+        }));
+      }
+    });
+    const textParts = [];
+    if (model.location) textParts.push(`Location: ${model.location}`);
+    if (model.header) textParts.push(model.header);
+    if (model.body) textParts.push(model.body);
+    if (model.footer) textParts.push(model.footer);
+    if (model.buttons.length) textParts.push(`Actions: ${model.buttons.map((button) => button.text).join(", ")}`);
+    model.text = textParts.join("\n").trim() || `Template: ${template.name || "message"}`;
+    return model;
+  }
+
+  function revokeTemplatePreviewUrl() {
+    const host = $("templatePreviewContent");
+    const temporary = host?.dataset.temporaryUrl || "";
+    if (temporary) URL.revokeObjectURL(temporary);
+    if (host) delete host.dataset.temporaryUrl;
+  }
+
+  function closeTemplateDialog() {
+    revokeTemplatePreviewUrl();
+    state.templateConversationId = null;
+    if ($("templateDialog").open) $("templateDialog").close();
+  }
+
+  function renderTemplateComposerPreview() {
+    const section = $("templateMessagePreview");
+    const host = $("templatePreviewContent");
+    const hidden = $("templatePreviewText");
+    if (!section || !host || !hidden) return null;
+    revokeTemplatePreviewUrl();
+    host.replaceChildren();
+    const model = templateComposerModel();
+    section.hidden = !model;
+    hidden.value = model?.text || "";
+    if (!model) return null;
+    if (model.media) {
+      if (model.media.type === "image" && model.media.previewUrl) {
+        const image = document.createElement("img");
+        image.className = "template-preview-media";
+        image.src = model.media.previewUrl;
+        image.alt = model.media.name;
+        image.referrerPolicy = "no-referrer";
+        image.loading = "lazy";
+        host.append(image);
+      } else if (model.media.type === "video" && model.media.previewUrl) {
+        const video = document.createElement("video");
+        video.className = "template-preview-media";
+        video.src = model.media.previewUrl;
+        video.controls = true;
+        video.preload = "metadata";
+        video.referrerPolicy = "no-referrer";
+        host.append(video);
+      } else {
+        host.append(element("div", "template-preview-document", model.media.name));
+      }
+      if (model.media.temporary) host.dataset.temporaryUrl = model.media.previewUrl;
+    }
+    if (model.location) host.append(element("div", "template-preview-location", `📍 ${model.location}`));
+    if (model.header) host.append(element("strong", "template-preview-header", model.header));
+    if (model.body) host.append(element("p", "template-preview-body", model.body));
+    if (model.footer) host.append(element("small", "template-preview-footer", model.footer));
+    model.buttons.forEach((button) => {
+      const action = element("span", "template-preview-action");
+      action.append(element("strong", "", button.text));
+      if (button.url) action.append(element("small", "", button.url));
+      host.append(action);
+    });
+    return model;
+  }
+
+  function templateSearchText(template) {
+    const parts = [template.name, template.category, template.status, template.language?.code || template.language];
+    asItems(template.components).forEach((component) => {
+      parts.push(component.type, component.text, component.format);
+      asItems(component.buttons).forEach((button) => parts.push(button.text, button.type));
+    });
+    return parts.filter(Boolean).join(" ").toLocaleLowerCase();
+  }
+
+  function renderTemplateSelectOptions(query = "") {
+    const select = $("templateSelect");
+    const templates = state.templatesByConversation.get(state.templateConversationId) || [];
+    const selected = select.value;
+    const needle = String(query || "").trim().toLocaleLowerCase();
+    const filtered = templates.filter((template) => !needle || templateSearchText(template).includes(needle));
+    select.replaceChildren(new Option(filtered.length ? "Choose a template" : "No matching templates", ""));
+    filtered.forEach((template) => {
+      const language = template.language?.code || template.language || "";
+      select.append(new Option(`${template.name}${language ? ` · ${language}` : ""}`, template._selectionKey));
+    });
+    if (filtered.some((template) => template._selectionKey === selected)) select.value = selected;
+    else {
+      select.value = "";
+      renderTemplateVariables();
+    }
+    select.disabled = !filtered.length;
+    $("templateSubmit").disabled = !filtered.length;
   }
 
   async function loadConversationTemplates(conversationId, { refresh = false } = {}) {
     const select = $("templateSelect");
+    const search = $("templateSearch");
     const status = $("templateLoadStatus");
     const submit = $("templateSubmit");
     select.disabled = true;
+    search.disabled = true;
     submit.disabled = true;
     status.hidden = false;
     status.classList.remove("is-error");
@@ -2681,13 +3126,8 @@
         state.templatesByConversation.set(conversationId, templates);
       }
       if (state.templateConversationId !== conversationId) return;
-      select.replaceChildren(new Option(templates.length ? "Choose a template" : "No approved templates found", ""));
-      templates.forEach((template) => {
-        const language = template.language?.code || template.language || "";
-        const option = new Option(`${template.name}${language ? ` · ${language}` : ""}`, template._selectionKey);
-        select.append(option);
-      });
-      select.disabled = !templates.length;
+      renderTemplateSelectOptions(search.value);
+      search.disabled = !templates.length;
       submit.disabled = !templates.length;
       status.textContent = templates.length
         ? `${templates.length} approved template${templates.length === 1 ? "" : "s"} available.`
@@ -2697,7 +3137,7 @@
       refreshButton.type = "button";
       refreshButton.dataset.action = "reload-templates";
       status.append(refreshButton);
-      if (templates.length) select.focus();
+      if (templates.length) search.focus();
     } catch (error) {
       if (state.templateConversationId !== conversationId) return;
       status.classList.add("is-error");
@@ -2707,6 +3147,7 @@
       retry.dataset.action = "reload-templates";
       status.append(retry);
       select.replaceChildren(new Option("Templates unavailable", ""));
+      search.disabled = true;
     }
   }
 
@@ -2718,6 +3159,7 @@
     }
     const form = $("templateForm");
     form.reset();
+    $("templateSearch").value = "";
     state.templateConversationId = conversation.conversationId;
     $("templateDialog").showModal();
     loadConversationTemplates(conversation.conversationId);
@@ -2726,7 +3168,6 @@
   async function sendCurrentTemplate(form) {
     const conversation = selectedConversation();
     if (!conversation || !isWhatsAppConversation(conversation)) return;
-    const values = new FormData(form);
     const template = currentTemplate();
     if (!template) {
       showToast("Choose a template", "Select an approved template before sending.", true);
@@ -2734,25 +3175,40 @@
     }
     const name = String(template.name || "").trim();
     const languageCode = String(template.language?.code || template.language || "").trim();
-    const previewText = String(values.get("previewText") || "").trim();
     if (!name || !languageCode) return;
     const descriptors = templateVariableDescriptors(template);
-    const componentMap = new Map();
+    const resolvedDescriptors = [];
     for (const descriptor of descriptors) {
       const row = $("templateVariableFields").querySelector(`[data-variable-id="${CSS.escape(descriptor.id)}"]`);
-      const source = row?.querySelector("select")?.value || "";
-      const manual = row?.querySelector("input")?.value?.trim() || "";
+      const source = row?.querySelector(".template-source-select")?.value || "";
+      const manual = row?.querySelector(".template-manual-value")?.value?.trim() || "";
       if (!source) {
         showToast("Choose a template source", `Choose a contact field or manual entry for ${descriptor.label}.`, true);
-        row?.querySelector("select")?.focus();
+        row?.querySelector(".template-source-select")?.focus();
         return;
       }
-      const value = source === "manual" ? manual : templateSourceValue(source, conversation);
+      const file = descriptor.kind === "media" && source === "upload"
+        ? row?.querySelector(".template-media-file")?.files?.[0] || null : null;
+      const value = descriptor.kind === "media"
+        ? (source === "upload" ? file?.name || "" : manual)
+        : source === "manual" ? manual : templateSourceValue(source, conversation);
       if (!value) {
         showToast("Template value required", `${descriptor.label} does not have a value. Choose another source or enter it manually.`, true);
-        row?.querySelector(source === "manual" ? "input" : "select")?.focus();
+        row?.querySelector(source === "upload" ? ".template-media-file" : source === "manual" || source === "url"
+          ? ".template-manual-value" : ".template-source-select")?.focus();
         return;
       }
+      resolvedDescriptors.push({ descriptor, row, source, value, file });
+    }
+    const previewText = String(renderTemplateComposerPreview()?.text || "").trim();
+    const submit = $("templateSubmit");
+    submit.disabled = true;
+    submit.textContent = "Sending…";
+    try {
+      const componentMap = new Map();
+      let mediaPreview = null;
+      for (const resolved of resolvedDescriptors) {
+        const { descriptor, row, source, value, file } = resolved;
       let key = descriptor.componentType;
       if (descriptor.componentType === "button") key = `button:${descriptor.buttonIndex}`;
       if (!componentMap.has(key)) componentMap.set(key, descriptor.componentType === "button"
@@ -2760,13 +3216,26 @@
         : { type: descriptor.componentType, parameters: [] });
       const component = componentMap.get(key);
       if (descriptor.kind === "media") {
-        component.parameters.push({ type: descriptor.mediaType, [descriptor.mediaType]: { link: value } });
+          if (source === "upload") {
+            const mediaForm = new FormData();
+            mediaForm.append("file", file, file.name);
+            mediaForm.append("type", descriptor.mediaType);
+            const uploaded = await state.api.uploadTemplateMedia(conversation.conversationId, mediaForm);
+            component.parameters.push({ type: descriptor.mediaType, [descriptor.mediaType]: { id: uploaded.mediaId } });
+            mediaPreview = {
+              filename: uploaded.filename || file.name,
+              mimeType: uploaded.mimeType || file.type || "",
+              size: Number(uploaded.size || file.size || 0)
+            };
+          } else {
+            component.parameters.push({ type: descriptor.mediaType, [descriptor.mediaType]: { link: value } });
+          }
       } else if (descriptor.kind === "location") {
         const [coordinates, name = "", address = ""] = value.split("|").map((part) => part.trim());
         const [latitude, longitude] = coordinates.split(",").map((part) => Number(part.trim()));
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
           showToast("Location is invalid", "Enter latitude and longitude separated by a comma, followed by optional name and address.", true);
-          row?.querySelector("input")?.focus();
+            row?.querySelector(".template-manual-value")?.focus();
           return;
         }
         component.parameters.push({ type: "location", location: { latitude, longitude, ...(name ? { name } : {}), ...(address ? { address } : {}) } });
@@ -2775,21 +3244,17 @@
         if (descriptor.parameterName) parameter.parameter_name = descriptor.parameterName;
         component.parameters.push(parameter);
       }
-    }
-    const requestTemplate = { name, language: { code: languageCode } };
-    if (componentMap.size) requestTemplate.components = [...componentMap.values()];
-    const submit = $("templateSubmit");
-    submit.disabled = true;
-    submit.textContent = "Sending…";
-    try {
-      const request = previewText ? { ...requestTemplate, previewText } : requestTemplate;
+      }
+      const request = { name, language: { code: languageCode }, previewText };
+      if (componentMap.size) request.components = [...componentMap.values()];
+      if (mediaPreview) request.mediaPreview = mediaPreview;
       const result = await state.api.sendTemplate(conversation.conversationId, request);
-      const fallback = previewText || `[Template: ${name}]`;
+      const fallback = previewText || `Template: ${name}`;
       const message = normalizeMessage(result.item || result.message || { text: fallback, direction: "outbound", status: "pending", messageType: "template" });
       upsertMessage(conversation.conversationId, message);
       conversation.lastMessage = message.text || fallback;
       conversation.lastMessageAt = message.timestamp;
-      $("templateDialog").close();
+      closeTemplateDialog();
       renderMessages();
       renderConversationList();
       showToast("Template queued", `${name} is being sent through WhatsApp.`);
@@ -2801,7 +3266,10 @@
     }
   }
 
-  function attachmentSizeLimit(file) {
+  function attachmentSizeLimit(file, conversation = selectedConversation()) {
+    if (isWhatsAppConversation(conversation) && String(file?.type || "").startsWith("image/")) {
+      return 5 * 1024 * 1024;
+    }
     return 16 * 1024 * 1024;
   }
 
@@ -2810,12 +3278,13 @@
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  async function uploadCurrentAttachment(file) {
+  function queueCurrentAttachments(fileList) {
     const conversation = selectedConversation();
     const status = $("attachmentStatus");
-    if (!conversation || !file) return;
-    if (!isWhatsAppConversation(conversation)) {
-      showToast("WhatsApp conversation required", "File sending is currently available for WhatsApp conversations.", true);
+    const files = [...(fileList || [])];
+    if (!conversation || !files.length) return;
+    if (!supportsChatAttachments(conversation)) {
+      showToast("Attachments unavailable", "File sending is currently available for WhatsApp and Telegram conversations.", true);
       return;
     }
     if (!whatsappReplyWindow(conversation).allowed) {
@@ -2823,46 +3292,127 @@
       showToast("Use a WhatsApp template", "Attachments cannot be sent after the 24-hour reply window closes.", true);
       return;
     }
-    const limit = attachmentSizeLimit(file);
-    if (file.size > limit) {
-      showToast("File is too large", `${file.name} is ${formatFileSize(file.size)}. The limit for this file type is ${formatFileSize(limit)}.`, true);
+    const queue = state.pendingAttachments.get(conversation.conversationId) || [];
+    for (const file of files) {
+      if (isWhatsAppConversation(conversation) && file.type === "image/webp") {
+        showToast("WhatsApp image type not supported", `${file.name} must be converted to JPEG or PNG before sending.`, true);
+        continue;
+      }
+      const limit = attachmentSizeLimit(file, conversation);
+      if (!file.size || file.size > limit) {
+        showToast(file.size ? "File is too large" : "Empty file skipped",
+          file.size ? `${file.name} is ${formatFileSize(file.size)}. The limit is ${formatFileSize(limit)}.` : `${file.name} is empty.`, true);
+        continue;
+      }
+      const previewUrl = file.type.startsWith("image/") || file.type.startsWith("video/") ? URL.createObjectURL(file) : "";
+      queue.push({ id: crypto.randomUUID?.() || `attachment-${Date.now()}-${Math.random()}`, file, previewUrl });
+    }
+    state.pendingAttachments.set(conversation.conversationId, queue);
+    $("attachmentInput").value = "";
+    status.hidden = true;
+    renderAttachmentQueue();
+    $("messageInput").focus();
+  }
+
+  function removeQueuedAttachment(attachmentId) {
+    const conversation = selectedConversation();
+    if (!conversation) return;
+    const queue = currentAttachmentQueue(conversation);
+    const index = queue.findIndex((item) => item.id === attachmentId);
+    if (index < 0) return;
+    const [removed] = queue.splice(index, 1);
+    if (removed.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    if (queue.length) state.pendingAttachments.set(conversation.conversationId, queue);
+    else state.pendingAttachments.delete(conversation.conversationId);
+    renderAttachmentQueue();
+  }
+
+  function discardAttachmentQueue(conversationId) {
+    if (!conversationId) return;
+    const queue = state.pendingAttachments.get(conversationId) || [];
+    queue.forEach((item) => {
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    });
+    state.pendingAttachments.delete(conversationId);
+  }
+
+  async function sendQueuedAttachments(conversation, caption) {
+    const queue = currentAttachmentQueue(conversation);
+    const status = $("attachmentStatus");
+    const input = $("messageInput");
+    if (!queue.length) return;
+    if (caption.length > 1024) {
+      showToast("Caption is too long", "Attachment captions can contain up to 1,024 characters. Shorten the message or send it separately.", true);
       return;
     }
-    const input = $("messageInput");
-    const formData = new FormData();
-    formData.append("file", file, file.name);
-    if (input.value.trim()) formData.append("caption", input.value.trim());
-    status.hidden = false;
-    status.classList.remove("is-error");
-    status.textContent = `Uploading ${file.name} (${formatFileSize(file.size)})…`;
-    $("attachmentButton").disabled = true;
-    try {
-      const result = await state.api.sendAttachment(conversation.conversationId, formData);
-      const fallback = input.value.trim() || `[Attachment: ${file.name}]`;
-      const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "document" });
-      upsertMessage(conversation.conversationId, message);
-      conversation.lastMessage = message.text || fallback;
-      conversation.lastMessageAt = message.timestamp;
-      input.value = "";
-      resizeComposer();
-      status.textContent = `${file.name} sent`;
-      renderMessages();
-      renderConversationList();
-      setTimeout(() => { status.hidden = true; }, 3500);
-    } catch (error) {
-      status.classList.add("is-error");
-      status.textContent = `${file.name} was not sent: ${error.message}`;
-      showToast("Attachment was not sent", error.message, true);
-    } finally {
-      $("attachmentInput").value = "";
-      renderComposerState();
+    const stillSelected = () => state.selectedConversationId === conversation.conversationId;
+    if (stillSelected()) {
+      $("sendButton").disabled = true;
+      $("attachmentButton").disabled = true;
+      status.hidden = false;
+      status.classList.remove("is-error");
     }
+    let sent = 0;
+    try {
+      while (queue.length) {
+        const item = queue[0];
+        if (stillSelected()) status.textContent = `Sending ${sent + 1} of ${sent + queue.length}: ${item.file.name}…`;
+        const formData = new FormData();
+        formData.append("file", item.file, item.file.name);
+        if (sent === 0 && caption) formData.append("caption", caption);
+        const result = await state.api.sendAttachment(conversation.conversationId, formData);
+        const fallback = sent === 0 && caption ? caption : `[Attachment: ${item.file.name}]`;
+        const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "document" });
+        upsertMessage(conversation.conversationId, message);
+        conversation.lastMessage = message.text || fallback;
+        conversation.lastMessageAt = message.timestamp;
+        queue.shift();
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+        sent++;
+        if (sent === 1 && caption && stillSelected() && input.value.trim() === caption) {
+          input.value = "";
+          resizeComposer();
+        }
+        if (stillSelected()) renderAttachmentQueue();
+      }
+      state.pendingAttachments.delete(conversation.conversationId);
+      if (stillSelected()) {
+        status.textContent = `${sent} file${sent === 1 ? "" : "s"} sent`;
+        renderMessages();
+        setTimeout(() => { if (stillSelected()) status.hidden = true; }, 3500);
+      }
+      renderConversationList();
+    } catch (error) {
+      state.pendingAttachments.set(conversation.conversationId, queue);
+      if (stillSelected()) {
+        status.classList.add("is-error");
+        status.textContent = `${sent ? `${sent} sent; ` : ""}${queue.length} not sent: ${error.message}`;
+        renderMessages();
+      }
+      showToast("Attachment sending stopped", `${error.message} Remaining files are still ready to send.`, true);
+      renderConversationList();
+    } finally {
+      renderComposerState();
+      if (stillSelected() && !input.disabled) input.focus();
+    }
+  }
+
+  async function uploadCurrentAttachment(file) {
+    // Backward-compatible entry point retained for integrations that dispatch a single File.
+    queueCurrentAttachments(file ? [file] : []);
   }
 
   function upsertMessage(conversationId, message) {
     const messages = state.messages.get(conversationId) || [];
     const index = messages.findIndex((item) => item.messageId === message.messageId);
-    if (index >= 0) messages[index] = { ...messages[index], ...message };
+    if (index >= 0) {
+      const existing = messages[index];
+      const merged = { ...existing, ...message };
+      if (existing.direction === "outbound" || message.direction === "outbound") {
+        merged.status = mergeOutboundMessageStatus(existing.status, message.status);
+      }
+      messages[index] = merged;
+    }
     else messages.push(message);
     state.messages.set(conversationId, messages);
   }
@@ -2870,6 +3420,9 @@
   async function handleRealtimeEvent(event) {
     const type = event.type || event.event;
     if (type === "webhook.received") {
+      const received = Math.max(0, Number(event.received) || 0);
+      const statuses = Math.max(0, Number(event.statuses) || 0);
+      if (received === 0 && statuses > 0) return;
       const before = new Map(state.conversations.map((conversation) => [conversation.conversationId, {
         lastMessageAt: new Date(conversation.lastMessageAt).getTime() || 0,
         unreadCount: conversation.unreadCount,
@@ -2903,12 +3456,17 @@
       if (!conversationId) return;
       const existingMessage = (state.messages.get(conversationId) || []).find((item) => item.messageId === String(rawMessage.messageId || rawMessage.id || ""));
       if (!existingMessage && rawMessage.text === undefined && rawMessage.direction === undefined) {
-        refreshMessages(conversationId);
-        loadAll();
+        if (conversationId === state.selectedConversationId) await refreshMessages(conversationId);
         return;
       }
+      const statusOnly = type === "message.updated" && Boolean(existingMessage)
+        && rawMessage.status !== undefined && rawMessage.text === undefined && rawMessage.direction === undefined;
       const message = normalizeMessage({ ...existingMessage, ...rawMessage });
       upsertMessage(conversationId, message);
+      if (statusOnly) {
+        if (conversationId === state.selectedConversationId) updateRenderedMessageStatus(message);
+        return;
+      }
       const conversation = state.conversations.find((item) => item.conversationId === conversationId);
       if (conversation) {
         conversation.lastMessage = message.text;
@@ -3794,6 +4352,9 @@
   }
 
   function clearSelectedConversation({ updateUrl = true } = {}) {
+    const conversationId = state.selectedConversationId;
+    discardAttachmentQueue(conversationId);
+    if (state.templateConversationId === conversationId) closeTemplateDialog();
     state.selectedConversationId = null;
     state.pendingConversationId = null;
     state.unreadMarker = null;
@@ -3971,6 +4532,10 @@
           copyWebhookVerifyToken(actionButton);
           return;
         }
+        if (actionButton.dataset.action === "remove-queued-attachment") {
+          removeQueuedAttachment(actionButton.dataset.attachmentId);
+          return;
+        }
         if (actionButton.dataset.action === "edit-webhook-token") {
           openWebhookTokenDialog(actionButton.dataset.channelId);
           return;
@@ -3998,7 +4563,7 @@
           },
           "choose-attachment": () => $("attachmentInput").click(),
           "open-template": openTemplateDialog,
-          "close-template": () => $("templateDialog").close(),
+          "close-template": closeTemplateDialog,
           "reload-templates": () => state.templateConversationId && loadConversationTemplates(state.templateConversationId, { refresh: true }),
           "insert-greeting": () => {
             const input = $("messageInput");
@@ -4105,15 +4670,10 @@
     $("mobileScrim").addEventListener("click", closeMobileMenu);
     $("mobileBack").addEventListener("click", () => clearSelectedConversation());
 
-    $("messageForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentMessage(); });
+    $("messageForm").addEventListener("submit", (event) => { event.preventDefault(); });
+    $("sendButton").addEventListener("click", sendCurrentMessage);
     $("messageInput").addEventListener("input", resizeComposer);
-    $("messageInput").addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        sendCurrentMessage();
-      }
-    });
-    $("attachmentInput").addEventListener("change", (event) => uploadCurrentAttachment(event.target.files?.[0]));
+    $("attachmentInput").addEventListener("change", (event) => queueCurrentAttachments(event.target.files));
     $("pushNotificationsToggle").addEventListener("click", (event) => setBrowserNotifications(event.target.checked));
 
     $("conversationStatus").addEventListener("change", async (event) => {
@@ -4167,15 +4727,25 @@
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
     $("contactEditForm").addEventListener("submit", (event) => { event.preventDefault(); saveContactEdits(event.currentTarget); });
     $("templateSelect").addEventListener("change", renderTemplateVariables);
+    $("templateSearch").addEventListener("input", (event) => renderTemplateSelectOptions(event.target.value));
     $("templateVariableFields").addEventListener("change", (event) => {
       const row = event.target.closest(".template-variable-row");
       if (row) syncTemplateVariableSource(row);
     });
     $("templateVariableFields").addEventListener("input", (event) => {
       const row = event.target.closest(".template-variable-row");
-      if (row) syncTemplateVariableSource(row);
+      if (!row) return;
+      if (event.target.matches(".template-source-search")) filterTemplateSourceOptions(row, event.target.value);
+      else syncTemplateVariableSource(row);
+    });
+    $("templateForm").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && event.target.matches("#templateSearch, .template-source-search")) event.preventDefault();
     });
     $("templateForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentTemplate(event.currentTarget); });
+    $("templateDialog").addEventListener("close", () => {
+      revokeTemplatePreviewUrl();
+      state.templateConversationId = null;
+    });
     $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
     $("apiKeyForm").addEventListener("submit", (event) => { event.preventDefault(); createDeveloperApiKey(event.currentTarget); });
     $("inviteRole").addEventListener("change", updateInviteRoleHelp);

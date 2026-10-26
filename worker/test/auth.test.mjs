@@ -63,6 +63,24 @@ class TestD1 {
   }
 }
 
+function withRunFailures(DB, patterns) {
+  const wrap = (statement, shouldFail) => ({
+    bind(...values) { return wrap(statement.bind(...values), shouldFail); },
+    async run() {
+      if (shouldFail) throw new Error('Simulated D1 write failure');
+      return statement.run();
+    },
+    first() { return statement.first(); },
+    all() { return statement.all(); }
+  });
+  return {
+    prepare(sql) {
+      return wrap(DB.prepare(sql), patterns.some(pattern => pattern.test(sql)));
+    },
+    batch(statements) { return DB.batch(statements); }
+  };
+}
+
 async function testDatabase() {
   const database = new DatabaseSync(':memory:');
   database.exec(await readFile(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8'));
@@ -1249,8 +1267,40 @@ test('Telegram bot identity is reserved before webhook registration', async () =
   }
   const originalFetch = globalThis.fetch;
   let setWebhookCalls = 0;
-  globalThis.fetch = async input => {
+  let telegramMediaSendCalls = 0;
+  globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
+    if (url.pathname.includes('/sendDocument')) {
+      telegramMediaSendCalls++;
+      const chatId = init.body.get('chat_id');
+      assert.ok(['778899', '778900'].includes(chatId));
+      const filename = init.body.get('document').name;
+      const retryFixture = filename === 'delivered-once.pdf';
+      const webpFixture = filename === 'preview.webp';
+      const failureFixture = filename === 'provider-failure.pdf';
+      assert.ok(['telegram.pdf', 'preview.webp', 'delivered-once.pdf', 'provider-failure.pdf'].includes(filename));
+      assert.equal(init.body.get('caption'), retryFixture ? 'Delivered once'
+        : failureFixture ? 'Provider failure' : webpFixture ? null : 'Telegram file');
+      if (failureFixture) {
+        return new Response(JSON.stringify({ ok: false, description: 'Bad Gateway' }), {
+          status: 502, headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, result: {
+        message_id: retryFixture ? 78 : webpFixture ? 79 : 77,
+        document: { file_id: retryFixture ? 'telegram-file-2' : webpFixture ? 'telegram-webp-1' : 'telegram-file-1',
+          file_name: filename, mime_type: webpFixture ? 'image/webp' : 'application/pdf' }
+      } }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.pathname.includes('/getFile')) {
+      assert.equal(url.searchParams.get('file_id'), 'telegram-file-1');
+      return new Response(JSON.stringify({ ok: true, result: { file_path: 'documents/telegram.pdf' } }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (url.pathname.includes('/file/bot') && url.pathname.endsWith('/documents/telegram.pdf')) {
+      return new Response('telegram document', { headers: { 'Content-Type': 'application/pdf' } });
+    }
     if (url.pathname.endsWith('/getMe')) {
       return new Response(JSON.stringify({ ok: true, result: { id: 777000, first_name: 'Shared', username: 'shared_bot' } }), {
         headers: { 'Content-Type': 'application/json' }
@@ -1274,6 +1324,102 @@ test('Telegram bot identity is reserved before webhook registration', async () =
     assert.equal(setWebhookCalls, 1);
     assert.equal(database.prepare("SELECT json_extract(config_json,'$.verifiedProviderId') AS id FROM channels WHERE channel_id='telegram-one'").get().id,
       '777000');
+
+    const now = new Date().toISOString();
+    database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+      VALUES ('contact-telegram-file','Ravi',?,?, 'ws_default')`).run(now, now);
+    database.prepare(`INSERT INTO channel_identities
+        (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
+      VALUES ('identity-telegram-file','contact-telegram-file','telegram-one','778899','Ravi',?,'ws_default')`).run(now);
+    database.prepare(`INSERT INTO conversations
+        (conversation_id,contact_id,channel_id,status,subject,last_message_at,created_at,updated_at,workspace_id)
+      VALUES ('conversation-telegram-file','contact-telegram-file','telegram-one','open','Ravi',?,?,?,'ws_default')`).run(now, now, now);
+    const telegramUpload = new FormData();
+    telegramUpload.set('file', new Blob(['telegram file data'], { type: 'application/pdf' }), 'telegram.pdf');
+    telegramUpload.set('caption', 'Telegram file');
+    const telegramAttachment = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-telegram-file/attachments', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: telegramUpload
+    }), env);
+    assert.equal(telegramAttachment.status, 202);
+    const telegramItem = (await telegramAttachment.json()).item;
+    assert.equal(telegramItem.status, 'sent');
+    assert.equal(telegramItem.channelMessageId, '77');
+    assert.equal(telegramItem.attachment.available, true);
+    const telegramMedia = await handleRequest(new Request(`https://api.chat.helixcer.com${telegramItem.attachment.url}`, {
+      headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(telegramMedia.status, 200);
+    assert.equal(await telegramMedia.text(), 'telegram document');
+
+    const telegramWebpBody = new FormData();
+    telegramWebpBody.set('file', new Blob(['webp image'], { type: 'image/webp' }), 'preview.webp');
+    const telegramWebp = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-telegram-file/attachments', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: telegramWebpBody
+    }), env);
+    assert.equal(telegramWebp.status, 202);
+    const telegramWebpItem = (await telegramWebp.json()).item;
+    assert.equal(telegramWebpItem.messageType, 'image');
+    assert.equal(telegramWebpItem.attachment.available, true);
+
+    database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+      VALUES ('contact-telegram-delivered','Maya',?,?, 'ws_default')`).run(now, now);
+    database.prepare(`INSERT INTO channel_identities
+        (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
+      VALUES ('identity-telegram-delivered','contact-telegram-delivered','telegram-one','778900','Maya',?,'ws_default')`).run(now);
+    database.prepare(`INSERT INTO conversations
+        (conversation_id,contact_id,channel_id,status,subject,last_message_at,created_at,updated_at,workspace_id)
+      VALUES ('conversation-telegram-delivered','contact-telegram-delivered','telegram-one','open','Maya',?,?,?,'ws_default')`).run(now, now, now);
+    const healthyDB = env.DB;
+    env.DB = withRunFailures(healthyDB, [/UPDATE messages SET provider_message_id/, /INSERT INTO audit_log/]);
+    const originalConsoleError = console.error;
+    console.error = () => {};
+    try {
+      const deliveredOnceBody = new FormData();
+      deliveredOnceBody.set('file', new Blob(['already delivered'], { type: 'application/pdf' }), 'delivered-once.pdf');
+      deliveredOnceBody.set('caption', 'Delivered once');
+      const scheduled = [];
+      const deliveredOnce = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-telegram-delivered/attachments', {
+        method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: deliveredOnceBody
+      }), env, { waitUntil(promise) { scheduled.push(promise); } });
+      assert.equal(deliveredOnce.status, 202);
+      const deliveredOnceItem = (await deliveredOnce.json()).item;
+      assert.equal(deliveredOnceItem.status, 'sent');
+      assert.equal(deliveredOnceItem.channelMessageId, '78');
+      assert.equal(deliveredOnceItem.attachment.available, true);
+      assert.equal(scheduled.length, 0);
+      assert.equal(telegramMediaSendCalls, 3);
+    } finally {
+      console.error = originalConsoleError;
+      env.DB = healthyDB;
+    }
+
+    const messagesBeforeProviderFailure = database.prepare('SELECT COUNT(*) AS count FROM messages').get().count;
+    const providerFailureBody = new FormData();
+    providerFailureBody.set('file', new Blob(['provider failure'], { type: 'application/pdf' }), 'provider-failure.pdf');
+    providerFailureBody.set('caption', 'Provider failure');
+    const providerFailure = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-telegram-file/attachments', {
+        method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: providerFailureBody
+      }), env);
+    assert.equal(providerFailure.status, 202);
+    const providerFailureItem = (await providerFailure.json()).item;
+    assert.equal(providerFailureItem.status, 'failed');
+    assert.match(providerFailureItem.error, /Telegram API.*Bad Gateway/);
+    assert.equal(providerFailureItem.attachment.available, false);
+    const storedFailure = database.prepare('SELECT status,error FROM messages WHERE message_id=?').get(providerFailureItem.messageId);
+    assert.equal(storedFailure.status, 'failed');
+    assert.match(storedFailure.error, /Telegram API.*Bad Gateway/);
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages').get().count, messagesBeforeProviderFailure + 1);
+
+    const messagesBeforeValidationFailure = database.prepare('SELECT COUNT(*) AS count FROM messages').get().count;
+    const invalidTelegramBody = new FormData();
+    invalidTelegramBody.set('file', new Blob(['unsafe'], { type: 'application/x-msdownload' }), 'unsafe.exe');
+    const invalidTelegram = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-telegram-file/attachments', {
+        method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: invalidTelegramBody
+      }), env);
+    assert.equal(invalidTelegram.status, 415);
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages').get().count, messagesBeforeValidationFailure);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();
@@ -1322,14 +1468,21 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
   let mediaUploadCalls = 0;
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
+    if (url.hostname === 'lookaside.fbsbx.com') {
+      assert.match(init.headers.Authorization, /^Bearer /);
+      return new Response('invoice bytes', { headers: { 'Content-Type': 'application/pdf', 'Content-Length': '13' } });
+    }
+    if (/\/media-dashboard-\d+$/.test(url.pathname)) {
+      assert.match(init.headers.Authorization, /^Bearer /);
+      return new Response(JSON.stringify({ url: 'https://lookaside.fbsbx.com/invoice.pdf' }), { headers: { 'Content-Type': 'application/json' } });
+    }
     if (url.pathname.endsWith('/media')) {
       assert.match(init.headers.Authorization, /^Bearer /);
       const upload = init.body;
       assert.equal(upload.get('messaging_product'), 'whatsapp');
       assert.equal(upload.get('type'), 'application/pdf');
-      assert.equal(upload.get('file').name, 'invoice.pdf');
       mediaUploadCalls++;
-      return new Response(JSON.stringify({ id: 'media-dashboard-1' }), { headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ id: `media-dashboard-${mediaUploadCalls}` }), { headers: { 'Content-Type': 'application/json' } });
     }
     if (url.pathname.endsWith('/messages')) {
       const body = JSON.parse(init.body);
@@ -1343,13 +1496,34 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
   try {
     const pending = [];
     const ctx = { waitUntil(promise) { pending.push(promise); } };
+    const beforeTemplateMediaCount = database.prepare('SELECT COUNT(*) AS count FROM messages').get().count;
+    const templateMediaBody = new FormData();
+    templateMediaBody.set('file', new Blob(['template document'], { type: 'application/pdf' }), 'template-header.pdf');
+    templateMediaBody.set('type', 'document');
+    const templateMedia = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/template-media', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: templateMediaBody
+    }), env, ctx);
+    assert.equal(templateMedia.status, 201);
+    assert.equal((await templateMedia.json()).mediaId, 'media-dashboard-1');
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages').get().count, beforeTemplateMediaCount);
+
     const templateResponse = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/template', {
       method: 'POST', headers: jsonHeaders,
       body: JSON.stringify({ name: 'order_update', language: { code: 'en_US' },
-        components: [{ type: 'body', parameters: [{ type: 'text', text: 'Asha' }] }] })
+        components: [
+          { type: 'header', parameters: [{ type: 'document', document: { id: 'media-dashboard-1' } }] },
+          { type: 'body', parameters: [{ type: 'text', text: 'Asha' }] }
+        ],
+        mediaPreview: { filename: 'template-header.pdf', mimeType: 'application/pdf', size: 17 },
+        previewText: 'Order update\nHi Asha\nTrack order' })
     }), env, ctx);
     assert.equal(templateResponse.status, 202);
-    assert.equal((await templateResponse.json()).item.messageType, 'template');
+    const templateItem = (await templateResponse.json()).item;
+    assert.equal(templateItem.messageType, 'template');
+    assert.equal(templateItem.text, 'Order update\nHi Asha\nTrack order');
+    assert.equal(templateItem.attachment.filename, 'template-header.pdf');
+    assert.equal(templateItem.attachment.type, 'document');
+    assert.equal(templateItem.attachment.available, true);
     await Promise.all(pending.splice(0));
     assert.equal(providerBodies[0].type, 'template');
     assert.equal(providerBodies[0].template.name, 'order_update');
@@ -1365,9 +1539,9 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal(attachmentItem.messageType, 'document');
     assert.equal(attachmentItem.attachment.filename, 'invoice.pdf');
     await Promise.all(pending.splice(0));
-    assert.equal(mediaUploadCalls, 1);
+    assert.equal(mediaUploadCalls, 2);
     assert.equal(providerBodies[1].type, 'document');
-    assert.equal(providerBodies[1].document.id, 'media-dashboard-1');
+    assert.equal(providerBodies[1].document.id, 'media-dashboard-2');
     assert.equal(providerBodies[1].document.filename, 'invoice.pdf');
 
     const messages = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/messages', {
@@ -1376,9 +1550,30 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     const messageBody = await messages.json();
     assert.equal(messageBody.freeformAllowed, true);
     const documentMessage = messageBody.items.find(item => item.messageType === 'document');
+    const templateMessage = messageBody.items.find(item => item.messageType === 'template');
+    assert.equal(templateMessage.attachment.filename, 'template-header.pdf');
+    assert.equal(templateMessage.attachment.available, true);
+    assert.match(templateMessage.attachment.url, /\/api\/messages\/.+\/attachment$/);
     assert.equal(documentMessage.attachment.caption, 'Your invoice');
+    assert.equal(documentMessage.attachment.available, true);
+    assert.match(documentMessage.attachment.url, /\/api\/messages\/.+\/attachment$/);
     assert.equal(documentMessage.channelMessageId, 'wamid.dashboard-2');
     assert.equal(Object.hasOwn(documentMessage, 'providerMessageId'), false);
+
+    const protectedTemplateMedia = await handleRequest(new Request(`https://api.chat.helixcer.com${templateMessage.attachment.url}`, {
+      headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(protectedTemplateMedia.status, 200);
+    assert.match(protectedTemplateMedia.headers.get('Content-Disposition'), /^attachment;/);
+    assert.equal(await protectedTemplateMedia.text(), 'invoice bytes');
+
+    const protectedAttachment = await handleRequest(new Request(`https://api.chat.helixcer.com${documentMessage.attachment.url}`, {
+      headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(protectedAttachment.status, 200);
+    assert.equal(protectedAttachment.headers.get('Content-Type'), 'application/octet-stream');
+    assert.match(protectedAttachment.headers.get('Content-Disposition'), /^attachment;/);
+    assert.equal(await protectedAttachment.text(), 'invoice bytes');
 
     const unsupportedBody = new FormData();
     unsupportedBody.set('file', new Blob(['binary'], { type: 'application/x-msdownload' }), 'unsafe.exe');
@@ -1387,7 +1582,35 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     }), env, ctx);
     assert.equal(unsupported.status, 415);
     assert.match((await unsupported.json()).error, /not supported/i);
-    assert.equal(mediaUploadCalls, 1);
+    assert.equal(mediaUploadCalls, 2);
+
+    const audioCaptionBody = new FormData();
+    audioCaptionBody.set('file', new Blob(['audio bytes'], { type: 'audio/mpeg' }), 'voice.mp3');
+    audioCaptionBody.set('caption', 'This text would not reach WhatsApp');
+    const audioCaption = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/attachments', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: audioCaptionBody
+    }), env, ctx);
+    assert.equal(audioCaption.status, 400);
+    assert.match((await audioCaption.json()).error, /audio messages do not support captions/i);
+    assert.equal(mediaUploadCalls, 2);
+
+    const oversizedImageBody = new FormData();
+    oversizedImageBody.set('file', new Blob([new Uint8Array(5 * 1024 * 1024 + 1)], { type: 'image/jpeg' }), 'oversized.jpg');
+    const oversizedImage = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/attachments', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: oversizedImageBody
+    }), env, ctx);
+    assert.equal(oversizedImage.status, 413);
+    assert.match((await oversizedImage.json()).error, /WhatsApp image attachments may not exceed 5 MB/i);
+    assert.equal(mediaUploadCalls, 2);
+
+    const whatsappWebpBody = new FormData();
+    whatsappWebpBody.set('file', new Blob(['webp'], { type: 'image/webp' }), 'unsupported.webp');
+    const whatsappWebp = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/attachments', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: whatsappWebpBody
+    }), env, ctx);
+    assert.equal(whatsappWebp.status, 415);
+    assert.match((await whatsappWebp.json()).error, /must be JPEG or PNG/i);
+    assert.equal(mediaUploadCalls, 2);
 
     database.prepare("UPDATE messages SET timestamp='2020-01-01T00:00:00.000Z' WHERE message_id='inbound-dashboard'").run();
     const blockedText = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/messages', {
@@ -1408,15 +1631,30 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     }), env, ctx);
     assert.equal(blockedAttachment.status, 409);
     assert.match((await blockedAttachment.json()).error, /24-hour service window/i);
-    assert.equal(mediaUploadCalls, 1);
+    assert.equal(mediaUploadCalls, 2);
+
+    const lateTemplateMediaBody = new FormData();
+    lateTemplateMediaBody.set('file', new Blob(['late template document'], { type: 'application/pdf' }), 'late-template.pdf');
+    lateTemplateMediaBody.set('type', 'document');
+    const lateTemplateMedia = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/template-media', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }, body: lateTemplateMediaBody
+    }), env, ctx);
+    assert.equal(lateTemplateMedia.status, 201);
+    assert.equal((await lateTemplateMedia.json()).mediaId, 'media-dashboard-3');
 
     const allowedTemplate = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/conversation-dashboard/template', {
       method: 'POST', headers: jsonHeaders,
-      body: JSON.stringify({ name: 'reopen_chat', language: { code: 'en_US' } })
+      body: JSON.stringify({ name: 'reopen_chat', language: { code: 'en_US' },
+        components: [{ type: 'header', parameters: [{ type: 'image', image: { link: 'https://cdn.example.com/banner.jpg' } }] }],
+        previewText: 'A'.repeat(5000) })
     }), env, ctx);
     assert.equal(allowedTemplate.status, 202);
     const allowedTemplateItem = (await allowedTemplate.clone().json()).item;
     assert.equal(allowedTemplateItem.status, 'pending');
+    assert.equal(allowedTemplateItem.text.length, 5000);
+    assert.equal(allowedTemplateItem.attachment.type, 'image');
+    assert.equal(allowedTemplateItem.attachment.external, true);
+    assert.equal(allowedTemplateItem.attachment.url, 'https://cdn.example.com/banner.jpg');
     assert.equal(database.prepare('SELECT message_type FROM messages WHERE message_id=?').get(allowedTemplateItem.messageId).message_type,
       'template');
     await Promise.all(pending.splice(0));

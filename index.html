@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#171827">
   <meta name="description" content="Helixcer Chat — a focused omnichannel inbox for customer conversations.">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://lh3.googleusercontent.com; connect-src 'self' https://api.chat.helixcer.com wss://api.chat.helixcer.com; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://api.chat.helixcer.com wss://api.chat.helixcer.com; object-src 'none'; base-uri 'none'; form-action 'self'">
   <meta name="helixcer-api-base" content="https://api.chat.helixcer.com">
   <title>Helixcer Chat</title>
   <link rel="icon" href="./assets/helixcer-mark.jpg" type="image/jpeg">
@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261026-9">
-  <script src="./assets/app.js?v=20261026-9" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261026-10">
+  <script src="./assets/app.js?v=20261026-10" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -239,8 +239,9 @@
               </div>
               <form class="composer" id="messageForm">
                 <div class="composer-box">
-                  <textarea id="messageInput" rows="1" maxlength="4000" placeholder="Write a reply…" aria-label="Message"></textarea>
-                  <input class="sr-only" id="attachmentInput" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/3gpp,audio/aac,audio/amr,audio/mpeg,audio/mp4,audio/ogg,application/pdf,text/plain,text/csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv" tabindex="-1">
+                  <textarea id="messageInput" rows="1" maxlength="4000" enterkeyhint="enter" placeholder="Write a reply…" aria-label="Message"></textarea>
+                  <input class="sr-only" id="attachmentInput" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/3gpp,audio/aac,audio/amr,audio/mpeg,audio/mp4,audio/ogg,application/pdf,text/plain,text/csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv" tabindex="-1">
+                  <div class="attachment-queue" id="attachmentQueue" aria-label="Files ready to send" hidden></div>
                   <div class="composer-tools">
                     <div>
                       <button class="composer-icon" id="attachmentButton" type="button" data-action="choose-attachment" aria-label="Attach a file">
@@ -252,8 +253,8 @@
                       <button class="template-button" id="templateButton" type="button" data-action="open-template" hidden>Template</button>
                     </div>
                     <div class="send-group">
-                      <span class="send-hint">Enter to send</span>
-                      <button class="send-button" id="sendButton" type="submit" aria-label="Send message">
+                      <span class="send-hint">Use Send to send</span>
+                      <button class="send-button" id="sendButton" type="button" aria-label="Send message">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 17 8-17 8 3-8Zm3 8h14"/></svg>
                       </button>
                     </div>
@@ -631,11 +632,20 @@
       </div>
       <p class="modal-copy">Choose an approved template, then map every required value from this contact or enter it manually.</p>
       <div class="form-grid">
-        <label class="field-label form-span">Approved template<select class="text-field" name="templateId" id="templateSelect" required disabled><option value="">Loading templates…</option></select></label>
+        <label class="field-label form-span">Approved template
+          <span class="searchable-select">
+            <input class="text-field searchable-select-input" id="templateSearch" type="search" placeholder="Search templates…" autocomplete="off" aria-controls="templateSelect">
+            <select class="text-field" name="templateId" id="templateSelect" required disabled><option value="">Loading templates…</option></select>
+          </span>
+        </label>
         <div class="template-load-state form-span" id="templateLoadStatus" role="status">Loading approved templates from WhatsApp…</div>
         <div class="template-summary form-span" id="templateSummary" hidden></div>
         <div class="template-variable-fields form-span" id="templateVariableFields"></div>
-        <label class="field-label form-span">Conversation preview <span class="optional-label">optional</span><input class="text-field" name="previewText" maxlength="500" placeholder="Order confirmation template"></label>
+        <input type="hidden" name="previewText" id="templatePreviewText">
+        <section class="template-composer-preview form-span" id="templateMessagePreview" aria-live="polite" hidden>
+          <span class="field-label">Message preview</span>
+          <div class="template-preview-phone"><div class="template-preview-message" id="templatePreviewContent"></div></div>
+        </section>
       </div>
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-template">Cancel</button>

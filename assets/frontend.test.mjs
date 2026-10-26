@@ -183,9 +183,9 @@ test("saving a channel never runs provider verification and avoids duplicate cre
   assert.match(app, /savedChannelId \? "Save changes" : "Save connection"/);
 });
 
-test("WhatsApp inbox supports templates, attachments, and reply-window blocking", () => {
+test("WhatsApp inbox supports rendered templates, queued attachments, and reply-window blocking", () => {
   assert.match(html, /id="replyWindowNotice"/);
-  assert.match(html, /id="attachmentInput" type="file"/);
+  assert.match(html, /id="attachmentInput" type="file" multiple/);
   assert.match(html, /id="templateDialog"/);
   assert.match(app, /freeformAllowed/);
   assert.match(app, /\/api\/conversations\/\$\{encodeURIComponent\(conversationId\)\}\/templates/);
@@ -197,7 +197,8 @@ test("WhatsApp inbox supports templates, attachments, and reply-window blocking"
   assert.match(app, /parameter_name/);
   assert.match(app, /sub_type: descriptor\.subType/);
   assert.match(app, /\[descriptor\.mediaType\]: \{ link: value \}/);
-  assert.match(app, /const request = previewText \? \{ \.\.\.requestTemplate, previewText \} : requestTemplate/);
+  assert.match(app, /\[descriptor\.mediaType\]: \{ id: uploaded\.mediaId \}/);
+  assert.match(app, /const request = \{ name, language: \{ code: languageCode \}, previewText \}/);
   assert.match(app, /\/approved template\/i\.test\(reason\)/);
   assert.match(styles, /#templateDialog\s*\{[^}]*max-height:\s*calc\(100dvh - 24px\)[^}]*overflow-y:\s*auto/);
   assert.match(app, /\["", "Choose source"\]/);
@@ -205,6 +206,56 @@ test("WhatsApp inbox supports templates, attachments, and reply-window blocking"
   assert.match(app, /\["customer_name", "displayName"\]/);
   assert.match(app, /return sources\.get\(name\) \|\| ""/);
   assert.match(app, /refreshButton\.dataset\.action = "reload-templates"/);
+});
+
+test("template composer searches templates and variables, previews substitutions, and uploads media", () => {
+  assert.match(html, /id="templateSearch" type="search"/);
+  assert.match(html, /id="templateMessagePreview"/);
+  assert.match(html, /id="templatePreviewText"/);
+  assert.match(app, /function renderTemplateSelectOptions\(query = ""\)/);
+  assert.match(app, /function filterTemplateSourceOptions\(row, query\)/);
+  assert.match(app, /function replaceTemplatePlaceholders/);
+  assert.match(app, /function renderTemplateComposerPreview/);
+  assert.match(app, /template-media/);
+  assert.match(app, /\[\["url", "Use media URL"\], \["upload", "Upload a file"\]\]/);
+  assert.match(app, /function revokeTemplatePreviewUrl\(\)/);
+  assert.match(app, /templateDialog"\)\.addEventListener\("close"[\s\S]*?revokeTemplatePreviewUrl\(\)/);
+  assert.match(app, /source === "upload" \? row\?\.querySelector\("\.template-media-file"\)/);
+  assert.match(app, /model\.media\.type === "image" && model\.media\.previewUrl/);
+  assert.match(app, /referrerPolicy = "no-referrer"/);
+  assert.match(html, /img-src 'self' data: blob: https:; media-src 'self' blob: https:/);
+  assert.doesNotMatch(app, /image\/jpeg,image\/png,image\/webp/);
+  assert.match(app, /const selectedOption = templateSourceOptions\.find/);
+  assert.match(app, /if \(selectedOption && !options\.some/);
+  assert.match(app, /event\.key === "Enter" && event\.target\.matches\("#templateSearch, \.template-source-search"\)/);
+  assert.match(app, /if \(mediaPreview\) request\.mediaPreview = mediaPreview/);
+  assert.match(app, /model\.text = textParts\.join\("\\n"\)\.trim\(\) \|\|/);
+  assert.doesNotMatch(app, /model\.text = [^\n]+\.slice\(0, 4096\)/);
+});
+
+test("attachments queue without auto-send and render provider-backed previews for WhatsApp and Telegram", () => {
+  assert.match(html, /id="attachmentQueue"/);
+  assert.match(app, /pendingAttachments: new Map\(\)/);
+  assert.match(app, /function queueCurrentAttachments\(fileList\)/);
+  assert.match(app, /async function sendQueuedAttachments/);
+  assert.match(app, /while \(queue\.length\)/);
+  assert.match(app, /supportsChatAttachments/);
+  assert.match(app, /"telegram", "telegram_bot"/);
+  assert.match(app, /function renderMessageAttachment\(message\)/);
+  assert.match(app, /image\.loading = "lazy"/);
+  assert.match(app, /video\.preload = "metadata"/);
+  assert.match(app, /download \? "\?download=1"/);
+  assert.match(app, /function discardAttachmentQueue\(conversationId\)/);
+  assert.match(app, /discardAttachmentQueue\(conversationId\);/);
+  assert.match(app, /return 5 \* 1024 \* 1024/);
+  assert.match(app, /WhatsApp image type not supported/);
+  const attachmentRenderer = app.slice(app.indexOf("function renderMessageAttachment"), app.indexOf("function renderMessages"));
+  for (const media of ["image", "video", "audio"]) {
+    assert.ok(attachmentRenderer.indexOf(`${media}.crossOrigin = "use-credentials"`) >= 0);
+    assert.ok(attachmentRenderer.indexOf(`${media}.crossOrigin = "use-credentials"`) < attachmentRenderer.indexOf(`${media}.src = url`));
+  }
+  const queueFunction = app.slice(app.indexOf("function queueCurrentAttachments"), app.indexOf("function removeQueuedAttachment"));
+  assert.doesNotMatch(queueFunction, /sendAttachment\(/);
 });
 
 test("settings expose permission-aware browser notifications", () => {
@@ -299,6 +350,39 @@ test("outbound messages expose sent, delivered, read, retry, and failure states 
   assert.match(app, /Message status:/);
   assert.match(styles, /\.delivery-status\.is-delivered/);
   assert.match(styles, /\.delivery-status\.is-read/);
+});
+
+test("delivery status realtime updates patch only the existing message status", () => {
+  const realtimeHandler = app.slice(app.indexOf("async function handleRealtimeEvent"), app.indexOf("function isIosDevice"));
+  assert.match(app, /function updateRenderedMessageStatus\(message\)/);
+  assert.match(app, /querySelector\("\.delivery-status, \.message-failed"\)/);
+  assert.match(realtimeHandler, /received === 0 && statuses > 0\) return/);
+  assert.match(realtimeHandler, /const statusOnly = type === "message\.updated"/);
+  assert.match(realtimeHandler, /if \(statusOnly\)[\s\S]*?updateRenderedMessageStatus\(message\);[\s\S]*?return/);
+  const missingStatusFallback = realtimeHandler.slice(realtimeHandler.indexOf("if (!existingMessage"), realtimeHandler.indexOf("const statusOnly"));
+  assert.doesNotMatch(missingStatusFallback, /loadAll\(\)/);
+});
+
+test("outbound status reconciliation is monotonic and permits explicit retry transitions", () => {
+  const start = app.indexOf("function mergeOutboundMessageStatus");
+  const end = app.indexOf("function updateRenderedMessageStatus", start);
+  assert.ok(start >= 0 && end > start);
+  const mergeStatus = Function(`${app.slice(start, end)}\nreturn mergeOutboundMessageStatus;`)();
+  assert.equal(mergeStatus("submitted", "pending"), "submitted");
+  assert.equal(mergeStatus("delivered", "sent"), "delivered");
+  assert.equal(mergeStatus("read", "delivered"), "read");
+  assert.equal(mergeStatus("pending", "failed"), "failed");
+  assert.equal(mergeStatus("failed", "submitted"), "failed");
+  assert.equal(mergeStatus("failed", "retrying"), "retrying");
+  assert.equal(mergeStatus("retrying", "submitted"), "submitted");
+});
+
+test("the composer sends only from the Send CTA and Enter inserts a newline", () => {
+  assert.match(html, /<textarea id="messageInput"[^>]*enterkeyhint="enter"/);
+  assert.match(html, /<button class="send-button" id="sendButton" type="button"/);
+  assert.doesNotMatch(html, /Enter to send/);
+  assert.match(app, /\$\("sendButton"\)\.addEventListener\("click", sendCurrentMessage\)/);
+  assert.doesNotMatch(app, /\$\("messageInput"\)\.addEventListener\("keydown"[\s\S]*?sendCurrentMessage\(\)/);
 });
 
 test("pending and closed status updates clear the selected chat only after the server accepts them", () => {

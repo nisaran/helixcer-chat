@@ -18,8 +18,9 @@ import {
   sendWorkspacePush
 } from './push.js';
 
-const API_VERSION = '2026-10-26-template-library';
+const API_VERSION = '2026-10-26-chat-media';
 const MAX_TEXT_LENGTH = 4096;
+const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
 const MAX_EXTERNAL_JSON_BODY = 131072;
@@ -27,6 +28,8 @@ const MAX_CREDENTIAL_LENGTH = 4096;
 const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024;
 const MAX_ATTACHMENT_CAPTION_LENGTH = 1024;
+const WHATSAPP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 const EXTERNAL_API_OPERATION = 'whatsapp.template.send';
 const EXTERNAL_API_IDEMPOTENCY_DAYS = 7;
 const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram']);
@@ -355,6 +358,11 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       ctx.waitUntil(sendOrQueue(env, result.message.messageId));
       return withCors(json({ ok: true, item: result.message }, 202), cors);
     }
+    const messageAttachmentMatch = url.pathname.match(/^\/api\/messages\/([^/]+)\/attachment$/);
+    if (messageAttachmentMatch && request.method === 'GET') {
+      const messageId = decodeURIComponent(messageAttachmentMatch[1]);
+      return withCors(await streamMessageAttachment(env, workspaceId, messageId, request, url), cors);
+    }
     const conversationTemplatesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/templates$/);
     if (conversationTemplatesMatch && request.method === 'GET') {
       const id = decodeURIComponent(conversationTemplatesMatch[1]);
@@ -368,12 +376,17 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       ctx.waitUntil(sendOrQueue(env, result.message.messageId));
       return withCors(json({ ok: true, item: result.message }, 202), cors);
     }
+    const templateMediaMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/template-media$/);
+    if (templateMediaMatch && request.method === 'POST') {
+      const id = decodeURIComponent(templateMediaMatch[1]);
+      return withCors(json(await uploadConversationTemplateMedia(env, workspaceId, id, request), 201), cors);
+    }
     const attachmentMessageMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/attachments$/);
     if (attachmentMessageMatch && request.method === 'POST') {
       const id = decodeURIComponent(attachmentMessageMatch[1]);
       const result = await createConversationAttachmentMessage(env, workspaceId, id, request, principal);
       await broadcast(env, workspaceId, { type: 'message.created', conversationId: id, messageId: result.message.messageId });
-      ctx.waitUntil(sendOrQueue(env, result.message.messageId));
+      if (result.message.status === 'pending') ctx.waitUntil(sendOrQueue(env, result.message.messageId));
       return withCors(json({ ok: true, item: result.message }, 202), cors);
     }
     if (url.pathname === '/api/contacts' && request.method === 'POST') {
@@ -898,6 +911,14 @@ function cleanOptionalText(value, label, maximum) {
   const text = value.trim();
   if (text.length > maximum) throw httpError(400, `${label} is too long.`);
   if (/[\u0000-\u001f\u007f]/.test(text)) throw httpError(400, `${label} contains invalid characters.`);
+  return text;
+}
+
+function cleanPreviewText(value, maximum) {
+  if (typeof value !== 'string') throw httpError(400, 'Preview text must be text.');
+  const text = value.replace(/\r\n?/g, '\n').replace(/\t/g, ' ').trim();
+  if (text.length > maximum) throw httpError(400, 'Preview text is too long.');
+  if (/[\u0000-\u0009\u000b-\u001f\u007f]/.test(text)) throw httpError(400, 'Preview text contains invalid characters.');
   return text;
 }
 
@@ -2128,7 +2149,7 @@ async function listMessages(env, workspaceId, conversationId, url) {
     messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
     status: row.status, timestamp: row.timestamp, channelId: row.channel_id,
     channelMessageId: row.provider_message_id, error: row.error,
-    attachment: messageAttachmentView(row.message_type, safeJsonParse(row.payload_json, {}))
+    attachment: messageAttachmentView(row.message_type, safeJsonParse(row.payload_json, {}), row.message_id)
   }));
 }
 
@@ -2447,7 +2468,7 @@ function sanitizeWhatsAppTemplateComponent(value, componentIndex) {
   if (type === 'header' && ['text', 'image', 'video', 'document', 'location'].includes(format)) {
     definition.format = format;
   }
-  const text = providerText(value.text, type === 'body' ? 4096 : 1024);
+  const text = providerMultilineText(value.text, type === 'body' ? 4096 : 1024);
   if (text) definition.text = text;
   const example = sanitizeWhatsAppTemplateExample(value.example);
   if (Object.keys(example).length) definition.example = example;
@@ -2544,6 +2565,12 @@ function providerText(value, maximum) {
   return String(value).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, maximum);
 }
 
+function providerMultilineText(value, maximum) {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  return String(value).replace(/\r\n?/g, '\n').replace(/\t/g, ' ')
+    .replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, ' ').trim().slice(0, maximum);
+}
+
 function providerIdentifier(value, maximum) {
   const text = providerText(value, maximum);
   return /^[A-Za-z0-9_.:-]+$/.test(text) ? text : '';
@@ -2562,7 +2589,7 @@ function redactProviderSecret(message, secret) {
 
 async function createConversationTemplateMessage(env, workspaceId, conversationId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Template payload must be an object.');
-  rejectUnknownKeys(payload, new Set(['name', 'language', 'components', 'previewText']), 'template request');
+  rejectUnknownKeys(payload, new Set(['name', 'language', 'components', 'previewText', 'mediaPreview']), 'template request');
   const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
   if (target.connectorType !== 'whatsapp_cloud') throw httpError(409, 'Templates are available only for WhatsApp conversations.');
   if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
@@ -2573,16 +2600,23 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   });
   const previewText = payload.previewText === undefined
     ? `Template: ${template.name} (${template.language.code})`
-    : cleanOptionalText(payload.previewText, 'Preview text', MAX_TEXT_LENGTH);
+    : cleanPreviewText(payload.previewText, MAX_TEMPLATE_PREVIEW_LENGTH);
+  const mediaPreview = validateTemplateMediaPreview(payload.mediaPreview);
+  const attachment = templateMediaAttachment(template, mediaPreview);
+  if (mediaPreview && !attachment) throw httpError(400, 'Media preview metadata requires a template media header.');
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
+  const storedPayload = {
+    template: { name: template.name, language: template.language },
+    ...(attachment ? { attachment } : {})
+  };
   const encryptedPayload = await encryptOutboundPayload({ template }, env.CHANNEL_CREDENTIALS_KEY, workspaceId, messageId);
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
         status,timestamp,payload_json,workspace_id)
       VALUES (?1,?2,?3,?4,'outbound','template',?5,'pending',?6,?7,?8)`)
       .bind(messageId, conversationId, target.contact_id, target.channel_id, previewText, now,
-        JSON.stringify({ template: { name: template.name, language: template.language } }), workspaceId),
+        JSON.stringify(storedPayload), workspaceId),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, workspaceId, encryptedPayload, now),
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
@@ -2597,14 +2631,63 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   return { message: {
     messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: 'template',
     text: previewText, status: 'pending', timestamp: now,
-    template: { name: template.name, language: template.language }
+    template: { name: template.name, language: template.language },
+    attachment: messageAttachmentView('template', storedPayload, messageId)
   } };
+}
+
+function validateTemplateMediaPreview(value) {
+  if (value === undefined || value === null) return null;
+  if (!isPlainObject(value)) throw httpError(400, 'Template media preview must be an object.');
+  rejectUnknownKeys(value, new Set(['filename', 'mimeType', 'size']), 'template media preview');
+  const filename = value.filename === undefined ? '' : cleanOptionalText(value.filename, 'Template media filename', 240);
+  const mimeType = value.mimeType === undefined ? '' : cleanOptionalText(value.mimeType, 'Template media MIME type', 160).toLowerCase();
+  if (mimeType && !/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i.test(mimeType)) {
+    throw httpError(400, 'Template media MIME type is invalid.');
+  }
+  const size = value.size === undefined ? 0 : Number(value.size);
+  if (!Number.isFinite(size) || size < 0 || size > MAX_ATTACHMENT_BYTES) throw httpError(400, 'Template media size is invalid.');
+  return { filename, mimeType, size: Math.floor(size) };
+}
+
+function templateMediaAttachment(template, preview) {
+  for (const component of Array.isArray(template?.components) ? template.components : []) {
+    if (String(component?.type || '').toLowerCase() !== 'header') continue;
+    for (const parameter of Array.isArray(component.parameters) ? component.parameters : []) {
+      const type = String(parameter?.type || '').toLowerCase();
+      if (!['image', 'video', 'document'].includes(type)) continue;
+      const media = parameter?.[type];
+      if (!isPlainObject(media)) continue;
+      const providerMediaId = String(media.id || '').trim();
+      let externalUrl = '';
+      if (!providerMediaId && media.link) {
+        validatePublicHttpsMediaUrl(media.link, `template ${type}`);
+        externalUrl = new URL(String(media.link)).toString();
+      }
+      if (!providerMediaId && !externalUrl) continue;
+      let filename = preview?.filename || '';
+      if (!filename && externalUrl) {
+        try { filename = decodeURIComponent(new URL(externalUrl).pathname.split('/').filter(Boolean).at(-1) || ''); } catch {}
+      }
+      return {
+        type,
+        filename: safeAttachmentFilename(filename || `${type}-template-media`),
+        mimeType: preview?.mimeType || '',
+        size: Number(preview?.size || 0),
+        caption: '',
+        ...(providerMediaId ? { providerMediaId } : { externalUrl })
+      };
+    }
+  }
+  return null;
 }
 
 async function createConversationAttachmentMessage(env, workspaceId, conversationId, request, principal) {
   const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
-  if (target.connectorType !== 'whatsapp_cloud') throw httpError(409, 'Attachments are currently available only for WhatsApp conversations.');
-  if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
+  if (!['whatsapp_cloud', 'telegram'].includes(target.connectorType)) {
+    throw httpError(409, 'Attachments are currently available for WhatsApp and Telegram conversations.');
+  }
+  if (!target.enabled) throw httpError(409, 'The channel is disabled.');
   assertFreeformReplyAllowed(target.connectorType, target.last_inbound_at);
   const contentType = request.headers.get('Content-Type') || '';
   if (!contentType.toLowerCase().startsWith('multipart/form-data;')) throw httpError(415, 'Content-Type must be multipart/form-data.');
@@ -2616,21 +2699,71 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   try { form = await request.formData(); } catch { throw httpError(400, 'Multipart attachment data is invalid.'); }
   const file = form.get('file');
   if (!file || typeof file !== 'object' || typeof file.arrayBuffer !== 'function') throw httpError(400, 'A file field is required.');
-  const attachment = validateWhatsAppAttachment(file, form.get('caption'));
-  const providerMediaId = await uploadWhatsAppMedia(env, target.channel, file, attachment);
+  const attachment = validateWhatsAppAttachment(file, form.get('caption'), target.connectorType);
+  if (target.connectorType === 'whatsapp_cloud' && attachment.type === 'audio' && attachment.caption) {
+    throw httpError(400, 'WhatsApp audio messages do not support captions. Remove the text or send it as a separate message.');
+  }
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
+  const preview = attachment.caption || `[${attachment.type}: ${attachment.filename}]`;
+  if (target.connectorType === 'telegram') {
+    let safeAttachment = { ...attachment };
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
+          provider_message_id,status,timestamp,payload_json,workspace_id)
+        VALUES (?1,?2,?3,?4,'outbound',?5,?6,'','pending',?7,?8,?9)`)
+        .bind(messageId, conversationId, target.contact_id, target.channel_id, attachment.type, preview, now,
+          JSON.stringify({ attachment: safeAttachment }), workspaceId),
+      env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2')
+        .bind(conversationId, workspaceId, now)
+    ]);
+    let sent;
+    try {
+      sent = await sendTelegramMedia(env, target.channel, target.channel_profile_id, file, attachment);
+      safeAttachment = { ...attachment, providerFileId: sent.providerFileId };
+      await persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, safeAttachment);
+    } catch (error) {
+      const failure = cleanError(error);
+      let failurePersisted = false;
+      try {
+        await env.DB.prepare(`UPDATE messages SET status='failed',error=?2 WHERE message_id=?1 AND workspace_id=?3`)
+          .bind(messageId, failure, workspaceId).run();
+        failurePersisted = true;
+      } catch (persistenceError) {
+        console.error('telegram_attachment_failure_persist_failed', {
+          messageId, workspaceId, error: cleanError(persistenceError)
+        });
+      }
+      if (!failurePersisted) throw error;
+      await auditAttachmentBestEffort(env, principal, conversationId, {
+        channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType,
+        size: attachment.size, status: 'failed'
+      });
+      return { message: {
+        messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
+        text: preview, status: 'failed', error: failure, timestamp: now, channelMessageId: '',
+        attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId)
+      } };
+    }
+    await auditAttachmentBestEffort(env, principal, conversationId, {
+      channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType, size: attachment.size
+    });
+    return { message: {
+      messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
+      text: preview, status: sent.status, timestamp: now, channelMessageId: sent.providerMessageId,
+      attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId)
+    } };
+  }
+
+  const providerMediaId = await uploadWhatsAppMedia(env, target.channel, file, attachment);
   const encryptedPayload = await encryptOutboundPayload({ media: { ...attachment, id: providerMediaId } },
     env.CHANNEL_CREDENTIALS_KEY, workspaceId, messageId);
-  const preview = attachment.caption || `[${attachment.type}: ${attachment.filename}]`;
-  const safeAttachment = { type: attachment.type, filename: attachment.filename, mimeType: attachment.mimeType,
-    size: attachment.size, caption: attachment.caption };
-  await env.DB.batch([
-    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
-        status,timestamp,payload_json,workspace_id)
-      VALUES (?1,?2,?3,?4,'outbound',?5,?6,'pending',?7,?8,?9)`)
-      .bind(messageId, conversationId, target.contact_id, target.channel_id, attachment.type, preview, now,
-        JSON.stringify({ attachment: safeAttachment }), workspaceId),
+  const safeAttachment = { ...attachment, providerMediaId };
+  const statements = [env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
+      provider_message_id,status,timestamp,payload_json,workspace_id)
+    VALUES (?1,?2,?3,?4,'outbound',?5,?6,'','pending',?7,?8,?9)`)
+    .bind(messageId, conversationId, target.contact_id, target.channel_id, attachment.type, preview,
+      now, JSON.stringify({ attachment: safeAttachment }), workspaceId),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, workspaceId, encryptedPayload, now),
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
@@ -2638,17 +2771,47 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
       .bind(crypto.randomUUID(), messageId, now, now, workspaceId),
     env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2')
       .bind(conversationId, workspaceId, now)
-  ]);
-  await audit(env, principal, 'send_attachment', 'conversation', conversationId, {
+  ];
+  await env.DB.batch(statements);
+  await auditAttachmentBestEffort(env, principal, conversationId, {
     channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType, size: attachment.size
   });
   return { message: {
     messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
-    text: preview, status: 'pending', timestamp: now, attachment: safeAttachment
+    text: preview, status: 'pending', timestamp: now, channelMessageId: '',
+    attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId)
   } };
 }
 
-function validateWhatsAppAttachment(file, captionValue) {
+async function persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, attachment) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await env.DB.prepare(`UPDATE messages SET provider_message_id=?2,status=?3,payload_json=?4,error=''
+        WHERE message_id=?1 AND workspace_id=?5`).bind(messageId, sent.providerMessageId, sent.status,
+          JSON.stringify({ attachment }), workspaceId).run();
+      return true;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  console.error('telegram_attachment_success_persist_failed', {
+    messageId, workspaceId, error: cleanError(lastError)
+  });
+  return false;
+}
+
+async function auditAttachmentBestEffort(env, principal, conversationId, details) {
+  try {
+    await audit(env, principal, 'send_attachment', 'conversation', conversationId, details);
+  } catch (error) {
+    console.error('attachment_audit_failed', {
+      conversationId, messageId: details?.messageId || '', error: cleanError(error)
+    });
+  }
+}
+
+function validateWhatsAppAttachment(file, captionValue, connectorType = 'whatsapp_cloud') {
   const mimeType = String(file.type || '').toLowerCase().split(';', 1)[0].trim();
   const types = new Map([
     ['image/jpeg', 'image'], ['image/png', 'image'], ['image/webp', 'image'],
@@ -2664,10 +2827,18 @@ function validateWhatsAppAttachment(file, captionValue) {
     ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'document']
   ]);
   const type = types.get(mimeType);
-  if (!type) throw httpError(415, 'This file type is not supported for WhatsApp attachments.');
+  if (!type) throw httpError(415, 'This file type is not supported for chat attachments.');
+  if (connectorType === 'whatsapp_cloud' && mimeType === 'image/webp') {
+    throw httpError(415, 'WhatsApp image attachments must be JPEG or PNG.');
+  }
   const size = Number(file.size || 0);
   if (!Number.isFinite(size) || size <= 0) throw httpError(400, 'The attachment is empty.');
-  if (size > MAX_ATTACHMENT_BYTES) throw httpError(413, 'Attachments may not exceed 16 MB.');
+  const maximum = connectorType === 'whatsapp_cloud' && type === 'image'
+    ? WHATSAPP_IMAGE_MAX_BYTES : MAX_ATTACHMENT_BYTES;
+  if (size > maximum) {
+    const provider = connectorType === 'telegram' ? 'Telegram' : 'WhatsApp';
+    throw httpError(413, `${provider} ${type} attachments may not exceed ${Math.round(maximum / (1024 * 1024))} MB.`);
+  }
   const rawName = String(file.name || `attachment.${mimeType.split('/')[1] || 'bin'}`)
     .replace(/[\u0000-\u001f\u007f\\/]+/g, ' ').trim();
   const filename = (rawName || 'attachment').slice(0, 240);
@@ -2697,17 +2868,151 @@ async function uploadWhatsAppMedia(env, channel, file, attachment) {
   return String(data.id);
 }
 
-function messageAttachmentView(messageType, payload) {
-  if (!['image', 'video', 'audio', 'document'].includes(String(messageType || ''))) return null;
+async function uploadConversationTemplateMedia(env, workspaceId, conversationId, request) {
+  const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
+  if (target.connectorType !== 'whatsapp_cloud') throw httpError(409, 'Template media is available only for WhatsApp conversations.');
+  if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.toLowerCase().startsWith('multipart/form-data;')) throw httpError(415, 'Content-Type must be multipart/form-data.');
+  const declaredLength = Number(request.headers.get('Content-Length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_ATTACHMENT_BYTES + 1024 * 1024) {
+    throw httpError(413, 'Template media request is too large.');
+  }
+  let form;
+  try { form = await request.formData(); } catch { throw httpError(400, 'Multipart template media is invalid.'); }
+  const file = form.get('file');
+  if (!file || typeof file !== 'object' || typeof file.arrayBuffer !== 'function') throw httpError(400, 'A file field is required.');
+  const expectedType = String(form.get('type') || '').toLowerCase();
+  if (!['image', 'video', 'document'].includes(expectedType)) throw httpError(400, 'Template media type must be image, video, or document.');
+  const attachment = validateWhatsAppAttachment(file, '');
+  if (attachment.type !== expectedType) throw httpError(415, `The selected file is not valid ${expectedType} media.`);
+  const mediaId = await uploadWhatsAppMedia(env, target.channel, file, attachment);
+  return {
+    ok: true, mediaId, type: attachment.type, filename: attachment.filename,
+    mimeType: attachment.mimeType, size: attachment.size
+  };
+}
+
+async function streamMessageAttachment(env, workspaceId, messageId, request, url) {
+  const row = await env.DB.prepare(`SELECT m.message_id,m.message_type,m.payload_json,m.channel_id,c.connector_type,c.provider_type,
+      c.config_json,c.secret_key,c.workspace_id
+    FROM messages m JOIN channels c ON c.channel_id=m.channel_id AND c.workspace_id=m.workspace_id
+    WHERE m.message_id=?1 AND m.workspace_id=?2`).bind(messageId, workspaceId).first();
+  if (!row) throw httpError(404, 'Attachment not found.');
+  const attachment = safeJsonParse(row.payload_json, {})?.attachment;
+  const attachmentType = String(row.message_type || '') === 'template'
+    ? String(attachment?.type || '') : String(row.message_type || '');
+  if (!attachment || !['image', 'video', 'audio', 'document'].includes(attachmentType)) {
+    throw httpError(404, 'Attachment not found.');
+  }
+  const channel = {
+    channelId: row.channel_id,
+    connectorType: logicalConnectorType(row),
+    config: safeJsonParse(row.config_json, {}),
+    secretKey: row.secret_key,
+    workspaceId: row.workspace_id
+  };
+  let providerResponse;
+  const range = request.headers.get('Range') || '';
+  if (channel.connectorType === 'whatsapp_cloud') {
+    const mediaId = String(attachment.providerMediaId || '');
+    if (!mediaId) throw httpError(410, 'This WhatsApp attachment is no longer available.');
+    const credentials = await readChannelCredentials(env, channel);
+    if (!credentials.accessToken) throw httpError(409, 'WhatsApp credentials are not configured.');
+    const version = metaApiVersion(channel.config?.apiVersion);
+    const infoResponse = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(mediaId)}`, {
+      headers: { Authorization: `Bearer ${credentials.accessToken}` }
+    });
+    const info = safeJsonParse(await infoResponse.text(), {});
+    if (!infoResponse.ok || !info.url) throw httpError(502, `WhatsApp media is unavailable: ${providerError(info, infoResponse.status)}`);
+    const mediaUrl = new URL(String(info.url));
+    if (mediaUrl.protocol !== 'https:' || !isMetaMediaHost(mediaUrl.hostname)) throw httpError(502, 'WhatsApp returned an invalid media location.');
+    providerResponse = await fetch(mediaUrl, { headers: {
+      Authorization: `Bearer ${credentials.accessToken}`, ...(range ? { Range: range } : {})
+    } });
+  } else if (channel.connectorType === 'telegram') {
+    const fileId = String(attachment.providerFileId || '');
+    if (!fileId) throw httpError(410, 'This Telegram attachment is no longer available.');
+    const credentials = await readChannelCredentials(env, channel);
+    if (!credentials.botToken) throw httpError(409, 'Telegram credentials are not configured.');
+    const infoResponse = await fetch(`https://api.telegram.org/bot${credentials.botToken}/getFile?file_id=${encodeURIComponent(fileId)}`);
+    const info = safeJsonParse(await infoResponse.text(), {});
+    if (!infoResponse.ok || info.ok === false || !info.result?.file_path) {
+      throw httpError(502, `Telegram media is unavailable: ${providerError(info, infoResponse.status)}`);
+    }
+    const filePath = String(info.result.file_path);
+    if (!/^[A-Za-z0-9_./-]{1,500}$/.test(filePath) || filePath.includes('..')) throw httpError(502, 'Telegram returned an invalid media location.');
+    providerResponse = await fetch(`https://api.telegram.org/file/bot${credentials.botToken}/${filePath}`, {
+      headers: range ? { Range: range } : {}
+    });
+  } else {
+    throw httpError(409, 'This provider does not expose protected attachment previews.');
+  }
+  if (!providerResponse.ok || !providerResponse.body) throw httpError(502, 'The provider could not return this attachment.');
+  const filename = safeAttachmentFilename(attachment.filename || `${attachmentType}-attachment`);
+  const requestedDownload = url.searchParams.get('download') === '1';
+  const mimeType = safeInlineAttachmentMime(attachmentType, attachment.mimeType, providerResponse.headers.get('Content-Type'));
+  const inline = !requestedDownload && attachmentType !== 'document' && Boolean(mimeType);
+  const headers = new Headers({
+    'Content-Type': mimeType || 'application/octet-stream',
+    'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename="${filename}"`,
+    'Cache-Control': 'private, max-age=300',
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+    'X-Content-Type-Options': 'nosniff'
+  });
+  const length = providerResponse.headers.get('Content-Length');
+  if (length) headers.set('Content-Length', length);
+  for (const name of ['Accept-Ranges', 'Content-Range']) {
+    const value = providerResponse.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  return new Response(providerResponse.body, { status: providerResponse.status, headers });
+}
+
+function isMetaMediaHost(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'lookaside.fbsbx.com' || host.endsWith('.fbcdn.net') || host === 'facebook.com' || host.endsWith('.facebook.com');
+}
+
+function safeInlineAttachmentMime(messageType, storedMime, providerMime) {
+  const candidate = String(storedMime || providerMime || '').toLowerCase().split(';', 1)[0].trim();
+  const allowed = {
+    image: new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+    video: new Set(['video/mp4', 'video/3gpp', 'video/webm']),
+    audio: new Set(['audio/aac', 'audio/amr', 'audio/mpeg', 'audio/mp4', 'audio/ogg'])
+  };
+  return allowed[String(messageType || '')]?.has(candidate) ? candidate : '';
+}
+
+function safeAttachmentFilename(value) {
+  return String(value || 'attachment').replace(/[^\x20-\x7e]+/g, '_').replace(/["\\/]+/g, '_').trim().slice(0, 180) || 'attachment';
+}
+
+function messageAttachmentView(messageType, payload, messageId = '') {
   const value = payload?.attachment;
   if (!value || typeof value !== 'object') return null;
+  const type = String(messageType || '') === 'template' ? String(value.type || '') : String(messageType || '');
+  if (!['image', 'video', 'audio', 'document'].includes(type)) return null;
+  const externalUrl = safeStoredExternalMediaUrl(value.externalUrl);
+  const available = Boolean(value.providerMediaId || value.providerFileId || externalUrl);
   return {
-    type: String(value.type || messageType),
+    type,
     filename: String(value.filename || ''),
     mimeType: String(value.mimeType || ''),
     size: Number(value.size || 0),
-    caption: String(value.caption || '')
+    caption: String(value.caption || ''),
+    available,
+    external: Boolean(externalUrl),
+    url: externalUrl || (available && messageId ? `/api/messages/${encodeURIComponent(messageId)}/attachment` : '')
   };
+}
+
+function safeStoredExternalMediaUrl(value) {
+  if (!value) return '';
+  try {
+    validatePublicHttpsMediaUrl(value, 'stored template media');
+    return new URL(String(value)).toString();
+  } catch { return ''; }
 }
 
 async function sendOrQueue(env, messageId) {
@@ -2893,7 +3198,7 @@ async function sendWhatsAppMedia(env, channel, recipient, media, messageId) {
     status: 'submitted', providerMessageId: data.messages?.[0]?.id || '', httpStatus: response.status,
     attachment: {
       type, filename: String(media.filename || ''), mimeType: String(media.mimeType || ''),
-      size: Number(media.size || 0), caption: String(media.caption || '')
+      size: Number(media.size || 0), caption: String(media.caption || ''), providerMediaId: String(media.id)
     }
   };
 }
@@ -2942,6 +3247,39 @@ async function sendTelegram(env, channel, chatId, text) {
   return { status: 'sent', providerMessageId: String(data.result?.message_id || ''), httpStatus: response.status };
 }
 
+async function sendTelegramMedia(env, channel, chatId, file, attachment) {
+  const credentials = await readChannelCredentials(env, channel);
+  const token = credentials.botToken;
+  if (!token) throw nonRetryableError('Telegram bot token is not configured.');
+  const telegramPhoto = attachment.type === 'image' &&
+    ['image/jpeg', 'image/png'].includes(attachment.mimeType) && attachment.size <= TELEGRAM_PHOTO_MAX_BYTES;
+  const voice = attachment.type === 'audio' && attachment.mimeType === 'audio/ogg';
+  const method = telegramPhoto ? 'sendPhoto'
+    : attachment.type === 'video' ? 'sendVideo'
+      : voice ? 'sendVoice' : attachment.type === 'audio' ? 'sendAudio' : 'sendDocument';
+  const field = telegramPhoto ? 'photo'
+    : attachment.type === 'video' ? 'video' : voice ? 'voice' : attachment.type === 'audio' ? 'audio' : 'document';
+  const body = new FormData();
+  body.set('chat_id', String(chatId));
+  body.set(field, file, attachment.filename);
+  if (attachment.caption) body.set('caption', attachment.caption);
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', body });
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok || data.ok === false) {
+    const error = new Error(`Telegram API: ${providerError(data, response.status)}`);
+    error.retryable = isRetryableProviderStatus(response.status);
+    throw error;
+  }
+  const sent = data.result || {};
+  const providerFileId = telegramPhoto
+    ? String(sent.photo?.at?.(-1)?.file_id || '')
+    : String((voice ? sent.voice : sent[attachment.type])?.file_id || sent.document?.file_id || '');
+  return {
+    status: 'sent', providerMessageId: String(sent.message_id || ''), providerFileId,
+    httpStatus: response.status
+  };
+}
+
 async function sendInstagram(env, channel, recipient, text) {
   const credentials = await readChannelCredentials(env, channel);
   const accountId = String(channel.config?.instagramAccountId || '');
@@ -2970,7 +3308,7 @@ async function markMessageSent(env, messageId, result) {
     env.DB.prepare(`UPDATE messages SET
         status=CASE WHEN status IN ('sent','delivered','read','failed') THEN status ELSE ?2 END,
         provider_message_id=CASE WHEN provider_message_id='' THEN ?3 ELSE provider_message_id END,
-        payload_json=CASE WHEN status IN ('sent','delivered','read','failed') THEN payload_json ELSE ?4 END,
+        payload_json=CASE WHEN message_type='template' OR status IN ('sent','delivered','read','failed') THEN payload_json ELSE ?4 END,
         error=CASE WHEN status='failed' THEN error ELSE '' END
       WHERE message_id=?1`)
       .bind(messageId, result.status || 'submitted', result.providerMessageId || '', JSON.stringify(result)),
@@ -3086,11 +3424,14 @@ async function storeInbound(env, channel, event, rawPayload) {
     }
   }
   const messageId = crypto.randomUUID();
+  const storedPayload = event.attachment
+    ? { attachment: event.attachment, providerMessageId: String(event.providerMessageId || '') }
+    : rawPayload;
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
       provider_message_id,status,timestamp,payload_json,workspace_id) VALUES (?1,?2,?3,?4,'inbound',?5,?6,?7,'received',?8,?9,?10)`)
       .bind(messageId, conversation.conversation_id, identity.contact_id, channel.channelId, String(event.messageType || 'text').slice(0, 40),
-        String(event.text || '').slice(0, MAX_TEXT_LENGTH), String(event.providerMessageId || ''), timestamp, truncateJson(rawPayload), channel.workspaceId),
+        String(event.text || '').slice(0, MAX_TEXT_LENGTH), String(event.providerMessageId || ''), timestamp, truncateJson(storedPayload), channel.workspaceId),
     env.DB.prepare("UPDATE conversations SET status='open',last_message_at=?3,unread_count=unread_count+1,updated_at=?4 WHERE conversation_id=?1 AND workspace_id=?2")
       .bind(conversation.conversation_id, channel.workspaceId, timestamp, now)
   ]);
@@ -3128,6 +3469,7 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
           ELSE ?4
         END,
         payload_json=CASE
+          WHEN message_type IN ('image','video','audio','document','template') THEN payload_json
           WHEN status='failed' THEN payload_json
           WHEN ?4='failed' THEN ?5
           WHEN status='read' THEN payload_json
@@ -3179,6 +3521,7 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
           ELSE ?5
         END,
         payload_json=CASE
+          WHEN message_type IN ('image','video','audio','document','template') THEN payload_json
           WHEN status='failed' THEN payload_json
           WHEN status='read' THEN payload_json
           WHEN status='delivered' AND ?5='delivered' THEN payload_json
@@ -3264,11 +3607,13 @@ export function normalizeWhatsApp(payload) {
       for (const message of value.messages || []) {
         const contact = contacts.find(item => String(item.wa_id) === String(message.from)) || {};
         const text = whatsappInboundText(message);
+        const attachment = whatsappInboundAttachment(message);
         messages.push({
           channelProfileId: String(message.from || ''), displayName: contact.profile?.name || String(message.from || ''),
           text, providerMessageId: String(message.id || ''),
           timestamp: message.timestamp ? new Date(Number(message.timestamp) * 1000).toISOString() : '',
-          messageType: String(message.type || 'text')
+          messageType: attachment?.type || String(message.type || 'text'),
+          ...(attachment ? { attachment } : {})
         });
       }
       for (const status of value.statuses || []) {
@@ -3296,6 +3641,24 @@ function whatsappInboundText(message) {
   if (caption) return String(caption);
   const type = String(message?.type || 'message').replace(/_/g, ' ');
   return `[WhatsApp ${type} received]`;
+}
+
+function whatsappInboundAttachment(message) {
+  const providerType = String(message?.type || '').toLowerCase();
+  const type = providerType === 'sticker' ? 'image' : providerType;
+  if (!['image', 'video', 'audio', 'document'].includes(type)) return null;
+  const media = message?.[providerType];
+  if (!media?.id) return null;
+  const mimeType = String(media.mime_type || '');
+  const extension = mimeType.split('/')[1]?.split(';')[0] || 'bin';
+  return {
+    type,
+    filename: String(media.filename || `${type}-${String(message.id || 'attachment').slice(-12)}.${extension}`).slice(0, 240),
+    mimeType: mimeType.slice(0, 160),
+    size: Number(media.file_size || 0),
+    caption: String(media.caption || message?.caption || '').slice(0, MAX_ATTACHMENT_CAPTION_LENGTH),
+    providerMediaId: String(media.id)
+  };
 }
 
 export function normalizeWhatsAppRecipient(value) {
@@ -3356,6 +3719,7 @@ export function normalizeTelegram(payload) {
   const message = payload?.message || payload?.edited_message || payload?.channel_post || null;
   if (!message?.chat?.id) return null;
   const name = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(' ') || message.chat.title || String(message.chat.id);
+  const attachment = telegramInboundAttachment(message);
   return {
     channelProfileId: String(message.chat.id), displayName: name,
     text: message.text || message.caption || '',
@@ -3363,7 +3727,41 @@ export function normalizeTelegram(payload) {
       ? `update:${payload.update_id}`
       : `chat:${message.chat.id}:message:${message.message_id || ''}`,
     timestamp: message.date ? new Date(Number(message.date) * 1000).toISOString() : '',
-    messageType: message.text ? 'text' : message.photo ? 'image' : message.document ? 'document' : 'message'
+    messageType: message.text ? 'text' : attachment?.type || 'message',
+    ...(attachment ? { attachment } : {})
+  };
+}
+
+function telegramInboundAttachment(message) {
+  let media = null;
+  let type = '';
+  if (Array.isArray(message?.photo) && message.photo.length) {
+    media = message.photo.reduce((largest, item) => Number(item.file_size || 0) >= Number(largest?.file_size || 0) ? item : largest, null);
+    type = 'image';
+  } else if (message?.video) {
+    media = message.video; type = 'video';
+  } else if (message?.audio || message?.voice) {
+    media = message.audio || message.voice; type = 'audio';
+  } else if (message?.document) {
+    media = message.document; type = 'document';
+  } else if (message?.animation) {
+    media = message.animation; type = 'video';
+  } else if (message?.video_note) {
+    media = message.video_note; type = 'video';
+  } else if (message?.sticker) {
+    media = message.sticker;
+    type = String(media.mime_type || '').toLowerCase() === 'video/webm' ? 'video' : 'image';
+  }
+  if (!media?.file_id || !type) return null;
+  const mimeType = String(media.mime_type || (type === 'image' ? 'image/jpeg' : ''));
+  const extension = mimeType.split('/')[1]?.split(';')[0] || 'bin';
+  return {
+    type,
+    filename: String(media.file_name || `${type}-${String(message.message_id || 'attachment')}.${extension}`).slice(0, 240),
+    mimeType: mimeType.slice(0, 160),
+    size: Number(media.file_size || 0),
+    caption: String(message.caption || '').slice(0, MAX_ATTACHMENT_CAPTION_LENGTH),
+    providerFileId: String(media.file_id)
   };
 }
 
