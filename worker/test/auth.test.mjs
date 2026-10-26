@@ -1775,6 +1775,7 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
   }), env);
   const conversation = (await conversations.json()).items.find(item => item.conversationId === 'conversation-dashboard');
   assert.equal(conversation.connectorType, 'whatsapp_cloud');
+  assert.equal(conversation.lastMessageType, 'text');
   assert.equal(conversation.freeformAllowed, true);
   assert.ok(conversation.replyWindowExpiresAt);
 
@@ -1783,6 +1784,17 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
   let mediaUploadCalls = 0;
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
+    if (url.pathname.endsWith('/message_templates')) {
+      const name = url.searchParams.get('name');
+      return new Response(JSON.stringify({ data: name === 'order_update' ? [{
+        id: 'meta-dashboard-order', name: 'order_update', language: 'en_US', status: 'APPROVED', category: 'UTILITY',
+        components: [
+          { type: 'HEADER', format: 'DOCUMENT' },
+          { type: 'BODY', text: 'Hi {{1}}, your order is ready.' },
+          { type: 'BUTTONS', buttons: [{ type: 'QUICK_REPLY', text: 'Continue' }] }
+        ]
+      }] : [] }), { headers: { 'Content-Type': 'application/json' } });
+    }
     if (url.hostname === 'lookaside.fbsbx.com') {
       assert.match(init.headers.Authorization, /^Bearer /);
       return new Response('invoice bytes', { headers: { 'Content-Type': 'application/pdf', 'Content-Length': '13' } });
@@ -1836,6 +1848,7 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     const templateItem = (await templateResponse.json()).item;
     assert.equal(templateItem.messageType, 'template');
     assert.equal(templateItem.text, 'Order update\nHi Asha\nTrack order');
+    assert.deepEqual(templateItem.template.buttons, [{ type: 'quick_reply', text: 'Continue' }]);
     assert.equal(templateItem.attachment.filename, 'template-header.pdf');
     assert.equal(templateItem.attachment.type, 'document');
     assert.equal(templateItem.attachment.available, true);
@@ -1843,6 +1856,12 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
       event.messageId === templateItem.messageId);
     assert.ok(templateCreatedEvent);
     assert.deepEqual(templateCreatedEvent.message, templateItem);
+    const conversationsAfterTemplate = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
+      headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    const conversationAfterTemplate = (await conversationsAfterTemplate.json()).items
+      .find(item => item.conversationId === 'conversation-dashboard');
+    assert.equal(conversationAfterTemplate.lastMessageType, 'template');
     await Promise.all(pending.splice(0));
     assert.equal(providerBodies[0].type, 'template');
     assert.equal(providerBodies[0].template.name, 'order_update');
@@ -1946,6 +1965,7 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal(messageBody.freeformAllowed, true);
     const documentMessage = messageBody.items.find(item => item.messageType === 'document');
     const templateMessage = messageBody.items.find(item => item.messageType === 'template');
+    assert.deepEqual(templateMessage.template.buttons, [{ type: 'quick_reply', text: 'Continue' }]);
     assert.equal(templateMessage.attachment.filename, 'template-header.pdf');
     assert.equal(templateMessage.attachment.available, true);
     assert.match(templateMessage.attachment.url, /\/api\/messages\/.+\/attachment$/);

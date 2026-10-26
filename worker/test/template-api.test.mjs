@@ -83,7 +83,10 @@ async function fixture() {
       return new Response(null, { status: 204 });
     } })
   };
-  return { database, broadcasts, env: { DB, INBOX_HUB, CHANNEL_CREDENTIALS_KEY: encryptionKey } };
+  return { database, broadcasts, env: {
+    DB, INBOX_HUB, CHANNEL_CREDENTIALS_KEY: encryptionKey,
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true'
+  } };
 }
 
 async function sha256(value) {
@@ -315,7 +318,8 @@ test('external template API stores and broadcasts the rendered template and medi
     assert.equal(row.text, expectedText);
     const stored = JSON.parse(row.payload_json);
     assert.deepEqual(stored.template, {
-      name: 'invoice_ready', language: { code: 'en_US' }, templateId: 'meta-template-invoice', category: 'UTILITY'
+      name: 'invoice_ready', language: { code: 'en_US' }, templateId: 'meta-template-invoice', category: 'UTILITY',
+      buttons: [{ type: 'url', text: 'View invoice' }]
     });
     assert.deepEqual(stored.attachment, {
       type: 'document', filename: 'invoice-1001.pdf', mimeType: '', size: 0, caption: '',
@@ -323,11 +327,20 @@ test('external template API stores and broadcasts the rendered template and medi
     });
     const created = broadcasts.find(event => event.type === 'message.created' && event.messageId === accepted.messageId);
     assert.equal(created.message.text, expectedText);
+    assert.deepEqual(created.message.template, stored.template);
     assert.deepEqual(created.message.attachment, {
       type: 'document', filename: 'invoice-1001.pdf', mimeType: '', size: 0, caption: '',
       available: true, external: true, url: 'https://cdn.example.com/invoice-1001.pdf'
     });
     assert.equal(created.conversation.lastMessage, expectedText);
+    const history = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/conversations/${accepted.conversationId}/messages`, {
+        headers: { Authorization: 'Bearer recovery-secret' }
+      }), env);
+    assert.equal(history.status, 200);
+    const listed = (await history.json()).items.find(item => item.messageId === accepted.messageId);
+    assert.deepEqual(listed.template, stored.template);
+    assert.deepEqual(listed.attachment, created.message.attachment);
     await Promise.all(waits);
     assert.deepEqual(providerPaths, [
       '/v26.0/2053926168641345/message_templates', '/v26.0/103698172469545/messages'
@@ -391,7 +404,8 @@ test('external template API persists once, dispatches, replays safely, and scope
       timestamp: accepted.createdAt,
       channelMessageId: '',
       error: '',
-      reply: null
+      reply: null,
+      template: { name: 'order_update', language: { code: 'en_US' } }
     });
     assert.ok(createdEvent.conversation);
     assert.equal(createdEvent.conversation.conversationId, accepted.conversationId);

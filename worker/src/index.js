@@ -33,6 +33,7 @@ const TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 const EXTERNAL_API_OPERATION = 'whatsapp.template.send';
 const EXTERNAL_API_IDEMPOTENCY_DAYS = 7;
 const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram']);
+const TEMPLATE_BUTTON_TYPES = new Set(['quick_reply', 'url', 'phone_number', 'copy_code', 'catalog', 'mpm', 'flow', 'otp']);
 const CONNECTOR_DEFINITIONS = {
   whatsapp_cloud: {
     label: 'WhatsApp Cloud API', webhookPath: 'whatsapp',
@@ -718,6 +719,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
     messageId, conversationId: identity.conversationId, channelId: channel.channelId,
     direction: 'outbound', messageType: 'template', text: preview, status: 'pending', timestamp: now,
     channelMessageId: '', error: '', reply: null,
+    template: templateMessageView(presentation.storedPayload),
     ...(realtimeAttachment ? { attachment: realtimeAttachment } : {})
   };
   const realtimeConversation = await getConversationItem(env, principal.workspaceId, identity.conversationId);
@@ -2064,7 +2066,10 @@ async function listConversations(env, workspaceId, url) {
   const result = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.status,c.assigned_to,
       c.subject,c.last_message_at,c.unread_count,c.tags_json,ch.name AS channel_name,ch.connector_type,ch.provider_type,
       i.channel_profile_id,
-      (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id ORDER BY timestamp DESC LIMIT 1) AS last_message,
+      (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
+        ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message,
+      (SELECT message_type FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
+        ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message_type,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
     FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id
@@ -2083,6 +2088,7 @@ function conversationListItem(row) {
     channelName: row.channel_name, connectorType, status: row.status, assignedTo: row.assigned_to,
     subject: row.subject, lastMessageAt: row.last_message_at, unreadCount: Number(row.unread_count || 0),
     tags: safeJsonParse(row.tags_json, []), lastMessage: row.last_message || '',
+    lastMessageType: row.last_message_type || '',
     channelProfileId: row.channel_profile_id || '',
     ...whatsappReplyWindowState(connectorType, row.last_inbound_at)
   };
@@ -2092,7 +2098,10 @@ async function getConversationItem(env, workspaceId, conversationId) {
   const row = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.status,c.assigned_to,
       c.subject,c.last_message_at,c.unread_count,c.tags_json,ch.name AS channel_name,ch.connector_type,ch.provider_type,
       i.channel_profile_id,
-      (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id ORDER BY timestamp DESC LIMIT 1) AS last_message,
+      (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
+        ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message,
+      (SELECT message_type FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
+        ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message_type,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
     FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
@@ -2316,11 +2325,13 @@ async function listMessages(env, workspaceId, conversationId, url) {
     .bind(workspaceId, conversationId, before, limit).all();
   return result.results.reverse().map(row => {
     const payload = safeJsonParse(row.payload_json, {});
+    const template = row.message_type === 'template' ? templateMessageView(payload) : null;
     return {
       messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
       status: row.status, timestamp: row.timestamp, channelId: row.channel_id,
       channelMessageId: row.provider_message_id, error: row.error,
       attachment: messageAttachmentView(row.message_type, payload, row.message_id),
+      ...(template ? { template } : {}),
       reply: messageReplyView(payload)
     };
   });
@@ -2344,6 +2355,29 @@ function messageReplyView(payload) {
     text: String(reply.text || '').slice(0, 1000),
     messageType,
     ...(attachment?.type ? { attachment } : {})
+  };
+}
+
+function templateMessageView(payload) {
+  const value = isPlainObject(payload?.template) ? payload.template : null;
+  if (!value) return null;
+  const name = providerText(value.name, 512);
+  const languageCode = providerText(isPlainObject(value.language) ? value.language.code : value.language, 35);
+  if (!/^[a-z0-9_]+$/.test(name) || !/^[A-Za-z]{2,3}(?:_[A-Za-z0-9]{2,8})?$/.test(languageCode)) return null;
+  const templateId = providerIdentifier(value.templateId || value.id, 128);
+  const category = providerEnum(value.category, 40);
+  const buttons = (Array.isArray(value.buttons) ? value.buttons : []).slice(0, 10).flatMap(button => {
+    if (!isPlainObject(button)) return [];
+    const type = String(button.type || '').toLowerCase();
+    const text = providerText(button.text, 100);
+    return TEMPLATE_BUTTON_TYPES.has(type) && text ? [{ type, text }] : [];
+  });
+  return {
+    name,
+    language: { code: languageCode },
+    ...(templateId ? { templateId } : {}),
+    ...(category ? { category } : {}),
+    ...(buttons.length ? { buttons } : {})
   };
 }
 
@@ -2785,7 +2819,7 @@ function sanitizeWhatsAppTemplateComponent(value, componentIndex) {
 function sanitizeWhatsAppTemplateButton(value) {
   if (!isPlainObject(value)) return null;
   const type = providerEnum(value.type, 40).toLowerCase();
-  if (!['quick_reply', 'url', 'phone_number', 'copy_code', 'catalog', 'mpm', 'flow', 'otp'].includes(type)) return null;
+  if (!TEMPLATE_BUTTON_TYPES.has(type)) return null;
   const button = { type };
   const text = providerText(value.text, 100);
   if (text) button.text = text;
@@ -2861,10 +2895,11 @@ function redactProviderSecret(message, secret) {
   return needle ? value.split(needle).join('[redacted]') : value;
 }
 
-async function externalTemplateInboxPresentation(env, channel, template, explicitPreview) {
-  const attachment = templateMediaAttachment(template, null);
+async function externalTemplateInboxPresentation(env, channel, template, explicitPreview, mediaPreview = null,
+  maximumTextLength = MAX_TEXT_LENGTH) {
+  const attachment = templateMediaAttachment(template, mediaPreview);
   let definition = null;
-  if (!explicitPreview && channel.config?.wabaId) {
+  if (channel.config?.wabaId) {
     try {
       definition = await findWhatsAppChannelTemplate(env, channel, template.name, template.language?.code);
     } catch {
@@ -2872,23 +2907,28 @@ async function externalTemplateInboxPresentation(env, channel, template, explici
       // catalogue permission/outage must not prevent a valid provider send.
     }
   }
-  const rendered = definition ? renderWhatsAppTemplatePreview(definition, template) : '';
+  const rendered = definition ? renderWhatsAppTemplatePresentation(definition, template) : { text: '', buttons: [] };
   const languageCode = String(template.language?.code || '');
-  const text = explicitPreview || rendered || `Template: ${template.name} (${languageCode})`;
+  const text = explicitPreview || rendered.text || `Template: ${template.name} (${languageCode})`;
   const templateView = {
     name: template.name,
     language: template.language,
     ...(definition?.templateId ? { templateId: definition.templateId } : {}),
-    ...(definition?.category ? { category: definition.category } : {})
+    ...(definition?.category ? { category: definition.category } : {}),
+    ...(rendered.buttons.length ? { buttons: rendered.buttons } : {})
   };
   return {
-    text: providerMultilineText(text, MAX_TEXT_LENGTH),
+    text: providerMultilineText(text, maximumTextLength),
     storedPayload: { template: templateView, ...(attachment ? { attachment } : {}) }
   };
 }
 
 export function renderWhatsAppTemplatePreview(definition, template) {
-  if (!isPlainObject(definition) || !isPlainObject(template)) return '';
+  return renderWhatsAppTemplatePresentation(definition, template).text;
+}
+
+function renderWhatsAppTemplatePresentation(definition, template) {
+  if (!isPlainObject(definition) || !isPlainObject(template)) return { text: '', buttons: [] };
   const requestComponents = Array.isArray(template.components) ? template.components : [];
   const componentParameters = (type, buttonIndex = null) => {
     const match = requestComponents.find(component => {
@@ -2898,7 +2938,7 @@ export function renderWhatsAppTemplatePreview(definition, template) {
     return Array.isArray(match?.parameters) ? match.parameters : [];
   };
   const parts = [];
-  const buttonLabels = [];
+  const buttons = [];
   for (const component of Array.isArray(definition.components) ? definition.components : []) {
     if (!isPlainObject(component)) continue;
     const type = String(component.type || '').toLowerCase();
@@ -2916,14 +2956,20 @@ export function renderWhatsAppTemplatePreview(definition, template) {
     } else if (type === 'footer' && component.text) {
       parts.push(String(component.text));
     } else if (type === 'buttons') {
-      for (const button of Array.isArray(component.buttons) ? component.buttons : []) {
+      const componentButtons = Array.isArray(component.buttons) ? component.buttons : [];
+      for (let buttonIndex = 0; buttonIndex < componentButtons.length; buttonIndex++) {
+        const button = componentButtons[buttonIndex];
         const label = providerText(button?.text || button?.type, 100);
-        if (label) buttonLabels.push(label);
+        const buttonType = String(button?.type || '').toLowerCase();
+        if (label && TEMPLATE_BUTTON_TYPES.has(buttonType)) buttons.push({ type: buttonType, text: label });
       }
     }
   }
-  if (buttonLabels.length) parts.push(`Actions: ${buttonLabels.join(', ')}`);
-  return providerMultilineText(parts.filter(Boolean).join('\n'), MAX_TEXT_LENGTH);
+  if (buttons.length) parts.push(`Actions: ${buttons.map(button => button.text).join(', ')}`);
+  return {
+    text: providerMultilineText(parts.filter(Boolean).join('\n'), MAX_TEXT_LENGTH),
+    buttons
+  };
 }
 
 function replaceWhatsAppTemplatePreviewVariables(text, parameters) {
@@ -2984,18 +3030,18 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
     language: payload.language,
     ...(payload.components === undefined ? {} : { components: payload.components })
   });
-  const previewText = payload.previewText === undefined
-    ? `Template: ${template.name} (${template.language.code})`
+  const requestedPreview = payload.previewText === undefined
+    ? ''
     : cleanPreviewText(payload.previewText, MAX_TEMPLATE_PREVIEW_LENGTH);
   const mediaPreview = validateTemplateMediaPreview(payload.mediaPreview);
-  const attachment = templateMediaAttachment(template, mediaPreview);
-  if (mediaPreview && !attachment) throw httpError(400, 'Media preview metadata requires a template media header.');
+  const requestedAttachment = templateMediaAttachment(template, mediaPreview);
+  if (mediaPreview && !requestedAttachment) throw httpError(400, 'Media preview metadata requires a template media header.');
+  const presentation = await externalTemplateInboxPresentation(env, target.channel, template, requestedPreview,
+    mediaPreview, MAX_TEMPLATE_PREVIEW_LENGTH);
+  const previewText = presentation.text;
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
-  const storedPayload = {
-    template: { name: template.name, language: template.language },
-    ...(attachment ? { attachment } : {})
-  };
+  const storedPayload = presentation.storedPayload;
   const encryptedPayload = await encryptOutboundPayload({ template }, env.CHANNEL_CREDENTIALS_KEY, workspaceId, messageId);
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
@@ -3017,7 +3063,7 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   return { message: {
     messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: 'template',
     text: previewText, status: 'pending', timestamp: now,
-    template: { name: template.name, language: template.language },
+    template: templateMessageView(storedPayload),
     attachment: messageAttachmentView('template', storedPayload, messageId)
   } };
 }

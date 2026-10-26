@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-13";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261026-14";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
 
@@ -321,6 +321,7 @@
         messageId: `demo-${Date.now()}`,
         channelMessageId: `demo-channel-${Date.now()}`,
         direction: "outbound",
+        messageType: "text",
         text,
         timestamp: new Date().toISOString(),
         status: "sent",
@@ -339,6 +340,7 @@
       const conversation = this.data.conversations.find((entry) => entry.conversationId === conversationId);
       if (conversation) {
         conversation.lastMessage = text;
+        conversation.lastMessageType = item.messageType;
         conversation.lastMessageAt = item.timestamp;
       }
       await smallDelay(160);
@@ -347,7 +349,13 @@
 
     async sendTemplate(conversationId, payload) {
       const templateName = payload?.name || "template";
-      return this.sendMessage(conversationId, payload.previewText || `[Template: ${templateName}]`);
+      const response = await this.sendMessage(conversationId, payload.previewText || `[Template: ${templateName}]`);
+      response.item.messageType = "template";
+      const stored = (this.data.messages[conversationId] || []).find((message) => message.messageId === response.item.messageId);
+      if (stored) stored.messageType = "template";
+      const conversation = this.data.conversations.find((entry) => entry.conversationId === conversationId);
+      if (conversation) conversation.lastMessageType = "template";
+      return response;
     }
 
     async uploadTemplateMedia(_conversationId, formData) {
@@ -365,7 +373,8 @@
           { type: "BUTTONS", buttons: [{ type: "URL", text: "View order", url: "https://example.com/orders/{{1}}" }] },
         ] },
         { templateId: "demo-welcome", name: "welcome_message", language: { code: "en_US" }, status: "APPROVED", category: "MARKETING", components: [
-          { type: "BODY", text: "Welcome {{1}}. We are happy to help." },
+          { type: "BODY", text: "Welcome *{{1}}*. We are happy to help." },
+          { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Continue" }] },
         ] },
       ]) };
     }
@@ -418,6 +427,10 @@
         type: result.item.messageType, filename: file?.name || "file", mimeType: file?.type || "",
         size: Number(file?.size || 0), caption, available: false, url: ""
       };
+      const stored = (this.data.messages[conversationId] || []).find((message) => message.messageId === result.item.messageId);
+      if (stored) Object.assign(stored, { messageType: result.item.messageType, attachment: result.item.attachment });
+      const conversation = this.data.conversations.find((entry) => entry.conversationId === conversationId);
+      if (conversation) conversation.lastMessageType = result.item.messageType;
       return result;
     }
 
@@ -1193,6 +1206,8 @@
 
   function normalizeConversation(raw) {
     const replyWindow = raw.replyWindow && typeof raw.replyWindow === "object" ? raw.replyWindow : {};
+    const lastMessage = raw.lastMessage?.text || raw.lastMessageText || raw.preview || raw.lastMessage || "No messages yet";
+    const lastMessageType = String(raw.lastMessageType || raw.lastMessage?.messageType || "").trim().toLocaleLowerCase();
     return {
       ...raw,
       conversationId: String(raw.conversationId || raw.id || ""),
@@ -1203,7 +1218,8 @@
       status: raw.status || "open",
       assignedTo: raw.assignedTo || raw.assignee || "Unassigned",
       unreadCount: Number(raw.unreadCount ?? raw.unread ?? 0),
-      lastMessage: raw.lastMessage?.text || raw.lastMessageText || raw.preview || raw.lastMessage || "No messages yet",
+      lastMessage: String(lastMessage),
+      lastMessageType,
       lastMessageAt: raw.lastMessageAt || raw.updatedAt || raw.createdAt || new Date().toISOString(),
       channelProfileId: raw.channelProfileId || raw.contact?.channelProfileId || "",
       freeformAllowed: typeof raw.freeformAllowed === "boolean"
@@ -1254,6 +1270,16 @@
 
   function normalizeMessage(raw) {
     const replySource = raw?.reply && typeof raw.reply === "object" ? raw.reply : null;
+    const templateSource = raw?.template && typeof raw.template === "object" ? raw.template : null;
+    const template = templateSource ? {
+      ...templateSource,
+      buttons: Array.isArray(templateSource.buttons) ? templateSource.buttons.slice(0, 10).flatMap((button) => {
+        if (!button || typeof button !== "object") return [];
+        const text = String(button.text || button.label || "").trim().slice(0, 100);
+        if (!text) return [];
+        return [{ ...button, text, type: String(button.type || "quick_reply").toLocaleLowerCase().slice(0, 40) }];
+      }) : [],
+    } : null;
     const reply = replySource ? {
       messageId: String(replySource.messageId || ""),
       channelMessageId: String(replySource.channelMessageId || replySource.providerMessageId || ""),
@@ -1274,6 +1300,7 @@
       status: raw.status || (raw.direction === "outbound" ? "sent" : "received"),
       senderName: raw.senderName || raw.sender || "",
       channelMessageId: raw.channelMessageId || raw.providerMessageId || "",
+      template,
       reply,
     };
   }
@@ -1598,7 +1625,9 @@
       const nameRow = element("span", "conversation-name-row");
       nameRow.append(element("strong", "", conversation.subject));
       if (conversation.priority === "high") nameRow.append(element("i", "priority-mark"));
-      copy.append(nameRow, element("span", "conversation-preview", conversation.lastMessage));
+      copy.append(nameRow, element("span", "conversation-preview", conversationPreviewText(
+        conversation.lastMessage, conversation.lastMessageType, conversation,
+      )));
 
       const side = element("span", "conversation-side");
       side.append(element("span", "conversation-time", relativeTime(conversation.lastMessageAt)));
@@ -1792,6 +1821,98 @@
     return String(message.text || `[${message.messageType || "Message"}]`);
   }
 
+  function appendWhatsAppFormattedText(host, value) {
+    const text = String(value || "");
+    const pattern = /```([\s\S]*?)```|\*([^*\n]+)\*|_([^_\n]+)_|~([^~\n]+)~/g;
+    let cursor = 0;
+    for (const match of text.matchAll(pattern)) {
+      const index = Number(match.index || 0);
+      const before = text[index - 1] || "";
+      const after = text[index + match[0].length] || "";
+      const isCode = match[1] !== undefined;
+      const content = match.slice(1).find((item) => item !== undefined) || "";
+      const touchesWord = !isCode && ((before && /[\p{L}\p{N}]/u.test(before)) || (after && /[\p{L}\p{N}]/u.test(after)));
+      if (!content.trim() || touchesWord) continue;
+      if (index > cursor) host.append(document.createTextNode(text.slice(cursor, index)));
+      const tag = isCode ? "code" : match[2] !== undefined ? "strong" : match[3] !== undefined ? "em" : "s";
+      const formatted = document.createElement(tag);
+      if (isCode) formatted.textContent = content;
+      else appendWhatsAppFormattedText(formatted, content);
+      host.append(formatted);
+      cursor = index + match[0].length;
+    }
+    if (cursor < text.length) host.append(document.createTextNode(text.slice(cursor)));
+    return host;
+  }
+
+  function whatsAppPlainText(value) {
+    return appendWhatsAppFormattedText(document.createElement("span"), value).textContent || "";
+  }
+
+  function appendChannelFormattedText(host, value, conversation) {
+    if (isWhatsAppConversation(conversation)) return appendWhatsAppFormattedText(host, value);
+    host.append(document.createTextNode(String(value || "")));
+    return host;
+  }
+
+  function channelPlainText(value, conversation) {
+    const text = String(value || "");
+    return isWhatsAppConversation(conversation) ? whatsAppPlainText(text) : text;
+  }
+
+  function conversationPreviewText(value, messageType, conversation) {
+    const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
+    let last = lines.length - 1;
+    while (last >= 0 && !lines[last].trim()) last--;
+    const isTemplate = String(messageType || "").trim().toLocaleLowerCase() === "template";
+    if (isTemplate && last >= 0 && /^\s*Actions:\s*.+$/i.test(lines[last])) lines.splice(last, 1);
+    return channelPlainText(lines.join("\n").trim(), conversation);
+  }
+
+  function templateMessagePresentation(message, value) {
+    let text = String(value || "");
+    let buttons = Array.isArray(message?.template?.buttons) ? message.template.buttons : [];
+    if (String(message?.messageType || "").toLocaleLowerCase() !== "template") return { text, buttons: [] };
+    const lines = text.replace(/\r\n?/g, "\n").split("\n");
+    let actionIndex = lines.length - 1;
+    while (actionIndex >= 0 && !lines[actionIndex].trim()) actionIndex--;
+    const fallbackActions = actionIndex >= 0 ? lines[actionIndex].match(/^\s*Actions:\s*(.+?)\s*$/i) : null;
+    if (fallbackActions) {
+      if (!buttons.length) {
+        buttons = fallbackActions[1].split(/\s*,\s*/).map((label) => ({
+          text: label.trim().slice(0, 100), type: "quick_reply",
+        })).filter((button) => button.text).slice(0, 10);
+      }
+      lines.splice(actionIndex, 1);
+      text = lines.join("\n").replace(/\n+$/, "");
+    }
+    return { text, buttons };
+  }
+
+  function renderTemplateMessageActions(buttons) {
+    if (!Array.isArray(buttons) || !buttons.length) return null;
+    const actions = element("div", "message-template-actions");
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", "Template actions");
+    buttons.slice(0, 10).forEach((button) => {
+      const label = String(button?.text || button?.label || "").trim().slice(0, 100);
+      if (!label) return;
+      const action = element("span", "message-template-action", label);
+      action.setAttribute("role", "button");
+      action.setAttribute("aria-disabled", "true");
+      action.dataset.buttonType = String(button?.type || "quick_reply").toLocaleLowerCase().slice(0, 40);
+      actions.append(action);
+    });
+    return actions.childElementCount ? actions : null;
+  }
+
+  function messagePlainText(message, conversation) {
+    const presentation = templateMessagePresentation(message, messageDisplayText(message));
+    const labels = presentation.buttons.map((button) => String(button?.text || button?.label || "").trim()).filter(Boolean);
+    return [channelPlainText(presentation.text, conversation), labels.length ? `Actions: ${labels.join(", ")}` : ""]
+      .filter(Boolean).join(". ");
+  }
+
   function replyAuthor(reply, conversation = selectedConversation()) {
     if (reply?.direction === "outbound") return "You";
     if (reply?.direction === "inbound") return conversation?.subject || "Customer";
@@ -1808,8 +1929,9 @@
     } else quote.disabled = true;
     quote.append(element("strong", "", replyAuthor(reply, conversation)));
     const preview = reply.attachment?.filename || reply.text || `${capitalize(reply.messageType || "message")} message`;
-    quote.append(element("span", "", preview));
-    quote.setAttribute("aria-label", `Reply to ${replyAuthor(reply, conversation)}: ${preview}`);
+    const presentation = templateMessagePresentation(reply, preview);
+    quote.append(appendChannelFormattedText(element("span"), presentation.text, conversation));
+    quote.setAttribute("aria-label", `Reply to ${replyAuthor(reply, conversation)}: ${messagePlainText(reply, conversation)}`);
     return quote;
   }
 
@@ -1834,7 +1956,9 @@
     const visibleText = message.attachment
       ? String(message.attachment.caption || (!/^\[[^\]]+\]$/.test(message.text || "") ? message.text || "" : ""))
       : messageDisplayText(message);
-    if (visibleText) bubble.append(element("p", "message-text", visibleText));
+    const presentation = templateMessagePresentation(message, visibleText);
+    if (presentation.text) bubble.append(appendChannelFormattedText(element("p", "message-text"), presentation.text, conversation));
+    const templateActions = renderTemplateMessageActions(presentation.buttons);
     const foot = element("div", "message-foot");
     foot.append(element("time", "", formatClock(message.timestamp)));
     if (message.direction === "outbound") {
@@ -1845,13 +1969,14 @@
       foot.append(status);
     }
     bubble.append(foot);
+    if (templateActions) bubble.append(templateActions);
     row.append(bubble);
     if (canReplyToMessage(conversation, message)) {
       const replyButton = element("button", "message-reply-button", "↩");
       replyButton.type = "button";
       replyButton.dataset.action = "reply-to-message";
       replyButton.dataset.messageId = message.messageId;
-      replyButton.setAttribute("aria-label", `Reply to ${messageDisplayText(message)}`);
+      replyButton.setAttribute("aria-label", `Reply to ${messagePlainText(message, conversation)}`);
       row.append(replyButton);
     }
     return row;
@@ -1983,7 +2108,7 @@
     host.hidden = !active;
     if (!active) return;
     $("composerReplyAuthor").textContent = `Replying to ${active.direction === "outbound" ? "your message" : active.senderName || conversation.subject}`;
-    $("composerReplyPreview").textContent = messageDisplayText(active);
+    $("composerReplyPreview").textContent = messagePlainText(active, conversation);
   }
 
   function startReplyToMessage(messageId) {
@@ -3282,6 +3407,7 @@
       const message = normalizeMessage(result.item || { text, direction: "outbound", status: "sent" });
       upsertMessage(conversation.conversationId, message);
       conversation.lastMessage = message.text;
+      conversation.lastMessageType = String(message.messageType || "text").toLocaleLowerCase();
       conversation.lastMessageAt = message.timestamp;
       upsertRenderedMessage(message, conversation.conversationId);
       renderConversationList();
@@ -3992,6 +4118,7 @@
       const message = normalizeMessage(result.item || result.message || { text: fallback, direction: "outbound", status: "pending", messageType: "template" });
       upsertMessage(conversation.conversationId, message);
       conversation.lastMessage = message.text || fallback;
+      conversation.lastMessageType = "template";
       conversation.lastMessageAt = message.timestamp;
       closeTemplateDialog();
       upsertRenderedMessage(message, conversation.conversationId);
@@ -4107,6 +4234,7 @@
         const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "document" });
         upsertMessage(conversation.conversationId, message);
         conversation.lastMessage = message.text || fallback;
+        conversation.lastMessageType = String(message.messageType || "document").toLocaleLowerCase();
         conversation.lastMessageAt = message.timestamp;
         if (stillSelected()) upsertRenderedMessage(message, conversation.conversationId);
         queue.shift();
@@ -4214,6 +4342,7 @@
         conversation = incomingConversation;
       }
       if (conversation) {
+        conversation.lastMessageType = String(message.messageType || "text").toLocaleLowerCase();
         if (!rawConversation) {
           conversation.lastMessage = messageDisplayText(message);
           conversation.lastMessageAt = message.timestamp;
@@ -4551,7 +4680,7 @@
     state.lastNotificationAt.set(conversation.conversationId, timestamp);
     const title = conversation.subject;
     const options = {
-      body: message.text || "A new customer message arrived.",
+      body: channelPlainText(message.text, conversation) || "A new customer message arrived.",
       icon: "/assets/helixcer-mark.jpg",
       badge: "/assets/helixcer-mark.jpg",
       tag: `helixcer-${conversation.conversationId}`,

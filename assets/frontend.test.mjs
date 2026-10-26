@@ -235,6 +235,38 @@ test("WhatsApp inbox supports rendered templates, queued attachments, and reply-
   assert.match(app, /refreshButton\.dataset\.action = "reload-templates"/);
 });
 
+test("chat renders WhatsApp formatting and template actions without unsafe HTML", () => {
+  assert.match(app, /response\.item\.messageType = "template"/);
+  assert.match(app, /function appendWhatsAppFormattedText\(host, value\)/);
+  assert.match(app, /document\.createTextNode\(text\.slice\(cursor, index\)\)/);
+  assert.match(app, /const tag = isCode \? "code" : match\[2\] !== undefined \? "strong"/);
+  assert.match(app, /function appendChannelFormattedText\(host, value, conversation\)/);
+  assert.match(app, /if \(isWhatsAppConversation\(conversation\)\) return appendWhatsAppFormattedText\(host, value\)/);
+  assert.match(app, /function channelPlainText\(value, conversation\)/);
+  assert.match(app, /isWhatsAppConversation\(conversation\) \? whatsAppPlainText\(text\) : text/);
+  assert.match(app, /function templateMessagePresentation\(message, value\)/);
+  assert.match(app, /match\(\/\^\\s\*Actions:/);
+  assert.match(app, /message\?\.template\?\.buttons/);
+  assert.match(app, /function renderTemplateMessageActions\(buttons\)/);
+  assert.match(app, /action\.setAttribute\("aria-disabled", "true"\)/);
+  assert.match(app, /function whatsAppPlainText\(value\)/);
+  assert.match(app, /function conversationPreviewText\(value, messageType, conversation\)/);
+  assert.match(app, /const isTemplate = String\(messageType \|\| ""\)[\s\S]*?=== "template"/);
+  assert.match(app, /if \(isTemplate && last >= 0 && \/\^\\s\*Actions:/);
+  assert.match(app, /conversation\.lastMessage, conversation\.lastMessageType, conversation/);
+  assert.match(app, /const lastMessageType = String\(raw\.lastMessageType \|\| raw\.lastMessage\?\.messageType \|\| ""\)/);
+  assert.match(app, /function messagePlainText\(message, conversation\)/);
+  assert.match(app, /Reply to \$\{messagePlainText\(message, conversation\)\}/);
+  assert.match(app, /body: channelPlainText\(message\.text, conversation\)/);
+  assert.match(app, /conversation\.lastMessageType = "template"/);
+  assert.match(app, /conversation\.lastMessageType = String\(message\.messageType \|\| "text"\)/);
+  const messageRenderer = app.slice(app.indexOf("function appendWhatsAppFormattedText"), app.indexOf("function syncMessageDateDividers"));
+  assert.doesNotMatch(messageRenderer, /innerHTML|insertAdjacentHTML/);
+  assert.match(styles, /\.message-template-actions\s*\{/);
+  assert.match(styles, /\.message-template-action\s*\{/);
+  assert.match(styles, /\.message-text strong\s*\{/);
+});
+
 test("template composer searches templates and variables, previews substitutions, and uploads media", () => {
   assert.match(html, /id="templateSearch" type="search"/);
   assert.match(html, /id="templateSearch"[^>]*role="combobox"/);
