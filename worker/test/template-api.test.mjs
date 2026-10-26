@@ -111,6 +111,7 @@ async function insertKey(database, token, apiKeyId, prefix) {
 function postTemplate(token, idempotencyKey, body, headers = {}) {
   const requestHeaders = {
     Authorization: `Bearer ${token}`,
+    'X-Workspace-Id': 'ws_default',
     'Content-Type': 'application/json',
     ...headers
   };
@@ -177,6 +178,36 @@ test('public Developer API preflight and rate-limit errors use the status envelo
     assert.equal(limitedBody.status, false);
     assert.equal(Object.hasOwn(limitedBody, 'ok'), false);
     assert.equal(limitedBody.error.code, 'rate_limited');
+  } finally {
+    database.close();
+  }
+});
+
+test('Developer API requires the API key workspace header and rejects mismatches before use', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_workspace1.${'w'.repeat(43)}`;
+  await insertKey(database, token, 'key-workspace', 'hxc_live_workspace1');
+  const body = {
+    channelId: 'wa-sales', to: '+91 98765 43210',
+    template: { name: 'order_update', language: { code: 'en_US' } }
+  };
+  try {
+    const missing = await handleRequest(postTemplate(token, null, body, { 'X-Workspace-Id': '' }), env);
+    assert.equal(missing.status, 400);
+    const missingBody = await missing.json();
+    assert.equal(missingBody.status, false);
+    assert.equal(missingBody.error.code, 'workspace_id_required');
+
+    const mismatch = await handleRequest(postTemplate(token, null, body, {
+      'X-Workspace-Id': 'another-workspace'
+    }), env);
+    assert.equal(mismatch.status, 403);
+    const mismatchBody = await mismatch.json();
+    assert.equal(mismatchBody.status, false);
+    assert.equal(mismatchBody.error.code, 'workspace_mismatch');
+
+    assert.equal(database.prepare('SELECT count(*) AS count FROM messages').get().count, 0);
+    assert.equal(database.prepare('SELECT last_used_at FROM api_keys WHERE api_key_id=?').get('key-workspace').last_used_at, null);
   } finally {
     database.close();
   }
@@ -488,7 +519,7 @@ test('external template API persists once, dispatches, replays safely, and scope
 
     const statusUrl = `https://api.chat.helixcer.com/api/v1/messages/${accepted.messageId}`;
     const status = await handleRequest(new Request(statusUrl, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}`, 'X-Workspace-Id': 'ws_default' }
     }), env);
     assert.equal(status.status, 200);
     const statusBody = await status.json();
@@ -501,7 +532,7 @@ test('external template API persists once, dispatches, replays safely, and scope
     const otherToken = `hxc_live_otherkey1.${'t'.repeat(43)}`;
     await insertKey(database, otherToken, 'key-two', 'hxc_live_otherkey1');
     const hidden = await handleRequest(new Request(statusUrl, {
-      headers: { Authorization: `Bearer ${otherToken}` }
+      headers: { Authorization: `Bearer ${otherToken}`, 'X-Workspace-Id': 'ws_default' }
     }), env);
     assert.equal(hidden.status, 404);
     const hiddenBody = await hidden.json();

@@ -107,6 +107,7 @@
           <pre><code>curl --request POST \
   --url https://api.chat.helixcer.com/api/v1/whatsapp/template-messages \
   --header 'Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY' \
+  --header 'X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0' \
   --header 'Content-Type: application/json' \
   --data '{
     "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
@@ -128,8 +129,9 @@
 
       <section id="authentication">
         <div class="two-col">
-          <div><p class="eyebrow">Authentication</p><h2>Your key stays on your server</h2><p class="intro">Create a workspace key in Helixcer and include it as a Bearer token. Sending requires <code class="plain">whatsapp:template:send</code>; reading status requires <code class="plain">messages:read</code>. The key applies to the workspace's WhatsApp connections, and each send selects one with <code class="plain">channelId</code>.</p><div class="callout"><strong>A Helixcer key is not a Meta token.</strong> External applications never receive the Meta token, WABA ID, or phone-number ID saved on the channel.</div></div>
+          <div><p class="eyebrow">Authentication</p><h2>Your key stays on your server</h2><p class="intro">Create a workspace key in Helixcer and include it as a Bearer token. Every request must also include the workspace ID shown under <strong>Workspace</strong> in <code class="plain">X-Workspace-Id</code>. Helixcer verifies that it matches the API key; the header cannot grant access to another workspace. Sending requires <code class="plain">whatsapp:template:send</code>; reading status requires <code class="plain">messages:read</code>. Each send selects one of that workspace's connections with <code class="plain">channelId</code>.</p><div class="callout"><strong>A Helixcer key is not a Meta token.</strong> External applications never receive the Meta token, WABA ID, or phone-number ID saved on the channel.</div></div>
           <div class="code-card"><div class="code-head"><span>Required headers</span><button class="copy" type="button">Copy</button></div><pre><code>Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
+X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
 Content-Type: application/json</code></pre></div>
         </div>
         <p style="margin-top:20px">An API key is shown once. Store it in a server-side secret manager or environment variable. Never place it in browser JavaScript, a mobile app, logs, screenshots, support messages, or a source repository. Revoke and replace it immediately if it may have leaked.</p>
@@ -391,7 +393,7 @@ Content-Type: application/json</code></pre></div>
       <section id="status">
         <p class="eyebrow">Status API</p><h2>Read the current message state</h2>
         <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/messages/{messageId}</code></div>
-        <p class="intro">Use the same Bearer key. The key requires the message-read scope and can read only messages it created.</p>
+        <p class="intro">Use the same Bearer key and <code class="plain">X-Workspace-Id</code> header. The key requires the message-read scope and can read only messages it created.</p>
         <div class="status-line" aria-label="Typical message status progression">
           <span class="pill">pending</span><span class="arrow">→</span><span class="pill">retrying</span><span class="arrow">→</span><span class="pill">submitted</span><span class="arrow">→</span><span class="pill">sent</span><span class="arrow">→</span><span class="pill good">delivered</span><span class="arrow">→</span><span class="pill good">read</span>
         </div>
@@ -439,9 +441,9 @@ Content-Type: application/json</code></pre></div>
         <div class="table-wrap"><table>
           <thead><tr><th>Status</th><th>Meaning</th><th>Action</th></tr></thead>
           <tbody>
-            <tr><td><code>400</code></td><td>Malformed JSON, missing or unknown field, or invalid parameter.</td><td>Correct the request; do not retry unchanged.</td></tr>
+            <tr><td><code>400</code></td><td>Malformed JSON, missing workspace header, missing or unknown field, or invalid parameter.</td><td>Correct the request; do not retry unchanged.</td></tr>
             <tr><td><code>401</code></td><td>Missing, invalid, expired, or revoked API key.</td><td>Replace the key and ensure it is not logged.</td></tr>
-            <tr><td><code>403</code></td><td>Browser-origin request or key lacks the required scope.</td><td>Send server-to-server; check key permissions.</td></tr>
+            <tr><td><code>403</code></td><td>Browser-origin request, workspace mismatch, or key lacks the required scope.</td><td>Send server-to-server; check the workspace ID and key permissions.</td></tr>
             <tr><td><code>404</code></td><td>Channel, message, or API route was not found for this key.</td><td>Check the ID and confirm the channel belongs to the key's workspace.</td></tr>
             <tr><td><code>409</code></td><td>The selected channel is not ready to send.</td><td>Read <code>error.code</code> and fix the channel setup.</td></tr>
             <tr><td><code>429</code></td><td>Rate limit exceeded.</td><td>Wait for <code>Retry-After</code> before trying again.</td></tr>

@@ -670,6 +670,13 @@ async function authenticateApiKey(request, env) {
       (row.expires_at && row.expires_at <= new Date().toISOString())) {
     throw apiError(401, 'invalid_api_key', 'The API key is invalid, expired, or revoked.');
   }
+  const workspaceId = String(request.headers.get('X-Workspace-Id') || '').trim();
+  if (!workspaceId) {
+    throw apiError(400, 'workspace_id_required', 'The X-Workspace-Id header is required.');
+  }
+  if (workspaceId !== String(row.workspace_id || '')) {
+    throw apiError(403, 'workspace_mismatch', 'The workspace ID does not match this API key.');
+  }
   await env.DB.prepare('UPDATE api_keys SET last_used_at=?2,updated_at=?2 WHERE api_key_id=?1')
     .bind(row.api_key_id, new Date().toISOString()).run();
   return {
@@ -4628,7 +4635,7 @@ function corsHeaders(origin, configured) {
   const permitted = Boolean(origin && allowed.includes(origin));
   return {
     ...(permitted ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Credentials': 'true', Vary: 'Origin' } : {}),
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Admin-Token',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Admin-Token, X-Workspace-Id',
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
     'Access-Control-Max-Age': '86400'
   };

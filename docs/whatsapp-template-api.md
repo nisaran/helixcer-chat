@@ -20,6 +20,7 @@ Send approved WhatsApp templates from your server while keeping every outbound m
 | Send a template | `POST /api/v1/whatsapp/template-messages` |
 | Read message status | `GET /api/v1/messages/{messageId}` |
 | Authentication | `Authorization: Bearer hxc_live_...` |
+| Workspace | `X-Workspace-Id: YOUR_WORKSPACE_ID` |
 | Request format | `application/json` |
 
 Your application supplies a Helixcer channel ID and a Meta-native template object. Helixcer selects the saved WhatsApp connection, writes the outbound message to the chatbox, sends it to Meta, and applies Meta status webhooks to the same message.
@@ -32,17 +33,19 @@ Create a workspace API key in Helixcer and send it as a Bearer token:
 
 ```http
 Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
+X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
 ```
 
 An API key is shown once. Store it in a server-side secret manager or environment variable. Never place it in browser JavaScript, a mobile app, logs, screenshots, support messages, or a Git repository. A Helixcer API key is not a Meta access token.
 
-Keys are bound to one workspace and apply to its WhatsApp connections. Sending requires the `whatsapp:template:send` scope; reading status requires `messages:read`. Every send still selects the required workspace connection with `channelId`. Revoke and replace a key immediately if it may have leaked; rotate production keys periodically.
+Keys are bound to one workspace and apply to its WhatsApp connections. Copy the read-only workspace ID from **Workspace** in Helixcer and send it in `X-Workspace-Id` with every request. Helixcer verifies that the header matches the API key; it cannot grant access to another workspace. Sending requires the `whatsapp:template:send` scope; reading status requires `messages:read`. Every send still selects the required workspace connection with `channelId`. Revoke and replace a key immediately if it may have leaked; rotate production keys periodically.
 
 ## Send a template message
 
 ```http
 POST https://api.chat.helixcer.com/api/v1/whatsapp/template-messages
 Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
+X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
 Content-Type: application/json
 ```
 
@@ -92,6 +95,7 @@ Content-Type: application/json
 curl --request POST \
   --url https://api.chat.helixcer.com/api/v1/whatsapp/template-messages \
   --header 'Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY' \
+  --header 'X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0' \
   --header 'Content-Type: application/json' \
   --data '{
     "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
@@ -528,9 +532,9 @@ Errors use a stable machine-readable code plus a human-readable message:
 
 | HTTP status | Meaning | What to do |
 |---:|---|---|
-| `400` | Malformed JSON, missing or unknown field, or invalid parameter. | Correct the request; do not retry unchanged. |
+| `400` | Malformed JSON, missing workspace header, missing or unknown field, or invalid parameter. | Correct the request; do not retry unchanged. |
 | `401` | Missing, invalid, expired, or revoked API key. | Replace the key. Do not log it. |
-| `403` | Browser-origin request or key lacks the required scope. | Send server-to-server and check key permissions. |
+| `403` | Browser-origin request, workspace mismatch, or key lacks the required scope. | Send server-to-server and check the workspace ID and key permissions. |
 | `404` | Channel, message, or route was not found for this key. | Check the identifier and confirm the channel belongs to the key's workspace. |
 | `409` | The selected channel is not ready to send. | Read `error.code` and fix the channel setup. |
 | `429` | Rate limit exceeded. | Wait for `Retry-After` before trying again. |
@@ -543,6 +547,7 @@ Do not parse `error.message` to drive application logic; use `error.code`. Inclu
 ```http
 GET https://api.chat.helixcer.com/api/v1/messages/594798db-1c00-481f-adab-137d1c80b2d8
 Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
+X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
 ```
 
 ```json

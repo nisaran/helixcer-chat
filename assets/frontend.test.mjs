@@ -686,6 +686,7 @@ test("Developer API documentation is channel-organized and keeps the send contra
   const sendSection = apiDocs.match(/<section id="send">[\s\S]*?<\/section>/)?.[0] || "";
   assert.match(sendSection, /<h2>Send a template message<\/h2>/);
   assert.match(sendSection, /POST<\/span><code>https:\/\/api\.chat\.helixcer\.com\/api\/v1\/whatsapp\/template-messages<\/code>/);
+  assert.match(apiDocs, /X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0/);
   assert.match(sendSection, /<code>contact\.displayName<\/code>[\s\S]*?Name used to save or update to the contact list/);
   assert.doesNotMatch(apiDocs, /Idempotency-Key|id="idempotency"|href="#idempotency"/i);
   assert.match(apiDocs, /"status": true/);
