@@ -615,6 +615,25 @@ test("message history opens at the latest message without an animated top-to-bot
   assert.doesNotMatch(styles, /\.message-thread \{[^}]*scroll-behavior: smooth/);
 });
 
+test("desktop and mobile chats share the Android light chat palette", () => {
+  const rootTheme = styles.match(/:root\s*\{[\s\S]*?\}/)?.[0] || "";
+  assert.match(rootTheme, /--chat-canvas:\s*#efeae2\s*;/i);
+  assert.match(rootTheme, /--chat-incoming:\s*#fff(?:fff)?\s*;/i);
+  assert.match(rootTheme, /--chat-outgoing:\s*#d9fdd3\s*;/i);
+
+  assert.match(styles, /\.chat-panel\s*\{[^}]*background:\s*var\(--chat-canvas\)/i);
+  assert.match(styles, /\.message-bubble\s*\{[^}]*background:\s*var\(--chat-incoming\)/i);
+  assert.match(styles, /\.message-row\.is-outbound \.message-bubble\s*\{[^}]*background:\s*var\(--chat-outgoing\)/i);
+
+  const mobileStart = styles.indexOf("@media (max-width: 640px)");
+  const mobileEnd = styles.indexOf("@media (prefers-reduced-motion: reduce)", mobileStart);
+  const mobileStyles = styles.slice(mobileStart, mobileEnd);
+  assert.ok(mobileStart >= 0, "the mobile chat breakpoint must remain present");
+  assert.match(mobileStyles, /\.message-bubble\s*\{[^}]*max-width:\s*86%/i);
+  assert.doesNotMatch(mobileStyles, /\.message-bubble\s*\{[^}]*(?:background|background-color)\s*:/i);
+  assert.doesNotMatch(mobileStyles, /\.chat-panel\s*\{[^}]*(?:background|background-color)\s*:/i);
+});
+
 test("conversation filters are multi-selectable with responsive desktop and mobile controls", () => {
   assert.match(app, /filters:\s*new Set\(\["open"\]\)/);
   assert.match(html, /id="conversationFilterToggle"[^>]*aria-controls="conversationFilterMenu"/);
