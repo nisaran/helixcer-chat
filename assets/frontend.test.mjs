@@ -368,7 +368,7 @@ test("realtime messages reconcile silently across resumed browsers", () => {
   assert.match(app, /socket\.send\("ping"\)/);
 });
 
-test("reconnect reconciliation expires stale histories and marks a visible selected chat read", () => {
+test("reconnect reconciliation expires stale histories and marks only an actively viewed chat read", () => {
   const loadAll = app.slice(app.indexOf("async function loadAll"), app.indexOf("async function reconcileWorkspace"));
   const reconcile = app.slice(app.indexOf("async function reconcileWorkspace"), app.indexOf("function renderAll"));
   const realtimeHandler = app.slice(app.indexOf("async function handleRealtimeEvent"), app.indexOf("function isIosDevice"));
@@ -379,7 +379,8 @@ test("reconnect reconciliation expires stale histories and marks a visible selec
   assert.match(realtimeHandler, /markConversationRealtimeMutation\(incoming\.conversationId\)/);
   assert.match(reconcile, /for \(const cachedConversationId of state\.messages\.keys\(\)\)/);
   assert.match(reconcile, /cachedConversationId !== activeSelectedId\) state\.messages\.delete\(cachedConversationId\)/);
-  assert.match(reconcile, /selectedConversation\.unreadCount > 0 && document\.visibilityState === "visible"/);
+  assert.match(reconcile, /selectedConversation\.unreadCount > 0 &&[\s\S]*?isConversationActivelyViewed\(activeSelectedId\)/);
+  assert.match(reconcile, /if \(shouldMarkRead\) selectedConversation\.unreadCount = 0/);
   assert.match(reconcile, /updateConversation\(activeSelectedId, \{ markRead: true \}\)\.catch/);
   assert.match(reconcile, /\["pending", "closed"\]\.includes\(selectedConversation\.status\)[\s\S]*?clearSelectedConversation/);
   const helperStart = app.indexOf("function markConversationRealtimeMutation");
@@ -399,6 +400,29 @@ test("reconnect reconciliation expires stale histories and marks a visible selec
   ], 1).map((item) => [item.conversationId, item.lastMessage]), [
     ["new-live", "new"], ["changed", "live"], ["steady", "stored"],
   ]);
+});
+
+test("background, unfocused, hidden-route, and contact-detail chats cannot acknowledge inbound messages", () => {
+  const helperStart = app.indexOf("function isConversationActivelyViewed");
+  const helperEnd = app.indexOf("function closeConversationActionMenu", helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  const source = app.slice(helperStart, helperEnd);
+  const evaluate = ({ route = "inbox", selected = "chat-1", detailsOpen = false, visibility = "visible", focused = true } = {}) => {
+    const state = { route, selectedConversationId: selected, detailsOpen, conversations: [] };
+    const document = { visibilityState: visibility, hasFocus: () => focused };
+    return Function("state", "document", `${source}\nreturn isConversationActivelyViewed;`)(state, document)("chat-1");
+  };
+  assert.equal(evaluate(), true);
+  assert.equal(evaluate({ visibility: "hidden" }), false);
+  assert.equal(evaluate({ focused: false }), false);
+  assert.equal(evaluate({ route: "contacts" }), false);
+  assert.equal(evaluate({ detailsOpen: true }), false);
+  assert.equal(evaluate({ selected: "chat-2" }), false);
+
+  const realtimeHandler = app.slice(app.indexOf("async function handleRealtimeEvent"), app.indexOf("function isIosDevice"));
+  assert.match(realtimeHandler, /if \(isConversationActivelyViewed\(conversationId\)\)[\s\S]*?markRead: true/);
+  assert.doesNotMatch(realtimeHandler, /if \(conversationId === state\.selectedConversationId\) \{\s*conversation\.unreadCount = 0/);
+  assert.match(app, /window\.addEventListener\("focus", resumeLiveWorkspace\)/);
 });
 
 test("realtime sockets ignore superseded close events and time out stalled handshakes", () => {
@@ -561,7 +585,7 @@ test("pending and closed status updates clear the selected chat only after the s
 
 test("opening a conversation clears its unread badge before the first list render", () => {
   const selectHandler = app.slice(app.indexOf("async function selectConversation"), app.indexOf("function renderSelectedConversation"));
-  assert.match(selectHandler, /const shouldMarkRead = markRead && unreadCount > 0/);
+  assert.match(selectHandler, /const shouldMarkRead = markRead && unreadCount > 0 && isConversationActivelyViewed\(conversationId\)/);
   assert.match(selectHandler, /conversation\.unreadCount = 0;[\s\S]*?renderCounts\(\);[\s\S]*?renderConversationList\(\)/);
   assert.ok(selectHandler.indexOf("conversation.unreadCount = 0") < selectHandler.indexOf("renderConversationList()"));
   assert.match(selectHandler, /if \(shouldMarkRead\) \{[\s\S]*?updateConversation\(conversationId, \{ markRead: true \}\)/);

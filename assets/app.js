@@ -1549,8 +1549,9 @@
       } else if (selectionUnchanged && selectedConversation && ["pending", "closed"].includes(selectedConversation.status)) {
         clearSelectedConversation({ updateUrl: false });
       } else if (selectedConversation) {
-        const shouldMarkRead = selectedConversation.unreadCount > 0 && document.visibilityState === "visible";
-        selectedConversation.unreadCount = 0;
+        const shouldMarkRead = selectedConversation.unreadCount > 0 &&
+          isConversationActivelyViewed(activeSelectedId);
+        if (shouldMarkRead) selectedConversation.unreadCount = 0;
         if (selectionUnchanged && messageData) {
           const fetchedMessages = asItems(messageData).map(normalizeMessage);
           state.messages.set(activeSelectedId, mergeMessageSnapshots(state.messages.get(activeSelectedId), fetchedMessages));
@@ -1720,16 +1721,16 @@
       state.unreadMarker = markRead && unreadCount > 0 ? { conversationId, count: unreadCount } : null;
       state.replyingTo = null;
     }
-    const shouldMarkRead = markRead && unreadCount > 0;
+    state.selectedConversationId = conversationId;
+    state.pendingConversationId = null;
+    if (updateUrl) replaceAppHash(conversationHash(conversationId));
+    $("inboxGrid").classList.add("chat-open");
+    const shouldMarkRead = markRead && unreadCount > 0 && isConversationActivelyViewed(conversationId);
     if (shouldMarkRead) {
       conversation.unreadCount = 0;
       renderCounts();
       state.api.updateConversation(conversationId, { markRead: true }).catch(() => {});
     }
-    state.selectedConversationId = conversationId;
-    state.pendingConversationId = null;
-    if (updateUrl) replaceAppHash(conversationHash(conversationId));
-    $("inboxGrid").classList.add("chat-open");
     renderConversationList();
     renderSelectedConversation();
     if (!state.messages.has(conversationId)) {
@@ -4499,7 +4500,7 @@
         if (message.direction === "inbound") {
           conversation.freeformAllowed = true;
           conversation.replyWindowExpiresAt = new Date(new Date(message.timestamp).getTime() + 24 * 60 * 60 * 1000).toISOString();
-          if (conversationId === state.selectedConversationId) {
+          if (isConversationActivelyViewed(conversationId)) {
             conversation.unreadCount = 0;
             state.api.updateConversation(conversationId, { markRead: true }).catch(() => {});
           } else if (!rawConversation) conversation.unreadCount += 1;
@@ -4858,7 +4859,7 @@
   async function notifyInboundMessage(conversation, message) {
     if (!state.notificationsEnabled || !notificationSupport() || Notification.permission !== "granted") return;
     if (state.pushSubscriptionReady && document.visibilityState !== "visible") return;
-    if (document.visibilityState === "visible" && conversation.conversationId === state.selectedConversationId) return;
+    if (isConversationActivelyViewed(conversation.conversationId)) return;
     const timestamp = new Date(message.timestamp || conversation.lastMessageAt).getTime() || Date.now();
     const previousNotification = state.lastNotificationAt.get(conversation.conversationId) || 0;
     if (timestamp <= previousNotification) return;
@@ -5495,6 +5496,16 @@
 
   function selectedConversation() {
     return state.conversations.find((item) => item.conversationId === state.selectedConversationId) || null;
+  }
+
+  function isConversationActivelyViewed(conversationId) {
+    const documentFocused = typeof document.hasFocus !== "function" || document.hasFocus();
+    return Boolean(conversationId) &&
+      state.route === "inbox" &&
+      state.selectedConversationId === conversationId &&
+      !state.detailsOpen &&
+      document.visibilityState === "visible" &&
+      documentFocused;
   }
 
   function closeConversationActionMenu({ restoreFocus = false } = {}) {
@@ -6147,6 +6158,7 @@
       prepareBrowserPush().catch(() => {});
       resumeLiveWorkspace();
     });
+    window.addEventListener("focus", resumeLiveWorkspace);
     window.addEventListener("pageshow", resumeLiveWorkspace);
     window.addEventListener("online", resumeLiveWorkspace);
   }
