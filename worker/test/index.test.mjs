@@ -21,11 +21,66 @@ import {
   normalizeWhatsAppRecipient,
   resolveTemplate,
   sanitizeWhatsAppTemplateDefinition,
+  searchMessages,
   timingSafeEqual,
   validateWhatsAppTemplateRequest,
   whatsappReplyWindowState,
   verifyMetaSignature
 } from '../src/index.js';
+
+test('message search is bounded and explicitly scoped to the authenticated workspace', async () => {
+  let sql = '';
+  let bindings = [];
+  const env = {
+    DB: {
+      prepare(statement) {
+        sql = statement;
+        return {
+          bind(...values) {
+            bindings = values;
+            return {
+              async all() {
+                return { results: [{
+                  message_id: 'message-1', conversation_id: 'conversation-1', contact_id: 'contact-1',
+                  display_name: 'Asha Rao', company: 'Helixcer', channel_id: 'channel-1', channel_name: 'Sales',
+                  connector_type: 'whatsapp_cloud', provider_type: '', channel_profile_id: '919999999999',
+                  text: 'Need the invoice', message_type: 'text', direction: 'inbound',
+                  timestamp: '2026-10-27T12:00:00.000Z', conversation_status: 'open', assigned_to: '', unread_count: 2
+                }] };
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+
+  const items = await searchMessages(
+    env,
+    'workspace-a',
+    new URL('https://api.chat.helixcer.com/api/search/messages?q=invoice&limit=500')
+  );
+
+  assert.deepEqual(bindings, ['workspace-a', 'invoice', 100]);
+  assert.match(sql, /WHERE m\.workspace_id=\?1/);
+  assert.match(sql, /ct\.workspace_id=m\.workspace_id/);
+  assert.match(sql, /ch\.workspace_id=m\.workspace_id/);
+  assert.deepEqual(items, [{
+    messageId: 'message-1', conversationId: 'conversation-1', contactId: 'contact-1',
+    contactIdentityId: '', identityId: '',
+    contactName: 'Asha Rao', company: 'Helixcer', channelId: 'channel-1', channelName: 'Sales',
+    connectorType: 'whatsapp_cloud', channelProfileId: '919999999999', text: 'Need the invoice',
+    messageType: 'text', direction: 'inbound', timestamp: '2026-10-27T12:00:00.000Z',
+    conversationStatus: 'open', assignedTo: '', unreadCount: 2
+  }]);
+
+  const untouchedEnv = { DB: { prepare() { throw new Error('blank queries must not reach D1'); } } };
+  assert.deepEqual(await searchMessages(
+    untouchedEnv,
+    'workspace-a',
+    new URL('https://api.chat.helixcer.com/api/search/messages?q=%20%20')
+  ), []);
+});
 
 test('inbound push notifications use the saved sender name and a bounded message preview', () => {
   const notification = inboundPushNotification({ channelId: 'wa-sales' }, {
@@ -39,6 +94,15 @@ test('inbound push notifications use the saved sender name and a bounded message
   assert.equal(notification.body.length, 240);
   assert.equal(notification.tag, 'helixcer-conversation-123');
   assert.equal(notification.url, '/#inbox/conversation-123');
+
+  const counted = inboundPushNotification({ channelId: 'wa-sales' }, {
+    conversationId: 'conversation-123', senderName: 'Asha', preview: 'Hi', messageType: 'text',
+    unreadCount: 12, conversation: { unreadCount: 4 },
+    message: { timestamp: '2026-10-27T12:00:00.000Z' }
+  });
+  assert.equal(counted.unreadCount, 12);
+  assert.equal(counted.conversationUnreadCount, 4);
+  assert.equal(counted.eventTimestamp, '2026-10-27T12:00:00.000Z');
 
   assert.deepEqual(inboundPushNotification({ channelId: 'telegram-support' }, {
     conversationId: 'conversation-media', senderName: '', preview: '', messageType: 'image'
@@ -77,7 +141,9 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
     messages: [
       { id: 'wamid.1', from: '919999999999', timestamp: '1761360000', type: 'text', text: { body: 'Hello' } },
       { id: 'wamid.2', from: '919999999999', timestamp: '1761360002', type: 'image', context: { id: 'wamid.1' },
-        image: { id: 'wa-media-2', mime_type: 'image/jpeg', caption: 'Receipt' } }
+        image: { id: 'wa-media-2', mime_type: 'image/jpeg', caption: 'Receipt' } },
+      { id: 'wamid.3', from: '919999999999', timestamp: '1761360003', type: 'document',
+        document: { id: 'wa-media-3', mime_type: 'application/pdf', filename: 'invoice.pdf' } }
     ],
     statuses: [{ id: 'wamid.out', status: 'delivered', timestamp: '1761360001', biz_opaque_callback_data: 'internal-message-1' }]
   } }] }] });
@@ -89,6 +155,8 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
     caption: 'Receipt', providerMediaId: 'wa-media-2'
   });
   assert.deepEqual(result.messages[1].reply, { channelMessageId: 'wamid.1' });
+  assert.equal(result.messages[2].text, '');
+  assert.equal(result.messages[2].attachment.filename, 'invoice.pdf');
   assert.equal(result.statuses[0].status, 'delivered');
   assert.equal(result.statuses[0].internalMessageId, 'internal-message-1');
   assert.deepEqual(result.phoneNumberIds, ['123456789']);
@@ -322,6 +390,8 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const pushSubscriptions = await readFile(new URL('../migrations/0008_push_subscriptions.sql', import.meta.url), 'utf8');
   const workspaceProfile = await readFile(new URL('../migrations/0009_workspace_profile.sql', import.meta.url), 'utf8');
   const workspaceIdMigration = await readFile(new URL('../migrations/0010_workspace_uuid.sql', import.meta.url), 'utf8');
+  const mobilePushDevices = await readFile(new URL('../migrations/0011_mobile_push_devices.sql', import.meta.url), 'utf8');
+  const contactIdentities = await readFile(new URL('../migrations/0012_contact_identities.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -391,12 +461,16 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
       WHERE channel_id='legacy-channel';
   `);
   database.exec(workspaceIdMigration);
+  database.exec(mobilePushDevices);
+  database.exec(contactIdentities);
   const migratedWorkspaceId = database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id;
   assert.match(migratedWorkspaceId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(database.prepare("SELECT count(*) AS count FROM workspaces WHERE workspace_id='ws_default'").get().count, 0);
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
   for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'channel_credentials',
-    'contacts', 'messages', 'audit_log', 'api_keys', 'outbound_payloads', 'external_api_requests', 'push_subscriptions']) {
+    'contacts', 'messages', 'audit_log', 'api_keys', 'outbound_payloads', 'external_api_requests', 'push_subscriptions',
+    'mobile_push_devices', 'mobile_auth_challenges', 'contact_identities', 'channel_identity_bindings',
+    'identity_migration_issues']) {
     assert.ok(tables.includes(name), `missing table ${name}`);
   }
   for (const [table, idColumn, id] of [
@@ -458,7 +532,10 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
     'idx_outbox_workspace_due', 'idx_channel_credentials_channel', 'idx_channels_workspace_provider',
     'idx_channels_workspace_whatsapp_phone', 'idx_channels_workspace_instagram_account', 'idx_channels_workspace_telegram_bot',
     'idx_api_keys_workspace_status', 'idx_outbound_payloads_workspace', 'idx_external_requests_message', 'idx_external_requests_expiry',
-    'idx_conversations_workspace_contact_channel_unique', 'idx_push_subscriptions_workspace', 'idx_push_subscriptions_membership']) {
+    'idx_conversations_workspace_identity_channel_unique', 'idx_conversations_workspace_legacy_contact_channel_unique',
+    'idx_conversations_workspace_contact_channel_compat', 'idx_push_subscriptions_workspace', 'idx_push_subscriptions_membership',
+    'idx_mobile_push_devices_workspace', 'idx_mobile_push_devices_membership', 'idx_mobile_push_devices_session',
+    'idx_sessions_type_expiry', 'idx_mobile_auth_challenges_expiry']) {
     assert.ok(indexes.has(name), `missing index ${name}`);
   }
   database.close();
@@ -474,6 +551,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   editedDatabase.exec(conversationUniqueness);
   editedDatabase.exec(pushSubscriptions);
   editedDatabase.exec(workspaceProfile);
+  editedDatabase.exec(mobilePushDevices);
   assert.equal(editedDatabase.prepare("SELECT name FROM channels WHERE channel_id='wa-main'").get().name, 'Edited WhatsApp');
   editedDatabase.close();
 });

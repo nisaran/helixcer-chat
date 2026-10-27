@@ -8,6 +8,7 @@ Helixcer Chat is a zero-monthly-cost omnichannel inbox designed for GitHub Pages
 - Google sign-in with server-side sessions, plus Owner, Admin, and Agent workspace roles.
 - Team invitations, member enable/disable controls, and protection against removing the last active Owner.
 - REST API backed by indexed D1 tables for contacts, identities, conversations, messages, webhook deduplication, retries, and audit history.
+- Person-first contacts: one master contact can hold WhatsApp, Telegram, Instagram, Facebook, and email identities, while explicit channel bindings retain each connected account's scoped address and conversation history. Starting a chat always uses a saved route; the system never guesses which connected account to use.
 - Realtime browser refresh through a hibernatable Durable Object WebSocket.
 - Any number of WhatsApp Cloud, Telegram Bot, and Instagram Messaging connections per workspace, with provider verification, signed/token-protected webhooks, and inbound/outbound text.
 - Channel credentials save immediately without calling the provider. Verification is a separate, explicit action, and administrators can copy a saved webhook verify token on demand without exposing it in normal channel payloads.
@@ -48,11 +49,38 @@ Run the backend checks with:
 node --test assets/frontend.test.mjs worker/test/*.test.mjs gateway/*.test.mjs
 ```
 
+## Android app
+
+The native Android client lives in [`android/`](android/) and uses the application ID `com.helixcer.chat`. It is a Kotlin/Jetpack Compose app for the Inbox, Contacts, contact details, and chat. Google Credential Manager exchanges a one-time backend nonce and Google ID token for a revocable mobile bearer session; browser cookies and developer API keys are never reused by the app.
+
+Build a debug APK with Android Studio's bundled JDK:
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+cd android
+.\gradlew.bat assembleDebug
+```
+
+The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. The backend must expose the mobile auth and push routes documented in [`android/README.md`](android/README.md).
+
+Firebase is optional at build time. To enable reliable background notifications, register the Android app `com.helixcer.chat` in Firebase and place its downloaded, untracked configuration at `android/app/google-services.json`. The build reads the matching app ID, API key, project ID, and sender ID automatically.
+
+If you cannot use the downloaded file, add the same non-secret public Android Firebase values to an untracked `android/local.properties` file instead:
+
+```properties
+FIREBASE_APPLICATION_ID=1:000000000000:android:0000000000000000
+FIREBASE_API_KEY=your-public-firebase-api-key
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_SENDER_ID=000000000000
+```
+
+When those values or the backend FCM configuration are absent, the Settings toggle remains off and explains that native notifications are unavailable.
+
 ## Cloudflare deployment
 
 The Worker setup is documented in [`worker/README.md`](worker/README.md). In summary:
 
-1. Create the `helixcer-chat-v2` D1 database and put its ID in `wrangler.toml`.
+1. Create the `helixcer-chat-db` D1 database and put its ID in `wrangler.toml`.
 2. Deploy `gateway/` as the `helixcer-chat-gateway` Pages project, associate `api.chat.helixcer.com`, and point only that external-DNS subdomain to `helixcer-chat-gateway.pages.dev`. The gateway calls the Worker over a service binding; this same-site hostname is required for the secure login cookie used by `chat.helixcer.com`.
 3. Create a Google Web OAuth client with the exact callback `https://api.chat.helixcer.com/auth/google/callback`.
 4. Configure Google OAuth secrets, set `BOOTSTRAP_OWNER_EMAIL` to the verified Google email that may claim the first Owner membership, and create one strong `CHANNEL_CREDENTIALS_KEY` Worker secret.
@@ -74,5 +102,5 @@ The application is intended to remain on GitHub Pages and Cloudflare free plans.
 
 ## Safe rollout and rollback
 
-Before migration, export D1 and record the currently deployed Worker version plus the current GitHub Pages commit. Deploy and verify the Worker/custom domain first, then publish the frontend, and switch provider callbacks last. If application behavior regresses, restore the prior Worker version and Pages commit. Migration `0004` adds the encrypted credential vault and removes only the untouched, unreferenced `wa-main` placeholder. Migration `0005` adds hashed workspace API keys, encrypted temporary outbound payloads, and idempotency records without changing existing inbox rows. Restore the D1 export if a schema migration itself must be rolled back or if data was corrupted.
+Before migration, export D1 and record the currently deployed Worker version plus the current GitHub Pages commit. Apply database migrations, then deploy and verify the Worker/custom domain before publishing the frontend; switch provider callbacks last. If application behavior regresses, restore the prior Worker version and Pages commit. Migration `0004` adds the encrypted credential vault and removes only the untouched, unreferenced `wa-main` placeholder. Migration `0005` adds hashed workspace API keys, encrypted temporary outbound payloads, and idempotency records without changing existing inbox rows. Migration `0012` separates master contacts, platform identities, and connected-channel bindings; it preserves ambiguous legacy routes for explicit review instead of guessing. Restore the D1 export if a schema migration itself must be rolled back or if data was corrupted.
 

@@ -7,3 +7,18 @@ node_modules/
 !.env.example
 *.local
 
+# Android
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/app/google-services.json
+android/keystore.properties
+android/signing/
+android/**/build/
+android/captures/
+android/.externalNativeBuild/
+android/.cxx/
+*.apk
+*.aab
+release/
+

@@ -4,8 +4,11 @@ import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import {
   authenticateRequest,
+  createGoogleMobileSession,
+  createMobileAuthChallenge,
   createInvitation,
   hashToken,
+  mobileAuthConfiguration,
   requireRole,
   startGoogleOAuth,
   finishGoogleOAuth,
@@ -14,7 +17,7 @@ import {
   validateReturnTo,
   verifyGoogleIdToken
 } from '../src/auth.js';
-import { encryptChannelCredential, handleRequest } from '../src/index.js';
+import worker, { encryptChannelCredential, handleRequest } from '../src/index.js';
 
 class TestD1Statement {
   constructor(statement, values = []) {
@@ -120,6 +123,8 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0007_conversation_uniqueness.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0008_push_subscriptions.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0009_workspace_profile.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0011_mobile_push_devices.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0012_contact_identities.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -181,6 +186,27 @@ test('role hierarchy rejects an agent and accepts admins and owners', () => {
   assert.doesNotThrow(() => requireRole({ membership: { role: 'owner' } }, 'admin'));
 });
 
+test('mobile auth configuration exposes only the public client identity', () => {
+  const configured = mobileAuthConfiguration(envFor(null));
+  assert.deepEqual(configured, {
+    enabled: true,
+    googleWebClientId: 'client-id.apps.googleusercontent.com',
+    packageName: 'com.helixcer.chat'
+  });
+  assert.equal(JSON.stringify(configured).includes('client-secret'), false);
+});
+
+test('mobile auth configuration route is public and non-cacheable', async () => {
+  const response = await handleRequest(new Request('https://api.chat.helixcer.com/auth/mobile/config'), envFor(null));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  assert.deepEqual(await response.json(), {
+    enabled: true,
+    googleWebClientId: 'client-id.apps.googleusercontent.com',
+    packageName: 'com.helixcer.chat'
+  });
+});
+
 test('Google ID token verification checks signature, issuer, audience, expiry, email and nonce', async () => {
   const fixture = await signingFixture();
   const nonce = 'nonce-value';
@@ -201,6 +227,15 @@ test('Google ID token verification checks signature, issuer, audience, expiry, e
   }, fetchJwks);
   assert.equal(identity.sub, 'google-subject');
   assert.equal(identity.email, 'owner@example.com');
+
+  const androidPresenter = 'android-client.apps.googleusercontent.com';
+  const androidToken = await fixture.sign({ ...basePayload, azp: androidPresenter });
+  const androidIdentity = await verifyGoogleIdToken(androidToken, {
+    clientId: basePayload.aud,
+    authorizedParties: [basePayload.aud, androidPresenter],
+    nonceHash, nowSeconds: now, jwksUrl
+  }, fetchJwks);
+  assert.equal(androidIdentity.sub, 'google-subject');
 
   const wrongAudience = await fixture.sign({ ...basePayload, aud: 'wrong-client' });
   await assert.rejects(() => verifyGoogleIdToken(wrongAudience, {
@@ -357,6 +392,151 @@ function performOwnerLogin(env) {
   return performGoogleLogin(env, { name: 'Primary owner' });
 }
 
+async function performGoogleMobileLogin(env, options = {}) {
+  const fixture = await signingFixture();
+  const now = Math.floor(Date.now() / 1000);
+  const deviceId = options.deviceId || 'android_1234567890abcdef';
+  const challenge = await createMobileAuthChallenge(env, { deviceId });
+  const nonce = challenge.nonce;
+  const jwksUrl = `https://jwks.example/${crypto.randomUUID()}`;
+  env.GOOGLE_JWKS_URL = jwksUrl;
+  const idToken = await fixture.sign({
+    iss: 'https://accounts.google.com', aud: env.GOOGLE_CLIENT_ID,
+    sub: options.subject || 'owner-google-mobile-sub',
+    email: options.email || 'owner@example.com', email_verified: true,
+    name: options.name || 'Mobile owner', picture: 'https://example.com/mobile-avatar.png',
+    nonce, iat: now - 2, exp: now + 300,
+    ...(options.azp ? { azp: options.azp } : {})
+  });
+  const result = await createGoogleMobileSession(env, {
+    idToken, nonce, deviceId, deviceName: options.deviceName || 'Pixel test device',
+    ...(options.invite ? { invitationToken: options.invite } : {})
+  }, async input => {
+    assert.equal(String(input), jwksUrl);
+    return new Response(JSON.stringify({ keys: [fixture.jwk] }), {
+      status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=60' }
+    });
+  });
+  return { result, idToken, nonce, deviceId };
+}
+
+test('mobile Google exchange validates nonce and returns a revocable bearer session', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const { result, idToken, nonce, deviceId } = await performGoogleMobileLogin(env);
+  assert.equal(result.ok, true);
+  assert.equal(result.tokenType, 'Bearer');
+  assert.ok(result.token.length > 30);
+  assert.ok(Date.parse(result.expiresAt) > Date.now());
+  assert.equal(result.me.user.email, 'owner@example.com');
+  assert.equal(result.me.membership.role, 'owner');
+
+  const bearerRequest = new Request('https://api.chat.helixcer.com/api/me', {
+    headers: { Authorization: `Bearer ${result.token}` }
+  });
+  const principal = await authenticateRequest(bearerRequest, env);
+  assert.equal(principal.authType, 'mobile_session');
+  assert.equal(principal.user.email, 'owner@example.com');
+  assert.equal(principal.deviceId, deviceId);
+  assert.equal(database.prepare('SELECT session_type FROM sessions WHERE session_id=?').get(principal.sessionId).session_type, 'mobile');
+
+  const mutation = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${result.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Mobile support', connectorType: 'web_chat', channelId: 'mobile-support' })
+  }), env);
+  assert.equal(mutation.status, 201);
+
+  Object.assign(env, {
+    FIREBASE_PROJECT_ID: 'helixcer-chat-test',
+    FIREBASE_CLIENT_EMAIL: 'push-test@helixcer-chat-test.iam.gserviceaccount.com',
+    FIREBASE_PRIVATE_KEY: `-----BEGIN PRIVATE KEY-----\n${'A'.repeat(64)}\n-----END PRIVATE KEY-----`
+  });
+  const deviceInput = {
+    deviceId: 'android_1234567890abcdef', appId: 'com.helixcer.chat',
+    token: `fcm:test_${'a'.repeat(64)}`
+  };
+  const pushRegistration = await handleRequest(new Request('https://api.chat.helixcer.com/api/push/mobile-devices', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${result.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(deviceInput)
+  }), env);
+  assert.equal(pushRegistration.status, 201);
+  assert.deepEqual(await pushRegistration.json(), {
+    available: true,
+    subscribed: true,
+    deviceId: deviceInput.deviceId,
+    appId: deviceInput.appId
+  });
+  assert.equal(database.prepare('SELECT count(*) AS count FROM mobile_push_devices').get().count, 1);
+  const pushStatus = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/push/mobile-config?deviceId=${encodeURIComponent(deviceInput.deviceId)}`,
+    { headers: { Authorization: `Bearer ${result.token}` } }
+  ), env);
+  assert.equal(pushStatus.status, 200);
+  assert.deepEqual(await pushStatus.json(), {
+    available: true,
+    appId: deviceInput.appId,
+    subscribed: true,
+    deviceId: deviceInput.deviceId
+  });
+  const pushRemoval = await handleRequest(new Request('https://api.chat.helixcer.com/api/push/mobile-devices', {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${result.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId: deviceInput.deviceId, appId: deviceInput.appId })
+  }), env);
+  assert.equal(pushRemoval.status, 200);
+  assert.deepEqual(await pushRemoval.json(), {
+    available: true,
+    subscribed: false,
+    deviceId: deviceInput.deviceId,
+    appId: deviceInput.appId
+  });
+  assert.equal(database.prepare('SELECT count(*) AS count FROM mobile_push_devices').get().count, 0);
+  const disabledStatus = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/push/mobile-config?deviceId=${encodeURIComponent(deviceInput.deviceId)}`,
+    { headers: { Authorization: `Bearer ${result.token}` } }
+  ), env);
+  assert.equal(disabledStatus.status, 200);
+  assert.deepEqual(await disabledStatus.json(), {
+    available: true,
+    appId: deviceInput.appId,
+    subscribed: false,
+    deviceId: deviceInput.deviceId
+  });
+
+  await assert.rejects(() => createGoogleMobileSession(env, {
+    idToken, nonce, deviceId
+  }), /challenge|already used/i);
+
+  const pushRegistrationAgain = await handleRequest(new Request('https://api.chat.helixcer.com/api/push/mobile-devices', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${result.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(deviceInput)
+  }), env);
+  assert.equal(pushRegistrationAgain.status, 201);
+  assert.equal(database.prepare('SELECT count(*) AS count FROM mobile_push_devices').get().count, 1);
+
+  const logoutResponse = await handleRequest(new Request('https://api.chat.helixcer.com/api/logout', {
+    method: 'POST', headers: { Authorization: `Bearer ${result.token}` }
+  }), env);
+  assert.equal(logoutResponse.status, 200);
+  assert.equal(await authenticateRequest(bearerRequest, env), null);
+  assert.equal(database.prepare('SELECT count(*) AS count FROM mobile_push_devices').get().count, 0);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM audit_log WHERE action='login' AND details_json LIKE '%google_mobile%'").get().count, 1);
+  database.close();
+});
+
+test('mobile Google exchange rejects missing or malformed nonces before token verification', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  await assert.rejects(() => createGoogleMobileSession(env, { idToken: 'token' }), /nonce/i);
+  await assert.rejects(() => createGoogleMobileSession(env, {
+    idToken: 'token', nonce: 'short', deviceId: 'android_1234567890abcdef'
+  }), /nonce/i);
+  database.close();
+});
+
 test('OAuth code flow bootstraps only the configured verified owner and creates a server session', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB);
@@ -366,6 +546,9 @@ test('OAuth code flow bootstraps only the configured verified owner and creates 
   assert.equal(principal.workspace.workspaceId, 'ws_default');
   assert.equal(database.prepare('SELECT count(*) AS count FROM memberships').get().count, 1);
   assert.equal(database.prepare('SELECT count(*) AS count FROM sessions WHERE revoked_at IS NULL').get().count, 1);
+  const browserSession = database.prepare('SELECT session_type,device_id FROM sessions WHERE revoked_at IS NULL').get();
+  assert.equal(browserSession.session_type, 'browser');
+  assert.equal(browserSession.device_id, null);
   assert.equal(database.prepare('SELECT count(*) AS count FROM oauth_states').get().count, 0);
   database.close();
 });
@@ -713,6 +896,15 @@ test('cookie writes, logout, and realtime require the exact browser origin', asy
   assert.ok(forwardedHeaders.get('X-Helixcer-Membership-Id'));
   assert.ok(forwardedHeaders.get('X-Helixcer-Session-Expires-At'));
 
+  const mobileSocket = await handleRequest(new Request('https://api.chat.helixcer.com/api/realtime', {
+    headers: { Authorization: `Bearer ${sessionToken}`, Upgrade: 'websocket' }
+  }), env);
+  assert.equal(mobileSocket.status, 401);
+  const rejectedMobileBrowserOrigin = await handleRequest(new Request('https://api.chat.helixcer.com/api/realtime', {
+    headers: { Authorization: `Bearer ${sessionToken}`, Origin: 'https://evil.example', Upgrade: 'websocket' }
+  }), env);
+  assert.equal(rejectedMobileBrowserOrigin.status, 403);
+
   const missingLogoutOrigin = await handleRequest(new Request('https://api.chat.helixcer.com/api/logout', {
     method: 'POST', headers: { Cookie: cookie }
   }), env);
@@ -997,6 +1189,111 @@ test('WhatsApp credential patches preserve an independent webhook handshake', as
   database.close();
 });
 
+test('routed managed channels lock provider identity and unverified retries fail closed', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const channelId = 'ig-routed-lock';
+  const accountId = '17841400000000901';
+  const appId = '123456789000901';
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId, name: 'Routed Instagram', connectorType: 'instagram',
+      config: { instagramAccountId: accountId, appId, apiVersion: 'v26.0', authMode: 'instagram_login' },
+      credentials: { accessToken: 'instagram-original-access-token-123456',
+        appSecret: 'abcdef1234567890abcdef1234567890', verifyToken: 'instagram-verify-token' } })
+  }), env);
+  assert.equal(created.status, 201);
+  const now = new Date().toISOString();
+  const verifiedConfig = {
+    ...JSON.parse(database.prepare('SELECT config_json FROM channels WHERE channel_id=?').get(channelId).config_json),
+    credentialsVerifiedAt: now,
+    verifiedProviderId: accountId
+  };
+  database.prepare('UPDATE channels SET config_json=? WHERE channel_id=?').run(JSON.stringify(verifiedConfig), channelId);
+  const originalEncryptedToken = database.prepare(`SELECT encrypted_value FROM channel_credentials
+    WHERE workspace_id='ws_default' AND channel_id=? AND credential_key='accessToken'`).get(channelId).encrypted_value;
+  database.prepare(`INSERT INTO contacts
+      (contact_id,display_name,created_at,updated_at,workspace_id)
+    VALUES ('ig-routed-contact','Instagram routed contact',?,?,'ws_default')`).run(now, now);
+  database.prepare(`INSERT INTO contact_identities
+      (identity_id,workspace_id,contact_id,platform,profile_id,display_name,created_at,updated_at)
+    VALUES ('ig-routed-identity','ws_default','ig-routed-contact','instagram','ig-canonical-profile',
+      'Instagram routed contact',?,?)`).run(now, now);
+  database.prepare(`INSERT INTO channel_identity_bindings
+      (binding_id,workspace_id,identity_id,channel_id,scoped_profile_id,active,first_seen_at,last_seen_at,created_at,updated_at)
+    VALUES ('ig-routed-binding','ws_default','ig-routed-identity',?,'ig-account-scoped-profile',1,?,?,?,?)`)
+    .run(channelId, now, now, now, now);
+  database.prepare(`INSERT INTO conversations
+      (conversation_id,contact_id,channel_id,identity_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+    VALUES ('ig-routed-conversation','ig-routed-contact',?,'ig-routed-identity','open','Instagram routed contact',
+      ?,0,?,?,'ws_default')`).run(channelId, now, now, now);
+
+  const originalFetch = globalThis.fetch;
+  let providerCalls = 0;
+  globalThis.fetch = async () => {
+    providerCalls += 1;
+    return new Response(JSON.stringify({ id: 'must-not-send' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    });
+  };
+  try {
+    const replacedAccount = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/channels/${channelId}`, {
+        method: 'PATCH', headers,
+        body: JSON.stringify({ config: { instagramAccountId: '17841400000000902', appId: '123456789000902' },
+          credentials: { accessToken: 'instagram-replacement-access-token-123456' } })
+      }
+    ), env);
+    assert.equal(replacedAccount.status, 409);
+    assert.match((await replacedAccount.json()).error, /new channel/i);
+    const afterRejectedConfig = JSON.parse(database.prepare('SELECT config_json FROM channels WHERE channel_id=?')
+      .get(channelId).config_json);
+    assert.equal(afterRejectedConfig.instagramAccountId, accountId);
+    assert.equal(afterRejectedConfig.appId, appId);
+    assert.equal(afterRejectedConfig.verifiedProviderId, accountId);
+    assert.equal(database.prepare(`SELECT encrypted_value FROM channel_credentials
+      WHERE workspace_id='ws_default' AND channel_id=? AND credential_key='accessToken'`).get(channelId).encrypted_value,
+    originalEncryptedToken);
+
+    const credentialOnly = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/channels/${channelId}`, {
+        method: 'PATCH', headers,
+        body: JSON.stringify({ credentials: { accessToken: 'instagram-rotated-access-token-123456' } })
+      }
+    ), env);
+    assert.equal(credentialOnly.status, 200);
+    const afterCredentialChange = JSON.parse(database.prepare('SELECT config_json FROM channels WHERE channel_id=?')
+      .get(channelId).config_json);
+    assert.equal(afterCredentialChange.credentialsVerifiedAt, undefined);
+    assert.equal(afterCredentialChange.verifiedProviderId, undefined);
+
+    database.prepare(`INSERT INTO messages
+        (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,workspace_id)
+      VALUES ('ig-unverified-retry','ig-routed-conversation','ig-routed-contact',?,'ig-routed-identity',
+        'outbound','text','Never send without verification','retrying',?,'ws_default')`).run(channelId, now);
+    database.prepare(`INSERT INTO outbox
+        (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,created_at,updated_at,workspace_id)
+      VALUES ('ig-unverified-outbox','ig-unverified-retry',0,6,?,'pending',?,?,'ws_default')`)
+      .run(new Date(Date.now() - 1000).toISOString(), now, now);
+    const scheduled = [];
+    worker.scheduled({}, env, { waitUntil(promise) { scheduled.push(promise); } });
+    await Promise.all(scheduled);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(providerCalls, 0);
+  const failedRetry = database.prepare("SELECT status,error FROM messages WHERE message_id='ig-unverified-retry'").get();
+  assert.equal(failedRetry.status, 'failed');
+  assert.match(failedRetry.error, /credentials must be verified/i);
+  assert.deepEqual({ ...database.prepare(`SELECT status,attempts FROM outbox
+    WHERE outbox_id='ig-unverified-outbox'`).get() }, { status: 'failed', attempts: 1 });
+  database.close();
+});
+
 test('signed WhatsApp webhooks reach the Inbox before Meta API verification', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB, {
@@ -1058,8 +1355,9 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
     assert.equal(conversation.status, 'open');
     assert.equal(conversation.subject, 'Asha');
     assert.equal(conversation.unread_count, 1);
-    const message = database.prepare(`SELECT message_id,direction,text,status,provider_message_id FROM messages
+    const message = database.prepare(`SELECT message_id,identity_id,direction,text,status,provider_message_id FROM messages
       WHERE channel_id=?`).get(channelId);
+    assert.ok(message.identity_id);
     assert.equal(message.direction, 'inbound');
     assert.equal(message.text, 'Hello Helixcer');
     assert.equal(message.status, 'received');
@@ -1072,6 +1370,8 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
       messageId: message.message_id,
       conversationId: conversation.conversation_id,
       channelId,
+      contactIdentityId: message.identity_id,
+      identityId: message.identity_id,
       direction: 'inbound',
       messageType: 'text',
       text: 'Hello Helixcer',
@@ -1095,6 +1395,14 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
     assert.equal(aggregateEvent.received, 1);
     assert.equal(aggregateEvent.statuses, 0);
     assert.ok(broadcasts.indexOf(inboundEvent) < broadcasts.indexOf(aggregateEvent));
+    const bootstrapAfterInbound = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/bootstrap', {
+        headers: { Authorization: 'Bearer recovery-secret' }
+      }), env);
+    assert.equal(bootstrapAfterInbound.status, 200);
+    const bootstrappedConversation = (await bootstrapAfterInbound.json()).conversations
+      .find(item => item.conversationId === conversation.conversation_id);
+    assert.equal(bootstrappedConversation.unreadCount, 1);
     const after = JSON.parse(database.prepare('SELECT config_json FROM channels WHERE channel_id=?').get(channelId).config_json);
     assert.ok(after.webhookVerifiedAt);
     assert.ok(after.lastWebhookAt);
@@ -1245,6 +1553,7 @@ test('Telegram and generic webhooks publish normalized granular message events',
     assert.equal(telegramEvent.conversation.connectorType, 'telegram');
     assert.equal(telegramEvent.conversation.channelProfileId, '91910001');
     assert.equal(telegramEvent.conversation.lastMessage, 'Telegram inbound');
+    assert.equal(telegramEvent.conversation.unreadCount, 1);
 
     const genericEvent = broadcasts.find(event => event.type === 'message.created' &&
       event.message?.channelMessageId === 'generic-message-1');
@@ -1255,6 +1564,14 @@ test('Telegram and generic webhooks publish normalized granular message events',
     assert.equal(genericEvent.conversation.connectorType, 'generic_http');
     assert.equal(genericEvent.conversation.channelProfileId, 'generic-user-1');
     assert.equal(genericEvent.conversation.lastMessage, 'Generic inbound');
+    assert.equal(genericEvent.conversation.unreadCount, 1);
+
+    const refreshed = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
+      headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    const refreshedItems = (await refreshed.json()).items;
+    assert.equal(refreshedItems.find(item => item.conversationId === telegramEvent.conversationId).unreadCount, 1);
+    assert.equal(refreshedItems.find(item => item.conversationId === genericEvent.conversationId).unreadCount, 1);
 
     const aggregates = broadcasts.filter(event => event.type === 'webhook.received');
     assert.equal(aggregates.length, 2);
@@ -1361,7 +1678,9 @@ test('shared Instagram app webhook verifies all matches and routes each account 
   const payload = { object: 'instagram', entry: [
     { id: '17841400000000011', messaging: [{ sender: { id: '5550001' }, recipient: { id: '17841400000000011' },
       timestamp: 1761360000000, message: { mid: 'ig-app-message-one', text: 'First account' } }] },
-    { id: '17841400000000012', messaging: [{ sender: { id: '5550002' }, recipient: { id: '17841400000000012' },
+    // Instagram sender ids are account scoped. Deliberately reuse the same
+    // numeric value on another account to prove it does not merge contacts.
+    { id: '17841400000000012', messaging: [{ sender: { id: '5550001' }, recipient: { id: '17841400000000012' },
       timestamp: 1761360001000, message: { mid: 'ig-app-message-two', text: 'Second account' } }] }
   ] };
   const raw = JSON.stringify(payload);
@@ -1379,6 +1698,13 @@ test('shared Instagram app webhook verifies all matches and routes each account 
   assert.equal(routed.length, 2);
   assert.equal(routed[0].channel_id, 'ig-account-one');
   assert.equal(routed[1].channel_id, 'ig-account-two');
+  const scopedRoutes = database.prepare(`SELECT b.channel_id,b.identity_id,ci.contact_id
+    FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
+    WHERE b.scoped_profile_id='5550001' AND b.active=1 ORDER BY b.channel_id`).all();
+  assert.equal(scopedRoutes.length, 2);
+  assert.notEqual(scopedRoutes[0].identity_id, scopedRoutes[1].identity_id);
+  assert.notEqual(scopedRoutes[0].contact_id, scopedRoutes[1].contact_id,
+    'the same Instagram-scoped id on two accounts must create separate contacts');
   const createdEvents = broadcasts.filter(event => event.type === 'message.created');
   assert.equal(createdEvents.length, 2);
   const firstCreated = createdEvents.find(event => event.message.channelMessageId === 'ig-app-message-one');
@@ -1391,7 +1717,7 @@ test('shared Instagram app webhook verifies all matches and routes each account 
   assert.equal(firstCreated.conversation.channelProfileId, '5550001');
   assert.equal(secondCreated.message.text, 'Second account');
   assert.equal(secondCreated.conversation.channelId, 'ig-account-two');
-  assert.equal(secondCreated.conversation.channelProfileId, '5550002');
+  assert.equal(secondCreated.conversation.channelProfileId, '5550001');
   const deliveryAggregates = broadcasts.filter(event => event.type === 'webhook.received');
   assert.equal(deliveryAggregates.length, 2);
   assert.ok(deliveryAggregates.every(event => event.granular === true && event.received === 1));
@@ -1769,6 +2095,14 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
         appSecret: '1234567890abcdef1234567890abcdef', verifyToken: 'dashboard-verify-token' } })
   }), env);
   assert.equal(created.status, 201);
+  const verifiedAt = new Date().toISOString();
+  const verifiedChannelConfig = {
+    ...JSON.parse(database.prepare("SELECT config_json FROM channels WHERE channel_id='wa-dashboard'").get().config_json),
+    credentialsVerifiedAt: verifiedAt,
+    verifiedProviderId: '523456789012346'
+  };
+  database.prepare("UPDATE channels SET config_json=? WHERE channel_id='wa-dashboard'")
+    .run(JSON.stringify(verifiedChannelConfig));
   const broadcasts = [];
   env.INBOX_HUB = {
     idFromName: value => value,
@@ -1784,12 +2118,20 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
   database.prepare(`INSERT INTO channel_identities
       (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
     VALUES ('identity-dashboard','contact-dashboard','wa-dashboard','919999999999','Asha',?,'ws_default')`).run(now);
+  database.prepare(`INSERT INTO contact_identities
+      (identity_id,workspace_id,contact_id,platform,profile_id,phone_number,display_name,created_at,updated_at)
+    VALUES ('identity-dashboard','ws_default','contact-dashboard','whatsapp','919999999999','919999999999','Asha',?,?)`)
+    .run(now, now);
+  database.prepare(`INSERT INTO channel_identity_bindings
+      (binding_id,workspace_id,identity_id,channel_id,scoped_profile_id,active,first_seen_at,last_seen_at,created_at,updated_at)
+    VALUES ('binding-dashboard','ws_default','identity-dashboard','wa-dashboard','919999999999',1,?,?,?,?)`)
+    .run(now, now, now, now);
   database.prepare(`INSERT INTO conversations
-      (conversation_id,contact_id,channel_id,status,subject,last_message_at,created_at,updated_at,workspace_id)
-    VALUES ('conversation-dashboard','contact-dashboard','wa-dashboard','open','Asha',?,?,?,'ws_default')`).run(now, now, now);
+      (conversation_id,contact_id,channel_id,identity_id,status,subject,last_message_at,created_at,updated_at,workspace_id)
+    VALUES ('conversation-dashboard','contact-dashboard','wa-dashboard','identity-dashboard','open','Asha',?,?,?,'ws_default')`).run(now, now, now);
   database.prepare(`INSERT INTO messages
-      (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,provider_message_id,status,timestamp,workspace_id)
-    VALUES ('inbound-dashboard','conversation-dashboard','contact-dashboard','wa-dashboard','inbound','text','Hello',
+      (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,provider_message_id,status,timestamp,workspace_id)
+    VALUES ('inbound-dashboard','conversation-dashboard','contact-dashboard','wa-dashboard','identity-dashboard','inbound','text','Hello',
       'wamid.inbound-dashboard','received',?,'ws_default')`).run(now);
 
   const conversations = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
@@ -1945,6 +2287,22 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal((await ordinaryPatch.json()).item.unreadCount, 5);
     assert.equal(database.prepare("SELECT unread_count FROM conversations WHERE conversation_id='conversation-dashboard'").get().unread_count, 5);
 
+    const concurrentReadPushes = [];
+    const concurrentInboundDuringRead = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-dashboard', {
+        method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ markRead: true })
+      }), {
+        ...env,
+        DB: withConcurrentUnreadIncrement(DB, database, 'conversation-dashboard')
+      }, {
+        waitUntil(promise) { concurrentReadPushes.push(promise); }
+      });
+    assert.equal(concurrentInboundDuringRead.status, 200);
+    assert.equal((await concurrentInboundDuringRead.json()).item.unreadCount, 1);
+    assert.equal(database.prepare("SELECT unread_count FROM conversations WHERE conversation_id='conversation-dashboard'").get().unread_count, 1);
+    assert.equal(concurrentReadPushes.length, 0,
+      'a concurrent newer unread message must not be cleared on Android');
+
     const markReadRaceEnv = {
       ...env,
       DB: withConcurrentConversationMutation(DB, () => {
@@ -1952,15 +2310,21 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
           WHERE conversation_id='conversation-dashboard'`).run();
       })
     };
+    const completedReadPushes = [];
     const markReadOnly = await handleRequest(new Request(
       'https://api.chat.helixcer.com/api/conversations/conversation-dashboard', {
         method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ markRead: true })
-      }), markReadRaceEnv);
+      }), markReadRaceEnv, {
+        waitUntil(promise) { completedReadPushes.push(promise); }
+      });
     assert.equal(markReadOnly.status, 200);
     const markReadItem = (await markReadOnly.json()).item;
     assert.equal(markReadItem.status, 'closed');
     assert.equal(markReadItem.assignedTo, 'concurrent@example.com');
     assert.equal(markReadItem.unreadCount, 0);
+    assert.equal(completedReadPushes.length, 1,
+      'a completed mark-read schedules one Android notification-clear event');
+    await Promise.all(completedReadPushes);
 
     const patchedConversation = await handleRequest(new Request(
       'https://api.chat.helixcer.com/api/conversations/conversation-dashboard', {
@@ -2151,6 +2515,21 @@ test('conversation template discovery is authenticated, workspace scoped, pagina
     .run(await hashToken(agentSessionToken), new Date(Date.now() + 3600000).toISOString(), now, now);
 
   const originalFetch = globalThis.fetch;
+  const originalCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
+  const templateCache = new Map();
+  Object.defineProperty(globalThis, 'caches', {
+    configurable: true,
+    value: {
+      default: {
+        async match(request) {
+          return templateCache.get(request.url)?.clone();
+        },
+        async put(request, response) {
+          templateCache.set(request.url, response.clone());
+        }
+      }
+    }
+  });
   const providerRequests = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
@@ -2202,11 +2581,20 @@ test('conversation template discovery is authenticated, workspace scoped, pagina
     assert.equal(providerRequests[1].url.searchParams.get('after'), 'page-two-cursor');
     assert.equal(providerRequests[0].authorization, `Bearer ${accessToken}`);
 
+    globalThis.fetch = async () => { throw new Error('Meta should not be called while the template cache is warm.'); };
+    const cachedResponse = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-template-list/templates',
+      { headers: { Cookie: `__Host-helixcer_session=${agentSessionToken}` } }
+    ), env);
+    assert.equal(cachedResponse.status, 200);
+    assert.deepEqual((await cachedResponse.json()).items, body.items);
+    assert.equal(providerRequests.length, 2);
+
     globalThis.fetch = async () => new Response(JSON.stringify({
       error: { message: `(#100) Missing permission for message templates (${accessToken})`, code: 100 }
     }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     const providerFailure = await handleRequest(new Request(
-      'https://api.chat.helixcer.com/api/conversations/conversation-template-list/templates',
+      'https://api.chat.helixcer.com/api/conversations/conversation-template-list/templates?refresh=1',
       { headers: { Authorization: 'Bearer recovery-secret' } }
     ), env);
     assert.equal(providerFailure.status, 422);
@@ -2238,6 +2626,8 @@ test('conversation template discovery is authenticated, workspace scoped, pagina
     assert.equal(crossWorkspaceFetches, 0);
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalCaches) Object.defineProperty(globalThis, 'caches', originalCaches);
+    else delete globalThis.caches;
     database.close();
   }
 });
@@ -2467,7 +2857,7 @@ test('contact detail and update APIs preserve conversations, keep Channel Profil
   assert.equal(detail.status, 200);
   const detailBody = await detail.json();
   assert.equal(detailBody.item.name, 'Asha Rao');
-  assert.equal(detailBody.item.channelEditable, true);
+  assert.equal(detailBody.item.channelEditable, false);
 
   const updated = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
     method: 'PATCH', headers: agentJsonHeaders,
@@ -2495,23 +2885,20 @@ test('contact detail and update APIs preserve conversations, keep Channel Profil
     method: 'PATCH', headers: jsonHeaders,
     body: JSON.stringify({ channelId: 'telegram-contact-api' })
   }), env);
-  assert.equal(reassigned.status, 200);
-  const reassignedBody = await reassigned.json();
-  assert.equal(reassignedBody.item.channelName, 'Support Telegram');
-  assert.equal(reassignedBody.item.channelProfileId, '919999999991');
+  assert.equal(reassigned.status, 400);
+  assert.match((await reassigned.json()).error, /contact identity route/i);
   assert.equal(database.prepare('SELECT channel_id FROM conversations WHERE conversation_id=?').get(conversationId).channel_id,
-    'telegram-contact-api');
+    'wa-contact-api');
 
   database.prepare(`INSERT INTO messages
       (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
-    VALUES ('contact-history',?1,?2,'telegram-contact-api','inbound','text','Hello','received',?3,'ws_default')`)
+    VALUES ('contact-history',?1,?2,'wa-contact-api','inbound','text','Hello','received',?3,'ws_default')`)
     .run(conversationId, contactId, new Date().toISOString());
   const lockedChannel = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
     method: 'PATCH', headers: jsonHeaders,
     body: JSON.stringify({ channelId: 'wa-contact-api' })
   }), env);
-  assert.equal(lockedChannel.status, 409);
-  assert.match((await lockedChannel.json()).error, /after messages/i);
+  assert.equal(lockedChannel.status, 200);
   const lockedDetail = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
     headers: { Authorization: 'Bearer recovery-secret' }
   }), env);
@@ -2543,8 +2930,8 @@ test('contact detail and update APIs preserve conversations, keep Channel Profil
   }), env);
   const listItem = (await list.json()).items.find(item => item.contactId === contactId);
   assert.equal(listItem.company, 'Acme Retail');
-  assert.equal(listItem.channelName, 'Support Telegram');
-  assert.equal(listItem.connectorType, 'telegram');
+  assert.equal(listItem.channelName, 'Support WhatsApp');
+  assert.equal(listItem.connectorType, 'whatsapp_cloud');
 
   database.prepare(`INSERT INTO workspaces (workspace_id,slug,name,created_at,updated_at)
     VALUES ('ws_contact_other','contact-other','Other Contacts',?,?)`).run(now, now);
@@ -2555,6 +2942,50 @@ test('contact detail and update APIs preserve conversations, keep Channel Profil
     headers: { Authorization: 'Bearer recovery-secret' }
   }), env);
   assert.equal(privateContact.status, 404);
+  database.close();
+});
+
+test('workspace tag catalogue is server-derived, canonical, bootstrap-visible, and workspace scoped', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, { ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true' });
+  const headers = { Authorization: 'Bearer recovery-secret' };
+  const jsonHeaders = { ...headers, 'Content-Type': 'application/json' };
+  const now = new Date().toISOString();
+  database.prepare(`INSERT INTO workspaces (workspace_id,slug,name,created_at,updated_at)
+    VALUES ('ws_tag_other','tag-other','Other tag workspace',?,?)`).run(now, now);
+  database.prepare(`INSERT INTO channels
+      (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+    VALUES ('tag-channel','Tag channel','generic_http','generic_http',1,'["text"]','{}','TAG_TEST',?,?, 'ws_default')`)
+    .run(now, now);
+  database.prepare(`INSERT INTO contacts
+      (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
+    VALUES ('tag-one','Tag One','','["VIP","Retail","priority"]',?,?,'ws_default'),
+      ('tag-two','Tag Two','','["vip","West"," Priority ","",42]',?,?,'ws_default'),
+      ('tag-invalid','Invalid','','not-json',?,?,'ws_default'),
+      ('tag-private','Private','','["Hidden"]',?,?,'ws_tag_other')`)
+    .run(now, now, now, now, now, now, now, now);
+  database.prepare(`INSERT INTO channel_identities
+      (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
+    VALUES ('tag-identity','tag-one','tag-channel','tag-profile','Tag One',?,'ws_default')`).run(now);
+
+  const unauthenticated = await handleRequest(new Request('https://api.chat.helixcer.com/api/tags'), env);
+  assert.equal(unauthenticated.status, 401);
+
+  const response = await handleRequest(new Request('https://api.chat.helixcer.com/api/tags', { headers }), env);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).items, ['Priority', 'Retail', 'VIP', 'West']);
+
+  const updated = await handleRequest(new Request('https://api.chat.helixcer.com/api/contacts/tag-one', {
+    method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ tags: ['VIP', 'New Tag'] })
+  }), env);
+  const updatedBody = await updated.json();
+  assert.equal(updated.status, 200, JSON.stringify(updatedBody));
+  const refreshed = await handleRequest(new Request('https://api.chat.helixcer.com/api/tags', { headers }), env);
+  assert.deepEqual((await refreshed.json()).items, ['New Tag', 'Priority', 'VIP', 'West']);
+
+  const bootstrap = await handleRequest(new Request('https://api.chat.helixcer.com/api/bootstrap', { headers }), env);
+  assert.equal(bootstrap.status, 200);
+  assert.deepEqual((await bootstrap.json()).tags, ['New Tag', 'Priority', 'VIP', 'West']);
   database.close();
 });
 
@@ -2632,7 +3063,7 @@ test('conversation, contact, and channel deletion removes only local workspace d
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM outbox WHERE message_id='message-delete'").get().count, 0);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM outbound_payloads WHERE message_id='message-delete'").get().count, 0);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM external_api_requests WHERE message_id='message-delete'").get().count, 0);
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contacts WHERE contact_id='delete-exclusive'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contacts WHERE contact_id='delete-exclusive'").get().count, 1);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contacts WHERE contact_id='delete-shared'").get().count, 1);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM conversations WHERE conversation_id='conversation-keep'").get().count, 1);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE message_id='message-keep'").get().count, 1);
@@ -2743,5 +3174,349 @@ test('team member deletion follows role hierarchy, revokes access, and protects 
   ), env);
   assert.equal(removedSecondAgent.status, 200);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM memberships WHERE membership_id='delete-agent-two-membership'").get().count, 0);
+  database.close();
+});
+
+test('identity routes are explicit, prevalidated, and never claim ambiguous legacy history', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, { ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true' });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const now = new Date().toISOString();
+  database.prepare(`INSERT INTO channels
+      (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+    VALUES ('route-generic-a','Generic A','generic_http','generic_http',1,'["text"]','{}','ROUTE_A',?,?, 'ws_default'),
+      ('route-generic-b','Generic B','generic_http','generic_http',1,'["text"]','{}','ROUTE_B',?,?, 'ws_default'),
+      ('route-generic-c','Generic C','generic_http','generic_http',1,'["text"]','{}','ROUTE_C',?,?, 'ws_default'),
+      ('route-wrong-platform','Wrong platform','web_chat','web_chat',1,'["text"]','{}','ROUTE_WRONG',?,?, 'ws_default')`)
+    .run(now, now, now, now, now, now, now, now);
+  database.prepare(`INSERT INTO channels
+      (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+    VALUES ('route-telegram','Telegram route','telegram','telegram',1,'["text"]','{}','ROUTE_TELEGRAM',?,?, 'ws_default')`)
+    .run(now, now);
+
+  async function createContact(displayName) {
+    const response = await handleRequest(new Request('https://api.chat.helixcer.com/api/contacts', {
+      method: 'POST', headers, body: JSON.stringify({ displayName })
+    }), env);
+    if (response.status !== 201) assert.fail(`Contact creation failed: ${response.status} ${await response.text()}`);
+    return (await response.json()).contactId;
+  }
+  async function createIdentity(contactId, body) {
+    return handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}/identities`, {
+      method: 'POST', headers, body: JSON.stringify(body)
+    }), env);
+  }
+
+  const contactId = await createContact('Route safety');
+  const unboundResponse = await createIdentity(contactId, {
+    platform: 'generic_http', profileId: 'route-unbound'
+  });
+  assert.equal(unboundResponse.status, 201);
+  const unboundId = (await unboundResponse.json()).identityId;
+  const whatsappIdentity = await createIdentity(contactId, {
+    platform: 'whatsapp', profileId: '919995761029'
+  });
+  assert.equal(whatsappIdentity.status, 201);
+  const whatsappIdentityId = (await whatsappIdentity.json()).identityId;
+  const mismatchedIdentityUpsert = await createIdentity(contactId, {
+    identityId: whatsappIdentityId,
+    platform: 'telegram',
+    profileId: '364038997',
+    bindings: [{ channelId: 'route-telegram', scopedProfileId: '364038997' }]
+  });
+  assert.equal(mismatchedIdentityUpsert.status, 400);
+  assert.match((await mismatchedIdentityUpsert.json()).error, /cannot be changed/i);
+  assert.equal(database.prepare('SELECT platform FROM contact_identities WHERE identity_id=?')
+    .get(whatsappIdentityId).platform, 'whatsapp');
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM channel_identity_bindings WHERE identity_id=?')
+    .get(whatsappIdentityId).count, 0);
+
+  const inferredOpen = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
+    method: 'POST', headers, body: JSON.stringify({ identityId: unboundId })
+  }), env);
+  assert.equal(inferredOpen.status, 409);
+  assert.match((await inferredOpen.json()).error, /add a channel route/i);
+  const explicitOpen = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
+    method: 'POST', headers, body: JSON.stringify({ identityId: unboundId, channelId: 'route-generic-a' })
+  }), env);
+  assert.equal(explicitOpen.status, 409);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM channel_identity_bindings WHERE identity_id=?').get(unboundId).count, 0);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM conversations WHERE identity_id=?').get(unboundId).count, 0);
+
+  const invalidLegacyAlias = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({
+        displayName: 'Alias must not persist', channelId: 'route-generic-a',
+        identities: [{ identityId: unboundId, platform: 'generic_http', profileId: 'route-unbound',
+          username: 'alias-must-not-persist' }]
+      })
+    }
+  ), env);
+  assert.equal(invalidLegacyAlias.status, 400);
+  assert.equal(database.prepare('SELECT display_name FROM contacts WHERE contact_id=?').get(contactId).display_name,
+    'Route safety');
+  assert.equal(database.prepare('SELECT username FROM contact_identities WHERE identity_id=?').get(unboundId).username, '');
+
+  const partialCreate = await createIdentity(contactId, {
+    platform: 'generic_http', profileId: 'route-partial-create',
+    bindings: [
+      { channelId: 'route-generic-a', scopedProfileId: 'route-partial-create' },
+      { channelId: 'route-wrong-platform', scopedProfileId: 'route-partial-create' }
+    ]
+  });
+  assert.equal(partialCreate.status, 400);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contact_identities WHERE profile_id='route-partial-create'").get().count, 0);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channel_identity_bindings WHERE scoped_profile_id='route-partial-create'").get().count, 0);
+
+  const failedWriteEnv = envFor(withRunFailures(DB, [/INSERT INTO channel_identity_bindings/i]), {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true'
+  });
+  const failedWrite = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}/identities`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        platform: 'generic_http', profileId: 'route-write-failure',
+        bindings: [{ channelId: 'route-generic-a', scopedProfileId: 'route-write-failure' }]
+      })
+    }
+  ), failedWriteEnv);
+  assert.equal(failedWrite.status, 500);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contact_identities WHERE profile_id='route-write-failure'").get().count, 0,
+    'identity and route writes must roll back together');
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channel_identity_bindings WHERE scoped_profile_id='route-write-failure'").get().count, 0);
+
+  const editableResponse = await createIdentity(contactId, {
+    platform: 'generic_http', profileId: 'route-editable', username: 'before',
+    bindings: [{ channelId: 'route-generic-a', scopedProfileId: 'route-editable' }]
+  });
+  assert.equal(editableResponse.status, 201);
+  const editableId = (await editableResponse.json()).identityId;
+  const failedUpdateEnv = envFor(withRunFailures(DB, [/UPDATE channel_identity_bindings SET metadata_json/i]), {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true'
+  });
+  const failedWriteUpdate = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}/identities/${editableId}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ username: 'write-must-not-persist', bindings: [
+        { channelId: 'route-generic-a', scopedProfileId: 'route-editable' }
+      ] })
+    }
+  ), failedUpdateEnv);
+  assert.equal(failedWriteUpdate.status, 500);
+  assert.equal(database.prepare('SELECT username FROM contact_identities WHERE identity_id=?').get(editableId).username,
+    'before', 'identity field and route updates must roll back together');
+  const partialUpdate = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}/identities/${editableId}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ username: 'after', isPrimary: true, bindings: [
+        { channelId: 'route-generic-a', scopedProfileId: 'route-editable' },
+        { channelId: 'route-wrong-platform', scopedProfileId: 'route-editable' }
+      ] })
+    }
+  ), env);
+  assert.equal(partialUpdate.status, 400);
+  assert.equal(database.prepare('SELECT username FROM contact_identities WHERE identity_id=?').get(editableId).username, 'before');
+  assert.equal(Boolean(JSON.parse(database.prepare('SELECT metadata_json FROM contact_identities WHERE identity_id=?')
+    .get(editableId).metadata_json).isPrimary), false);
+  assert.equal(Boolean(JSON.parse(database.prepare('SELECT metadata_json FROM contact_identities WHERE identity_id=?')
+    .get(unboundId).metadata_json).isPrimary), true,
+  'a failed route update must not change the contact primary identity');
+  assert.deepEqual(database.prepare(`SELECT channel_id,scoped_profile_id FROM channel_identity_bindings
+    WHERE identity_id=? AND active=1 ORDER BY channel_id`).all(editableId).map(row => ({ ...row })), [
+    { channel_id: 'route-generic-a', scoped_profile_id: 'route-editable' }
+  ]);
+
+  const openedEditable = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
+    method: 'POST', headers,
+    body: JSON.stringify({ identityId: editableId, channelId: 'route-generic-a' })
+  }), env);
+  assert.equal(openedEditable.status, 201);
+  const historyRouteChange = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}/identities/${editableId}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ username: 'must-not-persist', bindings: [
+        { channelId: 'route-generic-a', scopedProfileId: 'route-replacement' }
+      ] })
+    }
+  ), env);
+  assert.equal(historyRouteChange.status, 409);
+  assert.match((await historyRouteChange.json()).error, /conversation history/i);
+  assert.equal(database.prepare('SELECT username FROM contact_identities WHERE identity_id=?').get(editableId).username,
+    'before');
+  assert.equal(database.prepare(`SELECT scoped_profile_id FROM channel_identity_bindings
+    WHERE identity_id=? AND channel_id='route-generic-a' AND active=1`).get(editableId).scoped_profile_id,
+    'route-editable');
+
+  const deactivateOldRoute = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}/identities/${editableId}`, {
+      method: 'PATCH', headers, body: JSON.stringify({ bindings: [] })
+    }
+  ), env);
+  assert.equal(deactivateOldRoute.status, 409);
+  assert.match((await deactivateOldRoute.json()).error, /cannot be removed/i);
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM channel_identity_bindings
+    WHERE identity_id=? AND channel_id='route-generic-a' AND active=1`).get(editableId).count, 1);
+  // Simulate a route deactivated by an older deployment. History must still
+  // prevent replacing its scoped recipient id.
+  database.prepare(`UPDATE channel_identity_bindings SET active=0
+    WHERE identity_id=? AND channel_id='route-generic-a'`).run(editableId);
+  const replacementAfterDeactivate = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}/identities/${editableId}`, {
+      method: 'PATCH', headers, body: JSON.stringify({ bindings: [
+        { channelId: 'route-generic-a', scopedProfileId: 'route-replacement' }
+      ] })
+    }
+  ), env);
+  assert.equal(replacementAfterDeactivate.status, 409);
+  assert.match((await replacementAfterDeactivate.json()).error, /conversation history/i);
+
+  const reactivateOldRoute = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}/identities/${editableId}`, {
+      method: 'PATCH', headers, body: JSON.stringify({ bindings: [
+        { channelId: 'route-generic-a', scopedProfileId: 'route-editable' }
+      ] })
+    }
+  ), env);
+  assert.equal(reactivateOldRoute.status, 200);
+  database.prepare("UPDATE channels SET enabled=0 WHERE channel_id='route-generic-a'").run();
+  const preserveDisabledRoute = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}/identities/${editableId}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ username: 'disabled-preserved', bindings: [
+        { channelId: 'route-generic-a', scopedProfileId: 'route-editable' }
+      ] })
+    }
+  ), env);
+  assert.equal(preserveDisabledRoute.status, 200);
+  assert.equal(database.prepare('SELECT username FROM contact_identities WHERE identity_id=?').get(editableId).username,
+    'disabled-preserved');
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM channel_identity_bindings
+    WHERE identity_id=? AND channel_id='route-generic-a' AND scoped_profile_id='route-editable' AND active=1`)
+    .get(editableId).count, 1);
+
+  const wholeContactFailure = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({
+        displayName: 'Must not persist',
+        identities: [
+          { identityId: editableId, platform: 'generic_http', profileId: 'route-editable',
+            username: 'batch-must-not-persist',
+            bindings: [{ channelId: 'route-generic-a', scopedProfileId: 'route-editable' }] },
+          { identityId: unboundId, platform: 'generic_http', profileId: 'route-unbound', isPrimary: true,
+            bindings: [{ channelId: 'route-wrong-platform', scopedProfileId: 'route-unbound' }] }
+        ]
+      })
+    }
+  ), env);
+  assert.equal(wholeContactFailure.status, 400);
+  assert.equal(database.prepare('SELECT display_name FROM contacts WHERE contact_id=?').get(contactId).display_name,
+    'Route safety');
+  assert.equal(database.prepare('SELECT username FROM contact_identities WHERE identity_id=?').get(editableId).username,
+    'disabled-preserved', 'an invalid second identity must not partially update the first identity');
+
+  const unboundTwoResponse = await createIdentity(contactId, {
+    platform: 'generic_http', profileId: 'route-unbound-two'
+  });
+  assert.equal(unboundTwoResponse.status, 201);
+  const unboundTwoId = (await unboundTwoResponse.json()).identityId;
+  const pairwiseConflict = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ identities: [
+        { identityId: unboundId, platform: 'generic_http', profileId: 'route-unbound', isPrimary: true,
+          bindings: [{ channelId: 'route-generic-c', scopedProfileId: 'shared-route' }] },
+        { identityId: unboundTwoId, platform: 'generic_http', profileId: 'route-unbound-two',
+          bindings: [{ channelId: 'route-generic-c', scopedProfileId: 'shared-route' }] }
+      ] })
+    }
+  ), env);
+  assert.equal(pairwiseConflict.status, 409);
+  assert.match((await pairwiseConflict.json()).error, /more than one identity/i);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channel_identity_bindings WHERE channel_id='route-generic-c'").get().count, 0);
+
+  const ambiguousContactId = await createContact('Ambiguous legacy');
+  const firstResponse = await createIdentity(ambiguousContactId, {
+    platform: 'generic_http', profileId: 'route-ambiguous-1',
+    bindings: [{ channelId: 'route-generic-b', scopedProfileId: 'route-ambiguous-1' }]
+  });
+  const secondResponse = await createIdentity(ambiguousContactId, {
+    platform: 'generic_http', profileId: 'route-ambiguous-2',
+    bindings: [{ channelId: 'route-generic-b', scopedProfileId: 'route-ambiguous-2' }]
+  });
+  assert.equal(firstResponse.status, 201);
+  assert.equal(secondResponse.status, 201);
+  const firstIdentityId = (await firstResponse.json()).identityId;
+  const secondIdentityId = (await secondResponse.json()).identityId;
+  const legacyConversationId = crypto.randomUUID();
+  database.prepare(`INSERT INTO conversations
+      (conversation_id,contact_id,channel_id,identity_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+    VALUES (?,?,'route-generic-b','','open','Legacy',?,0,?,?,'ws_default')`)
+    .run(legacyConversationId, ambiguousContactId, now, now, now);
+  const removeAmbiguousCandidate = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${ambiguousContactId}/identities/${firstIdentityId}`, {
+      method: 'PATCH', headers, body: JSON.stringify({ bindings: [] })
+    }
+  ), env);
+  assert.equal(removeAmbiguousCandidate.status, 409);
+  assert.match((await removeAmbiguousCandidate.json()).error, /cannot be removed/i);
+  const deleteAmbiguousCandidate = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${ambiguousContactId}/identities/${firstIdentityId}`, {
+      method: 'DELETE', headers
+    }
+  ), env);
+  assert.equal(deleteAmbiguousCandidate.status, 409);
+  assert.match((await deleteAmbiguousCandidate.json()).error, /conversations/i);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM contact_identities WHERE identity_id IN (?,?)')
+    .get(firstIdentityId, secondIdentityId).count, 2);
+  assert.equal(database.prepare('SELECT identity_id FROM conversations WHERE conversation_id=?')
+    .get(legacyConversationId).identity_id, '');
+  const opened = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
+    method: 'POST', headers,
+    body: JSON.stringify({ contactId: ambiguousContactId, identityId: firstIdentityId, channelId: 'route-generic-b' })
+  }), env);
+  if (opened.status !== 201) assert.fail(`Conversation open failed: ${opened.status} ${await opened.text()}`);
+  const openedBody = await opened.json();
+  assert.notEqual(openedBody.conversationId, legacyConversationId);
+  assert.equal(database.prepare('SELECT identity_id FROM conversations WHERE conversation_id=?').get(legacyConversationId).identity_id, '');
+  assert.equal(database.prepare('SELECT identity_id FROM conversations WHERE conversation_id=?').get(openedBody.conversationId).identity_id,
+    firstIdentityId);
+
+  // A retry created before identity migration may still point at an ambiguous
+  // legacy conversation. It must fail closed rather than selecting the first
+  // legacy channel_identity and delivering to an arbitrary recipient.
+  database.prepare(`UPDATE channels SET config_json=? WHERE channel_id='route-generic-b'`)
+    .run(JSON.stringify({ endpoint: 'https://provider.example/send', allowedHosts: ['provider.example'] }));
+  database.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,workspace_id)
+    VALUES ('ambiguous-legacy-retry',?,?,'route-generic-b','','outbound','text','Never send','retrying',?,'ws_default')`)
+    .run(legacyConversationId, ambiguousContactId, now);
+  database.prepare(`INSERT INTO outbox
+      (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,created_at,updated_at,workspace_id)
+    VALUES ('ambiguous-legacy-outbox','ambiguous-legacy-retry',0,6,?,'pending',?,?,'ws_default')`)
+    .run(new Date(Date.now() - 1000).toISOString(), now, now);
+  const originalFetch = globalThis.fetch;
+  let providerCalls = 0;
+  globalThis.fetch = async () => {
+    providerCalls += 1;
+    return new Response(JSON.stringify({ id: 'must-not-send' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    });
+  };
+  try {
+    const scheduled = [];
+    worker.scheduled({}, env, { waitUntil(promise) { scheduled.push(promise); } });
+    await Promise.all(scheduled);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(providerCalls, 0);
+  const failedRetry = database.prepare(`SELECT status,error FROM messages
+    WHERE message_id='ambiguous-legacy-retry'`).get();
+  assert.equal(failedRetry.status, 'failed');
+  assert.match(failedRetry.error, /identity is unresolved/i);
+  assert.deepEqual({ ...database.prepare(`SELECT status,attempts FROM outbox
+    WHERE outbox_id='ambiguous-legacy-outbox'`).get() }, { status: 'failed', attempts: 1 });
   database.close();
 });

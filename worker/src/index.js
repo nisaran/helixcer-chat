@@ -1,9 +1,12 @@
 import {
   authenticateRequest,
+  createMobileAuthChallenge,
+  createGoogleMobileSession,
   createInvitation,
   finishGoogleOAuthResponse,
   listTeam,
   logout,
+  mobileAuthConfiguration,
   principalView,
   requireRole,
   startGoogleOAuth,
@@ -11,10 +14,14 @@ import {
   updateMembership
 } from './auth.js';
 import {
+  mobilePushStatus,
   pushConfiguration,
+  removeMobilePushDevice,
   removePushSubscription,
+  saveMobilePushDevice,
   savePushSubscription,
-  sendWorkspacePush
+  sendWorkspaceMobileConversationRead,
+  sendWorkspaceNotifications
 } from './push.js';
 
 const API_VERSION = '2026-10-26-chat-media';
@@ -32,7 +39,13 @@ const TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 const EXTERNAL_API_OPERATION = 'whatsapp.template.send';
 const EXTERNAL_API_IDEMPOTENCY_DAYS = 7;
 const LEGACY_WORKSPACE_ID = 'ws_default';
+const WHATSAPP_TEMPLATE_CACHE_SECONDS = 5 * 60;
+const WHATSAPP_TEMPLATE_CACHE_ORIGIN = 'https://template-cache.helixcer.internal';
 const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram']);
+// Only these providers expose an address that is portable between connected
+// accounts. Instagram/Facebook profile ids are account/app scoped, so an
+// identical value observed on another channel is not evidence of one person.
+const PORTABLE_IDENTITY_PLATFORMS = new Set(['whatsapp', 'telegram']);
 const TEMPLATE_BUTTON_TYPES = new Set(['quick_reply', 'url', 'phone_number', 'copy_code', 'catalog', 'mpm', 'flow', 'otp']);
 const CONNECTOR_DEFINITIONS = {
   whatsapp_cloud: {
@@ -218,11 +231,29 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return await startGoogleOAuth(request, env);
     }
     if (request.method === 'GET' && url.pathname === '/auth/google/callback') return await finishGoogleOAuthResponse(request, env);
+    if (request.method === 'GET' && url.pathname === '/auth/mobile/config') {
+      return json(mobileAuthConfiguration(env));
+    }
+    if (request.method === 'POST' && url.pathname === '/auth/mobile/challenge') {
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return limited;
+      return json(await createMobileAuthChallenge(env, await readJson(request)), 201);
+    }
+    if (request.method === 'POST' && url.pathname === '/auth/mobile/google') {
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return limited;
+      return json(await createGoogleMobileSession(env, await readJson(request)));
+    }
     if (request.method === 'POST' && (url.pathname === '/auth/logout' || url.pathname === '/api/logout')) {
-      if (!cors['Access-Control-Allow-Origin']) return json({ ok: false, error: 'Origin not allowed.' }, 403);
       const logoutPrincipal = await authenticateRequest(request, env);
+      if (logoutPrincipal?.authType === 'session' && !cors['Access-Control-Allow-Origin']) {
+        return json({ ok: false, error: 'Origin not allowed.' }, 403);
+      }
+      if (!logoutPrincipal && !cors['Access-Control-Allow-Origin']) {
+        return json({ ok: false, error: 'Origin not allowed.' }, 403);
+      }
       const response = await logout(request, env);
-      if (logoutPrincipal?.authType === 'session') {
+      if (logoutPrincipal?.authType === 'session' || logoutPrincipal?.authType === 'mobile_session') {
         await disconnectRealtime(env, logoutPrincipal.workspace.workspaceId, { sessionId: logoutPrincipal.sessionId });
       }
       return withCors(response, cors);
@@ -268,9 +299,25 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (url.pathname === '/api/push/subscriptions' && request.method === 'DELETE') {
       return withCors(json(await removePushSubscription(env, principal, await readJson(request))), cors);
     }
+    if (url.pathname === '/api/push/mobile-config' && request.method === 'GET') {
+      if (principal.authType !== 'mobile_session') {
+        return withCors(json({ ok: false, error: 'A verified mobile session is required.' }, 403), cors);
+      }
+      return withCors(json(await mobilePushStatus(env, principal, url.searchParams.get('deviceId') || '')), cors);
+    }
+    if (url.pathname === '/api/push/mobile-devices' && request.method === 'POST') {
+      return withCors(json(await saveMobilePushDevice(env, principal, await readJson(request)), 201), cors);
+    }
+    if (url.pathname === '/api/push/mobile-devices' && request.method === 'DELETE') {
+      return withCors(json(await removeMobilePushDevice(env, principal, await readJson(request))), cors);
+    }
     if (url.pathname === '/api/realtime' && request.method === 'GET') {
-      if (!cors['Access-Control-Allow-Origin']) return json({ ok: false, error: 'Origin not allowed.' }, 403);
-      if (principal.authType !== 'session') return json({ ok: false, error: 'A verified session is required for realtime.' }, 403);
+      if (principal.authType === 'session' && !cors['Access-Control-Allow-Origin']) {
+        return json({ ok: false, error: 'Origin not allowed.' }, 403);
+      }
+      if (principal.authType !== 'session' && principal.authType !== 'mobile_session') {
+        return json({ ok: false, error: 'A verified session is required for realtime.' }, 403);
+      }
       const headers = new Headers({
         Upgrade: 'websocket',
         'X-Helixcer-Session-Id': principal.sessionId,
@@ -280,13 +327,14 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return inboxHub(env, workspaceId).fetch('https://hub.internal/connect', { headers });
     }
     if (url.pathname === '/api/bootstrap' && request.method === 'GET') {
-      const [channels, conversations, contacts, workspace] = await Promise.all([
+      const [channels, conversations, contacts, tags, workspace] = await Promise.all([
         listChannels(env, workspaceId, principal.membership.role !== 'agent'),
         listConversations(env, workspaceId, url), listContacts(env, workspaceId, url),
+        listWorkspaceTags(env, workspaceId),
         getWorkspaceProfile(env, workspaceId)
       ]);
       return withCors(json({
-        appName: env.APP_NAME || 'Helixcer Chat', channels, conversations, contacts, workspace, me: principalView(principal),
+        appName: env.APP_NAME || 'Helixcer Chat', channels, conversations, contacts, tags, workspace, me: principalView(principal),
         connectorTypes: [
           { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: ['text'] },
           { value: 'telegram', label: 'Telegram Bot', capabilities: ['text'] },
@@ -309,7 +357,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/channel-data/whatsapp-templates' && request.method === 'GET') {
       requireRole(principal, 'admin');
-      return withCors(json(await listWorkspaceWhatsAppTemplates(env, workspaceId)), cors);
+      return withCors(json(await listWorkspaceWhatsAppTemplates(env, workspaceId, {
+        forceRefresh: url.searchParams.get('refresh') === '1'
+      })), cors);
     }
     if (url.pathname === '/api/channels' && request.method === 'POST') {
       requireRole(principal, 'admin');
@@ -349,11 +399,23 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (url.pathname === '/api/conversations' && request.method === 'GET') {
       return withCors(json({ items: await listConversations(env, workspaceId, url) }), cors);
     }
+    if (url.pathname === '/api/conversations' && request.method === 'POST') {
+      const result = await openIdentityConversation(env, workspaceId, await readJson(request), principal);
+      await broadcast(env, workspaceId, { type: 'conversation.created', conversationId: result.conversationId });
+      return withCors(json(result, 201), cors);
+    }
+    if (url.pathname === '/api/search/messages' && request.method === 'GET') {
+      return withCors(json({ items: await searchMessages(env, workspaceId, url) }), cors);
+    }
     const conversationMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)$/);
     if (conversationMatch && request.method === 'PATCH') {
       const id = decodeURIComponent(conversationMatch[1]);
-      const item = await updateConversation(env, workspaceId, id, await readJson(request), principal);
+      const payload = await readJson(request);
+      const item = await updateConversation(env, workspaceId, id, payload, principal);
       await broadcast(env, workspaceId, { type: 'conversation.updated', conversationId: id, conversation: item });
+      if (payload.markRead && Number(item.unreadCount || 0) === 0) {
+        scheduleConversationReadPush(ctx, env, workspaceId, item);
+      }
       return withCors(json({ ok: true, item }), cors);
     }
     if (conversationMatch && request.method === 'DELETE') {
@@ -389,7 +451,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     const conversationTemplatesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/templates$/);
     if (conversationTemplatesMatch && request.method === 'GET') {
       const id = decodeURIComponent(conversationTemplatesMatch[1]);
-      return withCors(json({ items: await listConversationTemplates(env, workspaceId, id) }), cors);
+      return withCors(json({ items: await listConversationTemplates(env, workspaceId, id, {
+        forceRefresh: url.searchParams.get('refresh') === '1'
+      }) }), cors);
     }
     const templateMessageMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/template$/);
     if (templateMessageMatch && request.method === 'POST') {
@@ -418,11 +482,40 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/contacts' && request.method === 'POST') {
       const result = await createContact(env, workspaceId, await readJson(request), principal);
-      await broadcast(env, workspaceId, { type: 'conversation.created', conversationId: result.conversationId });
+      if (result.conversationId) {
+        await broadcast(env, workspaceId, { type: 'conversation.created', conversationId: result.conversationId });
+      } else {
+        await broadcast(env, workspaceId, { type: 'contact.created', contactId: result.contactId });
+      }
       return withCors(json(result, 201), cors);
     }
     if (url.pathname === '/api/contacts' && request.method === 'GET') {
       return withCors(json({ items: await listContacts(env, workspaceId, url) }), cors);
+    }
+    if (url.pathname === '/api/tags' && request.method === 'GET') {
+      return withCors(json({ items: await listWorkspaceTags(env, workspaceId) }), cors);
+    }
+    const contactIdentityCollectionMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)\/identities$/);
+    if (contactIdentityCollectionMatch && request.method === 'POST') {
+      const contactId = decodeURIComponent(contactIdentityCollectionMatch[1]);
+      const result = await createContactIdentity(env, workspaceId, contactId, await readJson(request), principal);
+      await broadcast(env, workspaceId, { type: 'contact.updated', contactId });
+      return withCors(json(result, 201), cors);
+    }
+    const contactIdentityMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)\/identities\/([^/]+)$/);
+    if (contactIdentityMatch && request.method === 'PATCH') {
+      const contactId = decodeURIComponent(contactIdentityMatch[1]);
+      const identityId = decodeURIComponent(contactIdentityMatch[2]);
+      const result = await updateContactIdentity(env, workspaceId, contactId, identityId, await readJson(request), principal);
+      await broadcast(env, workspaceId, { type: 'contact.updated', contactId });
+      return withCors(json(result), cors);
+    }
+    if (contactIdentityMatch && request.method === 'DELETE') {
+      const contactId = decodeURIComponent(contactIdentityMatch[1]);
+      const identityId = decodeURIComponent(contactIdentityMatch[2]);
+      const result = await deleteContactIdentity(env, workspaceId, contactId, identityId, principal);
+      await broadcast(env, workspaceId, { type: 'contact.updated', contactId });
+      return withCors(json(result), cors);
     }
     const contactMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)$/);
     if (contactMatch && request.method === 'GET') {
@@ -746,13 +839,17 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   if (!accessToken) throw apiError(409, 'channel_not_ready', 'The WhatsApp channel is missing its access token.');
 
   const now = new Date().toISOString();
-  const identity = await ensureWhatsAppConversation(env, principal.workspaceId, channel, input.to, input.contact?.displayName || '', now);
   const messageId = crypto.randomUUID();
   const externalRequestId = crypto.randomUUID();
   const presentation = await externalTemplateInboxPresentation(env, channel, input.template, input.previewText);
   const preview = presentation.text;
   const encryptedPayload = await encryptOutboundPayload({ template: input.template }, env.CHANNEL_CREDENTIALS_KEY,
     principal.workspaceId, messageId);
+  // Prepare everything that can fail without writing application state before
+  // creating the recipient identity, binding, or conversation. In particular,
+  // a missing/invalid encryption key must not leave an orphan route behind.
+  const identity = await ensureWhatsAppConversation(env, principal.workspaceId, channel, input.to,
+    input.contact?.displayName || '', now);
   const expiresAt = new Date(Date.now() + EXTERNAL_API_IDEMPOTENCY_DAYS * 86400000).toISOString();
   const firstRetryAt = new Date(Date.now() + 30000).toISOString();
   const statements = [
@@ -762,12 +859,15 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
         .bind(identity.contactId, principal.workspaceId, input.contact.displayName, now),
       env.DB.prepare(`UPDATE channel_identities SET display_name=?4
         WHERE contact_id=?1 AND workspace_id=?2 AND channel_id=?3`)
-        .bind(identity.contactId, principal.workspaceId, channel.channelId, input.contact.displayName)
+        .bind(identity.contactId, principal.workspaceId, channel.channelId, input.contact.displayName),
+      env.DB.prepare(`UPDATE contact_identities SET display_name=?4,updated_at=?5
+        WHERE contact_id=?1 AND workspace_id=?2 AND identity_id=?3`)
+        .bind(identity.contactId, principal.workspaceId, identity.identityId, input.contact.displayName, now)
     ] : []),
-    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
+    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
         status,timestamp,payload_json,workspace_id)
-      VALUES (?1,?2,?3,?4,'outbound','template',?5,'pending',?6,?7,?8)`)
-      .bind(messageId, identity.conversationId, identity.contactId, channel.channelId, preview, now,
+      VALUES (?1,?2,?3,?4,?5,'outbound','template',?6,'pending',?7,?8,?9)`)
+      .bind(messageId, identity.conversationId, identity.contactId, channel.channelId, identity.identityId, preview, now,
         JSON.stringify(presentation.storedPayload), principal.workspaceId),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, principal.workspaceId, encryptedPayload, now),
@@ -783,6 +883,8 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   ];
   try {
     await env.DB.batch(statements);
+    await touchIdentityBinding(env, principal.workspaceId, identity.identityId, channel.channelId,
+      'outbound', identity.conversationId, now);
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       const winner = await findExternalRequest(env, principal.apiKeyId, idempotencyHash);
@@ -853,51 +955,66 @@ function externalMessageResponse(item, requestId, replayed, includeReplayHeader)
 }
 
 async function ensureWhatsAppConversation(env, workspaceId, channel, recipient, displayName, now) {
-  let identity = await env.DB.prepare(`SELECT identity_id,contact_id FROM channel_identities
-    WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3 LIMIT 1`)
+  let identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id
+    FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
+    WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
     .bind(workspaceId, channel.channelId, recipient).first();
   if (!identity) {
+    const candidates = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id
+      FROM contact_identities ci
+      WHERE ci.workspace_id=?1 AND ci.platform='whatsapp' AND ci.profile_id=?2
+      ORDER BY ci.created_at,ci.identity_id`).bind(workspaceId, recipient).all();
+    if ((candidates.results || []).length === 1) {
+      identity = candidates.results[0];
+      try {
+        await ensureIdentityBinding(env, workspaceId, identity.contact_id, identity.identity_id, {
+          platform: 'whatsapp', profileId: recipient, phoneNumber: recipient,
+          displayName: String(displayName || recipient).slice(0, 120), metadata: {},
+          channelId: channel.channelId, scopedProfileId: recipient
+        }, now);
+      } catch (error) {
+        const winner = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id
+          FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
+          WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
+          .bind(workspaceId, channel.channelId, recipient).first();
+        if (!winner) throw error;
+        identity = winner;
+      }
+    }
+  }
+  if (!identity) {
     const contactId = crypto.randomUUID();
-    const identityId = crypto.randomUUID();
     const name = String(displayName || recipient).slice(0, 120);
     try {
-      await env.DB.batch([
-        env.DB.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
-          VALUES (?1,?2,?3,?3,?4)`).bind(contactId, name, now, workspaceId),
-        env.DB.prepare(`INSERT INTO channel_identities
-            (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
-          VALUES (?1,?2,?3,?4,?5,?6,?7)`)
-          .bind(identityId, contactId, channel.channelId, recipient, name, now, workspaceId)
-      ]);
-      identity = { identity_id: identityId, contact_id: contactId };
+      await env.DB.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+        VALUES (?1,?2,?3,?3,?4)`).bind(contactId, name, now, workspaceId).run();
+      const created = await ensureContactIdentity(env, workspaceId, contactId, {
+        platform: 'whatsapp', profileId: recipient, phoneNumber: recipient, displayName: name,
+        channelId: channel.channelId, scopedProfileId: recipient, isPrimary: true
+      }, now);
+      identity = { identity_id: created.identityId, contact_id: contactId };
     } catch (error) {
-      identity = await env.DB.prepare(`SELECT identity_id,contact_id FROM channel_identities
-        WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3 LIMIT 1`)
+      await env.DB.prepare(`DELETE FROM contacts WHERE workspace_id=?1 AND contact_id=?2
+        AND NOT EXISTS (SELECT 1 FROM conversations WHERE workspace_id=?1 AND contact_id=?2)`)
+        .bind(workspaceId, contactId).run().catch(() => {});
+      identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id
+        FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
+        WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
         .bind(workspaceId, channel.channelId, recipient).first();
       if (!identity) throw error;
     }
   }
-  let conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
-    WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3
-    ORDER BY last_message_at DESC,created_at DESC LIMIT 1`).bind(workspaceId, identity.contact_id, channel.channelId).first();
-  if (!conversation) {
-    const conversationId = crypto.randomUUID();
-    const subject = String(displayName || recipient).slice(0, 120);
-    try {
-      await env.DB.prepare(`INSERT INTO conversations
-          (conversation_id,contact_id,channel_id,status,assigned_to,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
-        VALUES (?1,?2,?3,'open','',?4,?5,0,?5,?5,?6)`)
-        .bind(conversationId, identity.contact_id, channel.channelId, subject, now, workspaceId).run();
-      conversation = { conversation_id: conversationId };
-    } catch (error) {
-      if (!isUniqueConstraintError(error)) throw error;
-      conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
-        WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3 LIMIT 1`)
-        .bind(workspaceId, identity.contact_id, channel.channelId).first();
-      if (!conversation) throw error;
-    }
+  if (displayName) {
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE contacts SET display_name=?3,updated_at=?4 WHERE workspace_id=?1 AND contact_id=?2`)
+        .bind(workspaceId, identity.contact_id, String(displayName).slice(0, 120), now),
+      env.DB.prepare(`UPDATE contact_identities SET display_name=?3,updated_at=?4
+        WHERE workspace_id=?1 AND identity_id=?2`).bind(workspaceId, identity.identity_id, String(displayName).slice(0, 120), now)
+    ]);
   }
-  return { contactId: identity.contact_id, conversationId: conversation.conversation_id };
+  const conversationId = await ensureIdentityConversation(env, workspaceId, identity.contact_id,
+    identity.identity_id, channel.channelId, '');
+  return { contactId: identity.contact_id, identityId: identity.identity_id, conversationId };
 }
 
 export function validateWhatsAppTemplateRequest(payload) {
@@ -1333,10 +1450,38 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
 }
 
 function scheduleInboundPush(ctx, env, channel, inbound) {
-  const notification = inboundPushNotification(channel, inbound);
-  const delivery = sendWorkspacePush(env, channel.workspaceId, notification).catch(error => console.error('push_delivery_failed', {
+  const delivery = (async () => {
+    // Badge enrichment must never suppress the customer-message alert if the
+    // aggregate query is temporarily unavailable.
+    const unreadCount = await workspaceUnreadCount(env, channel.workspaceId).catch(() => 0);
+    const notification = inboundPushNotification(channel, { ...inbound, unreadCount });
+    return sendWorkspaceNotifications(env, channel.workspaceId, notification);
+  })().catch(error => console.error('push_delivery_failed', {
     workspaceId: channel.workspaceId,
     channelId: channel.channelId,
+    message: cleanError(error)
+  }));
+  if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(delivery);
+}
+
+function scheduleConversationReadPush(ctx, env, workspaceId, conversation) {
+  const delivery = (async () => {
+    // Re-check after the PATCH response was assembled. A webhook can create a
+    // newer unread between updateConversation() and this background task; in
+    // that case no clear event may be sent for this conversation.
+    const current = await env.DB.prepare(`SELECT unread_count,updated_at FROM conversations
+      WHERE workspace_id=?1 AND conversation_id=?2 LIMIT 1`)
+      .bind(workspaceId, conversation.conversationId).first();
+    if (!current || Number(current.unread_count || 0) > 0) return { skipped: true };
+    const unreadCount = await workspaceUnreadCount(env, workspaceId);
+    return sendWorkspaceMobileConversationRead(env, workspaceId, {
+      conversationId: conversation.conversationId,
+      unreadCount,
+      readAt: current.updated_at
+    });
+  })().catch(error => console.error('conversation_read_push_failed', {
+    workspaceId,
+    conversationId: conversation.conversationId,
     message: cleanError(error)
   }));
   if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(delivery);
@@ -1361,12 +1506,29 @@ export function inboundPushNotification(channel, inbound = {}) {
   const body = preview && !syntheticPreview ? preview : inboundMessageTypeLabel(inbound.messageType);
   const rawConversationId = String(inbound.conversationId || '');
   const conversationId = /^[A-Za-z0-9_-]{1,100}$/.test(rawConversationId) ? rawConversationId : '';
+  const unreadCount = boundedUnreadCount(inbound.unreadCount);
+  const conversationUnreadCount = boundedUnreadCount(inbound.conversation?.unreadCount);
   return {
     title,
     body,
     tag: `helixcer-${conversationId || String(channel?.channelId || 'inbox').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 90)}`,
-    url: conversationId ? `/#inbox/${conversationId}` : '/#inbox'
+    url: conversationId ? `/#inbox/${conversationId}` : '/#inbox',
+    ...(inbound.message?.timestamp ? { eventTimestamp: inbound.message.timestamp } : {}),
+    ...(unreadCount ? { unreadCount } : {}),
+    ...(conversationUnreadCount ? { conversationUnreadCount } : {})
   };
+}
+
+async function workspaceUnreadCount(env, workspaceId) {
+  const row = await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN unread_count>0 THEN unread_count ELSE 0 END),0) AS unread_count
+    FROM conversations WHERE workspace_id=?1`).bind(workspaceId).first();
+  return boundedUnreadCount(row?.unread_count);
+}
+
+function boundedUnreadCount(value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return Math.min(9999, Math.floor(count));
 }
 
 function compactNotificationText(value, maximumLength) {
@@ -1794,8 +1956,9 @@ async function saveChannel(env, workspaceId, payload, principal, forcedChannelId
   const config = mergeChannelConfig(connectorType, previousConfig, payload.config);
   await assertUniqueManagedConfig(env, workspaceId, connectorType, channelId, config);
   const credentialUpdates = validateCredentialPayload(connectorType, payload.credentials);
-  if (Object.keys(credentialUpdates).length) await importChannelCredentialKey(env.CHANNEL_CREDENTIALS_KEY);
   const changedConfigFields = editableConfigChanges(connectorType, previousConfig, config);
+  await assertProviderIdentityConfigMutable(env, workspaceId, existing, connectorType, changedConfigFields);
+  if (Object.keys(credentialUpdates).length) await importChannelCredentialKey(env.CHANNEL_CREDENTIALS_KEY);
   invalidateChannelVerification(connectorType, config, changedConfigFields, Object.keys(credentialUpdates));
   const collision = await env.DB.prepare('SELECT workspace_id FROM channels WHERE channel_id=?1').bind(channelId).first();
   if (collision && collision.workspace_id !== workspaceId) throw httpError(409, 'Channel ID is already used by another workspace.');
@@ -1861,7 +2024,7 @@ async function deleteChannel(env, workspaceId, channelId, principal) {
     WHERE channel_id=?1 AND workspace_id=?2`).bind(id, workspaceId).first();
   if (!channel) throw httpError(404, 'Channel not found.');
   const counts = await env.DB.prepare(`SELECT
-      (SELECT COUNT(*) FROM channel_identities WHERE channel_id=?1 AND workspace_id=?2) AS identities,
+      (SELECT COUNT(*) FROM channel_identity_bindings WHERE channel_id=?1 AND workspace_id=?2) AS identities,
       (SELECT COUNT(*) FROM conversations WHERE channel_id=?1 AND workspace_id=?2) AS conversations,
       (SELECT COUNT(*) FROM messages WHERE channel_id=?1 AND workspace_id=?2) AS messages`)
     .bind(id, workspaceId).first();
@@ -1872,16 +2035,12 @@ async function deleteChannel(env, workspaceId, channelId, principal) {
       (SELECT message_id FROM messages WHERE channel_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
     env.DB.prepare(`DELETE FROM outbound_payloads WHERE workspace_id=?2 AND message_id IN
       (SELECT message_id FROM messages WHERE channel_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare(`DELETE FROM identity_migration_issues WHERE workspace_id=?2 AND conversation_id IN
+      (SELECT conversation_id FROM conversations WHERE channel_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
     env.DB.prepare('DELETE FROM messages WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM conversations WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
-    env.DB.prepare(`DELETE FROM contacts WHERE workspace_id=?2
-      AND contact_id IN (SELECT contact_id FROM channel_identities WHERE channel_id=?1 AND workspace_id=?2)
-      AND NOT EXISTS (SELECT 1 FROM channel_identities other
-        WHERE other.workspace_id=?2 AND other.contact_id=contacts.contact_id AND other.channel_id<>?1)
-      AND NOT EXISTS (SELECT 1 FROM conversations other_conversation
-        WHERE other_conversation.workspace_id=?2 AND other_conversation.contact_id=contacts.contact_id)`)
-      .bind(id, workspaceId),
     env.DB.prepare('DELETE FROM channel_identities WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM channel_identity_bindings WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM channel_credentials WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM webhook_events WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM channels WHERE channel_id=?1 AND workspace_id=?2').bind(id, workspaceId)
@@ -1956,6 +2115,26 @@ function normalizeChannelConfigValue(key, value) {
 function editableConfigChanges(connectorType, before = {}, after = {}) {
   const fields = CONNECTOR_DEFINITIONS[connectorType]?.configFields || [];
   return fields.filter(key => String(before[key] || '') !== String(after[key] || ''));
+}
+
+async function assertProviderIdentityConfigMutable(env, workspaceId, existing, connectorType, changedConfigFields = []) {
+  if (!existing) return;
+  const providerIdentityFields = connectorType === 'whatsapp_cloud'
+    ? new Set(['wabaId', 'phoneNumberId'])
+    : connectorType === 'instagram'
+      ? new Set(['instagramAccountId', 'appId'])
+      : new Set();
+  if (!changedConfigFields.some(key => providerIdentityFields.has(key))) return;
+  const usage = await env.DB.prepare(`SELECT
+      EXISTS(SELECT 1 FROM channel_identity_bindings WHERE workspace_id=?1 AND channel_id=?2) AS has_bindings,
+      EXISTS(SELECT 1 FROM channel_identities WHERE workspace_id=?1 AND channel_id=?2) AS has_legacy_identities,
+      EXISTS(SELECT 1 FROM conversations WHERE workspace_id=?1 AND channel_id=?2) AS has_conversations,
+      EXISTS(SELECT 1 FROM messages WHERE workspace_id=?1 AND channel_id=?2) AS has_messages`)
+    .bind(workspaceId, existing.channel_id).first();
+  if (Number(usage?.has_bindings || 0) || Number(usage?.has_legacy_identities || 0) ||
+      Number(usage?.has_conversations || 0) || Number(usage?.has_messages || 0)) {
+    throw httpError(409, 'This provider identity already has contact routes or message history. Add a new channel instead.');
+  }
 }
 
 function invalidateChannelVerification(connectorType, config, changedConfigFields = [], changedCredentialFields = []) {
@@ -2172,9 +2351,11 @@ async function listConversations(env, workspaceId, url) {
   const channelId = url.searchParams.get('channelId') || '';
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
   const cursor = url.searchParams.get('cursor') || '';
-  const result = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.status,c.assigned_to,
+  const result = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.identity_id,c.status,c.assigned_to,
       c.subject,c.last_message_at,c.unread_count,c.tags_json,ch.name AS channel_name,ch.connector_type,ch.provider_type,
-      i.channel_profile_id,
+      COALESCE(b.scoped_profile_id,CASE WHEN c.identity_id='' THEN (SELECT legacy.channel_profile_id FROM channel_identities legacy
+        WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id AND legacy.channel_id=c.channel_id
+        ORDER BY legacy.created_at LIMIT 1) ELSE '' END,'') AS channel_profile_id,
       (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
         ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message,
       (SELECT message_type FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
@@ -2182,18 +2363,70 @@ async function listConversations(env, workspaceId, url) {
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
     FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id
-    LEFT JOIN channel_identities i ON i.workspace_id=c.workspace_id AND i.contact_id=c.contact_id AND i.channel_id=c.channel_id
+    LEFT JOIN channel_identity_bindings b ON b.workspace_id=c.workspace_id AND b.identity_id=c.identity_id
+      AND b.channel_id=c.channel_id AND b.active=1
     WHERE c.workspace_id=?1 AND ch.workspace_id=?1 AND (?2='' OR c.status=?2) AND (?3='' OR c.channel_id=?3)
-      AND (?4='' OR c.subject LIKE '%'||?4||'%' OR c.conversation_id LIKE '%'||?4||'%')
+      AND (?4='' OR c.subject LIKE '%'||?4||'%' OR c.conversation_id LIKE '%'||?4||'%'
+        OR COALESCE(b.scoped_profile_id,'') LIKE '%'||?4||'%')
       AND (?5='' OR c.last_message_at<?5)
     ORDER BY c.last_message_at DESC LIMIT ?6`).bind(workspaceId, status, channelId, q, cursor, limit).all();
   return result.results.map(conversationListItem);
+}
+
+/**
+ * Search message history for the signed-in workspace. Bootstrap intentionally
+ * contains only the latest message for each conversation, so clients use this
+ * bounded endpoint when an operator enters an inbox search query.
+ */
+export async function searchMessages(env, workspaceId, url) {
+  const query = (url.searchParams.get('q') || '').trim().slice(0, 100);
+  if (!query) return [];
+  const limit = clampInt(url.searchParams.get('limit'), 1, 100, 50);
+  const result = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.identity_id,m.text,m.message_type,m.direction,m.timestamp,
+      c.contact_id,c.status AS conversation_status,c.assigned_to,c.unread_count,
+      ct.display_name,ct.company,ch.channel_id,ch.name AS channel_name,ch.connector_type,ch.provider_type,
+      COALESCE(b.scoped_profile_id,ci.profile_id,'') AS channel_profile_id
+    FROM messages m
+    JOIN conversations c ON c.workspace_id=m.workspace_id AND c.conversation_id=m.conversation_id
+    JOIN contacts ct ON ct.workspace_id=m.workspace_id AND ct.contact_id=c.contact_id
+    JOIN channels ch ON ch.workspace_id=m.workspace_id AND ch.channel_id=c.channel_id
+    LEFT JOIN contact_identities ci ON ci.workspace_id=m.workspace_id AND ci.identity_id=m.identity_id
+    LEFT JOIN channel_identity_bindings b ON b.workspace_id=m.workspace_id AND b.identity_id=m.identity_id
+      AND b.channel_id=c.channel_id AND b.active=1
+    WHERE m.workspace_id=?1
+      AND (instr(lower(COALESCE(m.text,'')),lower(?2))>0
+        OR instr(lower(COALESCE(ct.display_name,'')),lower(?2))>0
+        OR instr(lower(COALESCE(ct.company,'')),lower(?2))>0
+        OR instr(lower(COALESCE(b.scoped_profile_id,ci.profile_id,'')),lower(?2))>0)
+    ORDER BY m.timestamp DESC,m.message_id DESC LIMIT ?3`)
+    .bind(workspaceId, query, limit).all();
+  return (result.results || []).map(row => ({
+    messageId: row.message_id,
+    conversationId: row.conversation_id,
+    contactId: row.contact_id,
+    contactIdentityId: row.identity_id || '',
+    identityId: row.identity_id || '',
+    contactName: String(row.display_name || '').slice(0, 120),
+    company: String(row.company || '').slice(0, 160),
+    channelId: row.channel_id,
+    channelName: row.channel_name || '',
+    connectorType: logicalConnectorType(row),
+    channelProfileId: row.channel_profile_id || '',
+    text: row.text || '',
+    messageType: row.message_type || 'text',
+    direction: row.direction || '',
+    timestamp: row.timestamp || '',
+    conversationStatus: row.conversation_status || '',
+    assignedTo: row.assigned_to || '',
+    unreadCount: Number(row.unread_count || 0)
+  }));
 }
 
 function conversationListItem(row) {
   const connectorType = logicalConnectorType(row);
   return {
     conversationId: row.conversation_id, contactId: row.contact_id, channelId: row.channel_id,
+    contactIdentityId: row.identity_id || '', identityId: row.identity_id || '',
     channelName: row.channel_name, connectorType, status: row.status, assignedTo: row.assigned_to,
     subject: row.subject, lastMessageAt: row.last_message_at, unreadCount: Number(row.unread_count || 0),
     tags: safeJsonParse(row.tags_json, []), lastMessage: row.last_message || '',
@@ -2204,9 +2437,11 @@ function conversationListItem(row) {
 }
 
 async function getConversationItem(env, workspaceId, conversationId) {
-  const row = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.status,c.assigned_to,
+  const row = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.identity_id,c.status,c.assigned_to,
       c.subject,c.last_message_at,c.unread_count,c.tags_json,ch.name AS channel_name,ch.connector_type,ch.provider_type,
-      i.channel_profile_id,
+      COALESCE(b.scoped_profile_id,CASE WHEN c.identity_id='' THEN (SELECT legacy.channel_profile_id FROM channel_identities legacy
+        WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id AND legacy.channel_id=c.channel_id
+        ORDER BY legacy.created_at LIMIT 1) ELSE '' END,'') AS channel_profile_id,
       (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
         ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message,
       (SELECT message_type FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
@@ -2214,7 +2449,8 @@ async function getConversationItem(env, workspaceId, conversationId) {
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
     FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
-    LEFT JOIN channel_identities i ON i.workspace_id=c.workspace_id AND i.contact_id=c.contact_id AND i.channel_id=c.channel_id
+    LEFT JOIN channel_identity_bindings b ON b.workspace_id=c.workspace_id AND b.identity_id=c.identity_id
+      AND b.channel_id=c.channel_id AND b.active=1
     WHERE c.workspace_id=?1 AND c.conversation_id=?2 LIMIT 1`).bind(workspaceId, conversationId).first();
   return row ? conversationListItem(row) : null;
 }
@@ -2254,25 +2490,359 @@ export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Dat
 
 async function listContacts(env, workspaceId, url) {
   const limit = clampInt(url.searchParams.get('contactLimit'), 1, 200, 100);
+  const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
   const result = await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
-      i.identity_id,i.channel_id,i.channel_profile_id,ch.name AS channel_name,ch.connector_type,ch.provider_type,
-      cv.status AS conversation_status,cv.last_message_at
+      (SELECT MAX(last_message_at) FROM conversations cv
+        WHERE cv.workspace_id=c.workspace_id AND cv.contact_id=c.contact_id) AS last_message_at
     FROM contacts c
-    LEFT JOIN channel_identities i ON i.identity_id=(SELECT identity_id FROM channel_identities
-      WHERE workspace_id=c.workspace_id AND contact_id=c.contact_id ORDER BY created_at LIMIT 1)
-    LEFT JOIN channels ch ON ch.workspace_id=c.workspace_id AND ch.channel_id=i.channel_id
-    LEFT JOIN conversations cv ON cv.conversation_id=(SELECT conversation_id FROM conversations
-      WHERE workspace_id=c.workspace_id AND contact_id=c.contact_id ORDER BY last_message_at DESC LIMIT 1)
-    WHERE c.workspace_id=?1
-    ORDER BY COALESCE(cv.last_message_at,c.updated_at) DESC LIMIT ?2`).bind(workspaceId, limit).all();
-  return (result.results || []).map(contactView);
+    WHERE c.workspace_id=?1 AND (?2='' OR
+      instr(lower(COALESCE(c.display_name,'')),lower(?2))>0 OR
+      instr(lower(COALESCE(c.company,'')),lower(?2))>0 OR
+      EXISTS (SELECT 1 FROM contact_identities ci
+        WHERE ci.workspace_id=c.workspace_id AND ci.contact_id=c.contact_id AND (
+          instr(lower(COALESCE(ci.profile_id,'')),lower(?2))>0 OR
+          instr(lower(COALESCE(ci.username,'')),lower(?2))>0 OR
+          instr(lower(COALESCE(ci.phone_number,'')),lower(?2))>0)))
+    ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?3`).bind(workspaceId, q, limit).all();
+  return hydrateContactViews(env, workspaceId, result.results || []);
+}
+
+function canonicalIdentityPlatform(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  const platform = raw === 'whatsapp_cloud' ? 'whatsapp' : raw;
+  if (!/^[a-z][a-z0-9_-]{1,39}$/.test(platform)) throw httpError(400, 'Identity platform is invalid.');
+  return platform;
+}
+
+function platformForChannel(channel) {
+  return canonicalIdentityPlatform(channel?.connectorType || channel?.connector_type || channel?.provider_type || '');
+}
+
+function normalizeIdentityProfileValue(platform, value, label = 'Profile ID') {
+  const profile = cleanRequired(value, label, 512);
+  // Current WhatsApp Cloud routes are phone numbers, but the canonical model
+  // also supports future username/opaque identifiers without forcing them
+  // through phone normalization.
+  if (platform === 'whatsapp' && /^\+?[\d\s().-]+$/.test(profile)) return normalizeWhatsAppRecipient(profile);
+  return profile;
+}
+
+function validateContactIdentityInput(value, defaults = {}) {
+  if (!isPlainObject(value)) throw httpError(400, 'Contact identity must be an object.');
+  rejectUnknownKeys(value, new Set([
+    'identityId', 'platform', 'connectorType', 'profileId', 'channelProfileId', 'scopedProfileId',
+    'username', 'phoneNumber', 'email', 'displayName', 'metadata', 'isPrimary', 'channelId',
+    'bindings', 'routes'
+  ]), 'contact identity');
+  const identityId = value.identityId === undefined ? '' : cleanId(value.identityId, 'Identity ID');
+  const platformSource = value.platform ?? value.connectorType ?? defaults.platform;
+  let platform = platformSource ? canonicalIdentityPlatform(platformSource) : '';
+  const email = value.email === undefined ? '' : cleanOptionalText(value.email, 'Email', 254).toLowerCase();
+  let rawProfileId = value.profileId ?? value.channelProfileId ?? (platform === 'email' ? email : '') ?? '';
+  if (!platform && email) platform = 'email';
+  if (!platform) throw httpError(400, 'Identity platform is required.');
+  rawProfileId = cleanRequired(rawProfileId, 'Profile ID', 512);
+  const profileId = normalizeIdentityProfileValue(platform, rawProfileId, 'Profile ID');
+  const scopedRaw = value.scopedProfileId ?? value.channelProfileId ?? profileId;
+  const scopedProfileId = normalizeIdentityProfileValue(platform, scopedRaw, 'Channel profile ID');
+  const username = value.username === undefined ? '' : cleanOptionalText(value.username, 'Username', 200);
+  const suppliedPhone = value.phoneNumber === undefined ? '' : cleanOptionalText(value.phoneNumber, 'Phone number', 80);
+  const phoneNumber = suppliedPhone && /^\+?[\d\s().-]+$/.test(suppliedPhone)
+    ? normalizeWhatsAppRecipient(suppliedPhone)
+    : suppliedPhone;
+  const displayName = value.displayName === undefined
+    ? String(defaults.displayName || '').slice(0, 120)
+    : cleanOptionalText(value.displayName, 'Identity display name', 120);
+  if (value.metadata !== undefined && !isPlainObject(value.metadata)) {
+    throw httpError(400, 'Identity metadata must be an object.');
+  }
+  const metadata = { ...(isPlainObject(value.metadata) ? value.metadata : {}) };
+  if (value.isPrimary !== undefined) metadata.isPrimary = Boolean(value.isPrimary);
+  const metadataJson = JSON.stringify(metadata);
+  if (metadataJson.length > 10000) throw httpError(400, 'Identity metadata is too large.');
+  const channelId = value.channelId === undefined || value.channelId === null || value.channelId === ''
+    ? '' : cleanId(value.channelId, 'Channel ID');
+  const routeSources = [];
+  let routesProvided = false;
+  for (const key of ['bindings', 'routes']) {
+    if (value[key] === undefined) continue;
+    routesProvided = true;
+    if (!Array.isArray(value[key]) || value[key].length > 50) {
+      throw httpError(400, 'Identity routes must be an array with no more than 50 items.');
+    }
+    routeSources.push(...value[key]);
+  }
+  if (channelId) routeSources.push({ channelId, scopedProfileId });
+  const routes = [];
+  const seenRoutes = new Set();
+  const seenRouteChannels = new Set();
+  for (const route of routeSources) {
+    if (!isPlainObject(route)) throw httpError(400, 'Each identity route must be an object.');
+    rejectUnknownKeys(route, new Set(['bindingId', 'channelId', 'scopedProfileId', 'channelProfileId', 'metadata', 'active']), 'identity route');
+    if (route.active === false) continue;
+    const routeChannelId = cleanId(route.channelId, 'Route channel ID');
+    const scopedRawValue = route.scopedProfileId ?? route.channelProfileId ?? profileId;
+    const routeProfileId = normalizeIdentityProfileValue(platform, scopedRawValue, 'Route profile ID');
+    const key = `${routeChannelId}\n${routeProfileId}`;
+    if (seenRoutes.has(key)) continue;
+    if (seenRouteChannels.has(routeChannelId)) {
+      throw httpError(400, 'An identity can have only one active route per channel.');
+    }
+    seenRoutes.add(key);
+    seenRouteChannels.add(routeChannelId);
+    if (route.metadata !== undefined && !isPlainObject(route.metadata)) {
+      throw httpError(400, 'Route metadata must be an object.');
+    }
+    routes.push({ channelId: routeChannelId, scopedProfileId: routeProfileId,
+      metadata: isPlainObject(route.metadata) ? route.metadata : {} });
+  }
+  return { identityId, platform, profileId, scopedProfileId, username, phoneNumber, displayName, metadata,
+    channelId, routes, routesProvided };
+}
+
+async function prevalidateIdentityRoutes(env, workspaceId, identityId, normalized) {
+  for (const route of normalized.routes) {
+    const routeOwner = await env.DB.prepare(`SELECT b.identity_id
+      FROM channel_identity_bindings b
+      WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
+      .bind(workspaceId, route.channelId, route.scopedProfileId).first();
+    if (routeOwner && routeOwner.identity_id !== identityId) {
+      throw httpError(409, 'This channel profile is already assigned to another contact identity.');
+    }
+    // An unchanged persisted route can be retained while its channel is
+    // disabled. Only creating/replacing a route requires an enabled channel.
+    if (!routeOwner) {
+      const channel = await getChannel(env, route.channelId, '', workspaceId);
+      if (!channel) throw httpError(400, 'Unknown or disabled channel.');
+      if (platformForChannel(channel) !== normalized.platform) {
+        throw httpError(400, 'The selected channel does not match the identity platform.');
+      }
+    }
+    await assertIdentityRouteProfileChangeAllowed(env, workspaceId, identityId,
+      route.channelId, route.scopedProfileId);
+  }
+}
+
+async function assertIdentityRouteProfileChangeAllowed(env, workspaceId, identityId, channelId, scopedProfileId) {
+  const previous = await env.DB.prepare(`SELECT scoped_profile_id
+    FROM channel_identity_bindings
+    WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3
+    ORDER BY active DESC,updated_at DESC,created_at DESC LIMIT 1`)
+    .bind(workspaceId, identityId, channelId).first();
+  if (!previous || previous.scoped_profile_id === scopedProfileId) return;
+  if (await identityChannelHasHistory(env, workspaceId, identityId, channelId)) {
+    throw httpError(409,
+      'This channel route has conversation history. Its Channel Profile ID cannot be changed; add another identity instead.');
+  }
+}
+
+async function identityChannelHasHistory(env, workspaceId, identityId, channelId) {
+  const history = await env.DB.prepare(`SELECT
+      EXISTS(SELECT 1 FROM conversations
+        WHERE workspace_id=?1 AND channel_id=?3 AND (
+          identity_id=?2 OR (identity_id='' AND contact_id=(SELECT contact_id FROM contact_identities
+            WHERE workspace_id=?1 AND identity_id=?2 LIMIT 1))) LIMIT 1) AS has_conversation,
+      EXISTS(SELECT 1 FROM messages
+        WHERE workspace_id=?1 AND channel_id=?3 AND (
+          identity_id=?2 OR (identity_id='' AND contact_id=(SELECT contact_id FROM contact_identities
+            WHERE workspace_id=?1 AND identity_id=?2 LIMIT 1))) LIMIT 1) AS has_message`)
+    .bind(workspaceId, identityId, channelId).first();
+  return Boolean(Number(history?.has_conversation || 0) || Number(history?.has_message || 0));
+}
+
+async function prevalidateIdentityRouteRemovals(env, workspaceId, identityId, normalized) {
+  if (!normalized.routesProvided) return [];
+  const selected = new Set(normalized.routes.map(route => `${route.channelId}\n${route.scopedProfileId}`));
+  const active = await env.DB.prepare(`SELECT binding_id,channel_id,scoped_profile_id
+    FROM channel_identity_bindings WHERE workspace_id=?1 AND identity_id=?2 AND active=1`)
+    .bind(workspaceId, identityId).all();
+  const remove = (active.results || []).filter(route => !selected.has(`${route.channel_id}\n${route.scoped_profile_id}`));
+  for (const route of remove) {
+    if (await identityChannelHasHistory(env, workspaceId, identityId, route.channel_id)) {
+      throw httpError(409,
+        'This channel route has conversation history and cannot be removed. Delete its conversations first.');
+    }
+  }
+  return remove;
+}
+
+async function prevalidateContactIdentityBatch(env, workspaceId, contactId, values, displayName) {
+  if (!Array.isArray(values) || values.length > 50) {
+    throw httpError(400, 'Identities must be an array with no more than 50 items.');
+  }
+  const existingResult = await env.DB.prepare(`SELECT * FROM contact_identities
+    WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, contactId).all();
+  const existingRows = existingResult.results || [];
+  const existingById = new Map(existingRows.map(row => [String(row.identity_id), row]));
+  const existingByCanonical = new Map(existingRows.map(row => [`${row.platform}\n${row.profile_id}`, row]));
+  const seenTargets = new Set();
+  const seenCanonical = new Map();
+  const seenRoutes = new Map();
+  let primaryCount = 0;
+
+  for (const value of values) {
+    if (!isPlainObject(value)) throw httpError(400, 'Each contact identity must be an object.');
+    const suppliedIdentityId = value.identityId === undefined || value.identityId === null || value.identityId === ''
+      ? '' : cleanId(value.identityId, 'Identity ID');
+    let existing = suppliedIdentityId ? existingById.get(suppliedIdentityId) : null;
+    if (suppliedIdentityId && !existing) throw httpError(404, 'Contact identity not found.');
+    const platformSource = value.platform ?? value.connectorType ?? existing?.platform;
+    const profileSource = value.profileId ?? value.channelProfileId ?? existing?.profile_id;
+    const preliminary = validateContactIdentityInput({
+      ...value,
+      ...(suppliedIdentityId ? { identityId: suppliedIdentityId } : {}),
+      platform: platformSource,
+      profileId: profileSource,
+      username: value.username ?? existing?.username ?? '',
+      phoneNumber: value.phoneNumber ?? existing?.phone_number ?? '',
+      displayName: value.displayName ?? existing?.display_name ?? displayName,
+      metadata: value.metadata ?? safeJsonParse(existing?.metadata_json, {})
+    }, { displayName });
+    const canonicalKey = `${preliminary.platform}\n${preliminary.profileId}`;
+    if (!existing) existing = existingByCanonical.get(canonicalKey) || null;
+    const targetKey = existing?.identity_id || suppliedIdentityId || `new:${canonicalKey}`;
+    if (seenTargets.has(targetKey)) throw httpError(400, 'The same contact identity was supplied more than once.');
+    seenTargets.add(targetKey);
+    if (existing && (preliminary.platform !== existing.platform || preliminary.profileId !== existing.profile_id)) {
+      throw httpError(400, 'Identity platform and profile ID cannot be changed. Add another identity instead.');
+    }
+    const canonicalOwner = seenCanonical.get(canonicalKey);
+    if (canonicalOwner && canonicalOwner !== targetKey) {
+      throw httpError(409, 'The same platform identity was supplied more than once.');
+    }
+    seenCanonical.set(canonicalKey, targetKey);
+    if (preliminary.metadata.isPrimary) primaryCount += 1;
+    const validationIdentityId = existing?.identity_id || suppliedIdentityId || crypto.randomUUID();
+    await prevalidateIdentityRoutes(env, workspaceId, validationIdentityId, preliminary);
+    if (existing) await prevalidateIdentityRouteRemovals(env, workspaceId, existing.identity_id, preliminary);
+    for (const route of preliminary.routes) {
+      const routeKey = `${route.channelId}\n${route.scopedProfileId}`;
+      const routeOwner = seenRoutes.get(routeKey);
+      if (routeOwner && routeOwner !== targetKey) {
+        throw httpError(409, 'The same channel profile route was supplied for more than one identity.');
+      }
+      seenRoutes.set(routeKey, targetKey);
+    }
+  }
+  if (primaryCount > 1) throw httpError(400, 'Only one contact identity can be primary.');
+}
+
+async function contactIdentityRows(env, workspaceId, contactIds = []) {
+  if (!contactIds.length) return [];
+  const ids = [...new Set(contactIds.map(String))].slice(0, 200);
+  const placeholders = ids.map((_, index) => `?${index + 2}`).join(',');
+  const result = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,ci.platform,ci.profile_id,ci.username,
+      ci.phone_number,ci.display_name,ci.metadata_json,ci.created_at,ci.updated_at,
+      b.binding_id,b.channel_id,b.scoped_profile_id,b.metadata_json AS binding_metadata_json,
+      b.first_seen_at,b.last_seen_at,b.last_inbound_at,b.last_outbound_at,b.last_conversation_id,
+      ch.name AS channel_name,ch.connector_type,ch.provider_type,ch.enabled,
+      cv.conversation_id,cv.status AS conversation_status,cv.last_message_at
+    FROM contact_identities ci
+    LEFT JOIN channel_identity_bindings b
+      ON b.workspace_id=ci.workspace_id AND b.identity_id=ci.identity_id AND b.active=1
+    LEFT JOIN channels ch ON ch.workspace_id=ci.workspace_id AND ch.channel_id=b.channel_id
+    LEFT JOIN conversations cv ON cv.workspace_id=ci.workspace_id AND cv.identity_id=ci.identity_id
+      AND cv.channel_id=b.channel_id
+    WHERE ci.workspace_id=?1 AND ci.contact_id IN (${placeholders})
+    ORDER BY ci.created_at,ci.identity_id,b.last_seen_at DESC,b.created_at DESC`)
+    .bind(workspaceId, ...ids).all();
+  return result.results || [];
+}
+
+async function hydrateContactViews(env, workspaceId, rows) {
+  if (!rows.length) return [];
+  const identityRows = await contactIdentityRows(env, workspaceId, rows.map(row => row.contact_id));
+  const byContact = new Map();
+  for (const row of identityRows) {
+    if (!byContact.has(row.contact_id)) byContact.set(row.contact_id, new Map());
+    const identities = byContact.get(row.contact_id);
+    let identity = identities.get(row.identity_id);
+    if (!identity) {
+      const metadata = safeJsonParse(row.metadata_json, {});
+      identity = {
+        identityId: row.identity_id,
+        platform: row.platform || '',
+        profileId: row.profile_id || '',
+        username: row.username || '',
+        phoneNumber: row.phone_number || '',
+        email: row.platform === 'email' ? row.profile_id || '' : '',
+        displayName: row.display_name || '',
+        metadata: isPlainObject(metadata) ? metadata : {},
+        isPrimary: Boolean(metadata?.isPrimary),
+        createdAt: row.created_at || '',
+        updatedAt: row.updated_at || '',
+        bindings: [], routes: []
+      };
+      identities.set(row.identity_id, identity);
+    }
+    if (row.binding_id) {
+      identity.bindings.push({
+        bindingId: row.binding_id,
+        channelId: row.channel_id || '',
+        channelName: row.channel_name || '',
+        connectorType: logicalConnectorType(row),
+        channelProfileId: row.scoped_profile_id || row.profile_id || '',
+        scopedProfileId: row.scoped_profile_id || '',
+        channelEnabled: Boolean(row.enabled),
+        conversationId: row.conversation_id || '',
+        conversationStatus: row.conversation_status || '',
+        lastMessageAt: row.last_message_at || '',
+        firstSeenAt: row.first_seen_at || '',
+        lastSeenAt: row.last_seen_at || '',
+        lastInboundAt: row.last_inbound_at || '',
+        lastOutboundAt: row.last_outbound_at || '',
+        lastConversationId: row.last_conversation_id || row.conversation_id || '',
+        metadata: safeJsonParse(row.binding_metadata_json, {})
+      });
+    }
+  }
+  return rows.map(row => {
+    const identities = [...(byContact.get(row.contact_id)?.values() || [])];
+    if (identities.length && !identities.some(identity => identity.isPrimary)) identities[0].isPrimary = true;
+    for (const identity of identities) {
+      identity.bindings.sort((a, b) => String(b.lastMessageAt || b.lastSeenAt).localeCompare(String(a.lastMessageAt || a.lastSeenAt)));
+      const binding = identity.bindings[0] || {};
+      Object.assign(identity, {
+        channelId: binding.channelId || '',
+        channelName: binding.channelName || '',
+        connectorType: binding.connectorType || '',
+        channelProfileId: binding.channelProfileId || identity.profileId,
+        channelEnabled: Boolean(binding.channelEnabled),
+        conversationId: binding.conversationId || '',
+        conversationStatus: binding.conversationStatus || '',
+        lastMessageAt: binding.lastMessageAt || ''
+      });
+      identity.routes = identity.bindings;
+    }
+    identities.sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) ||
+      String(b.lastMessageAt || b.updatedAt).localeCompare(String(a.lastMessageAt || a.updatedAt)));
+    return contactView(row, identities);
+  });
+}
+
+async function listWorkspaceTags(env, workspaceId) {
+  const result = await env.DB.prepare(`SELECT MIN(trim(CAST(tag.value AS TEXT))) AS tag
+    FROM contacts c
+    JOIN json_each(CASE
+      WHEN json_valid(c.tags_json) THEN CASE
+        WHEN json_type(c.tags_json)='array' THEN c.tags_json
+        ELSE '[]'
+      END
+      ELSE '[]'
+    END) tag
+    WHERE c.workspace_id=?1 AND tag.type='text'
+      AND length(trim(CAST(tag.value AS TEXT))) BETWEEN 1 AND 40
+    GROUP BY lower(trim(CAST(tag.value AS TEXT)))
+    ORDER BY lower(tag),tag
+    LIMIT 200`).bind(workspaceId).all();
+  return (result.results || []).map(row => String(row.tag || '').trim()).filter(Boolean);
 }
 
 async function loadContactRow(env, workspaceId, contactId) {
   return env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
       i.identity_id,i.channel_id,i.channel_profile_id,ch.name AS channel_name,ch.connector_type,ch.provider_type,
       cv.status AS conversation_status,cv.last_message_at,
-      (SELECT COUNT(*) FROM channel_identities identities
+      (SELECT COUNT(*) FROM contact_identities identities
         WHERE identities.workspace_id=c.workspace_id AND identities.contact_id=c.contact_id) AS identity_count,
       (SELECT COUNT(*) FROM conversations conversations
         WHERE conversations.workspace_id=c.workspace_id AND conversations.contact_id=c.contact_id) AS conversation_count,
@@ -2294,29 +2864,35 @@ async function loadContactRow(env, workspaceId, contactId) {
 async function getContactDetail(env, workspaceId, contactId) {
   const row = await loadContactRow(env, workspaceId, cleanId(contactId, 'Contact ID'));
   if (!row) throw httpError(404, 'Contact not found.');
-  return contactView(row);
+  const items = await hydrateContactViews(env, workspaceId, [row]);
+  return items[0];
 }
 
-function contactView(row) {
+function contactView(row, identities = []) {
   const attributes = safeJsonParse(row.attributes_json, {});
   const displayName = String(row.display_name || '').slice(0, 120);
   const tags = storedContactTags(row.tags_json);
+  const preferred = identities.find(identity => identity.isPrimary) || identities[0] || null;
+  const preferredBinding = preferred?.bindings?.[0] || null;
+  const conversationStatus = preferredBinding?.conversationStatus || row.conversation_status || '';
   return {
     contactId: row.contact_id,
     displayName,
     name: displayName,
     company: String(row.company || '').slice(0, 160),
     tags,
-    channelId: row.channel_id || '',
-    channelName: row.channel_name || '',
-    connectorType: logicalConnectorType(row),
-    channelProfileId: row.channel_profile_id || '',
+    identities,
+    identityId: preferred?.identityId || row.identity_id || '',
+    channelId: preferredBinding?.channelId || row.channel_id || '',
+    channelName: preferredBinding?.channelName || row.channel_name || '',
+    connectorType: preferredBinding?.connectorType || logicalConnectorType(row),
+    channelProfileId: preferredBinding?.channelProfileId || preferred?.profileId || row.channel_profile_id || '',
     email: typeof attributes.email === 'string' ? attributes.email.slice(0, 254) : '',
     phone: typeof attributes.phone === 'string' ? attributes.phone.slice(0, 80) : '',
-    status: row.conversation_status === 'closed' ? 'inactive' : 'active',
-    conversationStatus: row.conversation_status || '',
-    channelEditable: Number(row.identity_count ?? 1) === 1 && Number(row.message_count || 0) === 0,
-    lastMessageAt: row.last_message_at || row.updated_at
+    status: conversationStatus === 'closed' ? 'inactive' : 'active',
+    conversationStatus,
+    channelEditable: false,
+    lastMessageAt: preferredBinding?.lastMessageAt || row.last_message_at || row.updated_at
   };
 }
 
@@ -2342,16 +2918,446 @@ function validateContactTags(value) {
   return tags;
 }
 
+async function ensureContactIdentity(env, workspaceId, contactId, input, now = new Date().toISOString()) {
+  const contact = await env.DB.prepare(`SELECT contact_id,display_name FROM contacts
+    WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, contactId).first();
+  if (!contact) throw httpError(404, 'Contact not found.');
+  const normalized = validateContactIdentityInput(input, { displayName: contact.display_name });
+  let existing = normalized.identityId
+    ? await env.DB.prepare(`SELECT * FROM contact_identities
+        WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`)
+      .bind(workspaceId, contactId, normalized.identityId).first()
+    : await env.DB.prepare(`SELECT * FROM contact_identities
+        WHERE workspace_id=?1 AND contact_id=?2 AND platform=?3 AND profile_id=?4 LIMIT 1`)
+      .bind(workspaceId, contactId, normalized.platform, normalized.profileId).first();
+  if (normalized.identityId && !existing) throw httpError(404, 'Contact identity not found.');
+  if (normalized.identityId && existing
+      && (normalized.platform !== existing.platform || normalized.profileId !== existing.profile_id)) {
+    throw httpError(400, 'Identity platform and profile ID cannot be changed. Add another identity instead.');
+  }
+  const identityId = existing?.identity_id || normalized.identityId || crypto.randomUUID();
+  // Validate every requested route before changing primary flags or inserting
+  // anything.  A bad/conflicting later route must not leave a ghost identity
+  // or an earlier partial binding behind.
+  await prevalidateIdentityRoutes(env, workspaceId, identityId, normalized);
+  const statements = [];
+  if (!existing) {
+    const count = await env.DB.prepare(`SELECT COUNT(*) AS count FROM contact_identities
+      WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, contactId).first();
+    if (normalized.metadata.isPrimary === undefined && Number(count?.count || 0) === 0) {
+      normalized.metadata.isPrimary = true;
+    }
+    if (normalized.metadata.isPrimary) {
+      const others = await env.DB.prepare(`SELECT identity_id,metadata_json FROM contact_identities
+        WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, contactId).all();
+      for (const other of others.results || []) {
+        const metadata = safeJsonParse(other.metadata_json, {});
+        if (isPlainObject(metadata) && metadata.isPrimary) {
+          delete metadata.isPrimary;
+          statements.push(env.DB.prepare(`UPDATE contact_identities SET metadata_json=?4,updated_at=?5
+            WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`)
+            .bind(workspaceId, contactId, other.identity_id, JSON.stringify(metadata), now));
+        }
+      }
+    }
+    statements.push(env.DB.prepare(`INSERT INTO contact_identities
+        (identity_id,workspace_id,contact_id,platform,profile_id,username,phone_number,display_name,
+         metadata_json,created_at,updated_at)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)`)
+      .bind(identityId, workspaceId, contactId, normalized.platform, normalized.profileId,
+        normalized.username, normalized.phoneNumber, normalized.displayName || contact.display_name,
+        JSON.stringify(normalized.metadata), now));
+    existing = { identity_id: identityId };
+  }
+  const bindings = [];
+  for (const route of normalized.routes) {
+    const mutation = await prepareIdentityBindingMutation(env, workspaceId, contactId, existing.identity_id,
+      { ...normalized, ...route, channelId: route.channelId, scopedProfileId: route.scopedProfileId }, now);
+    statements.push(...mutation.statements);
+    bindings.push(mutation.binding);
+  }
+  if (statements.length) await env.DB.batch(statements);
+  return { identityId: existing.identity_id, binding: bindings[0] || null, bindings, normalized };
+}
+
+async function ensureIdentityBinding(env, workspaceId, contactId, identityId, identity, now = new Date().toISOString()) {
+  const mutation = await prepareIdentityBindingMutation(env, workspaceId, contactId, identityId, identity, now);
+  if (mutation.statements.length) await env.DB.batch(mutation.statements);
+  return mutation.binding;
+}
+
+async function prepareIdentityBindingMutation(env, workspaceId, contactId, identityId, identity,
+  now = new Date().toISOString()) {
+  const routeOwner = await env.DB.prepare(`SELECT b.binding_id,b.identity_id,ci.contact_id
+    FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
+    WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
+    .bind(workspaceId, identity.channelId, identity.scopedProfileId).first();
+  if (routeOwner && routeOwner.identity_id !== identityId) {
+    throw httpError(409, 'This channel profile is already assigned to another contact identity.');
+  }
+  if (routeOwner) {
+    return {
+      binding: { bindingId: routeOwner.binding_id, channelId: identity.channelId,
+        channelProfileId: identity.scopedProfileId },
+      statements: [env.DB.prepare(`UPDATE channel_identity_bindings SET metadata_json=?4,last_seen_at=?5,updated_at=?5
+        WHERE workspace_id=?1 AND binding_id=?2 AND identity_id=?3`)
+        .bind(workspaceId, routeOwner.binding_id, identityId, JSON.stringify(identity.metadata || {}), now)]
+    };
+  }
+  const channel = await getChannel(env, identity.channelId, '', workspaceId);
+  if (!channel) throw httpError(400, 'Unknown or disabled channel.');
+  if (platformForChannel(channel) !== identity.platform) {
+    throw httpError(400, 'The selected channel does not match the identity platform.');
+  }
+  await assertIdentityRouteProfileChangeAllowed(env, workspaceId, identityId,
+    identity.channelId, identity.scopedProfileId);
+  let binding = await env.DB.prepare(`SELECT binding_id FROM channel_identity_bindings
+    WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 AND scoped_profile_id=?4
+    ORDER BY created_at DESC LIMIT 1`).bind(workspaceId, identityId, identity.channelId, identity.scopedProfileId).first();
+  const bindingId = binding?.binding_id || crypto.randomUUID();
+  const statements = [
+    env.DB.prepare(`UPDATE channel_identity_bindings SET active=0,updated_at=?4
+      WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 AND active=1`)
+      .bind(workspaceId, identityId, identity.channelId, now)
+  ];
+  if (binding) {
+    statements.push(env.DB.prepare(`UPDATE channel_identity_bindings SET active=1,metadata_json=?3,last_seen_at=?4,updated_at=?4
+      WHERE workspace_id=?1 AND binding_id=?2`)
+      .bind(workspaceId, bindingId, JSON.stringify(identity.metadata || {}), now));
+  } else {
+    statements.push(env.DB.prepare(`INSERT INTO channel_identity_bindings
+        (binding_id,workspace_id,identity_id,channel_id,scoped_profile_id,metadata_json,active,
+         first_seen_at,last_seen_at,created_at,updated_at)
+      VALUES (?1,?2,?3,?4,?5,?6,1,?7,?7,?7,?7)`)
+      .bind(bindingId, workspaceId, identityId, identity.channelId, identity.scopedProfileId,
+        JSON.stringify(identity.metadata || {}), now));
+    statements.push(env.DB.prepare(`INSERT OR IGNORE INTO channel_identities
+        (identity_id,contact_id,channel_id,channel_profile_id,display_name,metadata_json,created_at,workspace_id)
+      VALUES (?1,?2,?3,?4,?5,'{}',?6,?7)`)
+      .bind(bindingId, contactId, identity.channelId, identity.scopedProfileId,
+        identity.displayName || '', now, workspaceId));
+  }
+  return {
+    binding: { bindingId, channelId: identity.channelId, channelProfileId: identity.scopedProfileId },
+    statements
+  };
+}
+
+async function ensureIdentityConversation(env, workspaceId, contactId, identityId, channelId, assignedTo = '') {
+  const route = await env.DB.prepare(`SELECT ci.display_name,ct.display_name AS contact_name,ct.tags_json
+    FROM contact_identities ci JOIN contacts ct ON ct.contact_id=ci.contact_id AND ct.workspace_id=ci.workspace_id
+    JOIN channel_identity_bindings b ON b.identity_id=ci.identity_id AND b.workspace_id=ci.workspace_id
+      AND b.channel_id=?4 AND b.active=1
+    WHERE ci.workspace_id=?1 AND ci.contact_id=?2 AND ci.identity_id=?3 LIMIT 1`)
+    .bind(workspaceId, contactId, identityId, channelId).first();
+  if (!route) throw httpError(409, 'This identity is not routed through the selected channel.');
+  let conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
+    WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 LIMIT 1`)
+    .bind(workspaceId, identityId, channelId).first();
+  if (conversation) {
+    await touchIdentityBinding(env, workspaceId, identityId, channelId, '', conversation.conversation_id);
+    return conversation.conversation_id;
+  }
+  const legacy = await env.DB.prepare(`SELECT conversation_id FROM conversations
+    WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3 AND identity_id='' LIMIT 1`)
+    .bind(workspaceId, contactId, channelId).first();
+  const now = new Date().toISOString();
+  let legacyIsUnambiguous = false;
+  if (legacy) {
+    const candidates = await env.DB.prepare(`SELECT ci.identity_id
+      FROM contact_identities ci
+      JOIN channel_identity_bindings b ON b.workspace_id=ci.workspace_id AND b.identity_id=ci.identity_id
+      WHERE ci.workspace_id=?1 AND ci.contact_id=?2 AND b.channel_id=?3 AND b.active=1
+      ORDER BY ci.identity_id`).bind(workspaceId, contactId, channelId).all();
+    const candidateIds = [...new Set((candidates.results || []).map(item => String(item.identity_id || '')).filter(Boolean))];
+    legacyIsUnambiguous = candidateIds.length === 1 && candidateIds[0] === identityId;
+  }
+  if (legacy && legacyIsUnambiguous) {
+    try {
+      await env.DB.batch([
+        env.DB.prepare(`UPDATE conversations SET identity_id=?4,updated_at=?5
+          WHERE workspace_id=?1 AND conversation_id=?2 AND contact_id=?3 AND identity_id=''`)
+          .bind(workspaceId, legacy.conversation_id, contactId, identityId, now),
+        env.DB.prepare(`UPDATE messages SET identity_id=?3
+          WHERE workspace_id=?1 AND conversation_id=?2 AND identity_id=''`)
+          .bind(workspaceId, legacy.conversation_id, identityId),
+        env.DB.prepare(`UPDATE identity_migration_issues SET resolved_at=?3
+          WHERE workspace_id=?1 AND conversation_id=?2 AND resolved_at=''`)
+          .bind(workspaceId, legacy.conversation_id, now)
+      ]);
+      await touchIdentityBinding(env, workspaceId, identityId, channelId, '', legacy.conversation_id, now);
+      return legacy.conversation_id;
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
+        WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 LIMIT 1`)
+        .bind(workspaceId, identityId, channelId).first();
+      if (conversation) {
+        await touchIdentityBinding(env, workspaceId, identityId, channelId, '', conversation.conversation_id, now);
+        return conversation.conversation_id;
+      }
+      throw error;
+    }
+  }
+  const conversationId = crypto.randomUUID();
+  try {
+    await env.DB.prepare(`INSERT INTO conversations
+        (conversation_id,contact_id,channel_id,identity_id,status,assigned_to,subject,last_message_at,
+         unread_count,tags_json,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,?3,?4,'open',?5,?6,?7,0,?8,?7,?7,?9)`)
+      .bind(conversationId, contactId, channelId, identityId, assignedTo,
+        route.contact_name || route.display_name || '', now, route.tags_json || '[]', workspaceId).run();
+    await touchIdentityBinding(env, workspaceId, identityId, channelId, '', conversationId, now);
+    return conversationId;
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) throw error;
+    conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
+      WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 LIMIT 1`)
+      .bind(workspaceId, identityId, channelId).first();
+    if (!conversation) throw error;
+    await touchIdentityBinding(env, workspaceId, identityId, channelId, '', conversation.conversation_id, now);
+    return conversation.conversation_id;
+  }
+}
+
+async function reconcileLegacyConversationIdentity(env, workspaceId, conversationId) {
+  const conversation = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.identity_id,
+      ch.connector_type,ch.provider_type
+    FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
+    WHERE c.workspace_id=?1 AND c.conversation_id=?2`).bind(workspaceId, conversationId).first();
+  if (!conversation || conversation.identity_id) return conversation;
+
+  const routes = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id
+    FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
+      AND ci.workspace_id=b.workspace_id
+    WHERE b.workspace_id=?1 AND b.channel_id=?2 AND ci.contact_id=?3 AND b.active=1
+    ORDER BY b.created_at,b.binding_id`).bind(workspaceId, conversation.channel_id, conversation.contact_id).all();
+  let identity = (routes.results || []).length === 1 ? routes.results[0] : null;
+
+  if (!identity && (routes.results || []).length === 0) {
+    const legacy = await env.DB.prepare(`SELECT channel_profile_id,display_name,metadata_json,MIN(created_at) AS created_at
+      FROM channel_identities
+      WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3
+      GROUP BY channel_profile_id,display_name,metadata_json
+      ORDER BY created_at,channel_profile_id`).bind(workspaceId, conversation.contact_id, conversation.channel_id).all();
+    const legacyRoutes = legacy.results || [];
+    const distinctProfiles = [...new Set(legacyRoutes.map(row => String(row.channel_profile_id || '')))].filter(Boolean);
+    if (distinctProfiles.length === 1) {
+      const route = legacyRoutes.find(row => String(row.channel_profile_id || '') === distinctProfiles[0]);
+      const platform = platformForChannel(conversation);
+      const result = await ensureContactIdentity(env, workspaceId, conversation.contact_id, {
+        platform,
+        profileId: distinctProfiles[0],
+        username: '',
+        phoneNumber: platform === 'whatsapp' && /^\d{6,20}$/.test(distinctProfiles[0]) ? distinctProfiles[0] : '',
+        displayName: String(route?.display_name || '').slice(0, 120),
+        metadata: safeJsonParse(route?.metadata_json, {}),
+        channelId: conversation.channel_id,
+        scopedProfileId: distinctProfiles[0]
+      });
+      identity = { identity_id: result.identityId, contact_id: conversation.contact_id };
+    }
+  }
+
+  if (!identity) {
+    const now = new Date().toISOString();
+    const candidateCount = Number((routes.results || []).length);
+    await env.DB.prepare(`INSERT INTO identity_migration_issues
+        (issue_id,workspace_id,conversation_id,issue_type,candidate_count,details_json,created_at,resolved_at)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,'')
+      ON CONFLICT(issue_id) DO UPDATE SET issue_type=excluded.issue_type,
+        candidate_count=excluded.candidate_count,details_json=excluded.details_json,resolved_at=''`)
+      .bind(`${conversationId}:runtime-identity`, workspaceId, conversationId,
+        candidateCount > 1 ? 'ambiguous_identity' : 'missing_identity', candidateCount,
+        JSON.stringify({ contactId: conversation.contact_id, channelId: conversation.channel_id }), now).run();
+    return conversation;
+  }
+
+  await ensureIdentityConversation(env, workspaceId, conversation.contact_id, identity.identity_id,
+    conversation.channel_id, '');
+  return { ...conversation, identity_id: identity.identity_id };
+}
+
+async function touchIdentityBinding(env, workspaceId, identityId, channelId, direction = '', conversationId = '',
+  now = new Date().toISOString()) {
+  const inbound = direction === 'inbound' ? now : '';
+  const outbound = direction === 'outbound' ? now : '';
+  await env.DB.prepare(`UPDATE channel_identity_bindings SET
+      last_seen_at=?5,
+      last_inbound_at=CASE WHEN ?6<>'' THEN ?6 ELSE last_inbound_at END,
+      last_outbound_at=CASE WHEN ?7<>'' THEN ?7 ELSE last_outbound_at END,
+      last_conversation_id=CASE WHEN ?4<>'' THEN ?4 ELSE last_conversation_id END,
+      updated_at=?5
+    WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 AND active=1`)
+    .bind(workspaceId, identityId, channelId, conversationId, now, inbound, outbound).run();
+}
+
+async function openIdentityConversation(env, workspaceId, payload, principal) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Conversation request must be a JSON object.');
+  rejectUnknownKeys(payload, new Set(['contactId', 'identityId', 'channelId']), 'conversation request');
+  const identityId = cleanId(payload.identityId, 'Identity ID');
+  const identity = await env.DB.prepare(`SELECT identity_id,contact_id,platform,profile_id,username,phone_number,
+      display_name,metadata_json FROM contact_identities
+    WHERE workspace_id=?1 AND identity_id=?2`).bind(workspaceId, identityId).first();
+  if (!identity) throw httpError(404, 'Contact identity not found.');
+  const contactId = identity.contact_id;
+  if (payload.contactId !== undefined && cleanId(payload.contactId, 'Contact ID') !== contactId) {
+    throw httpError(409, 'The identity does not belong to the supplied contact.');
+  }
+  let channelId = payload.channelId === undefined || payload.channelId === null || payload.channelId === ''
+    ? '' : cleanId(payload.channelId, 'Channel ID');
+  if (!channelId) {
+    const routes = await env.DB.prepare(`SELECT channel_id FROM channel_identity_bindings
+      WHERE workspace_id=?1 AND identity_id=?2 AND active=1 ORDER BY last_seen_at DESC`).bind(workspaceId, identityId).all();
+    if ((routes.results || []).length === 1) channelId = routes.results[0].channel_id;
+    else if ((routes.results || []).length > 1) throw httpError(400, 'Select one connected channel for this identity.');
+    else throw httpError(409, 'Add a channel route to this identity before starting a conversation.');
+  }
+  const channel = await getChannel(env, channelId, '', workspaceId);
+  if (!channel || platformForChannel(channel) !== identity.platform) {
+    throw httpError(400, 'The selected channel is not compatible with this identity.');
+  }
+  await assertChannelReadyForConversation(env, workspaceId, channel);
+  const currentBinding = await env.DB.prepare(`SELECT binding_id FROM channel_identity_bindings
+    WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 AND active=1 LIMIT 1`)
+    .bind(workspaceId, identityId, channelId).first();
+  if (!currentBinding) {
+    throw httpError(409, 'Add the selected channel route to this identity before starting a conversation.');
+  }
+  const conversationId = await ensureIdentityConversation(env, workspaceId, contactId, identityId, channelId,
+    principal?.user?.email || '');
+  await audit(env, principal, 'open', 'conversation', conversationId, { contactId, identityId, channelId });
+  return { ok: true, conversationId, contactId, identityId, channelId,
+    item: await getConversationItem(env, workspaceId, conversationId) };
+}
+
+async function assertChannelReadyForConversation(env, workspaceId, channel) {
+  if (!MANAGED_CONNECTORS.has(channel.connectorType)) return;
+  const stored = await env.DB.prepare(`SELECT credential_key FROM channel_credentials
+    WHERE workspace_id=?1 AND channel_id=?2`).bind(workspaceId, channel.channelId).all();
+  const credentialFields = new Set((stored.results || []).map(row => row.credential_key));
+  const health = channelHealth({ enabled: 1, provider_type: channel.connectorType }, channel.config, credentialFields);
+  if (health !== 'connected') throw httpError(409, 'Verify the channel and its webhook before starting a conversation.');
+}
+
+async function createContactIdentity(env, workspaceId, contactId, payload, principal) {
+  const id = cleanId(contactId, 'Contact ID');
+  const result = await ensureContactIdentity(env, workspaceId, id, payload);
+  await audit(env, principal, 'create', 'contact_identity', result.identityId, {
+    contactId: id, platform: result.normalized.platform, channelIds: result.bindings.map(binding => binding.channelId)
+  });
+  return { ok: true, contactId: id, identityId: result.identityId,
+    conversationIds: [], conversationId: '',
+    item: await getContactDetail(env, workspaceId, id) };
+}
+
+async function updateContactIdentity(env, workspaceId, contactId, identityId, payload, principal) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Contact identity update must be a JSON object.');
+  const id = cleanId(contactId, 'Contact ID');
+  const identity = cleanId(identityId, 'Identity ID');
+  const existing = await env.DB.prepare(`SELECT * FROM contact_identities
+    WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`).bind(workspaceId, id, identity).first();
+  if (!existing) throw httpError(404, 'Contact identity not found.');
+  const merged = {
+    ...payload,
+    identityId: identity,
+    platform: payload.platform ?? payload.connectorType ?? existing.platform,
+    profileId: payload.profileId ?? payload.channelProfileId ?? existing.profile_id,
+    username: payload.username ?? existing.username,
+    phoneNumber: payload.phoneNumber ?? existing.phone_number,
+    displayName: payload.displayName ?? existing.display_name,
+    metadata: payload.metadata ?? safeJsonParse(existing.metadata_json, {})
+  };
+  const normalized = validateContactIdentityInput(merged, { displayName: existing.display_name });
+  if (normalized.platform !== existing.platform || normalized.profileId !== existing.profile_id) {
+    throw httpError(400, 'Identity platform and profile ID cannot be changed. Add another identity instead.');
+  }
+  // Fail the entire request before any editable fields or primary flags change
+  // when even one requested route is invalid or already owned elsewhere.
+  await prevalidateIdentityRoutes(env, workspaceId, identity, normalized);
+  const routesToRemove = await prevalidateIdentityRouteRemovals(env, workspaceId, identity, normalized);
+  const now = new Date().toISOString();
+  const statements = [];
+  if (normalized.metadata.isPrimary) {
+    const others = await env.DB.prepare(`SELECT identity_id,metadata_json FROM contact_identities
+      WHERE workspace_id=?1 AND contact_id=?2 AND identity_id<>?3`).bind(workspaceId, id, identity).all();
+    for (const other of others.results || []) {
+      const metadata = safeJsonParse(other.metadata_json, {});
+      if (isPlainObject(metadata) && metadata.isPrimary) {
+        delete metadata.isPrimary;
+        statements.push(env.DB.prepare(`UPDATE contact_identities SET metadata_json=?4,updated_at=?5
+          WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`)
+          .bind(workspaceId, id, other.identity_id, JSON.stringify(metadata), now));
+      }
+    }
+  }
+  statements.push(env.DB.prepare(`UPDATE contact_identities SET username=?4,phone_number=?5,display_name=?6,
+      metadata_json=?7,updated_at=?8 WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`)
+    .bind(workspaceId, id, identity, normalized.username, normalized.phoneNumber,
+      normalized.displayName, JSON.stringify(normalized.metadata), now));
+  const bindings = [];
+  for (const route of normalized.routes) {
+    const mutation = await prepareIdentityBindingMutation(env, workspaceId, id, identity,
+      { ...normalized, ...route, channelId: route.channelId, scopedProfileId: route.scopedProfileId }, now);
+    statements.push(...mutation.statements);
+    bindings.push(mutation.binding);
+  }
+  if (routesToRemove.length) {
+      statements.push(...routesToRemove.map(route => env.DB.prepare(`UPDATE channel_identity_bindings
+        SET active=0,updated_at=?3 WHERE workspace_id=?1 AND binding_id=?2`)
+        .bind(workspaceId, route.binding_id, now)));
+  }
+  await env.DB.batch(statements);
+  await audit(env, principal, 'update', 'contact_identity', identity,
+    { contactId: id, channelIds: bindings.map(binding => binding.channelId) });
+  return { ok: true, contactId: id, identityId: identity, item: await getContactDetail(env, workspaceId, id) };
+}
+
+async function deleteContactIdentity(env, workspaceId, contactId, identityId, principal) {
+  const id = cleanId(contactId, 'Contact ID');
+  const identity = cleanId(identityId, 'Identity ID');
+  const existing = await env.DB.prepare(`SELECT identity_id,platform,profile_id,
+      (SELECT COUNT(*) FROM conversations conversation WHERE conversation.workspace_id=?1 AND (
+        conversation.identity_id=?3 OR (conversation.identity_id='' AND conversation.contact_id=?2
+          AND EXISTS (SELECT 1 FROM channel_identity_bindings binding
+            WHERE binding.workspace_id=?1 AND binding.identity_id=?3
+              AND binding.channel_id=conversation.channel_id)))) AS conversation_count,
+      (SELECT COUNT(*) FROM messages message WHERE message.workspace_id=?1 AND (
+        message.identity_id=?3 OR (message.identity_id='' AND message.contact_id=?2
+          AND EXISTS (SELECT 1 FROM channel_identity_bindings binding
+            WHERE binding.workspace_id=?1 AND binding.identity_id=?3
+              AND binding.channel_id=message.channel_id)))) AS message_count
+    FROM contact_identities WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`)
+    .bind(workspaceId, id, identity).first();
+  if (!existing) throw httpError(404, 'Contact identity not found.');
+  if (Number(existing.conversation_count || 0) || Number(existing.message_count || 0)) {
+    throw httpError(409, 'Delete this identity’s conversations before deleting the identity.');
+  }
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM channel_identities WHERE workspace_id=?1 AND identity_id IN
+      (SELECT binding_id FROM channel_identity_bindings WHERE workspace_id=?1 AND identity_id=?2)`)
+      .bind(workspaceId, identity),
+    env.DB.prepare(`DELETE FROM channel_identity_bindings WHERE workspace_id=?1 AND identity_id=?2`)
+      .bind(workspaceId, identity),
+    env.DB.prepare(`DELETE FROM contact_identities WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`)
+      .bind(workspaceId, id, identity)
+  ]);
+  await audit(env, principal, 'delete', 'contact_identity', identity,
+    { contactId: id, platform: existing.platform, profileId: existing.profile_id });
+  return { ok: true, contactId: id, identityId: identity, deleted: true, item: await getContactDetail(env, workspaceId, id) };
+}
+
 async function updateContact(env, workspaceId, contactId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Contact update must be a JSON object.');
-  rejectUnknownKeys(payload, new Set(['displayName', 'name', 'company', 'tags', 'channelId', 'channelProfileId']), 'contact');
+  rejectUnknownKeys(payload, new Set(['displayName', 'name', 'company', 'tags', 'channelId', 'channelProfileId', 'identities']), 'contact');
   if (!Object.keys(payload).length) throw httpError(400, 'Provide at least one contact field to update.');
   if (payload.displayName !== undefined && payload.name !== undefined &&
       String(payload.displayName).trim() !== String(payload.name).trim()) {
     throw httpError(400, 'Display name and name must match when both are supplied.');
   }
   const id = cleanId(contactId, 'Contact ID');
-  const existing = await loadContactRow(env, workspaceId, id);
+  const existing = await env.DB.prepare(`SELECT contact_id,display_name,company,tags_json,attributes_json
+    FROM contacts WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, id).first();
   if (!existing) throw httpError(404, 'Contact not found.');
   const suppliedName = payload.displayName === undefined ? payload.name : payload.displayName;
   if (suppliedName !== undefined && typeof suppliedName !== 'string') throw httpError(400, 'Display name must be text.');
@@ -2362,65 +3368,54 @@ async function updateContact(env, workspaceId, contactId, payload, principal) {
     ? String(existing.company || '')
     : cleanOptionalText(payload.company, 'Company', 160);
   const tags = payload.tags === undefined ? storedContactTags(existing.tags_json) : validateContactTags(payload.tags);
-
-  let channelId = existing.channel_id || '';
-  const channelProfileId = existing.channel_profile_id || '';
-  if (payload.channelProfileId !== undefined) {
-    if (typeof payload.channelProfileId !== 'string') throw httpError(400, 'Channel Profile ID must be text.');
-    const suppliedProfileId = payload.channelProfileId.trim();
-    const comparableProfileId = logicalConnectorType(existing) === 'whatsapp_cloud'
-      ? normalizeWhatsAppRecipient(suppliedProfileId)
-      : suppliedProfileId;
-    if (comparableProfileId !== channelProfileId) throw httpError(400, 'Channel Profile ID cannot be changed.');
+  // Validate the complete identity graph before changing even the base contact
+  // fields. This prevents a bad second identity/route from leaving the contact
+  // and an earlier identity partially updated.
+  if (payload.identities !== undefined) {
+    await prevalidateContactIdentityBatch(env, workspaceId, id, payload.identities, displayName);
   }
-  const identityFieldsSupplied = payload.channelId !== undefined || payload.channelProfileId !== undefined;
-  if (identityFieldsSupplied) {
-    channelId = payload.channelId === undefined ? channelId : cleanId(payload.channelId, 'Channel ID');
-    const channel = channelId === existing.channel_id
-      ? { connectorType: logicalConnectorType(existing) }
-      : await getChannel(env, channelId, '', workspaceId);
-    if (!channel?.connectorType) throw httpError(400, 'Unknown or disabled channel.');
-  }
-  const identityChangeRequested = channelId !== existing.channel_id || channelProfileId !== existing.channel_profile_id;
-  if (identityChangeRequested) {
-    if (!existing.identity_id) throw httpError(409, 'This contact does not have an editable channel identity.');
-    if (Number(existing.identity_count) !== 1) {
-      throw httpError(409, 'This contact has multiple channel identities. Edit a specific identity instead.');
+  // Legacy aliases are validation-only. Validate them against the currently
+  // preferred identity before any base or identity write so an invalid alias
+  // cannot turn an otherwise combined PATCH into a partial save.
+  if (payload.channelId !== undefined || payload.channelProfileId !== undefined) {
+    const hydrated = await getContactDetail(env, workspaceId, id);
+    const preferred = hydrated.identities.find(identity => identity.isPrimary) || hydrated.identities[0];
+    if (!preferred) throw httpError(409, 'Add a contact identity before assigning a channel.');
+    if (payload.channelProfileId !== undefined) {
+      const supplied = normalizeIdentityProfileValue(preferred.platform, payload.channelProfileId, 'Channel Profile ID');
+      if (supplied !== preferred.profileId && supplied !== preferred.channelProfileId) {
+        throw httpError(400, 'Channel Profile ID cannot be changed. Add another identity instead.');
+      }
     }
-    if (channelId !== existing.channel_id && Number(existing.message_count) > 0) {
-      throw httpError(409, 'The channel cannot be changed after messages have been sent or received.');
+    if (payload.channelId !== undefined && cleanId(payload.channelId, 'Channel ID') !== preferred.channelId) {
+      throw httpError(400, 'Use a contact identity route to select another connected channel.');
     }
   }
-
   const now = new Date().toISOString();
-  const statements = [
+  await env.DB.batch([
     env.DB.prepare(`UPDATE contacts SET display_name=?3,company=?4,tags_json=?5,updated_at=?6
       WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, id, displayName, company, JSON.stringify(tags), now),
     env.DB.prepare(`UPDATE channel_identities SET display_name=?3
       WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, id, displayName),
+    env.DB.prepare(`UPDATE contact_identities SET display_name=CASE WHEN display_name='' OR display_name=?3 THEN ?4 ELSE display_name END,
+      updated_at=?5 WHERE workspace_id=?1 AND contact_id=?2`)
+      .bind(workspaceId, id, existing.display_name, displayName, now),
     env.DB.prepare(`UPDATE conversations SET subject=?3,tags_json=?4,updated_at=?5
       WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, id, displayName, JSON.stringify(tags), now)
-  ];
-  if (identityChangeRequested) {
-    statements.push(env.DB.prepare(`UPDATE channel_identities SET channel_id=?4,channel_profile_id=?5,display_name=?6
-      WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`)
-      .bind(workspaceId, id, existing.identity_id, channelId, channelProfileId, displayName));
-    if (channelId !== existing.channel_id) {
-      statements.push(env.DB.prepare(`UPDATE conversations SET channel_id=?3,updated_at=?4
-        WHERE workspace_id=?1 AND contact_id=?2`)
-        .bind(workspaceId, id, channelId, now));
+  ]);
+  if (payload.identities !== undefined) {
+    for (const identity of payload.identities) {
+      if (identity?.identityId) {
+        await updateContactIdentity(env, workspaceId, id, identity.identityId, identity, principal);
+      } else {
+        await createContactIdentity(env, workspaceId, id, identity, principal);
+      }
     }
-  }
-  try {
-    await env.DB.batch(statements);
-  } catch (error) {
-    if (isUniqueConstraintError(error)) throw httpError(409, 'This channel identity already belongs to another contact.');
-    throw error;
   }
   const changedFields = [...new Set(Object.keys(payload).map(key => key === 'name' ? 'displayName' : key))];
   await audit(env, principal, 'update', 'contact', id, {
     fields: changedFields,
-    identityChanged: identityChangeRequested
+    identitiesUpdated: Array.isArray(payload.identities) ? payload.identities.length : 0
   });
   return getContactDetail(env, workspaceId, id);
 }
@@ -2428,7 +3423,7 @@ async function updateContact(env, workspaceId, contactId, payload, principal) {
 async function deleteContact(env, workspaceId, contactId, principal) {
   const id = cleanId(contactId, 'Contact ID');
   const existing = await env.DB.prepare(`SELECT contact_id,display_name,company,
-      (SELECT COUNT(*) FROM channel_identities WHERE workspace_id=?2 AND contact_id=?1) AS identity_count,
+      (SELECT COUNT(*) FROM contact_identities WHERE workspace_id=?2 AND contact_id=?1) AS identity_count,
       (SELECT COUNT(*) FROM conversations WHERE workspace_id=?2 AND contact_id=?1) AS conversation_count,
       (SELECT COUNT(*) FROM messages WHERE workspace_id=?2 AND contact_id=?1) AS message_count
     FROM contacts WHERE contact_id=?1 AND workspace_id=?2`).bind(id, workspaceId).first();
@@ -2443,9 +3438,14 @@ async function deleteContact(env, workspaceId, contactId, principal) {
       (SELECT message_id FROM messages WHERE contact_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
     env.DB.prepare(`DELETE FROM outbound_payloads WHERE workspace_id=?2 AND message_id IN
       (SELECT message_id FROM messages WHERE contact_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare(`DELETE FROM identity_migration_issues WHERE workspace_id=?2 AND conversation_id IN
+      (SELECT conversation_id FROM conversations WHERE contact_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
     env.DB.prepare('DELETE FROM messages WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM conversations WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM channel_identities WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId),
+    env.DB.prepare(`DELETE FROM channel_identity_bindings WHERE workspace_id=?2 AND identity_id IN
+      (SELECT identity_id FROM contact_identities WHERE contact_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM contact_identities WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM contacts WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId)
   ]);
   await audit(env, principal, 'delete', 'contact', id, {
@@ -2466,7 +3466,7 @@ async function listMessages(env, workspaceId, conversationId, url) {
   const limit = clampInt(url.searchParams.get('limit'), 1, 200, 100);
   const before = url.searchParams.get('before') || '';
   if (!await env.DB.prepare('SELECT 1 FROM conversations WHERE conversation_id=?1 AND workspace_id=?2').bind(conversationId, workspaceId).first()) throw httpError(404, 'Conversation not found.');
-  const result = await env.DB.prepare(`SELECT message_id,direction,text,message_type,status,timestamp,channel_id,provider_message_id,error,payload_json
+  const result = await env.DB.prepare(`SELECT message_id,identity_id,direction,text,message_type,status,timestamp,channel_id,provider_message_id,error,payload_json
     FROM messages WHERE workspace_id=?1 AND conversation_id=?2 AND (?3='' OR timestamp<?3) ORDER BY timestamp DESC LIMIT ?4`)
     .bind(workspaceId, conversationId, before, limit).all();
   return result.results.reverse().map(row => {
@@ -2474,6 +3474,7 @@ async function listMessages(env, workspaceId, conversationId, url) {
     const template = row.message_type === 'template' ? templateMessageView(payload) : null;
     return {
       messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
+      contactIdentityId: row.identity_id || '', identityId: row.identity_id || '',
       status: row.status, timestamp: row.timestamp, channelId: row.channel_id,
       channelMessageId: row.provider_message_id, error: row.error,
       attachment: messageAttachmentView(row.message_type, payload, row.message_id),
@@ -2542,15 +3543,22 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
     assignedTo = assignee.email;
   }
   const markRead = Boolean(payload.markRead);
+  // Clear only the unread messages that existed when this request began. An
+  // inbound webhook can increment the counter between the SELECT above and
+  // this UPDATE; setting the counter to zero would silently mark that newer
+  // message as read before any client had displayed it.
+  const knownUnreadCount = Math.max(0, Number(existing.unread_count) || 0);
   const fallbackUnreadCount = markRead ? 0 : existing.unread_count;
   const now = new Date().toISOString();
   await env.DB.prepare(`UPDATE conversations SET
       status=CASE WHEN ?3=1 THEN ?4 ELSE status END,
       assigned_to=CASE WHEN ?5=1 THEN ?6 ELSE assigned_to END,
-      unread_count=CASE WHEN ?7=1 THEN 0 ELSE unread_count END,updated_at=?8
+      unread_count=CASE WHEN ?7=1 THEN
+        CASE WHEN unread_count>?8 THEN unread_count-?8 ELSE 0 END
+        ELSE unread_count END,updated_at=?9
     WHERE conversation_id=?1 AND workspace_id=?2`)
     .bind(id, workspaceId, hasStatusPatch ? 1 : 0, status, hasAssigneePatch ? 1 : 0, assignedTo,
-      markRead ? 1 : 0, now).run();
+      markRead ? 1 : 0, knownUnreadCount, now).run();
   await audit(env, principal, 'update', 'conversation', id, { status, assignedTo, markRead });
   return await getConversationItem(env, workspaceId, id) ||
     { conversationId: id, status, assignedTo, unreadCount: fallbackUnreadCount, updatedAt: now };
@@ -2570,6 +3578,7 @@ async function deleteConversation(env, workspaceId, conversationId, principal) {
       (SELECT message_id FROM messages WHERE conversation_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
     env.DB.prepare(`DELETE FROM outbound_payloads WHERE workspace_id=?2 AND message_id IN
       (SELECT message_id FROM messages WHERE conversation_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
+    env.DB.prepare('DELETE FROM identity_migration_issues WHERE conversation_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM messages WHERE conversation_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM conversations WHERE conversation_id=?1 AND workspace_id=?2').bind(id, workspaceId)
   ]);
@@ -2588,7 +3597,7 @@ async function deleteConversation(env, workspaceId, conversationId, principal) {
 
 async function createContact(env, workspaceId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Contact must be a JSON object.');
-  rejectUnknownKeys(payload, new Set(['displayName', 'name', 'company', 'tags', 'channelId', 'channelProfileId']), 'contact');
+  rejectUnknownKeys(payload, new Set(['displayName', 'name', 'company', 'tags', 'channelId', 'channelProfileId', 'identities']), 'contact');
   if (payload.displayName !== undefined && payload.name !== undefined &&
       String(payload.displayName).trim() !== String(payload.name).trim()) {
     throw httpError(400, 'Display name and name must match when both are supplied.');
@@ -2598,57 +3607,83 @@ async function createContact(env, workspaceId, payload, principal) {
   const displayName = cleanRequired(suppliedName, 'Display name', 120);
   const company = payload.company === undefined ? '' : cleanOptionalText(payload.company, 'Company', 160);
   const tags = payload.tags === undefined ? [] : validateContactTags(payload.tags);
-  const channelId = cleanId(payload.channelId, 'Channel ID');
-  const channel = await getChannel(env, channelId, '', workspaceId);
-  if (!channel) throw httpError(400, 'Unknown or disabled channel.');
-  if (MANAGED_CONNECTORS.has(channel.connectorType)) {
-    const stored = await env.DB.prepare(`SELECT credential_key FROM channel_credentials
-      WHERE workspace_id=?1 AND channel_id=?2`).bind(workspaceId, channelId).all();
-    const credentialFields = new Set((stored.results || []).map(row => row.credential_key));
-    const health = channelHealth({ enabled: 1, provider_type: channel.connectorType }, channel.config, credentialFields);
-    if (health !== 'connected') throw httpError(409, 'Verify the channel and its webhook before starting a conversation.');
+  if (payload.identities !== undefined && (!Array.isArray(payload.identities) || payload.identities.length > 50)) {
+    throw httpError(400, 'Identities must be an array with no more than 50 items.');
   }
-  const rawChannelProfileId = cleanRequired(payload.channelProfileId, 'Channel profile ID', 200);
-  const channelProfileId = channel.connectorType === 'whatsapp_cloud'
-    ? normalizeWhatsAppRecipient(rawChannelProfileId)
-    : rawChannelProfileId;
   const now = new Date().toISOString();
   const contactId = crypto.randomUUID();
-  const identityId = crypto.randomUUID();
-  const conversationId = crypto.randomUUID();
+  const legacyConversationRequested = payload.channelId !== undefined || payload.channelProfileId !== undefined;
+  const identityInputs = Array.isArray(payload.identities) ? [...payload.identities] : [];
+  if (payload.channelId !== undefined || payload.channelProfileId !== undefined) {
+    const channelId = cleanId(payload.channelId, 'Channel ID');
+    const channel = await getChannel(env, channelId, '', workspaceId);
+    if (!channel) throw httpError(400, 'Unknown or disabled channel.');
+    await assertChannelReadyForConversation(env, workspaceId, channel);
+    identityInputs.push({
+      platform: platformForChannel(channel),
+      connectorType: channel.connectorType,
+      channelId,
+      channelProfileId: cleanRequired(payload.channelProfileId, 'Channel Profile ID', 512),
+      displayName,
+      isPrimary: !identityInputs.length
+    });
+  }
   try {
-    await env.DB.batch([
-      env.DB.prepare(`INSERT INTO contacts
-          (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
-        VALUES (?1,?2,?3,?4,?5,?5,?6)`)
-        .bind(contactId, displayName, company, JSON.stringify(tags), now, workspaceId),
-      env.DB.prepare(`INSERT INTO channel_identities (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
-        VALUES (?1,?2,?3,?4,?5,?6,?7)`).bind(identityId, contactId, channelId, channelProfileId, displayName, now, workspaceId),
-      env.DB.prepare(`INSERT INTO conversations
-          (conversation_id,contact_id,channel_id,status,assigned_to,subject,last_message_at,tags_json,created_at,updated_at,workspace_id)
-        VALUES (?1,?2,?3,'open',?4,?5,?6,?7,?6,?6,?8)`)
-        .bind(conversationId, contactId, channelId, principal.user.email, displayName, now, JSON.stringify(tags), workspaceId)
-    ]);
+    await env.DB.prepare(`INSERT INTO contacts
+        (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,?3,?4,?5,?5,?6)`)
+      .bind(contactId, displayName, company, JSON.stringify(tags), now, workspaceId).run();
   } catch (error) {
-    if (String(error.message).includes('UNIQUE')) throw httpError(409, 'This channel identity already exists.');
+    if (isUniqueConstraintError(error)) throw httpError(409, 'Contact ID already exists.');
     throw error;
   }
-  await audit(env, principal, 'create', 'contact', contactId, { channelId, conversationId });
-  return { ok: true, contactId, conversationId, item: await getContactDetail(env, workspaceId, contactId) };
+  const conversationIds = [];
+  const identityIds = [];
+  try {
+    for (const identityInput of identityInputs) {
+      const result = await ensureContactIdentity(env, workspaceId, contactId, identityInput, now);
+      identityIds.push(result.identityId);
+      for (const binding of (legacyConversationRequested ? result.bindings.slice(0, 1) : [])) {
+        conversationIds.push(await ensureIdentityConversation(env, workspaceId, contactId, result.identityId,
+          binding.channelId, principal?.user?.email || ''));
+      }
+    }
+  } catch (error) {
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM conversations WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, contactId),
+      env.DB.prepare(`DELETE FROM channel_identities WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, contactId),
+      env.DB.prepare(`DELETE FROM channel_identity_bindings WHERE workspace_id=?1 AND identity_id IN
+        (SELECT identity_id FROM contact_identities WHERE workspace_id=?1 AND contact_id=?2)`).bind(workspaceId, contactId),
+      env.DB.prepare(`DELETE FROM contact_identities WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, contactId),
+      env.DB.prepare(`DELETE FROM contacts WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, contactId)
+    ]);
+    throw error;
+  }
+  await audit(env, principal, 'create', 'contact', contactId,
+    { identityIds, conversationIds, channelIndependent: identityInputs.length === 0 });
+  return { ok: true, contactId, identityIds, conversationIds,
+    conversationId: conversationIds[0] || '', item: await getContactDetail(env, workspaceId, contactId) };
 }
 
 async function createOutboundMessage(env, workspaceId, conversationId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Message payload must be an object.');
   rejectUnknownKeys(payload, new Set(['text', 'replyToMessageId']), 'message request');
   const text = cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH);
-  const row = await env.DB.prepare(`SELECT c.contact_id,c.channel_id,i.channel_profile_id,ch.connector_type,ch.provider_type,
+  await reconcileLegacyConversationIdentity(env, workspaceId, conversationId);
+  const row = await env.DB.prepare(`SELECT c.contact_id,c.channel_id,c.identity_id,
+      COALESCE(b.scoped_profile_id,CASE WHEN c.identity_id='' THEN (SELECT legacy.channel_profile_id FROM channel_identities legacy
+        WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id AND legacy.channel_id=c.channel_id
+        ORDER BY legacy.created_at LIMIT 1) ELSE '' END,'') AS channel_profile_id,
+      ch.connector_type,ch.provider_type,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
     FROM conversations c
-    JOIN channel_identities i ON i.contact_id=c.contact_id AND i.channel_id=c.channel_id AND i.workspace_id=c.workspace_id
     JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
+    LEFT JOIN channel_identity_bindings b ON b.workspace_id=c.workspace_id AND b.identity_id=c.identity_id
+      AND b.channel_id=c.channel_id AND b.active=1
     WHERE c.conversation_id=?1 AND c.workspace_id=?2`).bind(conversationId, workspaceId).first();
-  if (!row) throw httpError(404, 'Conversation or channel identity not found.');
+  if (!row || !row.channel_profile_id) throw httpError(404, 'Conversation or channel identity not found.');
+  if (!row.identity_id) throw httpError(409, 'This legacy conversation has an unresolved contact identity. Repair its route before sending.');
   const connectorType = logicalConnectorType(row);
   assertFreeformReplyAllowed(connectorType, row.last_inbound_at);
   const reply = await resolveReplyTarget(env, workspaceId, conversationId, row.channel_id,
@@ -2656,16 +3691,18 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,payload_json,workspace_id)
-      VALUES (?1,?2,?3,?4,'outbound','text',?5,'pending',?6,?7,?8)`).bind(messageId, conversationId, row.contact_id,
-        row.channel_id, text, now, reply ? JSON.stringify({ reply }) : '{}', workspaceId),
+    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,payload_json,workspace_id)
+      VALUES (?1,?2,?3,?4,?5,'outbound','text',?6,'pending',?7,?8,?9)`).bind(messageId, conversationId, row.contact_id,
+        row.channel_id, row.identity_id || '', text, now, reply ? JSON.stringify({ reply }) : '{}', workspaceId),
     env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2').bind(conversationId, workspaceId, now)
   ]);
+  if (row.identity_id) await touchIdentityBinding(env, workspaceId, row.identity_id, row.channel_id, 'outbound', conversationId, now);
   await audit(env, principal, 'send_message', 'conversation', conversationId, {
     channelId: row.channel_id, messageId, ...(reply ? { replyToMessageId: reply.messageId } : {})
   });
   return { message: {
-    messageId, conversationId, channelId: row.channel_id, direction: 'outbound', messageType: 'text',
+    messageId, conversationId, channelId: row.channel_id, contactIdentityId: row.identity_id || '',
+    identityId: row.identity_id || '', direction: 'outbound', messageType: 'text',
     text, status: 'pending', timestamp: now, reply: reply || null
   } };
 }
@@ -2714,15 +3751,22 @@ function assertFreeformReplyAllowed(connectorType, lastInboundAt) {
 }
 
 async function conversationDeliveryTarget(env, workspaceId, conversationId) {
-  const row = await env.DB.prepare(`SELECT c.contact_id,c.channel_id,i.channel_profile_id,ch.connector_type,ch.provider_type,
+  await reconcileLegacyConversationIdentity(env, workspaceId, conversationId);
+  const row = await env.DB.prepare(`SELECT c.contact_id,c.channel_id,c.identity_id,
+      COALESCE(b.scoped_profile_id,CASE WHEN c.identity_id='' THEN (SELECT legacy.channel_profile_id FROM channel_identities legacy
+        WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id AND legacy.channel_id=c.channel_id
+        ORDER BY legacy.created_at LIMIT 1) ELSE '' END,'') AS channel_profile_id,
+      ch.connector_type,ch.provider_type,
       ch.config_json,ch.secret_key,ch.enabled,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
     FROM conversations c
-    JOIN channel_identities i ON i.contact_id=c.contact_id AND i.channel_id=c.channel_id AND i.workspace_id=c.workspace_id
     JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
+    LEFT JOIN channel_identity_bindings b ON b.workspace_id=c.workspace_id AND b.identity_id=c.identity_id
+      AND b.channel_id=c.channel_id AND b.active=1
     WHERE c.conversation_id=?1 AND c.workspace_id=?2`).bind(conversationId, workspaceId).first();
-  if (!row) throw httpError(404, 'Conversation or channel identity not found.');
+  if (!row || !row.channel_profile_id) throw httpError(404, 'Conversation or channel identity not found.');
+  if (!row.identity_id) throw httpError(409, 'This legacy conversation has an unresolved contact identity. Repair its route before sending.');
   return {
     ...row,
     connectorType: logicalConnectorType(row),
@@ -2736,16 +3780,16 @@ async function conversationDeliveryTarget(env, workspaceId, conversationId) {
   };
 }
 
-async function listConversationTemplates(env, workspaceId, conversationId) {
+async function listConversationTemplates(env, workspaceId, conversationId, { forceRefresh = false } = {}) {
   const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
   if (target.connectorType !== 'whatsapp_cloud') {
     throw httpError(409, 'Templates are available only for WhatsApp conversations.');
   }
   if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
-  return listWhatsAppChannelTemplates(env, target.channel, { approvedOnly: true });
+  return listWhatsAppChannelTemplates(env, target.channel, { approvedOnly: true, forceRefresh });
 }
 
-async function listWorkspaceWhatsAppTemplates(env, workspaceId) {
+async function listWorkspaceWhatsAppTemplates(env, workspaceId, { forceRefresh = false } = {}) {
   const result = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled,config_json,secret_key,workspace_id
     FROM channels WHERE workspace_id=?1 ORDER BY name COLLATE NOCASE,channel_id`)
     .bind(workspaceId).all();
@@ -2767,7 +3811,9 @@ async function listWorkspaceWhatsAppTemplates(env, workspaceId) {
   const truncatedChannels = [];
   const channelResults = await Promise.all(channels.map(async channel => {
     try {
-      return { channel, templateResult: await listWhatsAppChannelTemplates(env, channel, { approvedOnly: false, includeMetadata: true }) };
+      return { channel, templateResult: await listWhatsAppChannelTemplates(env, channel, {
+        approvedOnly: false, includeMetadata: true, forceRefresh
+      }) };
     } catch (error) {
       return { channel, error };
     }
@@ -2823,13 +3869,22 @@ async function listWorkspaceWhatsAppTemplates(env, workspaceId) {
   };
 }
 
-async function listWhatsAppChannelTemplates(env, channel, { approvedOnly = true, includeMetadata = false } = {}) {
+async function listWhatsAppChannelTemplates(env, channel, {
+  approvedOnly = true,
+  includeMetadata = false,
+  forceRefresh = false
+} = {}) {
   const templateLabel = approvedOnly ? 'approved WhatsApp templates' : 'WhatsApp templates';
   const wabaId = String(channel.config?.wabaId || '').trim();
   if (!/^\d{5,40}$/.test(wabaId)) throw httpError(409, 'The WhatsApp Business Account ID is not configured.');
   const credentials = await readChannelCredentials(env, channel);
   if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
   const version = metaApiVersion(channel.config?.apiVersion);
+  const cacheRequest = whatsAppTemplateCacheRequest(channel, wabaId, version, approvedOnly, includeMetadata);
+  if (!forceRefresh) {
+    const cached = await readWhatsAppTemplateCache(cacheRequest, includeMetadata);
+    if (cached.hit) return cached.value;
+  }
   const items = [];
   const seen = new Set();
   const maximumPages = approvedOnly ? 3 : 10;
@@ -2879,7 +3934,59 @@ async function listWhatsAppChannelTemplates(env, channel, { approvedOnly = true,
   }
   items.sort((left, right) => left.name.localeCompare(right.name) ||
     left.language.code.localeCompare(right.language.code));
-  return includeMetadata ? { items, truncated: moreAvailable, limit: maximumItems } : items;
+  const result = includeMetadata ? { items, truncated: moreAvailable, limit: maximumItems } : items;
+  await writeWhatsAppTemplateCache(cacheRequest, result);
+  return result;
+}
+
+export function whatsAppTemplateCacheRequest(channel, wabaId, version, approvedOnly, includeMetadata) {
+  const workspaceId = String(channel?.workspaceId || '').slice(0, 100);
+  const channelId = String(channel?.channelId || '').slice(0, 100);
+  const url = new URL('/whatsapp/templates', WHATSAPP_TEMPLATE_CACHE_ORIGIN);
+  url.searchParams.set('workspace', workspaceId);
+  url.searchParams.set('channel', channelId);
+  url.searchParams.set('waba', String(wabaId || '').slice(0, 40));
+  url.searchParams.set('version', String(version || '').slice(0, 20));
+  url.searchParams.set('approved', approvedOnly ? '1' : '0');
+  url.searchParams.set('metadata', includeMetadata ? '1' : '0');
+  return new Request(url.toString(), { method: 'GET' });
+}
+
+function defaultTemplateCache() {
+  const cache = globalThis.caches?.default;
+  return cache && typeof cache.match === 'function' && typeof cache.put === 'function' ? cache : null;
+}
+
+async function readWhatsAppTemplateCache(request, includeMetadata) {
+  const cache = defaultTemplateCache();
+  if (!cache) return { hit: false, value: null };
+  try {
+    const response = await cache.match(request);
+    if (!response?.ok) return { hit: false, value: null };
+    const payload = safeJsonParse(await response.text(), null);
+    const value = payload?.value;
+    const valid = includeMetadata
+      ? isPlainObject(value) && Array.isArray(value.items) && typeof value.truncated === 'boolean'
+      : Array.isArray(value);
+    return valid ? { hit: true, value } : { hit: false, value: null };
+  } catch {
+    return { hit: false, value: null };
+  }
+}
+
+async function writeWhatsAppTemplateCache(request, value) {
+  const cache = defaultTemplateCache();
+  if (!cache) return;
+  try {
+    await cache.put(request, new Response(JSON.stringify({ value }), {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': `public, max-age=${WHATSAPP_TEMPLATE_CACHE_SECONDS}`
+      }
+    }));
+  } catch {
+    // Cache availability must never prevent the live Meta response from returning.
+  }
 }
 
 async function findWhatsAppChannelTemplate(env, channel, name, languageCode) {
@@ -3220,10 +4327,10 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   const storedPayload = presentation.storedPayload;
   const encryptedPayload = await encryptOutboundPayload({ template }, env.CHANNEL_CREDENTIALS_KEY, workspaceId, messageId);
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
+    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
         status,timestamp,payload_json,workspace_id)
-      VALUES (?1,?2,?3,?4,'outbound','template',?5,'pending',?6,?7,?8)`)
-      .bind(messageId, conversationId, target.contact_id, target.channel_id, previewText, now,
+      VALUES (?1,?2,?3,?4,?5,'outbound','template',?6,'pending',?7,?8,?9)`)
+      .bind(messageId, conversationId, target.contact_id, target.channel_id, target.identity_id, previewText, now,
         JSON.stringify(storedPayload), workspaceId),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, workspaceId, encryptedPayload, now),
@@ -3233,11 +4340,13 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
     env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2')
       .bind(conversationId, workspaceId, now)
   ]);
+  await touchIdentityBinding(env, workspaceId, target.identity_id, target.channel_id, 'outbound', conversationId, now);
   await audit(env, principal, 'send_template', 'conversation', conversationId, {
     channelId: target.channel_id, messageId, templateName: template.name
   });
   return { message: {
-    messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: 'template',
+    messageId, conversationId, channelId: target.channel_id, contactIdentityId: target.identity_id,
+    identityId: target.identity_id, direction: 'outbound', messageType: 'template',
     text: previewText, status: 'pending', timestamp: now,
     template: templateMessageView(storedPayload),
     attachment: messageAttachmentView('template', storedPayload, messageId)
@@ -3319,14 +4428,15 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   if (target.connectorType === 'telegram') {
     let safeAttachment = { ...attachment };
     await env.DB.batch([
-      env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
+      env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
           provider_message_id,status,timestamp,payload_json,workspace_id)
-        VALUES (?1,?2,?3,?4,'outbound',?5,?6,'','pending',?7,?8,?9)`)
-        .bind(messageId, conversationId, target.contact_id, target.channel_id, attachment.type, preview, now,
+        VALUES (?1,?2,?3,?4,?5,'outbound',?6,?7,'','pending',?8,?9,?10)`)
+        .bind(messageId, conversationId, target.contact_id, target.channel_id, target.identity_id, attachment.type, preview, now,
           JSON.stringify({ attachment: safeAttachment, ...(reply ? { reply } : {}) }), workspaceId),
       env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2')
         .bind(conversationId, workspaceId, now)
     ]);
+    await touchIdentityBinding(env, workspaceId, target.identity_id, target.channel_id, 'outbound', conversationId, now);
     let sent;
     try {
       sent = await sendTelegramMedia(env, target.channel, target.channel_profile_id, file, attachment,
@@ -3370,10 +4480,10 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   const encryptedPayload = await encryptOutboundPayload({ media: { ...attachment, id: providerMediaId } },
     env.CHANNEL_CREDENTIALS_KEY, workspaceId, messageId);
   const safeAttachment = { ...attachment, providerMediaId };
-  const statements = [env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
+  const statements = [env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
       provider_message_id,status,timestamp,payload_json,workspace_id)
-    VALUES (?1,?2,?3,?4,'outbound',?5,?6,'','pending',?7,?8,?9)`)
-    .bind(messageId, conversationId, target.contact_id, target.channel_id, attachment.type, preview,
+    VALUES (?1,?2,?3,?4,?5,'outbound',?6,?7,'','pending',?8,?9,?10)`)
+    .bind(messageId, conversationId, target.contact_id, target.channel_id, target.identity_id, attachment.type, preview,
       now, JSON.stringify({ attachment: safeAttachment, ...(reply ? { reply } : {}) }), workspaceId),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, workspaceId, encryptedPayload, now),
@@ -3384,6 +4494,7 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
       .bind(conversationId, workspaceId, now)
   ];
   await env.DB.batch(statements);
+  await touchIdentityBinding(env, workspaceId, target.identity_id, target.channel_id, 'outbound', conversationId, now);
   await auditAttachmentBestEffort(env, principal, conversationId, {
     channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType, size: attachment.size
   });
@@ -3685,11 +4796,20 @@ async function sendOrQueue(env, messageId) {
 
 async function dispatchOutbound(env, messageId) {
   const row = await env.DB.prepare(`SELECT m.*,c.config_json,c.connector_type,c.provider_type,c.secret_key,c.enabled,
-      i.channel_profile_id,cv.contact_id FROM messages m JOIN channels c ON c.channel_id=m.channel_id
+      COALESCE(b.scoped_profile_id,'') AS channel_profile_id,
+      COALESCE(NULLIF(m.identity_id,''),NULLIF(cv.identity_id,''),'') AS delivery_identity_id,cv.contact_id
+      FROM messages m JOIN channels c ON c.channel_id=m.channel_id
       AND c.workspace_id=m.workspace_id JOIN conversations cv ON cv.conversation_id=m.conversation_id AND cv.workspace_id=m.workspace_id
-      JOIN channel_identities i ON i.contact_id=cv.contact_id AND i.channel_id=cv.channel_id AND i.workspace_id=m.workspace_id
+      LEFT JOIN channel_identity_bindings b ON b.workspace_id=m.workspace_id
+        AND b.identity_id=COALESCE(NULLIF(m.identity_id,''),NULLIF(cv.identity_id,''),'')
+        AND b.channel_id=cv.channel_id AND b.active=1
       WHERE m.message_id=?1`).bind(messageId).first();
   if (!row) throw new Error('Outbound message not found.');
+  // Ambiguous legacy conversations intentionally keep an empty identity_id.
+  // Never guess a destination from the first legacy channel_identity: queued
+  // or retried messages must fail closed until migration resolves the identity.
+  if (!row.delivery_identity_id) throw nonRetryableError('Outbound identity is unresolved.');
+  if (!row.channel_profile_id) throw nonRetryableError('Outbound channel route is unavailable.');
   if (!row.enabled) throw new Error('Channel is disabled.');
   const channel = {
     channelId: row.channel_id,
@@ -3698,6 +4818,7 @@ async function dispatchOutbound(env, messageId) {
     config: safeJsonParse(row.config_json, {}),
     secretKey: row.secret_key
   };
+  assertManagedOutboundVerified(channel);
   const messagePayload = safeJsonParse(row.payload_json, {});
   const replyChannelMessageId = String(messagePayload?.reply?.channelMessageId || '');
   let result;
@@ -3732,6 +4853,24 @@ async function dispatchOutbound(env, messageId) {
   else if (channel.connectorType === 'web_chat') result = { status: 'sent', providerMessageId: row.message_id, httpStatus: 200 };
   else throw new Error(`Outbound connector ${channel.connectorType} is not implemented yet.`);
   return { ...result, workspaceId: row.workspace_id };
+}
+
+function assertManagedOutboundVerified(channel) {
+  if (!MANAGED_CONNECTORS.has(channel.connectorType)) return;
+  const config = channel.config || {};
+  const verifiedAt = String(config.credentialsVerifiedAt || '').trim();
+  const verifiedProviderId = String(config.verifiedProviderId || '').trim();
+  if (!verifiedAt || !verifiedProviderId) {
+    throw nonRetryableError('Channel credentials must be verified before sending messages.');
+  }
+  const configuredProviderId = channel.connectorType === 'whatsapp_cloud'
+    ? String(config.phoneNumberId || '').trim()
+    : channel.connectorType === 'instagram'
+      ? String(config.instagramAccountId || '').trim()
+      : '';
+  if (configuredProviderId && configuredProviderId !== verifiedProviderId) {
+    throw nonRetryableError('The verified provider identity does not match the channel configuration.');
+  }
 }
 
 async function sendWhatsApp(env, channel, recipient, text, replyChannelMessageId = '', messageId = '') {
@@ -4018,48 +5157,68 @@ async function storeInbound(env, channel, event, rawPayload) {
   try {
   const now = new Date().toISOString();
   const timestamp = normalizeTimestamp(event.timestamp, now);
-  let identity = await env.DB.prepare(`SELECT i.identity_id,i.contact_id,c.display_name AS contact_display_name
-    FROM channel_identities i JOIN contacts c ON c.contact_id=i.contact_id AND c.workspace_id=i.workspace_id
-    WHERE i.workspace_id=?1 AND i.channel_id=?2 AND i.channel_profile_id=?3`)
+  const profileId = String(event.channelProfileId);
+  const platform = platformForChannel(channel);
+  let identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+    FROM channel_identity_bindings b
+    JOIN contact_identities ci ON ci.identity_id=b.identity_id AND ci.workspace_id=b.workspace_id
+    JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+    WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
     .bind(channel.workspaceId, channel.channelId, String(event.channelProfileId)).first();
   if (!identity) {
-    const contactId = crypto.randomUUID();
-    const identityId = crypto.randomUUID();
-    const name = String(event.displayName || event.channelProfileId).slice(0, 120);
-    try {
-      await env.DB.batch([
-        env.DB.prepare('INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id) VALUES (?1,?2,?3,?3,?4)').bind(contactId, name, now, channel.workspaceId),
-        env.DB.prepare(`INSERT INTO channel_identities (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
-          VALUES (?1,?2,?3,?4,?5,?6,?7)`).bind(identityId, contactId, channel.channelId, String(event.channelProfileId), name, now, channel.workspaceId)
-      ]);
-      identity = { identity_id: identityId, contact_id: contactId, contact_display_name: name };
-    } catch (error) {
-      identity = await env.DB.prepare(`SELECT i.identity_id,i.contact_id,c.display_name AS contact_display_name
-        FROM channel_identities i JOIN contacts c ON c.contact_id=i.contact_id AND c.workspace_id=i.workspace_id
-        WHERE i.workspace_id=?1 AND i.channel_id=?2 AND i.channel_profile_id=?3`)
-        .bind(channel.workspaceId, channel.channelId, String(event.channelProfileId)).first();
-      if (!identity) throw error;
+    const candidates = PORTABLE_IDENTITY_PLATFORMS.has(platform)
+      ? await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+          FROM contact_identities ci JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+          WHERE ci.workspace_id=?1 AND ci.platform=?2 AND ci.profile_id=?3
+          ORDER BY ci.created_at,ci.identity_id`).bind(channel.workspaceId, platform, profileId).all()
+      : { results: [] };
+    if ((candidates.results || []).length === 1) {
+      identity = candidates.results[0];
+      try {
+        await ensureIdentityBinding(env, channel.workspaceId, identity.contact_id, identity.identity_id, {
+          platform, profileId, scopedProfileId: profileId, username: '',
+          phoneNumber: platform === 'whatsapp' && /^\d{6,20}$/.test(profileId) ? profileId : '',
+          displayName: String(event.displayName || identity.contact_display_name || profileId).slice(0, 120),
+          metadata: {}, channelId: channel.channelId
+        }, now);
+      } catch (error) {
+        const winner = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+          FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
+          JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+          WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
+          .bind(channel.workspaceId, channel.channelId, profileId).first();
+        if (!winner) throw error;
+        identity = winner;
+      }
+    } else {
+      const contactId = crypto.randomUUID();
+      const name = String(event.displayName || event.channelProfileId).slice(0, 120);
+      try {
+        await env.DB.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+          VALUES (?1,?2,?3,?3,?4)`).bind(contactId, name, now, channel.workspaceId).run();
+        const created = await ensureContactIdentity(env, channel.workspaceId, contactId, {
+          platform, profileId, channelId: channel.channelId, scopedProfileId: profileId,
+          phoneNumber: platform === 'whatsapp' && /^\d{6,20}$/.test(profileId) ? profileId : '',
+          displayName: name, isPrimary: true
+        }, now);
+        identity = { identity_id: created.identityId, contact_id: contactId, contact_display_name: name };
+      } catch (error) {
+        await env.DB.prepare(`DELETE FROM contacts WHERE workspace_id=?1 AND contact_id=?2
+          AND NOT EXISTS (SELECT 1 FROM conversations WHERE workspace_id=?1 AND contact_id=?2)`)
+          .bind(channel.workspaceId, contactId).run().catch(() => {});
+        const winner = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+          FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
+          JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+          WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
+          .bind(channel.workspaceId, channel.channelId, profileId).first();
+        if (!winner) throw error;
+        identity = winner;
+      }
     }
   }
-  let conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
-    WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3
-    ORDER BY last_message_at DESC,created_at DESC LIMIT 1`)
-    .bind(channel.workspaceId, identity.contact_id, channel.channelId).first();
-  if (!conversation) {
-    const conversationId = crypto.randomUUID();
-    try {
-      await env.DB.prepare(`INSERT INTO conversations (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
-        VALUES (?1,?2,?3,'open',?4,?5,0,?6,?6,?7)`).bind(conversationId, identity.contact_id, channel.channelId,
-        String(event.displayName || event.channelProfileId).slice(0, 120), timestamp, now, channel.workspaceId).run();
-      conversation = { conversation_id: conversationId };
-    } catch (error) {
-      if (!isUniqueConstraintError(error)) throw error;
-      conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
-        WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3 LIMIT 1`)
-        .bind(channel.workspaceId, identity.contact_id, channel.channelId).first();
-      if (!conversation) throw error;
-    }
-  }
+  const conversationId = await ensureIdentityConversation(env, channel.workspaceId, identity.contact_id,
+    identity.identity_id, channel.channelId, '');
+  const conversation = { conversation_id: conversationId };
   const messageId = crypto.randomUUID();
   const reply = await resolveInboundReply(env, channel.workspaceId, conversation.conversation_id,
     channel.channelId, event.reply);
@@ -4071,18 +5230,22 @@ async function storeInbound(env, channel, event, rawPayload) {
       }
     : rawPayload;
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,
-      provider_message_id,status,timestamp,payload_json,workspace_id) VALUES (?1,?2,?3,?4,'inbound',?5,?6,?7,'received',?8,?9,?10)`)
-      .bind(messageId, conversation.conversation_id, identity.contact_id, channel.channelId, String(event.messageType || 'text').slice(0, 40),
-        String(event.text || '').slice(0, MAX_TEXT_LENGTH), String(event.providerMessageId || ''), timestamp, truncateJson(storedPayload), channel.workspaceId),
+    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
+      provider_message_id,status,timestamp,payload_json,workspace_id) VALUES (?1,?2,?3,?4,?5,'inbound',?6,?7,?8,'received',?9,?10,?11)`)
+      .bind(messageId, conversation.conversation_id, identity.contact_id, channel.channelId, identity.identity_id,
+        String(event.messageType || 'text').slice(0, 40), String(event.text || '').slice(0, MAX_TEXT_LENGTH),
+        String(event.providerMessageId || ''), timestamp, truncateJson(storedPayload), channel.workspaceId),
     env.DB.prepare("UPDATE conversations SET status='open',last_message_at=?3,unread_count=unread_count+1,updated_at=?4 WHERE conversation_id=?1 AND workspace_id=?2")
       .bind(conversation.conversation_id, channel.workspaceId, timestamp, now)
   ]);
+  await touchIdentityBinding(env, channel.workspaceId, identity.identity_id, channel.channelId,
+    'inbound', conversation.conversation_id, timestamp);
   const messageType = String(event.messageType || 'text').slice(0, 40);
   const text = String(event.text || '').slice(0, MAX_TEXT_LENGTH);
   const senderName = String(identity.contact_display_name || event.displayName || event.channelProfileId);
   const message = {
     messageId, conversationId: conversation.conversation_id, channelId: channel.channelId,
+    contactIdentityId: identity.identity_id, identityId: identity.identity_id,
     direction: 'inbound', messageType, text, status: 'received', timestamp,
     channelMessageId: String(event.providerMessageId || ''), error: '', senderName,
     attachment: messageAttachmentView(messageType, storedPayload, messageId),
@@ -4198,15 +5361,19 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
         error=CASE WHEN status='failed' THEN error ELSE '' END
       WHERE workspace_id=?1 AND channel_id=?2 AND direction='outbound' AND timestamp<=?4
         AND provider_message_id<>'' AND status IN ('submitted','sent','delivered','read')
-        AND contact_id IN (SELECT contact_id FROM channel_identities
-          WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3)`)
+        AND COALESCE(NULLIF(identity_id,''),(SELECT NULLIF(c.identity_id,'') FROM conversations c
+          WHERE c.workspace_id=messages.workspace_id AND c.conversation_id=messages.conversation_id),'')
+          IN (SELECT identity_id FROM channel_identity_bindings
+          WHERE workspace_id=?1 AND channel_id=?2 AND scoped_profile_id=?3)`)
       .bind(workspaceId, channelId, channelProfileId, timestamp, status, truncateJson(rawPayload)).run();
     if (!updated.meta?.changes) return [];
     const changed = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.status,m.error,m.provider_message_id FROM messages m
       WHERE m.workspace_id=?1 AND m.channel_id=?2 AND m.direction='outbound' AND m.timestamp<=?4
         AND m.provider_message_id<>'' AND m.status IN ('submitted','sent','delivered','read')
-        AND m.contact_id IN (SELECT contact_id FROM channel_identities
-          WHERE workspace_id=?1 AND channel_id=?2 AND channel_profile_id=?3)`)
+        AND COALESCE(NULLIF(m.identity_id,''),(SELECT NULLIF(c.identity_id,'') FROM conversations c
+          WHERE c.workspace_id=m.workspace_id AND c.conversation_id=m.conversation_id),'')
+          IN (SELECT identity_id FROM channel_identity_bindings
+          WHERE workspace_id=?1 AND channel_id=?2 AND scoped_profile_id=?3)`)
       .bind(workspaceId, channelId, channelProfileId, timestamp).all();
     return changed.results.map(realtimeMessageStatus);
   } catch (error) {
@@ -4248,18 +5415,29 @@ async function seedDemo(env, workspaceId, principal) {
   const channelId = workspaceId === 'ws_default' ? 'demo-web' : `demo-web-${workspaceId}`;
   const contactId = crypto.randomUUID();
   const identityId = crypto.randomUUID();
+  const bindingId = crypto.randomUUID();
   const conversationId = crypto.randomUUID();
+  const profileId = `demo-${contactId}`;
   await env.DB.batch([
     env.DB.prepare(`INSERT OR IGNORE INTO channels (channel_id,name,connector_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
       VALUES (?1,'Website chat','web_chat',1,'["text"]','{}','DEMO_WEB',?2,?2,?3)`).bind(channelId, now, workspaceId),
     env.DB.prepare('INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id) VALUES (?1,?2,?3,?3,?4)').bind(contactId, 'Demo customer', now, workspaceId),
+    env.DB.prepare(`INSERT INTO contact_identities
+        (identity_id,workspace_id,contact_id,platform,profile_id,display_name,metadata_json,created_at,updated_at)
+      VALUES (?1,?2,?3,'web_chat',?4,'Demo customer','{"isPrimary":true}',?5,?5)`)
+      .bind(identityId, workspaceId, contactId, profileId, now),
+    env.DB.prepare(`INSERT INTO channel_identity_bindings
+        (binding_id,workspace_id,identity_id,channel_id,scoped_profile_id,metadata_json,active,
+         first_seen_at,last_seen_at,last_inbound_at,last_conversation_id,created_at,updated_at)
+      VALUES (?1,?2,?3,?4,?5,'{}',1,?6,?6,?6,?7,?6,?6)`)
+      .bind(bindingId, workspaceId, identityId, channelId, profileId, now, conversationId),
     env.DB.prepare(`INSERT INTO channel_identities (identity_id,contact_id,channel_id,channel_profile_id,display_name,created_at,workspace_id)
-      VALUES (?1,?2,?3,?4,?5,?6,?7)`).bind(identityId, contactId, channelId, `demo-${contactId}`, 'Demo customer', now, workspaceId),
-    env.DB.prepare(`INSERT INTO conversations (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
-      VALUES (?1,?2,?3,'open','Demo customer',?4,1,?4,?4,?5)`).bind(conversationId, contactId, channelId, now, workspaceId),
-    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
-      VALUES (?1,?2,?3,?4,'inbound','text','Hello! This is a demo conversation.','received',?5,?6)`)
-      .bind(crypto.randomUUID(), conversationId, contactId, channelId, now, workspaceId)
+      VALUES (?1,?2,?3,?4,?5,?6,?7)`).bind(bindingId, contactId, channelId, profileId, 'Demo customer', now, workspaceId),
+    env.DB.prepare(`INSERT INTO conversations (conversation_id,contact_id,channel_id,identity_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,?3,?4,'open','Demo customer',?5,1,?5,?5,?6)`).bind(conversationId, contactId, channelId, identityId, now, workspaceId),
+    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,workspace_id)
+      VALUES (?1,?2,?3,?4,?5,'inbound','text','Hello! This is a demo conversation.','received',?6,?7)`)
+      .bind(crypto.randomUUID(), conversationId, contactId, channelId, identityId, now, workspaceId)
   ]);
   await audit(env, principal, 'seed', 'conversation', conversationId, { channelId });
   return { ok: true, channelId, contactId, conversationId };
@@ -4311,6 +5489,13 @@ function whatsappInboundText(message) {
   if (direct) return String(direct);
   const caption = message?.image?.caption || message?.video?.caption || message?.document?.caption;
   if (caption) return String(caption);
+  // Media cards already describe their file type and name. Keeping a generated
+  // "[WhatsApp image received]" line duplicates that UI and is especially noisy
+  // in conversation previews. An attachment without a customer caption should
+  // therefore remain textless, just like Telegram media.
+  if (['image', 'video', 'audio', 'document', 'sticker'].includes(String(message?.type || '').toLowerCase())) {
+    return '';
+  }
   const type = String(message?.type || 'message').replace(/_/g, ' ');
   return `[WhatsApp ${type} received]`;
 }
@@ -4645,6 +5830,7 @@ async function cleanupExpiredAuth(env) {
   const now = new Date().toISOString();
   await env.DB.batch([
     env.DB.prepare('DELETE FROM oauth_states WHERE expires_at<=?1').bind(now),
+    env.DB.prepare('DELETE FROM mobile_auth_challenges WHERE expires_at<=?1 OR consumed_at IS NOT NULL').bind(now),
     env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?1 OR revoked_at IS NOT NULL').bind(now),
     env.DB.prepare("UPDATE invitations SET status='expired',updated_at=?1 WHERE status='pending' AND expires_at<=?1").bind(now)
   ]);

@@ -16,6 +16,7 @@ The backend uses Cloudflare Workers, D1, a scheduled D1 outbox, and a Durable Ob
 - Dashboard attachments are uploaded directly to Meta before their outbound message is queued; Helixcer stores only message metadata and the encrypted temporary provider payload, not another copy of the file.
 - External applications use revocable, hashed workspace API keys through the Helixcer Messaging API. The currently available WhatsApp template module writes sends to the inbox and outbox atomically; sensitive retry payloads are AES-GCM encrypted and removed after a terminal submission result.
 - Authenticated browser installations can register a VAPID Web Push subscription. Inbound provider webhooks schedule encrypted background alerts without delaying the provider response; expired browser endpoints are removed automatically.
+- The native Android app requests a short-lived, one-use server challenge and exchanges the nonce-bound Google ID token for a device-bound, revocable bearer session. When optional Firebase service-account secrets are configured, mobile installations can register FCM tokens and receive the same sender, preview, and conversation deep link as browser alerts.
 
 The initial migration seeds one empty workspace, never an administrator. On the first successful Google login, an owner membership is created only if there are no memberships and the verified Google email exactly matches `BOOTSTRAP_OWNER_EMAIL`. Future users require an invitation.
 
@@ -36,16 +37,26 @@ Configure these as Worker secrets/environment variables; never commit real value
 
 ```sh
 npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_ANDROID_CLIENT_IDS
 npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put GOOGLE_REDIRECT_URI
 npx wrangler secret put BOOTSTRAP_OWNER_EMAIL
 npx wrangler secret put CHANNEL_CREDENTIALS_KEY
 npx wrangler secret put VAPID_PRIVATE_KEY
+npx wrangler secret put FIREBASE_PROJECT_ID
+npx wrangler secret put FIREBASE_CLIENT_EMAIL
+npx wrangler secret put FIREBASE_PRIVATE_KEY
 ```
+
+If Google includes the Android OAuth client as the ID token's `azp` claim, set
+`GOOGLE_ANDROID_CLIENT_IDS` to that client ID (or a comma-separated allowlist).
+The token audience is always required to equal `GOOGLE_CLIENT_ID`.
 
 `CHANNEL_CREDENTIALS_KEY` must be at least 32 bytes of high-entropy material and must remain stable across deployments. It is the only Worker secret used to protect managed channel credentials; do not create `WA_MAIN_*`, per-channel, or per-workspace bindings. Losing this key makes the encrypted provider credentials unreadable, so keep a protected backup.
 
 `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` must belong to the same stable VAPID identity. Keep only the private key in Worker secrets. Rotating the pair requires browsers to subscribe again. Web Push uses each browser vendor's push service directly and does not require a paid notification provider.
+
+The three `FIREBASE_*` values are optional and enable reliable background notifications for `com.helixcer.chat`. Use a dedicated Firebase service account with permission to send Firebase Cloud Messaging messages. Store its PKCS#8 private key only as the `FIREBASE_PRIVATE_KEY` Worker secret (escaped `\n` newlines are supported). If these values are absent or invalid, browser Web Push continues normally and native FCM registration reports that it is unavailable.
 
 `ADMIN_TOKEN` is optional emergency recovery access. It is ignored unless `RECOVERY_MODE=true`, is accepted only through `Authorization: Bearer` or `X-Admin-Token`, and should be rotated or deleted immediately after the incident. Normal browser use relies on the session cookie. There is no email-override header and no URL-token authentication.
 
@@ -68,7 +79,7 @@ No Google refresh token is requested or stored; Google is used only to verify id
 Create D1 once, place its ID in `wrangler.toml`, then apply every migration in order:
 
 ```sh
-npx wrangler d1 migrations apply helixcer-chat-v2 --remote
+npx wrangler d1 migrations apply helixcer-chat-db --remote
 npx wrangler deploy
 ```
 
@@ -86,6 +97,10 @@ Migration `0008_push_subscriptions.sql` adds workspace/member/device-scoped Web 
 
 Migration `0010_workspace_uuid.sql` replaces the bootstrap workspace's actual primary key with a database-generated RFC 4122 version-4 UUID. It preserves users, memberships, sessions, invitations, contacts, conversations, messages, API keys, push subscriptions, webhook history, and audit history. Because channel credentials and queued provider payloads are encrypted with the old workspace ID as authenticated data, the migration removes those encrypted values, stops queued sends, marks affected pending messages failed, and clears provider-verification markers. Channel definitions and message history remain visible, but every provider connection must be reconnected. For an existing deployment, deploy the compatible Worker code first and then apply this migration so sign-in and emergency recovery resolve the renamed workspace dynamically throughout the rollout.
 
+Migration `0011_mobile_push_devices.sql` adds typed, device-bound mobile sessions, one-use mobile sign-in challenges, and session-scoped native push registrations for the Android app. FCM registration tokens are capability values, are never included in bootstrap or list responses, and are deleted automatically only when Firebase explicitly reports them as `UNREGISTERED`. Revoking or expiring the owning mobile session removes its registrations.
+
+Migration `0012_contact_identities.sql` makes contacts independent from connected channel accounts. It creates workspace-scoped platform identities and separate channel bindings, backfills legacy channel identities without merging different contacts, and adds an exact identity reference to conversations and messages. A binding stores the account-scoped profile ID plus last inbound, outbound, and conversation usage so the UI can identify the most recently used connected account. Legacy rows with no unambiguous identity remain readable through the compatibility path and are recorded in `identity_migration_issues` instead of being assigned by guesswork. Export D1 before applying this migration.
+
 Deploy the Worker on its `workers.dev` hostname, then deploy the repository's `gateway/` Pages Function with an `API` service binding to this Worker. Associate the Pages project with `api.chat.helixcer.com` and, at the external DNS provider, point only the `api.chat` CNAME to `helixcer-chat-gateway.pages.dev`. Keep the GitHub Pages dashboard at `chat.helixcer.com` and list only the dashboard origin in `ALLOWED_ORIGINS`. The checked-in frontend uses the branded API hostname; browsers never call the `workers.dev` hostname directly because its host-only `SameSite=Lax` cookie would be cross-site.
 
 The gateway holds no Google or channel secret. HTTP and WebSocket requests are passed to the Worker over Cloudflare's internal service binding. Deploy it from `gateway/` with `npx wrangler pages deploy` after the Worker is available.
@@ -94,9 +109,22 @@ The gateway holds no Google or channel secret. HTTP and WebSocket requests are p
 
 - `GET /auth/google/start?return_to=URL&invite=TOKEN` — begins Google login. `return_to` and the `returnTo` alias are accepted only when their origin exactly matches the allowlist.
 - `GET /auth/google/callback` — consumes code/state/PKCE, verifies the Google ID token, and creates a server session.
+- `GET /auth/mobile/config` — returns the public Google Web client ID and Android package name required by Credential Manager.
+- `POST /auth/mobile/challenge` — accepts `{deviceId}` and returns a five-minute, one-use `{nonce, expiresAt}` for Credential Manager.
+- `POST /auth/mobile/google` — accepts `{idToken, nonce, deviceId, deviceName}`, consumes the matching challenge, applies the same owner/invitation rules, and returns a revocable mobile bearer session.
 - `GET /api/me` — current verified user, workspace, membership, and role.
 - `GET /api/push/config` — returns Web Push availability and the public VAPID key to a verified browser session.
 - `POST|DELETE /api/push/subscriptions` — registers or removes the current member's browser installation.
+- `GET /api/push/mobile-config?deviceId=DEVICE_ID` — returns `available`, `subscribed`, `deviceId`, and the fixed `com.helixcer.chat` app ID for the authenticated mobile session, so Settings can show the server's true state.
+- `POST|DELETE /api/push/mobile-devices` — registers or removes the current member's `com.helixcer.chat` Android installation using `{deviceId, appId, token}` (the token is required only for `POST`); these routes accept mobile bearer sessions only.
+
+For the current direct-delivery architecture, each inbound event sends at most
+23 browser pushes and 23 native pushes. This keeps the combined fanout, a
+possible FCM OAuth exchange, and realtime broadcast below the Cloudflare Free
+external-subrequest limit with a small safety margin. Larger workspaces should
+move fanout to Cloudflare Queues before raising this cap.
+
+FCM sends are high-priority data-only messages. Their data contains the sender title, bounded message preview, notification tag, `conversationId`, and native deep-link target. The Android `FirebaseMessagingService` builds the visible notification so its `PendingIntent` can always open the exact conversation.
 - `POST /api/logout` or `/auth/logout` — revokes the session and clears its cookie.
 - `GET /api/team` — owner/admin member and pending-invitation list.
 - `POST /api/team/invitations` — creates a hashed, email-bound, seven-day invitation and returns its one-time login URL.
@@ -124,6 +152,7 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `POST /api/channels/:channelId/verify`
 - `GET /api/channels/:channelId/verify-token` (owner/admin; audited, no-store response)
 - `GET /api/conversations`
+- `POST /api/conversations` (opens or reuses one conversation for an exact contact identity and connected channel)
 - `PATCH /api/conversations/:id`
 - `GET|POST /api/conversations/:id/messages`
 - `GET /api/conversations/:id/templates` (approved templates from that conversation's WhatsApp connection)
@@ -131,6 +160,9 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `POST /api/conversations/:id/attachments` (authenticated WhatsApp multipart upload)
 - `GET|POST /api/contacts`
 - `GET|PATCH /api/contacts/:contactId`
+- `POST /api/contacts/:contactId/identities`
+- `PATCH|DELETE /api/contacts/:contactId/identities/:identityId`
+- `GET /api/tags` (workspace-scoped tag suggestions derived from saved contacts)
 - `GET /api/channel-data/whatsapp-templates`
 - `POST /api/demo/seed`
 - `GET /api/realtime` (WebSocket)
@@ -168,7 +200,9 @@ For each WhatsApp conversation, list and message responses include `freeformAllo
 
 `GET /api/channel-data/whatsapp-templates` is restricted to workspace owners and administrators. It builds a read-only library from every saved WhatsApp Cloud account in the workspace, including disabled accounts, and requests every template status rather than only approved sendable templates. Each sanitized item includes `channelId`, `channelName`, `channelEnabled`, and `providerDisplayName` source metadata. The response also includes searchable filter options for channels, categories, statuses, and languages. One account's bounded, credential-redacted provider failure is returned in `errors` without hiding templates loaded from the other accounts. The Worker follows Meta pagination for up to 1,000 templates per account; accounts beyond that safety bound are listed in `truncatedChannels` so the UI never silently presents a partial library. Non-WhatsApp and cross-workspace channels are never queried.
 
-Contact list, bootstrap, and detail responses include `displayName`/`name`, `company`, `tags`, `channelId`, `channelName`, `connectorType`, and `channelProfileId`. Detail responses also expose `channelEditable`. `PATCH /api/contacts/:contactId` accepts a subset of those editable values, mirrors name and tag changes to existing conversations, and never deletes history. Channel Profile IDs are immutable after creation. A contact's channel can be corrected while its conversation is still empty, retaining the same Channel Profile ID; after any message is sent or received, the channel is locked so historical messages cannot be misattributed.
+Contact list, bootstrap, and detail responses include `displayName`/`name`, `company`, `tags`, and an `identities` array. Each identity has an immutable `platform` and `profileId`, optional `username`, optional WhatsApp `phoneNumber`, and zero or more `bindings`/`routes` for connected channel accounts. Each binding exposes its channel, account-scoped profile ID, last use timestamps, and last conversation. The former singular `channelId`, `channelName`, `connectorType`, and `channelProfileId` fields remain as temporary preferred-identity aliases for older clients; new clients must use `identities`.
+
+`GET /api/tags` returns case-insensitively deduplicated suggestions directly from saved workspace contacts; it does not use a device cache or a separate tag-master table. A new tag becomes available after it is saved on a contact. `PATCH /api/contacts/:contactId` updates master contact fields and can synchronize identities. Identity profile IDs and platforms are immutable after creation; username, phone, display name, primary preference, and channel bindings without message history can be updated. A persisted route's account-scoped profile ID cannot be changed after it owns conversation or message history. Adding an identity or binding does not create an Inbox thread. `POST /api/conversations` requires an explicit active binding and lazily opens or reuses that exact identity-and-channel conversation; it never guesses a connected account. Deleting a channel removes only that local route and its channel history; it does not delete the master contact or reusable platform identity. Inbound canonical-identity reuse is limited to portable WhatsApp and Telegram identifiers; account-scoped Instagram and Facebook identifiers require an exact binding so equal values from different accounts never auto-merge.
 
 Outbound message status is monotonic: `sent` → `delivered` → `read`, with `failed` retained as terminal. WhatsApp status callbacks, Instagram message echoes/delivery receipts/read watermarks, and configured Generic HTTP status callbacks update the same inbox message and broadcast the change in realtime. Telegram's Bot API confirms a successful send but does not expose recipient delivery/read receipts, so Telegram messages remain accurately labeled `sent` rather than fabricating a receipt.
 

@@ -7,6 +7,8 @@ const GOOGLE_ISSUERS = new Set(['https://accounts.google.com', 'accounts.google.
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const jwksCache = new Map();
+const MOBILE_DEVICE_ID_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
+const MOBILE_CHALLENGE_TTL_SECONDS = 5 * 60;
 
 export async function startGoogleOAuth(request, env) {
   requireOAuthConfig(env);
@@ -129,9 +131,11 @@ export async function finishGoogleOAuthResponse(request, env, fetchImpl = fetch)
 export async function authenticateRequest(request, env) {
   const recovery = await recoveryPrincipal(request, env);
   if (recovery) return recovery;
-  const rawToken = readCookie(request, SESSION_COOKIE);
+  const credential = sessionCredential(request);
+  const rawToken = credential.token;
   if (!rawToken) return null;
-  const row = await env.DB.prepare(`SELECT s.session_id,s.expires_at,u.user_id,u.email,u.display_name,u.avatar_url,
+  const row = await env.DB.prepare(`SELECT s.session_id,s.expires_at,s.session_type,s.device_id,
+      u.user_id,u.email,u.display_name,u.avatar_url,
       m.membership_id,m.role,m.status,w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
     FROM sessions s JOIN users u ON u.user_id=s.user_id
       JOIN memberships m ON m.user_id=s.user_id AND m.workspace_id=s.workspace_id
@@ -139,21 +143,103 @@ export async function authenticateRequest(request, env) {
     WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2 AND m.status='active'`)
     .bind(await hashToken(rawToken), new Date().toISOString()).first();
   if (!row) return null;
-  return principalFromRow(row);
+  const expectedSource = row.session_type === 'mobile' ? 'bearer' : 'cookie';
+  if (credential.source !== expectedSource) return null;
+  return principalFromRow(row, row.session_type === 'mobile' ? 'mobile_session' : 'session');
 }
 
 export async function logout(request, env) {
-  const token = readCookie(request, SESSION_COOKIE);
+  const token = sessionCredential(request).token;
   const principal = token ? await authenticateRequest(request, env) : null;
-  if (token) {
-    await env.DB.prepare('UPDATE sessions SET revoked_at=?2 WHERE token_hash=?1 AND revoked_at IS NULL')
-      .bind(await hashToken(token), new Date().toISOString()).run();
+  if (token && (principal?.authType === 'session' || principal?.authType === 'mobile_session')) {
+    const now = new Date().toISOString();
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM mobile_push_devices WHERE session_id=?1').bind(principal.sessionId),
+      env.DB.prepare('UPDATE sessions SET revoked_at=?2 WHERE token_hash=?1 AND revoked_at IS NULL')
+        .bind(await hashToken(token), now)
+    ]);
   }
-  if (principal) await auditAuthAction(env, principal, 'logout', 'session', principal.sessionId || '', {});
+  if (principal && (principal.authType === 'session' || principal.authType === 'mobile_session')) {
+    await auditAuthAction(env, principal, 'logout', 'session', principal.sessionId || '', {
+      client: principal.authType === 'mobile_session' ? 'android' : 'browser'
+    });
+  }
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
     headers: { 'Content-Type': 'application/json; charset=utf-8', 'Set-Cookie': clearCookieHeader(SESSION_COOKIE) }
   });
+}
+
+export function mobileAuthConfiguration(env) {
+  return {
+    enabled: Boolean(env.GOOGLE_CLIENT_ID),
+    googleWebClientId: String(env.GOOGLE_CLIENT_ID || ''),
+    packageName: 'com.helixcer.chat'
+  };
+}
+
+export async function createMobileAuthChallenge(env, payload) {
+  if (!env.GOOGLE_CLIENT_ID) throw authError(503, 'Google mobile sign-in is not configured.');
+  const deviceId = cleanMobileDeviceId(payload?.deviceId);
+  const nonce = randomToken(32);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + MOBILE_CHALLENGE_TTL_SECONDS * 1000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM mobile_auth_challenges
+      WHERE device_id=?1 OR expires_at<=?2 OR consumed_at IS NOT NULL`).bind(deviceId, now.toISOString()),
+    env.DB.prepare(`INSERT INTO mobile_auth_challenges
+        (challenge_hash,device_id,expires_at,consumed_at,created_at)
+      VALUES (?1,?2,?3,NULL,?4)`)
+      .bind(await hashToken(nonce), deviceId, expiresAt, now.toISOString())
+  ]);
+  return { nonce, expiresAt };
+}
+
+export async function createGoogleMobileSession(env, payload, fetchImpl = fetch) {
+  if (!env.GOOGLE_CLIENT_ID) throw authError(503, 'Google mobile sign-in is not configured.');
+  const idToken = String(payload?.idToken || '').trim();
+  if (!idToken || idToken.length > 16384) throw authError(400, 'A valid Google ID token is required.');
+  const nonce = String(payload?.nonce || '').trim();
+  if (nonce.length < 16 || nonce.length > 256) throw authError(400, 'A valid sign-in nonce is required.');
+  const deviceId = cleanMobileDeviceId(payload?.deviceId);
+  const challengeHash = await hashToken(nonce);
+  const challenge = await env.DB.prepare(`SELECT challenge_hash FROM mobile_auth_challenges
+    WHERE challenge_hash=?1 AND device_id=?2 AND consumed_at IS NULL AND expires_at>?3`)
+    .bind(challengeHash, deviceId, new Date().toISOString()).first();
+  if (!challenge) throw authError(401, 'The mobile sign-in challenge is invalid, expired, or already used.');
+  const invitationToken = String(payload?.invitationToken || payload?.invite || '').trim();
+  if (invitationToken.length > 256) throw authError(400, 'Invitation token is invalid.');
+  const deviceName = cleanDeviceName(payload?.deviceName);
+  const identity = await verifyGoogleIdToken(idToken, {
+    clientId: env.GOOGLE_CLIENT_ID,
+    nonceHash: challengeHash,
+    authorizedParties: googleAuthorizedParties(env),
+    jwksUrl: env.GOOGLE_JWKS_URL || GOOGLE_JWKS_URL
+  }, fetchImpl);
+  const consumed = await env.DB.prepare(`UPDATE mobile_auth_challenges SET consumed_at=?3
+    WHERE challenge_hash=?1 AND device_id=?2 AND consumed_at IS NULL AND expires_at>?3`)
+    .bind(challengeHash, deviceId, new Date().toISOString()).run();
+  if (!consumed?.meta?.changes) throw authError(401, 'The mobile sign-in challenge is invalid, expired, or already used.');
+  const principal = await provisionVerifiedIdentity(
+    env,
+    identity,
+    invitationToken ? await hashToken(invitationToken) : null
+  );
+  const session = await createSession(env, principal, { sessionType: 'mobile', deviceId });
+  await auditAuthAction(env, principal, 'login', 'session', session.sessionId, {
+    authProvider: 'google_mobile',
+    client: 'android',
+    packageName: 'com.helixcer.chat',
+    deviceId,
+    ...(deviceName ? { deviceName } : {})
+  });
+  return {
+    ok: true,
+    token: session.token,
+    tokenType: 'Bearer',
+    expiresAt: session.expiresAt,
+    me: principalView(principal)
+  };
 }
 
 async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
@@ -247,17 +333,20 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
   return principalFromRow(row);
 }
 
-async function createSession(env, principal) {
+async function createSession(env, principal, options = {}) {
   const token = randomToken(32);
   const maxAge = clampNumber(env.SESSION_TTL_SECONDS, 900, 2592000, 604800);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + maxAge * 1000).toISOString();
   const sessionId = crypto.randomUUID();
+  const sessionType = options.sessionType === 'mobile' ? 'mobile' : 'browser';
+  const deviceId = sessionType === 'mobile' ? cleanMobileDeviceId(options.deviceId) : null;
   await env.DB.prepare(`INSERT INTO sessions
-      (session_id,token_hash,user_id,workspace_id,expires_at,last_seen_at,created_at)
-    VALUES (?1,?2,?3,?4,?5,?6,?6)`)
-    .bind(sessionId, await hashToken(token), principal.user.userId, principal.workspace.workspaceId, expiresAt, now.toISOString()).run();
-  return { token, maxAge, sessionId };
+      (session_id,token_hash,user_id,workspace_id,expires_at,last_seen_at,created_at,session_type,device_id)
+    VALUES (?1,?2,?3,?4,?5,?6,?6,?7,?8)`)
+    .bind(sessionId, await hashToken(token), principal.user.userId, principal.workspace.workspaceId,
+      expiresAt, now.toISOString(), sessionType, deviceId).run();
+  return { token, maxAge, sessionId, expiresAt };
 }
 
 export async function listTeam(env, principal) {
@@ -401,7 +490,8 @@ export async function verifyGoogleIdToken(idToken, options, fetchImpl = fetch) {
   const now = options.nowSeconds ?? Math.floor(Date.now() / 1000);
   const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   if (!audiences.includes(options.clientId)) throw authError(401, 'Google ID token audience mismatch.');
-  if (payload.azp && payload.azp !== options.clientId) throw authError(401, 'Google ID token authorized-party mismatch.');
+  const authorizedParties = new Set(options.authorizedParties || [options.clientId]);
+  if (payload.azp && !authorizedParties.has(payload.azp)) throw authError(401, 'Google ID token authorized-party mismatch.');
   if (!GOOGLE_ISSUERS.has(payload.iss)) throw authError(401, 'Google ID token issuer mismatch.');
   if (!Number.isFinite(payload.exp) || payload.exp <= now - 30) throw authError(401, 'Google ID token expired.');
   if (payload.nbf !== undefined && (!Number.isFinite(payload.nbf) || payload.nbf > now + 30)) throw authError(401, 'Google ID token is not active yet.');
@@ -467,9 +557,10 @@ async function resolveDefaultWorkspace(env) {
   return workspace;
 }
 
-function principalFromRow(row) {
+function principalFromRow(row, authType = 'session') {
   return {
-    authType: 'session', sessionId: row.session_id || '', sessionExpiresAt: row.expires_at || '',
+    authType, sessionId: row.session_id || '', sessionExpiresAt: row.expires_at || '',
+    deviceId: row.device_id || '',
     user: { userId: row.user_id, email: row.email, displayName: row.display_name, avatarUrl: row.avatar_url },
     workspace: { workspaceId: row.workspace_id, name: row.workspace_name, slug: row.workspace_slug },
     membership: { membershipId: row.membership_id, role: row.role, status: row.status }
@@ -602,6 +693,30 @@ function readCookie(request, name) {
     }
   }
   return '';
+}
+
+function sessionCredential(request) {
+  const cookie = readCookie(request, SESSION_COOKIE);
+  if (cookie) return { token: cookie, source: 'cookie' };
+  const authorization = request.headers.get('Authorization') || '';
+  if (!authorization.startsWith('Bearer ')) return { token: '', source: '' };
+  const token = authorization.slice(7).trim();
+  return token ? { token, source: 'bearer' } : { token: '', source: '' };
+}
+
+function cleanDeviceName(value) {
+  return String(value || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+
+function cleanMobileDeviceId(value) {
+  const deviceId = String(value || '').trim();
+  if (!MOBILE_DEVICE_ID_PATTERN.test(deviceId)) throw authError(400, 'A valid mobile device ID is required.');
+  return deviceId;
+}
+
+function googleAuthorizedParties(env) {
+  return [env.GOOGLE_CLIENT_ID, ...String(env.GOOGLE_ANDROID_CLIENT_IDS || '')
+    .split(',').map(value => value.trim()).filter(Boolean)];
 }
 
 export async function hashToken(value) {

@@ -38,6 +38,9 @@
     recentVerifyTokens: new Map(),
     selectedConversationId: null,
     selectedContactId: null,
+    contactCreateIdentityDrafts: [],
+    contactEditIdentityDrafts: [],
+    contactRouteSelection: null,
     expandedChannelIds: new Set(),
     detailsOpen: false,
     currentUser: null,
@@ -76,6 +79,9 @@
     gmail: { label: "Gmail", short: "GM", color: "#c44d3b", soft: "#faece9" },
     instagram: { label: "Instagram", short: "IG", color: "#b6427b", soft: "#f9eaf2" },
     instagram_messaging: { label: "Instagram", short: "IG", color: "#b6427b", soft: "#f9eaf2" },
+    facebook: { label: "Facebook", short: "FB", color: "#2768b2", soft: "#eaf2fb" },
+    facebook_messenger: { label: "Facebook", short: "FB", color: "#2768b2", soft: "#eaf2fb" },
+    messenger: { label: "Facebook", short: "FB", color: "#2768b2", soft: "#eaf2fb" },
     generic: { label: "Custom", short: "API", color: "#5e6c69", soft: "#edf0ef" },
   };
 
@@ -107,6 +113,14 @@
       description: "Manage Instagram Business or Creator account messages from the inbox.",
       setupUrl: "https://developers.facebook.com/apps/", setupLabel: "Open Meta",
     },
+  };
+
+  const identityPlatforms = {
+    whatsapp: { label: "WhatsApp", profileLabel: "Profile ID", profilePlaceholder: "WhatsApp-scoped profile ID" },
+    telegram: { label: "Telegram", profileLabel: "Profile ID", profilePlaceholder: "Telegram user or chat ID" },
+    instagram: { label: "Instagram", profileLabel: "Profile ID", profilePlaceholder: "Instagram-scoped user ID" },
+    facebook: { label: "Facebook", profileLabel: "Profile ID", profilePlaceholder: "Facebook-scoped user ID" },
+    email: { label: "Email", profileLabel: "Email address", profilePlaceholder: "name@example.com" },
   };
 
   const avatarPalettes = [
@@ -467,68 +481,125 @@
 
     async createContact(payload) {
       const suffix = Date.now().toString(36);
+      const identities = Array.isArray(payload.identities) ? clone(payload.identities).map((identity, index) => ({
+        ...identity,
+        identityId: String(identity.identityId || `identity-${suffix}-${index + 1}`),
+      })) : payload.channelId || payload.channelProfileId ? [{
+        identityId: `identity-${suffix}-1`,
+        platform: connectorPlatform(channelFor(payload.channelId).connectorType),
+        profileId: payload.channelProfileId || "",
+        channelProfileId: payload.channelProfileId || "",
+        channelId: payload.channelId || "",
+        bindings: payload.channelId ? [{ channelId: payload.channelId }] : [],
+        isPrimary: true,
+      }] : [];
       const contact = {
         contactId: `ct-${suffix}`,
         displayName: payload.displayName,
-        channelId: payload.channelId,
-        channelProfileId: payload.channelProfileId,
         company: payload.company || "",
-        phone: payload.channelProfileId,
-        email: "—",
         tags: Array.isArray(payload.tags) && payload.tags.length ? payload.tags : ["New"],
-      };
-      const conversation = {
-        conversationId: `cv-${suffix}`,
-        contactId: contact.contactId,
-        subject: contact.displayName,
-        channelId: contact.channelId,
-        status: "open",
-        assignedTo: "Unassigned",
-        unreadCount: 0,
-        lastMessage: "New conversation",
-        lastMessageAt: new Date().toISOString(),
+        identities,
       };
       this.data.contacts.unshift(contact);
-      this.data.conversations.unshift(conversation);
-      this.data.messages[conversation.conversationId] = [];
-      this.emit({ type: "conversation.created", conversation: clone(conversation), item: clone(conversation) });
-      return { ok: true, contactId: contact.contactId, conversationId: conversation.conversationId, item: clone(conversation) };
+      this.emit({ type: "contact.updated", contactId: contact.contactId, item: clone(contact) });
+      return { ok: true, contactId: contact.contactId, item: clone(contact) };
     }
 
     async getContact(contactId) {
       await smallDelay(90);
       const item = this.data.contacts.find((contact) => contact.contactId === contactId);
       if (!item) throw new Error("Contact not found.");
-      const channel = this.data.channels.find((entry) => entry.channelId === item.channelId);
-      const hasMessages = this.data.conversations
-        .filter((conversation) => conversation.contactId === contactId)
-        .some((conversation) => (this.data.messages[conversation.conversationId] || []).length > 0);
-      return { item: clone({ ...item, channelName: channel?.name || "", connectorType: channel?.connectorType || "generic", channelEditable: !hasMessages }) };
+      return { item: clone(item) };
     }
 
     async updateContact(contactId, patch) {
       await smallDelay(110);
       const item = this.data.contacts.find((contact) => contact.contactId === contactId);
       if (!item) throw new Error("Contact not found.");
-      if (patch.channelId && patch.channelId !== item.channelId) {
-        const hasMessages = this.data.conversations
-          .filter((conversation) => conversation.contactId === contactId)
-          .some((conversation) => (this.data.messages[conversation.conversationId] || []).length > 0);
-        if (hasMessages) throw new Error("The channel cannot be changed after messages have been sent or received.");
-      }
-      ["displayName", "company", "channelId", "channelProfileId"].forEach((key) => {
+      ["displayName", "company"].forEach((key) => {
         if (Object.prototype.hasOwnProperty.call(patch, key)) item[key] = patch[key];
       });
       if (Array.isArray(patch.tags)) item.tags = clone(patch.tags);
+      if (Array.isArray(patch.identities)) {
+        item.identities = patch.identities.map((identity, index) => ({
+          ...clone(identity),
+          identityId: String(identity.identityId || `identity-${Date.now().toString(36)}-${index + 1}`),
+        }));
+      }
       this.data.conversations.filter((conversation) => conversation.contactId === contactId).forEach((conversation) => {
         conversation.subject = item.displayName;
-        conversation.channelId = item.channelId;
       });
-      const channel = this.data.channels.find((entry) => entry.channelId === item.channelId);
-      const hasMessages = this.data.conversations
-        .filter((conversation) => conversation.contactId === contactId)
-        .some((conversation) => (this.data.messages[conversation.conversationId] || []).length > 0);
-      return { ok: true, item: clone({ ...item, channelName: channel?.name || "", connectorType: channel?.connectorType || "generic", channelEditable: !hasMessages }) };
+      return { ok: true, item: clone(item) };
+    }
+
+    async createContactIdentity(contactId, payload) {
+      await smallDelay(90);
+      const item = this.data.contacts.find((contact) => contact.contactId === contactId);
+      if (!item) throw new Error("Contact not found.");
+      if (!Array.isArray(item.identities)) item.identities = normalizeContact(item).identities.map(identityRequestPayload);
+      const identity = { ...clone(payload), identityId: `identity-${Date.now().toString(36)}` };
+      item.identities.push(identity);
+      return { ok: true, item: clone(identity), contact: clone(item) };
+    }
+
+    async updateContactIdentity(contactId, identityId, payload) {
+      await smallDelay(90);
+      const item = this.data.contacts.find((contact) => contact.contactId === contactId);
+      if (!item) throw new Error("Contact not found.");
+      if (!Array.isArray(item.identities)) item.identities = normalizeContact(item).identities.map(identityRequestPayload);
+      const index = item.identities.findIndex((identity) => String(identity.identityId) === String(identityId));
+      if (index < 0) throw new Error("Contact identity not found.");
+      item.identities[index] = { ...item.identities[index], ...clone(payload), identityId };
+      return { ok: true, item: clone(item.identities[index]), contact: clone(item) };
+    }
+
+    async deleteContactIdentity(contactId, identityId) {
+      await smallDelay(90);
+      const item = this.data.contacts.find((contact) => contact.contactId === contactId);
+      if (!item) throw new Error("Contact not found.");
+      if (!Array.isArray(item.identities)) item.identities = normalizeContact(item).identities.map(identityRequestPayload);
+      const linked = this.data.conversations.some((conversation) => conversation.contactId === contactId &&
+        String(conversation.contactIdentityId || conversation.identityId || "") === String(identityId));
+      if (linked) throw new Error("This identity has conversation history and cannot be removed.");
+      item.identities = item.identities.filter((identity) => String(identity.identityId) !== String(identityId));
+      return { ok: true, deleted: true, contact: clone(item) };
+    }
+
+    async startContactConversation(contactId, identityId, payload = {}) {
+      await smallDelay(100);
+      const contact = this.data.contacts.find((item) => item.contactId === contactId &&
+        normalizeContact(item).identities.some((identity) => identity.identityId === identityId));
+      if (!contact) throw new Error("Contact identity not found.");
+      const identity = normalizeContact(contact).identities.find((entry) => entry.identityId === identityId);
+      const channelId = String(payload.channelId || identity.bindings[0]?.channelId || identity.channelId || "");
+      if (!channelId) throw new Error("Choose a connected route first.");
+      const binding = identity.bindings.find((entry) => entry.channelId === channelId) || null;
+      const existing = this.data.conversations.find((conversation) => conversation.contactId === contact.contactId &&
+        conversation.channelId === channelId &&
+        (conversation.contactIdentityId === identityId || !conversation.contactIdentityId));
+      if (existing) return { ok: true, conversationId: existing.conversationId, item: clone(existing) };
+      const channel = this.data.channels.find((entry) => entry.channelId === channelId);
+      if (!channel) throw new Error("The selected route is no longer available.");
+      const suffix = Date.now().toString(36);
+      const conversation = {
+        conversationId: `cv-${suffix}`,
+        contactId: contact.contactId,
+        contactIdentityId: identityId,
+        subject: contact.displayName,
+        channelId,
+        channelName: channel.name,
+        connectorType: channel.connectorType,
+        channelProfileId: binding?.scopedProfileId || identity.profileId,
+        status: "open",
+        assignedTo: "Unassigned",
+        unreadCount: 0,
+        lastMessage: "New conversation",
+        lastMessageAt: new Date().toISOString(),
+      };
+      this.data.conversations.unshift(conversation);
+      this.data.messages[conversation.conversationId] = [];
+      this.emit({ type: "conversation.created", conversation: clone(conversation), item: clone(conversation) });
+      return { ok: true, conversationId: conversation.conversationId, item: clone(conversation) };
     }
 
     async deleteContact(contactId) {
@@ -583,10 +654,16 @@
       const index = this.data.channels.findIndex((entry) => entry.channelId === channelId);
       if (index < 0) throw new Error("Channel not found.");
       const [item] = this.data.channels.splice(index, 1);
-      const contactIds = new Set(this.data.contacts.filter((contact) => contact.channelId === channelId).map((contact) => contact.contactId));
       const conversationIds = this.data.conversations.filter((conversation) => conversation.channelId === channelId)
         .map((conversation) => conversation.conversationId);
-      this.data.contacts = this.data.contacts.filter((contact) => !contactIds.has(contact.contactId));
+      this.data.contacts.forEach((contact) => {
+        if (!Array.isArray(contact.identities)) return;
+        contact.identities.forEach((identity) => {
+          if (Array.isArray(identity.bindings)) identity.bindings = identity.bindings.filter((binding) => binding.channelId !== channelId);
+          if (Array.isArray(identity.routes)) identity.routes = identity.routes.filter((route) => route.channelId !== channelId);
+          if (identity.channelId === channelId) identity.channelId = "";
+        });
+      });
       this.data.conversations = this.data.conversations.filter((conversation) => conversation.channelId !== channelId);
       conversationIds.forEach((conversationId) => { delete this.data.messages[conversationId]; });
       this.verifyTokens.delete(channelId);
@@ -780,6 +857,34 @@
       return this.isDemo
         ? this.demo.updateContact(contactId, payload)
         : this.request(`/api/contacts/${encodeURIComponent(contactId)}`, { method: "PATCH", body: JSON.stringify(payload) });
+    }
+
+    createContactIdentity(contactId, payload) {
+      return this.isDemo
+        ? this.demo.createContactIdentity(contactId, payload)
+        : this.request(`/api/contacts/${encodeURIComponent(contactId)}/identities`, { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    updateContactIdentity(contactId, identityId, payload) {
+      return this.isDemo
+        ? this.demo.updateContactIdentity(contactId, identityId, payload)
+        : this.request(`/api/contacts/${encodeURIComponent(contactId)}/identities/${encodeURIComponent(identityId)}`, {
+          method: "PATCH", body: JSON.stringify(payload),
+        });
+    }
+
+    deleteContactIdentity(contactId, identityId) {
+      return this.isDemo
+        ? this.demo.deleteContactIdentity(contactId, identityId)
+        : this.request(`/api/contacts/${encodeURIComponent(contactId)}/identities/${encodeURIComponent(identityId)}`, { method: "DELETE" });
+    }
+
+    startContactConversation(contactId, identityId, payload = {}) {
+      return this.isDemo
+        ? this.demo.startContactConversation(contactId, identityId, payload)
+        : this.request("/api/conversations", {
+          method: "POST", body: JSON.stringify({ contactId, identityId, ...payload }),
+        });
     }
 
     deleteContact(contactId) {
@@ -1277,6 +1382,87 @@
     };
   }
 
+  function connectorPlatform(value) {
+    const normalized = String(value || "").trim().toLocaleLowerCase().replace(/[-\s]+/g, "_");
+    if (["whatsapp", "whatsapp_cloud", "wa"].includes(normalized)) return "whatsapp";
+    if (["telegram", "telegram_bot", "tg"].includes(normalized)) return "telegram";
+    if (["instagram", "instagram_messaging", "ig"].includes(normalized)) return "instagram";
+    if (["facebook", "facebook_messenger", "messenger", "fb"].includes(normalized)) return "facebook";
+    if (["email", "gmail", "outlook", "mail"].includes(normalized)) return "email";
+    return identityPlatforms[normalized] ? normalized : "";
+  }
+
+  function normalizeIdentityBinding(raw, identity = {}) {
+    const channelId = String(raw?.channelId || raw?.routeId || "");
+    const channel = state.channels.find((item) => item.channelId === channelId) || null;
+    const connectorType = String(raw?.connectorType || channel?.connectorType || identity.connectorType || "");
+    const lastUsedAt = raw?.lastUsedAt || raw?.lastMessageAt || raw?.lastInboundAt || raw?.lastOutboundAt || "";
+    return {
+      ...raw,
+      channelId,
+      channelName: raw?.channelName || raw?.name || channel?.name || "Connected route",
+      connectorType,
+      scopedProfileId: String(raw?.scopedProfileId || raw?.channelProfileId || identity.channelProfileId || identity.profileId || ""),
+      conversationId: String(raw?.conversationId || raw?.lastConversationId || ""),
+      conversationStatus: String(raw?.conversationStatus || ""),
+      lastUsedAt,
+      eligible: raw?.eligible !== false && raw?.channelEnabled !== false && channel?.enabled !== false,
+    };
+  }
+
+  function normalizeContactIdentity(raw, contact = {}, index = 0) {
+    const channelId = String(raw?.channelId || "");
+    const channel = state.channels.find((item) => item.channelId === channelId) || null;
+    const connectorType = String(raw?.connectorType || channel?.connectorType || "");
+    const platform = connectorPlatform(raw?.platform || raw?.provider || connectorType) || "email";
+    const profileId = String(raw?.profileId || raw?.channelProfileId || raw?.providerId || raw?.identity || raw?.email || "");
+    const identityId = String(raw?.identityId || raw?.contactIdentityId || raw?.id ||
+      `legacy:${contact.contactId || contact.id || "contact"}:${channelId || platform}:${profileId || index + 1}`);
+    const routeSource = [
+      ...asItems(raw?.routes),
+      ...asItems(raw?.bindings),
+    ];
+    if (!routeSource.length && channelId) routeSource.push({
+      channelId,
+      channelName: raw?.channelName || contact.channelName,
+      connectorType,
+      channelProfileId: raw?.channelProfileId || profileId,
+      conversationId: raw?.conversationId,
+      conversationStatus: raw?.conversationStatus,
+      lastUsedAt: raw?.lastMessageAt,
+      channelEnabled: raw?.channelEnabled,
+    });
+    const routeMap = new Map();
+    routeSource.forEach((route) => {
+      const normalized = normalizeIdentityBinding(route, { ...raw, profileId });
+      const key = `${normalized.channelId}:${normalized.conversationId || ""}`;
+      if (!routeMap.has(key)) routeMap.set(key, normalized);
+    });
+    const bindings = [...routeMap.values()];
+    return {
+      ...raw,
+      identityId,
+      platform,
+      profileId,
+      channelProfileId: profileId,
+      username: String(raw?.username || raw?.handle || ""),
+      phoneNumber: String(raw?.phoneNumber || raw?.phone || (platform === "whatsapp" ? profileId : "")),
+      email: String(raw?.email || (platform === "email" ? profileId : "")),
+      displayName: String(raw?.displayName || ""),
+      metadata: raw?.metadata && typeof raw.metadata === "object" ? { ...raw.metadata } : {},
+      isPrimary: raw?.isPrimary === true || raw?.primary === true,
+      channelId: channelId || bindings[0]?.channelId || "",
+      channelName: raw?.channelName || bindings[0]?.channelName || "",
+      connectorType: connectorType || bindings[0]?.connectorType || "",
+      conversationId: String(raw?.conversationId || bindings[0]?.conversationId || ""),
+      conversationStatus: String(raw?.conversationStatus || bindings[0]?.conversationStatus || ""),
+      lastMessageAt: raw?.lastMessageAt || bindings[0]?.lastUsedAt || "",
+      channelEnabled: raw?.channelEnabled !== false,
+      bindings,
+      routes: bindings,
+    };
+  }
+
   function normalizeConversation(raw) {
     const replyWindow = raw.replyWindow && typeof raw.replyWindow === "object" ? raw.replyWindow : {};
     const lastMessage = raw.lastMessage?.text || raw.lastMessageText || raw.preview || raw.lastMessage || "No messages yet";
@@ -1285,6 +1471,7 @@
       ...raw,
       conversationId: String(raw.conversationId || raw.id || ""),
       contactId: String(raw.contactId || raw.contact?.contactId || raw.contact?.id || ""),
+      contactIdentityId: String(raw.contactIdentityId || raw.identityId || raw.contact?.identityId || ""),
       subject: raw.subject || raw.contactName || raw.displayName || raw.contact?.displayName || "Unknown contact",
       channelId: String(raw.channelId || raw.channel?.channelId || raw.channel?.id || "unknown"),
       connectorType: raw.connectorType || raw.channel?.connectorType || "",
@@ -1324,18 +1511,41 @@
   }
 
   function normalizeContact(raw) {
+    const identitySource = asItems(raw.identities);
+    if (!identitySource.length && (raw.channelId || raw.channelProfileId || raw.identity || raw.email || raw.phone)) {
+      identitySource.push({
+        identityId: raw.identityId || raw.contactIdentityId,
+        platform: raw.platform || raw.connectorType || raw.channel?.connectorType || (raw.email && raw.email !== "—" ? "email" : ""),
+        channelId: raw.channelId,
+        channelName: raw.channelName || raw.channel?.name,
+        connectorType: raw.connectorType || raw.channel?.connectorType,
+        profileId: raw.channelProfileId || raw.identity || (raw.email !== "—" ? raw.email : "") || (raw.phone !== "—" ? raw.phone : ""),
+        username: raw.username,
+        phoneNumber: raw.phone !== "—" ? raw.phone : "",
+        email: raw.email !== "—" ? raw.email : "",
+        conversationId: raw.conversationId,
+        lastMessageAt: raw.lastMessageAt,
+        isPrimary: true,
+      });
+    }
+    const identities = identitySource.map((identity, index) => normalizeContactIdentity(identity, raw, index));
+    if (identities.length && !identities.some((identity) => identity.isPrimary)) identities[0].isPrimary = true;
+    const preferred = identities.find((identity) => identity.isPrimary) || identities[0] || null;
+    const emailIdentity = identities.find((identity) => identity.platform === "email");
+    const whatsappIdentity = identities.find((identity) => identity.platform === "whatsapp");
     return {
       ...raw,
       contactId: String(raw.contactId || raw.id || ""),
       displayName: raw.displayName || raw.name || "Unknown contact",
-      channelId: String(raw.channelId || raw.identities?.[0]?.channelId || "unknown"),
-      channelName: raw.channelName || raw.channel?.name || "",
-      connectorType: raw.connectorType || raw.channel?.connectorType || "",
-      channelProfileId: raw.channelProfileId || raw.identity || raw.identities?.[0]?.channelProfileId || "—",
+      identities,
+      channelId: String(raw.channelId || preferred?.channelId || ""),
+      channelName: raw.channelName || raw.channel?.name || preferred?.channelName || "",
+      connectorType: raw.connectorType || raw.channel?.connectorType || preferred?.connectorType || preferred?.platform || "",
+      channelProfileId: raw.channelProfileId || raw.identity || preferred?.profileId || "—",
       company: raw.company || "",
       channelEditable: raw.channelEditable !== false,
-      email: raw.email || "—",
-      phone: raw.phone || "—",
+      email: (raw.email && raw.email !== "—" ? raw.email : emailIdentity?.profileId) || "—",
+      phone: (raw.phone && raw.phone !== "—" ? raw.phone : whatsappIdentity?.phoneNumber) || "—",
       tags: Array.isArray(raw.tags) ? raw.tags : [],
       status: raw.status || "active",
     };
@@ -1450,19 +1660,42 @@
     const byId = new Map();
     conversations.forEach((conversation) => {
       const key = conversation.contactId || `conversation:${conversation.conversationId}`;
-      if (byId.has(key)) return;
-      byId.set(key, normalizeContact({
+      const existing = byId.get(key) || {
         contactId: key,
         displayName: conversation.subject,
-        channelId: conversation.channelId,
-        channelProfileId: conversation.channelProfileId || "—",
         email: conversation.email || "—",
         phone: conversation.phone || "—",
         tags: conversation.tags || [],
         status: conversation.status === "closed" ? "inactive" : "active",
-      }));
+        identities: [],
+      };
+      const identityKey = conversation.contactIdentityId ||
+        `legacy:${key}:${conversation.channelId}:${conversation.channelProfileId || "profile"}`;
+      let identity = existing.identities.find((item) => item.identityId === identityKey);
+      if (!identity) {
+        identity = {
+          identityId: identityKey,
+          platform: connectorPlatform(conversation.connectorType || channelFor(conversation.channelId).connectorType),
+          profileId: conversation.channelProfileId || "",
+          channelProfileId: conversation.channelProfileId || "",
+          isPrimary: existing.identities.length === 0,
+          bindings: [],
+        };
+        existing.identities.push(identity);
+      }
+      identity.bindings.push({
+        channelId: conversation.channelId,
+        channelName: conversation.channelName || channelFor(conversation.channelId).name,
+        connectorType: conversation.connectorType || channelFor(conversation.channelId).connectorType,
+        channelProfileId: conversation.channelProfileId || "",
+        conversationId: conversation.conversationId,
+        conversationStatus: conversation.status,
+        lastUsedAt: conversation.lastMessageAt,
+        eligible: true,
+      });
+      byId.set(key, existing);
     });
-    return [...byId.values()];
+    return [...byId.values()].map(normalizeContact);
   }
 
   async function loadAll({ preserveSelection = true } = {}) {
@@ -1578,7 +1811,6 @@
     renderCounts();
     renderContacts();
     renderChannels();
-    populateContactChannelSelect();
     populateAssigneeSelect();
     if (canAdmin()) renderApiKeys();
     renderNotificationSetting();
@@ -1760,13 +1992,14 @@
       return;
     }
     const contact = contactFor(conversation);
+    const activeIdentity = contactIdentityForConversation(conversation, contact);
     const channel = channelFor(conversation.channelId);
     const style = channelStyle(channel);
     $("chatTitle").textContent = conversation.subject;
     $("chatAvatar").textContent = initials(conversation.subject);
     $("chatChannel").textContent = channel?.name || style.label;
     $("chatChannelBadge").title = style.label;
-    const channelProfileId = contact?.channelProfileId || conversation.channelProfileId || "";
+    const channelProfileId = conversation.channelProfileId || activeIdentity?.profileId || contact?.channelProfileId || "";
     $("chatChannelProfileId").textContent = channelProfileId === "—" ? "" : channelProfileId;
     $("chatChannelProfileId").title = channelProfileId === "—" ? "" : channelProfileId;
     $("chatChannelProfileId").hidden = !channelProfileId || channelProfileId === "—";
@@ -1780,7 +2013,7 @@
 
     $("detailsAvatar").textContent = initials(conversation.subject);
     $("detailsName").textContent = conversation.subject;
-    $("detailsIdentity").textContent = contact?.channelProfileId || conversation.channelProfileId || "No saved identity";
+    $("detailsIdentity").textContent = conversation.channelProfileId || activeIdentity?.profileId || contact?.channelProfileId || "No saved identity";
     $("detailsEmail").textContent = contact?.email || "—";
     $("detailsPhone").textContent = contact?.phone || "—";
     $("detailsChannel").textContent = channel?.name || style.label;
@@ -2352,9 +2585,288 @@
     renderAttachmentQueue();
   }
 
+  let contactIdentityDraftSequence = 0;
+
+  function identityLabel(platform) {
+    return identityPlatforms[platform]?.label || capitalize(String(platform || "Identity"));
+  }
+
+  function identityDraft(identity = {}, platform = "whatsapp") {
+    const normalized = normalizeContactIdentity({ platform, ...identity }, {}, contactIdentityDraftSequence);
+    return {
+      ...normalized,
+      clientKey: String(identity.clientKey || identity.identityId || `draft-${++contactIdentityDraftSequence}`),
+      identityId: String(identity.identityId || ""),
+      platform: normalized.platform || platform,
+      profileId: normalized.profileId || "",
+      username: normalized.username || "",
+      phoneNumber: normalized.phoneNumber || "",
+      isPrimary: identity.isPrimary === true,
+      bindings: normalized.bindings || [],
+    };
+  }
+
+  function identityHasHistory(identity) {
+    if (!identity) return false;
+    if (identity.conversationId || identity.lastConversationId || identity.lastInboundAt ||
+        identity.lastOutboundAt || identity.lastMessageAt) return true;
+    return asItems(identity.bindings || identity.routes).some((binding) =>
+      binding.conversationId || binding.lastConversationId || binding.lastInboundAt ||
+      binding.lastOutboundAt || binding.lastMessageAt || binding.lastUsedAt);
+  }
+
+  function identityRequestPayload(identity) {
+    const bindings = asItems(identity.bindings || identity.routes).map((binding) => ({
+      channelId: String(binding.channelId || ""),
+      scopedProfileId: String(binding.scopedProfileId || binding.channelProfileId || identity.profileId || "").trim(),
+    })).filter((binding) => binding.channelId);
+    const payload = {
+      platform: connectorPlatform(identity.platform) || identity.platform,
+      profileId: String(identity.profileId || identity.channelProfileId || "").trim(),
+      channelProfileId: String(identity.profileId || identity.channelProfileId || "").trim(),
+      username: String(identity.username || "").trim(),
+      phoneNumber: String(identity.phoneNumber || "").trim(),
+      displayName: String(identity.displayName || "").trim(),
+      metadata: identity.metadata && typeof identity.metadata === "object" ? identity.metadata : {},
+      isPrimary: identity.isPrimary === true,
+      bindings,
+    };
+    return payload;
+  }
+
+  function identityChannels(platform, bindings = []) {
+    const matched = state.channels.filter((channel) => connectorPlatform(channel.connectorType) === platform);
+    const byId = new Map(matched.map((channel) => [channel.channelId, channel]));
+    asItems(bindings).forEach((binding) => {
+      if (!binding.channelId || byId.has(binding.channelId)) return;
+      byId.set(binding.channelId, {
+        channelId: binding.channelId,
+        name: binding.channelName || "Unavailable route",
+        connectorType: binding.connectorType || platform,
+        enabled: false,
+        health: "disconnected",
+      });
+    });
+    return [...byId.values()];
+  }
+
+  function collectIdentityDrafts(host, fallbackDrafts = []) {
+    if (!host) return fallbackDrafts;
+    const fallback = new Map(fallbackDrafts.map((draft) => [draft.clientKey, draft]));
+    return [...host.querySelectorAll("[data-contact-identity-key]")].map((card) => {
+      const clientKey = card.dataset.contactIdentityKey;
+      const previous = fallback.get(clientKey) || {};
+      const platform = connectorPlatform(card.dataset.platform) || "email";
+      const profileId = card.querySelector("[data-identity-profile]")?.value || "";
+      const routeProfileInputs = [...card.querySelectorAll("[data-identity-route-profile]")];
+      const checkedRoutes = [...card.querySelectorAll("[data-identity-route]:checked")].map((input) => {
+        const existing = asItems(previous.bindings).find((binding) => binding.channelId === input.value);
+        const channel = channelFor(input.value);
+        const scopedProfileId = String(routeProfileInputs.find((field) =>
+          field.dataset.identityRouteProfile === input.value)?.value || existing?.scopedProfileId || profileId).trim();
+        return normalizeIdentityBinding({
+          ...existing,
+          channelId: input.value,
+          scopedProfileId,
+          channelName: channel.name,
+          connectorType: channel.connectorType,
+          eligible: channel.enabled !== false && channel.health === "connected",
+        }, previous);
+      });
+      return identityDraft({
+        ...previous,
+        clientKey,
+        platform,
+        profileId,
+        username: card.querySelector("[data-identity-username]")?.value || "",
+        phoneNumber: card.querySelector("[data-identity-phone]")?.value || "",
+        isPrimary: card.querySelector("[data-identity-primary]")?.checked === true,
+        bindings: checkedRoutes,
+      }, platform);
+    });
+  }
+
+  function renderContactIdentityList(host, drafts, mode) {
+    if (!host) return;
+    host.replaceChildren();
+    if (!drafts.length) {
+      host.append(element("div", "contact-identities-empty", "No platform identities yet. Add one when you are ready."));
+      return;
+    }
+    drafts.forEach((draft, index) => {
+      const card = element("article", `contact-identity-card${draft.isPrimary ? " is-primary" : ""}`);
+      card.dataset.contactIdentityKey = draft.clientKey;
+      card.dataset.platform = draft.platform;
+      const head = element("div", "contact-identity-card-head");
+      const platforms = element("div", "identity-platform-options");
+      Object.entries(identityPlatforms).forEach(([value, profile]) => {
+        const button = element("button", `identity-platform-button${draft.platform === value ? " is-selected" : ""}`, profile.label);
+        button.type = "button";
+        button.dataset.action = "choose-contact-identity-platform";
+        button.dataset.identityMode = mode;
+        button.dataset.identityKey = draft.clientKey;
+        button.dataset.platform = value;
+        button.setAttribute("aria-pressed", String(draft.platform === value));
+        button.disabled = Boolean(draft.identityId);
+        if (draft.identityId) button.title = "An existing identity's platform cannot be changed. Add another identity instead.";
+        platforms.append(button);
+      });
+      const remove = element("button", "identity-remove-button", "×");
+      remove.type = "button";
+      remove.dataset.action = "remove-contact-identity";
+      remove.dataset.identityMode = mode;
+      remove.dataset.identityKey = draft.clientKey;
+      remove.setAttribute("aria-label", `Remove ${identityLabel(draft.platform)} identity`);
+      // An unresolved legacy conversation is not always visible in the hydrated
+      // binding list. Keep every persisted identity in a combined contact save;
+      // only unsaved drafts may be removed from this editor.
+      remove.disabled = mode === "edit" && Boolean(draft.identityId);
+      if (remove.disabled) remove.title = identityHasHistory(draft)
+        ? "This identity has conversation history and cannot be removed."
+        : "Existing identities cannot be removed from this contact editor.";
+      head.append(platforms, remove);
+
+      const fields = element("div", "contact-identity-fields");
+      const profile = identityPlatforms[draft.platform] || identityPlatforms.email;
+      const profileLabel = element("label", "field-label", profile.profileLabel);
+      const profileInput = document.createElement("input");
+      profileInput.className = "text-field";
+      profileInput.value = draft.profileId;
+      profileInput.placeholder = profile.profilePlaceholder;
+      profileInput.type = draft.platform === "email" ? "email" : "text";
+      profileInput.maxLength = 200;
+      profileInput.dataset.identityProfile = "";
+      profileInput.readOnly = Boolean(draft.identityId);
+      if (draft.identityId) {
+        profileInput.title = "An existing channel profile ID cannot be changed. Add another identity instead.";
+        profileInput.setAttribute("aria-readonly", "true");
+      }
+      profileLabel.append(profileInput);
+      if (draft.identityId) profileLabel.append(element("span", "field-help", "Existing profile IDs are read only."));
+      const usernameLabel = element("label", "field-label", "Username");
+      const username = document.createElement("input");
+      username.className = "text-field";
+      username.value = draft.username;
+      username.placeholder = "Optional username or handle";
+      username.maxLength = 160;
+      username.dataset.identityUsername = "";
+      usernameLabel.append(username);
+      fields.append(profileLabel, usernameLabel);
+      if (draft.platform === "whatsapp") {
+        const phoneLabel = element("label", "field-label form-span", "WhatsApp phone number");
+        const phone = document.createElement("input");
+        phone.className = "text-field";
+        phone.value = draft.phoneNumber;
+        phone.placeholder = "Optional, including country code";
+        phone.inputMode = "tel";
+        phone.maxLength = 40;
+        phone.dataset.identityPhone = "";
+        phoneLabel.append(phone);
+        fields.append(phoneLabel);
+      }
+      const routeFieldset = element("fieldset", "identity-route-fieldset");
+      routeFieldset.append(element("legend", "", "Connected routes"));
+      const routeOptions = element("div", "identity-route-options");
+      const boundChannelIds = new Set(asItems(draft.bindings).map((binding) => binding.channelId));
+      const availableChannels = identityChannels(draft.platform, draft.bindings).filter((channel) =>
+        boundChannelIds.has(channel.channelId) || (channel.enabled !== false && channel.health === "connected"));
+      if (!availableChannels.length) {
+        routeOptions.append(element("span", "identity-route-empty", draft.platform === "email"
+          ? "Email can be saved without a connected messaging route."
+          : "No matching channel is connected yet."));
+      } else availableChannels.forEach((channel) => {
+        const existingBinding = asItems(draft.bindings).find((binding) => binding.channelId === channel.channelId);
+        const routeHasHistory = Boolean(existingBinding && (
+          existingBinding.conversationId || existingBinding.lastConversationId || existingBinding.lastInboundAt ||
+          existingBinding.lastOutboundAt || existingBinding.lastMessageAt
+        ));
+        const routeRow = element("div", "identity-route-option-row");
+        const option = element("label", "identity-route-option");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = channel.channelId;
+        checkbox.dataset.identityRoute = "";
+        checkbox.checked = asItems(draft.bindings).some((binding) => binding.channelId === channel.channelId);
+        checkbox.disabled = routeHasHistory || (!checkbox.checked && (channel.enabled === false || channel.health !== "connected"));
+        if (routeHasHistory) {
+          checkbox.title = "This route has conversation history and cannot be removed.";
+        }
+        option.append(checkbox, document.createTextNode(`${channel.name}${channel.enabled === false ? " · unavailable" : ""}`));
+        const scopedProfile = document.createElement("input");
+        scopedProfile.className = "text-field identity-route-profile";
+        scopedProfile.value = String(existingBinding?.scopedProfileId || draft.profileId || "");
+        scopedProfile.placeholder = "Channel-scoped profile ID";
+        scopedProfile.maxLength = 512;
+        scopedProfile.dataset.identityRouteProfile = channel.channelId;
+        scopedProfile.setAttribute("aria-label", `${channel.name} scoped profile ID`);
+        scopedProfile.disabled = channel.enabled === false || channel.health !== "connected";
+        scopedProfile.readOnly = Boolean(existingBinding);
+        if (existingBinding) {
+          scopedProfile.title = routeHasHistory
+            ? "This route has conversation history and its profile ID cannot be changed."
+            : "An existing channel route ID cannot be changed. Remove the route and add a new one instead.";
+        }
+        routeRow.append(option, scopedProfile);
+        if (routeHasHistory) {
+          routeRow.append(element("span", "field-help", "Used by conversation history · locked"));
+        }
+        routeOptions.append(routeRow);
+      });
+      routeFieldset.append(routeOptions);
+      fields.append(routeFieldset);
+      const primary = element("label", "identity-primary-control");
+      const primaryInput = document.createElement("input");
+      primaryInput.type = "radio";
+      primaryInput.name = `${mode}-primary-contact-identity`;
+      primaryInput.dataset.identityPrimary = "";
+      primaryInput.checked = draft.isPrimary || (!drafts.some((item) => item.isPrimary) && index === 0);
+      primary.append(primaryInput, document.createTextNode("Primary identity"));
+      fields.append(primary);
+      card.append(head, fields);
+      host.append(card);
+    });
+  }
+
+  function contactIdentityDraftContext(mode) {
+    const createMode = mode === "create";
+    return {
+      host: $(createMode ? "contactCreateIdentities" : "contactEditIdentities"),
+      drafts: createMode ? state.contactCreateIdentityDrafts : state.contactEditIdentityDrafts,
+      set(next) {
+        if (createMode) state.contactCreateIdentityDrafts = next;
+        else state.contactEditIdentityDrafts = next;
+      },
+    };
+  }
+
+  function refreshContactIdentityDrafts(mode, mutate) {
+    const context = contactIdentityDraftContext(mode);
+    let drafts = collectIdentityDrafts(context.host, context.drafts);
+    drafts = mutate(drafts) || drafts;
+    if (drafts.length && !drafts.some((draft) => draft.isPrimary)) drafts[0].isPrimary = true;
+    context.set(drafts);
+    renderContactIdentityList(context.host, drafts, mode);
+  }
+
+  function contactSearchText(contact) {
+    const identities = contact.identities.flatMap((identity) => [
+      identity.platform, identityLabel(identity.platform), identity.profileId, identity.username, identity.phoneNumber, identity.email,
+      ...identity.bindings.flatMap((binding) => [binding.channelId, binding.channelName, binding.scopedProfileId]),
+    ]);
+    return [contact.displayName, contact.email, contact.phone, contact.company, ...contact.tags, ...identities].join(" ").toLocaleLowerCase();
+  }
+
+  function contactLastActive(contact) {
+    const values = [
+      ...state.conversations.filter((conversation) => conversation.contactId === contact.contactId).map((conversation) => conversation.lastMessageAt),
+      ...contact.identities.flatMap((identity) => [identity.lastMessageAt, ...identity.bindings.map((binding) => binding.lastUsedAt)]),
+    ].filter(Boolean).map((value) => new Date(value)).filter((value) => !Number.isNaN(value.getTime()));
+    return values.sort((a, b) => b - a)[0]?.toISOString() || "";
+  }
+
   function renderContacts() {
     const search = state.contactSearch.trim().toLocaleLowerCase();
-    const contacts = state.contacts.filter((contact) => `${contact.displayName} ${contact.email} ${contact.phone} ${contact.channelProfileId} ${contact.company} ${contact.channelName} ${contact.tags.join(" ")}`.toLocaleLowerCase().includes(search));
+    const contacts = state.contacts.filter((contact) => contactSearchText(contact).includes(search));
     $("contactCount").textContent = `${contacts.length} contact${contacts.length === 1 ? "" : "s"}`;
     const tbody = $("contactTableBody");
     tbody.replaceChildren();
@@ -2381,18 +2893,16 @@
       avatar.style.background = palette[0];
       avatar.style.color = palette[1];
       const copy = document.createElement("div");
-      copy.append(element("strong", "", contact.displayName), element("span", "", contact.email !== "—" ? contact.email : contact.channelProfileId));
+      const count = contact.identities.length;
+      copy.append(
+        element("strong", "", contact.displayName),
+        element("span", "contact-count-copy", `${count} platform identit${count === 1 ? "y" : "ies"}`),
+      );
       identity.append(avatar, copy);
       identityCell.append(identity);
       row.append(identityCell);
 
-      const style = channelStyle(channelFor(contact.channelId));
-      const channelCell = document.createElement("td");
-      const badge = element("span", "channel-badge", style.label);
-      badge.style.background = style.soft;
-      badge.style.color = style.color;
-      channelCell.append(badge);
-      row.append(channelCell);
+      row.append(tableCell(contact.company || "—"));
 
       const tagCell = document.createElement("td");
       const tagWrap = element("div", "tag-list");
@@ -2400,8 +2910,8 @@
       tagCell.append(tagWrap);
       row.append(tagCell);
 
-      const conversation = state.conversations.find((item) => item.contactId === contact.contactId);
-      row.append(tableCell(conversation ? relativeTime(conversation.lastMessageAt) : "—"));
+      const lastActive = contactLastActive(contact);
+      row.append(tableCell(lastActive ? relativeTime(lastActive) : "—"));
       const statusCell = document.createElement("td");
       statusCell.append(element("span", `status-chip${contact.status === "inactive" ? " is-inactive" : ""}`, contact.status === "inactive" ? "Inactive" : "Active"));
       row.append(statusCell);
@@ -2409,17 +2919,152 @@
     });
   }
 
-  function populateContactEditorChannels(selectedId = "") {
-    const select = $("contactEditChannel");
-    select.replaceChildren();
-    state.channels.filter((channel) => providerProfiles[channel.connectorType]).forEach((channel) => {
-      const option = document.createElement("option");
-      option.value = channel.channelId;
-      option.textContent = `${channel.name} · ${(providerProfiles[channel.connectorType] || {}).label || channel.connectorType}`;
-      option.disabled = channel.enabled === false;
-      select.append(option);
+  function contactPlatformRoutes(contact, platform) {
+    const routes = [];
+    contact.identities.filter((identity) => identity.platform === platform).forEach((identity) => {
+      if (platform === "email" && identity.profileId) {
+        routes.push({
+          key: `email:${identity.identityId}`,
+          contactId: contact.contactId,
+          identityId: identity.identityId,
+          platform,
+          profileId: identity.profileId,
+          channelId: "",
+          channelName: identity.username || identity.profileId,
+          connectorType: "email",
+          conversationId: "",
+          lastUsedAt: identity.lastMessageAt || "",
+          eligible: true,
+          kind: "email",
+        });
+      }
+      const bindingByChannel = new Map(identity.bindings.map((binding) => [binding.channelId, binding]));
+      // A provider identity is only addressable through an explicitly saved
+      // channel binding.  Never infer an account-scoped route from the
+      // canonical profile ID (Instagram/Facebook IDs can differ per account).
+      const compatible = identityChannels(platform, identity.bindings).filter((channel) =>
+        bindingByChannel.has(channel.channelId));
+      compatible.forEach((channel) => {
+        const binding = bindingByChannel.get(channel.channelId);
+        const conversation = state.conversations.find((item) => item.contactId === contact.contactId &&
+          ((item.contactIdentityId && item.contactIdentityId === identity.identityId && item.channelId === channel.channelId) ||
+            item.conversationId === binding.conversationId)) ||
+          state.conversations.find((item) => item.contactId === contact.contactId && !item.contactIdentityId &&
+            item.channelId === channel.channelId && (!item.channelProfileId || item.channelProfileId === identity.profileId));
+        routes.push({
+          key: `${identity.identityId}:${channel.channelId}`,
+          contactId: contact.contactId,
+          identityId: identity.identityId,
+          platform,
+          profileId: identity.profileId,
+          username: identity.username,
+          channelId: channel.channelId,
+          channelName: binding.channelName || channel.name,
+          connectorType: binding.connectorType || channel.connectorType,
+          conversationId: conversation?.conversationId || binding.conversationId || "",
+          conversationStatus: conversation?.status || binding.conversationStatus || "",
+          lastUsedAt: conversation?.lastMessageAt || binding.lastUsedAt || "",
+          eligible: Boolean(conversation) || (binding.eligible !== false && channel.enabled !== false && channel.health === "connected"),
+          kind: "conversation",
+        });
+      });
     });
-    if ([...select.options].some((option) => option.value === selectedId)) select.value = selectedId;
+    const latest = routes.filter((route) => route.lastUsedAt).sort((a, b) => new Date(b.lastUsedAt) - new Date(a.lastUsedAt))[0];
+    return routes.map((route) => ({ ...route, isLastUsed: Boolean(latest && latest.key === route.key) }))
+      .sort((a, b) => Number(b.isLastUsed) - Number(a.isLastUsed) || Number(b.eligible) - Number(a.eligible) ||
+        new Date(b.lastUsedAt || 0) - new Date(a.lastUsedAt || 0));
+  }
+
+  function renderContactPlatformActions(contact) {
+    const host = $("contactPlatformActions");
+    host.replaceChildren();
+    const platforms = [...new Set(contact.identities.map((identity) => identity.platform).filter(Boolean))];
+    if (!platforms.length) {
+      host.append(element("span", "contact-platform-empty", "Add a platform identity to start or open a conversation."));
+      return;
+    }
+    platforms.forEach((platform) => {
+      const routes = contactPlatformRoutes(contact, platform);
+      const eligible = routes.filter((route) => route.eligible).length;
+      const button = element("button", "contact-platform-action");
+      button.type = "button";
+      button.dataset.action = "open-contact-platform";
+      button.dataset.contactId = contact.contactId;
+      button.dataset.platform = platform;
+      button.disabled = eligible === 0;
+      button.append(
+        document.createTextNode(identityLabel(platform)),
+        element("span", "", eligible ? `${eligible} route${eligible === 1 ? "" : "s"}` : "Unavailable"),
+      );
+      host.append(button);
+    });
+  }
+
+  async function openContactRoute(route) {
+    if (!route?.eligible) return;
+    if ($("contactRouteDialog").open) $("contactRouteDialog").close();
+    state.contactRouteSelection = null;
+    if (route.kind === "email") {
+      window.location.href = `mailto:${encodeURIComponent(route.profileId)}`;
+      return;
+    }
+    if (route.conversationId && state.conversations.some((conversation) => conversation.conversationId === route.conversationId)) {
+      setRoute("inbox");
+      await selectConversation(route.conversationId);
+      return;
+    }
+    try {
+      const result = await state.api.startContactConversation(route.contactId, route.identityId,
+        route.channelId ? { channelId: route.channelId } : {});
+      const conversationId = String(result.conversationId || result.item?.conversationId || "");
+      await loadAll({ preserveSelection: false });
+      setRoute("inbox");
+      if (conversationId) await selectConversation(conversationId);
+    } catch (error) {
+      showToast("Conversation could not be opened", error.message, true);
+    }
+  }
+
+  function showContactRouteDialog(contact, platform, routes) {
+    state.contactRouteSelection = { contactId: contact.contactId, platform, routes };
+    $("contactRouteDialogEyebrow").textContent = identityLabel(platform);
+    $("contactRouteDialogTitle").textContent = `Open ${contact.displayName}`;
+    $("contactRouteDialogCopy").textContent = "Choose a connected account. The most recently used route is listed first.";
+    const host = $("contactRouteList");
+    host.replaceChildren();
+    routes.forEach((route, index) => {
+      const button = element("button", "contact-route-option");
+      button.type = "button";
+      button.dataset.action = "choose-contact-route";
+      button.dataset.routeIndex = String(index);
+      button.disabled = !route.eligible;
+      const copy = document.createElement("div");
+      copy.append(
+        element("strong", "", route.channelName || identityLabel(platform)),
+        element("span", "", [route.username || route.profileId, route.lastUsedAt ? `Used ${relativeTime(route.lastUsedAt)}` : "Never used"].filter(Boolean).join(" · ")),
+      );
+      const status = element("span", `contact-route-state${route.isLastUsed ? " is-last-used" : ""}`,
+        route.isLastUsed ? "Last used" : route.eligible ? (route.conversationId ? "Open" : "Start") : "Unavailable");
+      button.append(copy, status);
+      host.append(button);
+    });
+    $("contactRouteDialog").showModal();
+  }
+
+  function openContactPlatform(contactId, platform) {
+    const contact = state.contacts.find((item) => item.contactId === contactId);
+    if (!contact) return;
+    const routes = contactPlatformRoutes(contact, platform);
+    const eligible = routes.filter((route) => route.eligible);
+    if (!eligible.length) {
+      showToast("No available route", `Connect a ${identityLabel(platform)} channel before starting this conversation.`, true);
+      return;
+    }
+    if (eligible.length === 1) {
+      openContactRoute(eligible[0]);
+      return;
+    }
+    showContactRouteDialog(contact, platform, routes);
   }
 
   function showContactEditor(contact, { loading = false, error = "" } = {}) {
@@ -2438,14 +3083,11 @@
     $("contactEditorTitle").textContent = normalized.displayName;
     $("contactEditId").value = normalized.contactId;
     $("contactEditName").value = normalized.displayName;
-    populateContactEditorChannels(normalized.channelId);
-    $("contactEditChannel").disabled = !normalized.channelEditable;
-    $("contactEditChannelHelp").textContent = normalized.channelEditable
-      ? "You can change the channel until the first message is sent or received."
-      : "Channel is locked because this contact already has message history.";
-    $("contactEditChannelProfileId").value = normalized.channelProfileId === "—" ? "" : normalized.channelProfileId;
     $("contactEditCompany").value = normalized.company;
     $("contactEditTags").value = normalized.tags.join(", ");
+    state.contactEditIdentityDrafts = normalized.identities.map((identity) => identityDraft(identity, identity.platform));
+    renderContactIdentityList($("contactEditIdentities"), state.contactEditIdentityDrafts, "edit");
+    renderContactPlatformActions(normalized);
   }
 
   async function selectContact(contactId) {
@@ -2474,7 +3116,49 @@
     $("contactEditor").hidden = true;
     $("contactEditForm").reset();
     $("contactEditorTitle").textContent = "Edit contact";
+    state.contactEditIdentityDrafts = [];
+    $("contactEditIdentities").replaceChildren();
+    $("contactPlatformActions").replaceChildren();
     renderContacts();
+  }
+
+  function validateContactIdentities(drafts) {
+    const normalized = drafts.map((draft) => {
+      const profileId = String(draft.profileId || (draft.platform === "whatsapp" ? draft.phoneNumber : "")).trim();
+      return { ...draft, profileId };
+    });
+    const missing = normalized.find((identity) => !identity.profileId);
+    if (missing) throw new Error(`${identityLabel(missing.platform)} profile ID is required.`);
+    const keys = normalized.map((identity) => `${identity.platform}:${identity.profileId.toLocaleLowerCase()}`);
+    if (new Set(keys).size !== keys.length) throw new Error("The same platform identity was added more than once.");
+    if (normalized.length && !normalized.some((identity) => identity.isPrimary)) normalized[0].isPrimary = true;
+    return normalized;
+  }
+
+  function identityPayloadChanged(previous, next) {
+    const compact = (identity) => JSON.stringify(identityRequestPayload(identity));
+    return compact(previous) !== compact(next);
+  }
+
+  async function syncContactIdentities(contact, drafts) {
+    const previousById = new Map(contact.identities.filter((identity) => identity.identityId).map((identity) => [identity.identityId, identity]));
+    const retained = new Set();
+    for (const draft of drafts) {
+      const previous = draft.identityId ? previousById.get(draft.identityId) : null;
+      const payload = identityRequestPayload(draft);
+      if (!previous || draft.identityId.startsWith("legacy:")) {
+        if (!previous || identityPayloadChanged(previous, draft)) await state.api.createContactIdentity(contact.contactId, payload);
+      } else {
+        retained.add(draft.identityId);
+        if (identityPayloadChanged(previous, draft)) await state.api.updateContactIdentity(contact.contactId, draft.identityId, payload);
+      }
+    }
+    for (const identity of contact.identities) {
+      if (!identity.identityId || identity.identityId.startsWith("legacy:") || retained.has(identity.identityId)) continue;
+      if (!drafts.some((draft) => draft.identityId === identity.identityId)) {
+        await state.api.deleteContactIdentity(contact.contactId, identity.identityId);
+      }
+    }
   }
 
   async function saveContactEdits(form) {
@@ -2482,25 +3166,50 @@
     const contactId = String(data.get("contactId") || "");
     const payload = {
       displayName: String(data.get("displayName") || "").trim(),
-      channelId: String($("contactEditChannel").value || "").trim(),
       company: String(data.get("company") || "").trim(),
       tags: String(data.get("tags") || "").split(/[,\n]/).map((tag) => tag.trim()).filter(Boolean),
     };
-    if (!contactId || !payload.displayName || !payload.channelId) {
+    if (!contactId || !payload.displayName) {
       form.reportValidity();
+      return;
+    }
+    const current = state.contacts.find((contact) => contact.contactId === contactId);
+    if (!current) return;
+    let drafts;
+    try {
+      drafts = validateContactIdentities(collectIdentityDrafts($("contactEditIdentities"), state.contactEditIdentityDrafts));
+    } catch (error) {
+      showToast("Contact was not saved", error.message, true);
+      return;
+    }
+    const retainedIdentityIds = new Set(drafts.map((draft) => draft.identityId).filter(Boolean));
+    const omittedHistoryIdentity = current.identities.find((identity) => identity.identityId &&
+      !retainedIdentityIds.has(identity.identityId) && identityHasHistory(identity));
+    if (omittedHistoryIdentity) {
+      showToast("Contact was not saved", "An identity with conversation history cannot be removed.", true);
       return;
     }
     const submit = $("contactEditSubmit");
     submit.disabled = true;
     submit.textContent = "Saving…";
     try {
-      const result = await state.api.updateContact(contactId, payload);
-      const updated = normalizeContact(result.item || { contactId, ...payload });
+      payload.identities = drafts.map((draft) => ({
+        ...identityRequestPayload(draft),
+        ...((draft.identityId && !draft.identityId.startsWith("legacy:")) ? { identityId: draft.identityId } : {}),
+      }));
+      await state.api.updateContact(contactId, payload);
+      const savedIdentityIds = new Set(drafts.map((draft) => draft.identityId)
+        .filter((identityId) => identityId && !identityId.startsWith("legacy:")));
+      for (const identity of current.identities) {
+        if (!identity.identityId || identity.identityId.startsWith("legacy:") || savedIdentityIds.has(identity.identityId)) continue;
+        await state.api.deleteContactIdentity(contactId, identity.identityId);
+      }
+      const refreshed = await state.api.getContact(contactId);
+      const updated = normalizeContact(refreshed.item || refreshed || { contactId, ...payload, identities: drafts });
       const index = state.contacts.findIndex((contact) => contact.contactId === contactId);
       if (index >= 0) state.contacts[index] = { ...state.contacts[index], ...updated };
       state.conversations.filter((conversation) => conversation.contactId === contactId).forEach((conversation) => {
         conversation.subject = updated.displayName;
-        conversation.channelId = updated.channelId;
       });
       showContactEditor(state.contacts[index] || updated);
       renderContacts();
@@ -3653,10 +4362,11 @@
 
   function templateSourceValue(source, conversation = selectedConversation()) {
     const contact = conversation ? contactFor(conversation) : null;
+    const identity = conversation ? contactIdentityForConversation(conversation, contact) : null;
     const channel = conversation ? channelFor(conversation.channelId) : null;
     const values = {
       displayName: contact?.displayName || conversation?.subject || "",
-      channelProfileId: contact?.channelProfileId === "—" ? "" : contact?.channelProfileId || conversation?.channelProfileId || "",
+      channelProfileId: conversation?.channelProfileId || identity?.profileId || (contact?.channelProfileId === "—" ? "" : contact?.channelProfileId) || "",
       company: contact?.company || "",
       tags: contact?.tags?.join(", ") || "",
       channelName: channel?.name || "",
@@ -5356,61 +6066,47 @@
     }
   }
 
-  function populateContactChannelSelect(selectedId = "") {
-    const select = $("contactChannelId");
-    if (!select) return;
-    const previous = selectedId || select.value;
-    const available = state.channels.filter((channel) => providerProfiles[channel.connectorType] && channel.enabled && channel.health === "connected");
-    select.replaceChildren();
-    available.forEach((channel) => {
-      const option = document.createElement("option");
-      option.value = channel.channelId;
-      option.textContent = `${channel.name} · ${providerProfiles[channel.connectorType].label}`;
-      select.append(option);
-    });
-    if (available.some((channel) => channel.channelId === previous)) select.value = previous;
-    updateContactIdentityField();
-  }
-
-  function updateContactIdentityField() {
-    const channel = channelFor($("contactChannelId")?.value);
-    const profile = providerProfiles[channel.connectorType] || { noun: "Customer identifier", placeholder: "Customer identifier", help: "Enter the provider-specific customer identifier." };
-    $("contactIdentityLabel").textContent = profile.noun;
-    $("contactChannelProfileId").placeholder = profile.placeholder;
-    $("contactChannelProfileId").inputMode = channel.connectorType === "whatsapp_cloud" ? "tel" : "text";
-    $("contactIdentityHelp").textContent = profile.help;
-  }
-
   function openContactDialog() {
-    const available = state.channels.filter((channel) => providerProfiles[channel.connectorType] && channel.enabled && channel.health === "connected");
-    if (!available.length) {
-      setRoute(canAdmin() ? "channels" : "inbox");
-      showToast("Connect a channel first", "An enabled messaging channel is required before creating a conversation.", true);
-      return;
-    }
     $("contactForm").reset();
-    populateContactChannelSelect(available[0].channelId);
+    state.contactCreateIdentityDrafts = [];
+    renderContactIdentityList($("contactCreateIdentities"), state.contactCreateIdentityDrafts, "create");
     $("contactDialog").showModal();
+    $("contactForm").elements.displayName?.focus();
   }
 
   async function createContact(form) {
     const formData = new FormData(form);
+    let drafts;
+    try {
+      drafts = validateContactIdentities(collectIdentityDrafts($("contactCreateIdentities"), state.contactCreateIdentityDrafts));
+    } catch (error) {
+      showToast("Contact needs attention", error.message, true);
+      return;
+    }
+    const identityPayloads = drafts.map(identityRequestPayload);
     const payload = {
       displayName: String(formData.get("displayName") || "").trim(),
-      channelId: String(formData.get("channelId") || "").trim(),
-      channelProfileId: String(formData.get("channelProfileId") || "").trim(),
+      company: String(formData.get("company") || "").trim(),
+      tags: String(formData.get("tags") || "").split(/[,\n]/).map((tag) => tag.trim()).filter(Boolean),
+      identities: identityPayloads,
     };
-    if (!payload.displayName || !payload.channelId || !payload.channelProfileId) return;
+    if (!payload.displayName) {
+      form.reportValidity();
+      return;
+    }
     const submit = form.querySelector('[type="submit"]');
     submit.disabled = true;
     try {
       const result = await state.api.createContact(payload);
       $("contactDialog").close();
       form.reset();
+      state.contactCreateIdentityDrafts = [];
+      $("contactCreateIdentities").replaceChildren();
       await loadAll({ preserveSelection: false });
-      setRoute("inbox");
-      if (result.conversationId) await selectConversation(String(result.conversationId));
-      showToast("Contact created", `${payload.displayName} is ready for a conversation.`);
+      setRoute("contacts");
+      const contactId = String(result.contactId || result.item?.contactId || "");
+      if (contactId) await selectContact(contactId);
+      showToast("Contact created", `${payload.displayName} was added with ${identityPayloads.length} platform identit${identityPayloads.length === 1 ? "y" : "ies"}.`);
     } catch (error) {
       showToast("Contact could not be created", error.message, true);
     } finally {
@@ -5571,6 +6267,23 @@
 
   function contactFor(conversation) {
     return state.contacts.find((contact) => contact.contactId === conversation.contactId) || null;
+  }
+
+  function contactIdentityForConversation(conversation, contact = contactFor(conversation)) {
+    if (!contact || !conversation) return null;
+    const identities = asItems(contact.identities);
+    if (conversation.contactIdentityId) {
+      const exact = identities.find((identity) => identity.identityId === conversation.contactIdentityId);
+      if (exact) return exact;
+    }
+    const routed = identities.find((identity) => asItems(identity.bindings || identity.routes).some((binding) =>
+      binding.channelId === conversation.channelId &&
+      (!conversation.channelProfileId || !binding.scopedProfileId || binding.scopedProfileId === conversation.channelProfileId)));
+    if (routed) return routed;
+    const legacy = identities.find((identity) =>
+      identity.channelId === conversation.channelId &&
+      (!conversation.channelProfileId || !identity.profileId || identity.profileId === conversation.channelProfileId));
+    return legacy || identities.find((identity) => identity.isPrimary) || identities[0] || null;
   }
 
   function channelFor(channelId) {
@@ -5787,6 +6500,51 @@
           openWebhookTokenDialog(actionButton.dataset.channelId);
           return;
         }
+        if (actionButton.dataset.action === "add-contact-create-identity" || actionButton.dataset.action === "add-contact-edit-identity") {
+          const mode = actionButton.dataset.action.includes("create") ? "create" : "edit";
+          refreshContactIdentityDrafts(mode, (drafts) => [
+            ...drafts,
+            identityDraft({ isPrimary: drafts.length === 0 }, "whatsapp"),
+          ]);
+          return;
+        }
+        if (actionButton.dataset.action === "remove-contact-identity") {
+          const mode = actionButton.dataset.identityMode === "create" ? "create" : "edit";
+          const context = contactIdentityDraftContext(mode);
+          const currentDraft = collectIdentityDrafts(context.host, context.drafts)
+            .find((draft) => draft.clientKey === actionButton.dataset.identityKey);
+          if (mode === "edit" && currentDraft?.identityId) {
+            showToast("Identity cannot be removed", identityHasHistory(currentDraft)
+              ? "This identity has conversation history."
+              : "Existing identities cannot be removed from this contact editor.", true);
+            return;
+          }
+          refreshContactIdentityDrafts(mode, (drafts) => drafts.filter((draft) => draft.clientKey !== actionButton.dataset.identityKey));
+          return;
+        }
+        if (actionButton.dataset.action === "choose-contact-identity-platform") {
+          const mode = actionButton.dataset.identityMode === "create" ? "create" : "edit";
+          refreshContactIdentityDrafts(mode, (drafts) => drafts.map((draft) => draft.clientKey === actionButton.dataset.identityKey
+            ? identityDraft({
+              ...draft,
+              platform: actionButton.dataset.platform,
+              profileId: "",
+              username: "",
+              phoneNumber: "",
+              bindings: [],
+            }, actionButton.dataset.platform)
+            : draft));
+          return;
+        }
+        if (actionButton.dataset.action === "open-contact-platform") {
+          openContactPlatform(actionButton.dataset.contactId, actionButton.dataset.platform);
+          return;
+        }
+        if (actionButton.dataset.action === "choose-contact-route") {
+          const route = state.contactRouteSelection?.routes?.[Number(actionButton.dataset.routeIndex)];
+          if (route) openContactRoute(route);
+          return;
+        }
         const actions = {
           "toggle-user-menu": () => toggleUserMenu(),
           "logout": logout,
@@ -5805,6 +6563,10 @@
           "new-conversation": openContactDialog,
           "new-contact": openContactDialog,
           "close-contact-dialog": () => $("contactDialog").close(),
+          "close-contact-route-dialog": () => {
+            $("contactRouteDialog").close();
+            state.contactRouteSelection = null;
+          },
           "close-contact-editor": closeContactEditor,
           "delete-contact": deleteSelectedContact,
           "cancel-contact-edit": () => {
@@ -6022,7 +6784,6 @@
       }
       syncChannelForm(event.target.value, false, {});
     });
-    $("contactChannelId").addEventListener("change", updateContactIdentityField);
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
     $("contactEditForm").addEventListener("submit", (event) => { event.preventDefault(); saveContactEdits(event.currentTarget); });
     $("templateSearch").addEventListener("focus", (event) => {

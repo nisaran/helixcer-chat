@@ -1,5 +1,8 @@
 # Copy to .dev.vars for local development only. The real file is gitignored.
 GOOGLE_CLIENT_ID="your-google-oauth-client-id.apps.googleusercontent.com"
+# Optional comma-separated Android OAuth client IDs accepted as the Google
+# token's authorized presenter (azp). The audience remains GOOGLE_CLIENT_ID.
+GOOGLE_ANDROID_CLIENT_IDS="your-android-oauth-client-id.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET="your-google-oauth-client-secret"
 GOOGLE_REDIRECT_URI="http://localhost:8787/auth/google/callback"
 BOOTSTRAP_OWNER_EMAIL="owner@example.com"
@@ -14,3 +17,7 @@ CHANNEL_CREDENTIALS_KEY="generate-at-least-32-random-bytes-and-keep-this-private
 VAPID_PUBLIC_KEY="generate-one-P-256-VAPID-public-key"
 VAPID_PRIVATE_KEY="keep-the-matching-VAPID-private-key-secret"
 VAPID_SUBJECT="mailto:owner@example.com"
+# Optional native Android background notifications (Firebase service account).
+FIREBASE_PROJECT_ID="your-firebase-project-id"
+FIREBASE_CLIENT_EMAIL="firebase-adminsdk@example-project.iam.gserviceaccount.com"
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nreplace-with-service-account-private-key\n-----END PRIVATE KEY-----\n"

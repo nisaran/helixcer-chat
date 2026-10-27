@@ -55,14 +55,18 @@ async function fixture() {
   const database = new DatabaseSync(':memory:');
   for (const name of ['0001_initial.sql', '0002_identity_and_workspaces.sql', '0003_whatsapp_channel.sql',
     '0004_multichannel_credentials.sql', '0005_external_template_api.sql', '0006_contact_profiles.sql',
-    '0007_conversation_uniqueness.sql', '0008_push_subscriptions.sql', '0009_workspace_profile.sql']) {
+    '0007_conversation_uniqueness.sql', '0008_push_subscriptions.sql', '0009_workspace_profile.sql',
+    '0011_mobile_push_devices.sql', '0012_contact_identities.sql']) {
     database.exec(await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));
   }
   const now = new Date().toISOString();
   database.prepare(`INSERT INTO channels
       (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
     VALUES ('wa-sales','WhatsApp Sales','whatsapp_cloud','whatsapp_cloud',1,'["text","template"]',?,'WA_SALES',?,?, 'ws_default')`)
-    .run(JSON.stringify({ phoneNumberId: '103698172469545', apiVersion: 'v26.0' }), now, now);
+    .run(JSON.stringify({
+      phoneNumberId: '103698172469545', apiVersion: 'v26.0',
+      credentialsVerifiedAt: now, verifiedProviderId: '103698172469545'
+    }), now, now);
   const encryptionKey = 'unit-test-channel-credential-key-material-1234567890';
   const encryptedToken = await encryptChannelCredential('EAAtest-access-token-123456789', encryptionKey,
     'ws_default', 'wa-sales', 'accessToken');
@@ -549,6 +553,33 @@ test('external template API persists once, dispatches, replays safely, and scope
     assert.equal(browserBody.error.code, 'server_to_server_only');
   } finally {
     globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('external template encryption failure leaves no recipient route or conversation', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_noencrypt1.${'e'.repeat(43)}`;
+  await insertKey(database, token, 'key-no-encryption', 'hxc_live_noencrypt1');
+  env.CHANNEL_CREDENTIALS_KEY = '';
+  const before = Object.fromEntries([
+    'contacts', 'contact_identities', 'channel_identity_bindings', 'channel_identities', 'conversations'
+  ].map(table => [table, database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count]));
+  try {
+    const response = await handleRequest(postTemplate(token, 'missing-encryption-key', {
+      channelId: 'wa-sales',
+      to: '+91 99999 00001',
+      previewText: 'This request must fail before creating the recipient.',
+      template: { name: 'order_update', language: { code: 'en_US' } }
+    }), env);
+    assert.equal(response.status, 503);
+    const error = await response.json();
+    assert.equal(error.status, false);
+    for (const [table, count] of Object.entries(before)) {
+      assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, count,
+        `${table} must not change when outbound payload encryption is unavailable`);
+    }
+  } finally {
     database.close();
   }
 });

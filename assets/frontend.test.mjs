@@ -98,8 +98,8 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /Instagram Business or Creator account/);
   assert.match(html, /Instagram User access token/);
   assert.doesNotMatch(html, /Facebook Page ID|Page access token/);
-  assert.match(html, /id="contactChannelId"/);
-  assert.match(html, /name="channelProfileId"/);
+  assert.match(html, /id="contactCreateIdentities"/);
+  assert.match(html, /data-action="add-contact-create-identity"/);
   assert.match(app, /request\("\/api\/channels", \{ method: "POST"/);
   assert.match(app, /request\(`\/api\/channels\/\$\{encodeURIComponent\(channelId\)\}`, \{ method: "PATCH"/);
   assert.match(app, /\/api\/channels\/\$\{encodeURIComponent\(channelId\)\}\/verify/);
@@ -112,8 +112,8 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(app, /copy-webhook-callback/);
   assert.match(app, /\/webhooks\/instagram-app\/\$\{encodeURIComponent\(channel\.config\.appId\)\}/);
   assert.match(app, /Helixcer routes messages by account ID/);
-  assert.match(app, /populateContactChannelSelect/);
-  assert.match(app, /channelId:\s*String\(formData\.get\("channelId"\)/);
+  assert.match(app, /function identityChannels\(platform, bindings = \[\]\)/);
+  assert.match(app, /connectorPlatform\(channel\.connectorType\) === platform/);
   assert.doesNotMatch(app, /channelId:\s*"wa-main"/);
   assert.doesNotMatch(`${html}\n${app}`, /WA_MAIN_(?:ACCESS_TOKEN|APP_SECRET|VERIFY_TOKEN|PHONE_NUMBER_ID)/);
 });
@@ -466,7 +466,7 @@ test("notification clicks accept only inbox deep links and navigate an existing 
   assert.match(serviceWorker, /self\.clients\.openWindow\(targetUrl\)/);
 });
 
-test("channel cards collapse by default and use provider artwork throughout the inbox", () => {
+test("channel cards and the inbox retain provider artwork while contacts stay person-first", () => {
   assert.match(app, /expandedChannelIds: new Set\(\)/);
   assert.match(app, /data\.action = "toggle-channel-details"|dataset\.action = "toggle-channel-details"/);
   assert.match(app, /details\.hidden = !expanded/);
@@ -485,27 +485,59 @@ test("channel cards collapse by default and use provider artwork throughout the 
   assert.match(styles, /\.chat-person-title-row\s*\{/);
   assert.match(styles, /\.chat-profile-id \{ max-width: min\(30vw, 140px\); \}/);
   assert.match(app, /\$\("chatChannel"\)\.textContent = channel\?\.name/);
-  assert.match(app, /contact\?\.channelProfileId \|\| conversation\.channelProfileId/);
+  assert.match(app, /conversation\.channelProfileId \|\| activeIdentity\?\.profileId \|\| contact\?\.channelProfileId/);
+  const contactsStart = app.indexOf("function renderContacts()");
+  const contactsEnd = app.indexOf("function contactPlatformRoutes", contactsStart);
+  const renderContactsBody = app.slice(contactsStart, contactsEnd);
+  assert.match(renderContactsBody, /platform identit/);
+  assert.doesNotMatch(renderContactsBody, /providerLogo|providerLogoPaths|provider-(?:whatsapp|telegram|instagram)\.svg/);
 });
 
-test("contacts open in a right-side editor backed by contact detail endpoints", () => {
+test("person-first contacts edit multiple immutable identities and open lazy channel routes", () => {
   assert.match(html, /id="contactsWorkspace"/);
   assert.match(html, /id="contactEditor"/);
   assert.match(html, /id="contactEditName"/);
-  assert.match(html, /id="contactEditChannel"/);
-  assert.match(html, /id="contactEditChannelHelp"/);
-  assert.match(html, /Channel Profile ID<input[^>]*id="contactEditChannelProfileId"[^>]*readonly[^>]*aria-readonly="true"/);
-  assert.match(html, /Assigned by the channel and cannot be edited/);
+  assert.match(html, /id="contactEditIdentities"/);
+  assert.match(html, /id="contactPlatformActions"/);
+  assert.match(html, /id="contactRouteDialog"/);
+  assert.doesNotMatch(html, /id="contactEditChannel(?:Help|ProfileId)?"/);
   assert.match(html, /id="contactEditCompany"/);
   assert.match(html, /id="contactEditTags"/);
   assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`\)/);
   assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`, \{ method: "PATCH"/);
+  assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}\/identities`, \{ method: "POST"/);
+  assert.match(app, /identities\/\$\{encodeURIComponent\(identityId\)\}/);
+  assert.match(app, /profileInput\.readOnly = Boolean\(draft\.identityId\)/);
+  assert.match(app, /Existing profile IDs are read only/);
+  assert.match(app, /dataset\.identityRouteProfile = channel\.channelId/);
+  assert.match(app, /scopedProfileId/);
+  assert.match(app, /scopedProfile\.readOnly = Boolean\(existingBinding\)/);
+  assert.match(app, /existing channel route ID cannot be changed/);
+  assert.match(app, /function identityHasHistory\(identity\)/);
+  assert.match(app, /remove\.disabled = mode === "edit" && Boolean\(draft\.identityId\)/);
+  assert.match(app, /omittedHistoryIdentity[\s\S]*?An identity with conversation history cannot be removed/);
+  assert.match(app, /mode === "edit" && currentDraft\?\.identityId/);
+  const identityPayloadBody = app.match(/function identityRequestPayload\(identity\) \{([\s\S]*?)\n  \}/)?.[1] || "";
+  assert.match(identityPayloadBody, /bindings/);
+  assert.doesNotMatch(identityPayloadBody, /payload\.channelId/);
   assert.match(app, /row\.dataset\.contactId = contact\.contactId/);
-  assert.match(app, /Channel is locked because this contact already has message history/);
   const saveContactBody = app.match(/async function saveContactEdits\(form\) \{([\s\S]*?)\n  \}/)?.[1] || "";
   assert.doesNotMatch(saveContactBody, /channelProfileId\s*:/);
   assert.match(app, /type === "contact\.updated"[\s\S]*?await reconcileWorkspace\(\)[\s\S]*?await selectContact/);
-  assert.match(app, /\["channelProfileId", "Channel Profile ID"\]/);
+  assert.match(app, /JSON\.stringify\(\{ contactId, identityId, \.\.\.payload \}\)/);
+  assert.match(app, /conversation\.channelId === channelId/);
+  assert.match(app, /channelProfileId: binding\?\.scopedProfileId \|\| identity\.profileId/);
+  assert.match(app, /route\.isLastUsed \? "Last used"/);
+  assert.match(app, /"Never used"/);
+  const platformRoutesBody = app.slice(app.indexOf("function contactPlatformRoutes"),
+    app.indexOf("function renderContactPlatformActions"));
+  assert.match(platformRoutesBody, /filter\(\(channel\) =>\s*bindingByChannel\.has\(channel\.channelId\)\)/);
+  assert.doesNotMatch(platformRoutesBody, /bindingByChannel\.has\(channel\.channelId\) \|\|/);
+  assert.match(app, /state\.contactCreateIdentityDrafts = \[\]/);
+  assert.match(app, /No platform identities yet\. Add one when you are ready\./);
+  const createContactBody = app.match(/async function createContact\(form\) \{([\s\S]*?)\n  \}/)?.[1] || "";
+  assert.match(createContactBody, /identities: identityPayloads/);
+  assert.doesNotMatch(createContactBody, /channelId\s*:|channelProfileId\s*:/);
 });
 
 test("expanded channel cards expose the internal channel ID with a copy action", () => {

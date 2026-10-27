@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261027-16">
-  <script src="./assets/app.js?v=20261027-1" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261028-18">
+  <script src="./assets/app.js?v=20261028-18" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -327,7 +327,7 @@
 
       <section class="route content-route" id="contactsRoute" data-route-panel="contacts" aria-labelledby="contactsTitle" hidden>
         <div class="route-heading">
-          <div><p class="eyebrow">Audience</p><h2 id="contactsTitle">Contacts</h2><p>Customer identities across every connected channel.</p></div>
+          <div><p class="eyebrow">Audience</p><h2 id="contactsTitle">Contacts</h2><p>One person record with every available messaging identity.</p></div>
           <button class="primary-button" type="button" data-action="new-contact"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add contact</button>
         </div>
         <div class="contacts-workspace" id="contactsWorkspace">
@@ -342,7 +342,7 @@
             </div>
             <div class="contact-table-wrap">
               <table class="contact-table">
-                <thead><tr><th>Contact</th><th>Channel</th><th>Tags</th><th>Last active</th><th>Status</th></tr></thead>
+                <thead><tr><th>Contact</th><th>Company</th><th>Tags</th><th>Last active</th><th>Status</th></tr></thead>
                 <tbody id="contactTableBody"></tbody>
               </table>
             </div>
@@ -357,11 +357,20 @@
               <div class="contact-editor-fields" id="contactEditorFields" hidden>
                 <input type="hidden" name="contactId" id="contactEditId">
                 <label class="field-label">Name<input class="text-field" id="contactEditName" name="displayName" required maxlength="100"></label>
-                <label class="field-label">Channel<select class="text-field" id="contactEditChannel" name="channelId" required></select><span class="field-help" id="contactEditChannelHelp"></span></label>
-                <label class="field-label">Channel Profile ID<input class="text-field read-only-field" id="contactEditChannelProfileId" readonly aria-readonly="true"><span class="field-help">Assigned by the channel and cannot be edited.</span></label>
                 <label class="field-label">Company<input class="text-field" id="contactEditCompany" name="company" maxlength="160" placeholder="Optional company"></label>
                 <label class="field-label">Tags<input class="text-field" id="contactEditTags" name="tags" maxlength="500" placeholder="Priority, Customer"></label>
                 <span class="field-help">Separate tags with commas.</span>
+                <section class="contact-identities" aria-labelledby="contactEditIdentitiesTitle">
+                  <div class="contact-identities-head">
+                    <div><strong id="contactEditIdentitiesTitle">Platform identities</strong><span>Add every account that belongs to this person.</span></div>
+                    <button class="secondary-button compact-button" type="button" data-action="add-contact-edit-identity">Add identity</button>
+                  </div>
+                  <div class="contact-identity-list" id="contactEditIdentities"></div>
+                </section>
+                <section class="contact-platform-actions" aria-labelledby="contactPlatformActionsTitle">
+                  <div><strong id="contactPlatformActionsTitle">Open a conversation</strong><span>Choose a platform. Helixcer opens the only eligible route or lets you choose between several.</span></div>
+                  <div class="contact-platform-button-list" id="contactPlatformActions"></div>
+                </section>
               </div>
               <div class="contact-editor-actions" id="contactEditorActions" hidden>
                 <button class="danger-button contact-delete-button" id="contactDeleteButton" type="button" data-action="delete-contact">Delete contact</button>
@@ -701,22 +710,40 @@
     </form>
   </dialog>
 
-  <dialog class="modal" id="contactDialog" aria-labelledby="contactDialogTitle">
+  <dialog class="modal contact-modal" id="contactDialog" aria-labelledby="contactDialogTitle">
     <form class="modal-card" id="contactForm">
       <div class="modal-head">
-        <div><p class="eyebrow">New conversation</p><h2 id="contactDialogTitle">Add a contact</h2></div>
+        <div><p class="eyebrow">New person</p><h2 id="contactDialogTitle">Add a contact</h2></div>
         <button class="icon-button" type="button" data-action="close-contact-dialog" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
       <div class="form-grid">
         <label class="field-label">Name<input class="text-field" name="displayName" required maxlength="100" placeholder="Customer name"></label>
-        <label class="field-label">Channel<select class="text-field" name="channelId" id="contactChannelId" required></select></label>
-        <label class="field-label form-span"><span id="contactIdentityLabel">Customer identifier</span><input class="text-field" id="contactChannelProfileId" name="channelProfileId" required maxlength="200" autocomplete="off" placeholder="Customer identifier"><span class="field-help" id="contactIdentityHelp">Choose a channel to see the required identifier.</span></label>
+        <label class="field-label">Company<input class="text-field" name="company" maxlength="160" placeholder="Optional company"></label>
+        <label class="field-label form-span">Tags<input class="text-field" name="tags" maxlength="500" placeholder="Priority, Customer"><span class="field-help">Separate tags with commas.</span></label>
       </div>
+      <section class="contact-identities contact-create-identities" aria-labelledby="contactCreateIdentitiesTitle">
+        <div class="contact-identities-head">
+          <div><strong id="contactCreateIdentitiesTitle">Platform identities</strong><span>A contact can have WhatsApp, Telegram, Instagram, Facebook and email identities.</span></div>
+          <button class="secondary-button compact-button" type="button" data-action="add-contact-create-identity">Add identity</button>
+        </div>
+        <div class="contact-identity-list" id="contactCreateIdentities"></div>
+      </section>
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-contact-dialog">Cancel</button>
-        <button class="primary-button" type="submit">Create conversation</button>
+        <button class="primary-button" type="submit">Create contact</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog class="modal contact-route-modal" id="contactRouteDialog" aria-labelledby="contactRouteDialogTitle">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div><p class="eyebrow" id="contactRouteDialogEyebrow">Choose route</p><h2 id="contactRouteDialogTitle">Open conversation</h2></div>
+        <button class="icon-button" type="button" data-action="close-contact-route-dialog" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="modal-copy" id="contactRouteDialogCopy">Choose which connected account should be used.</p>
+      <div class="contact-route-list" id="contactRouteList"></div>
+    </div>
   </dialog>
 
   <dialog class="modal" id="templateDialog" aria-labelledby="templateDialogTitle">
