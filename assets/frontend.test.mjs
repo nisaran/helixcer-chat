@@ -624,9 +624,9 @@ test("conversation URLs deep-link safely without auto-selecting plain inbox", ()
 });
 
 test("Helixcer mark brands the login, sidebar, and favicon", () => {
-  assert.match(html, /rel="icon" href="\.\/assets\/helixcer-mark\.jpg"/);
+  assert.match(html, /rel="icon" href="\.\/assets\/helixcer-mark\.jpg\?v=fc5bb333"/);
   assert.match(html, /class="auth-brand-logo" src="\.\/assets\/helixcer-logo\.jpg" alt="Helixcer"/);
-  assert.match(html, /class="brand-mark"[^>]*>[\s\S]*?src="\.\/assets\/helixcer-mark\.jpg"/);
+  assert.match(html, /class="brand-mark"[^>]*>[\s\S]*?src="\.\/assets\/helixcer-mark\.jpg\?v=fc5bb333"/);
 });
 
 test("Developer API keys are managed by admins and shown only once", () => {

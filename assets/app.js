@@ -4799,8 +4799,8 @@
       const registration = await subscribeBrowserPush();
       await registration.showNotification("Helixcer notifications enabled", {
         body: "This device can now receive new customer message alerts in the background.",
-        icon: "/assets/helixcer-mark.jpg",
-        badge: "/assets/helixcer-mark.jpg",
+        icon: "/assets/helixcer-mark.jpg?v=fc5bb333",
+        badge: "/assets/helixcer-mark.jpg?v=fc5bb333",
         tag: "helixcer-notification-test",
         data: { url: "/#inbox" }
       });
@@ -4866,8 +4866,8 @@
     const title = conversation.subject;
     const options = {
       body: channelPlainText(message.text, conversation) || "A new customer message arrived.",
-      icon: "/assets/helixcer-mark.jpg",
-      badge: "/assets/helixcer-mark.jpg",
+      icon: "/assets/helixcer-mark.jpg?v=fc5bb333",
+      badge: "/assets/helixcer-mark.jpg?v=fc5bb333",
       tag: `helixcer-${conversation.conversationId}`,
       data: { url: conversationUrl(conversation.conversationId), conversationId: conversation.conversationId },
     };

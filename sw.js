@@ -1,6 +1,6 @@
 const INBOX_URL = "/#inbox";
 const DEFAULT_TITLE = "Helixcer Chat";
-const DEFAULT_ICON = "/assets/helixcer-mark.jpg";
+const DEFAULT_ICON = "/assets/helixcer-mark.jpg?v=fc5bb333";
 
 function boundedText(value, fallback, maximumLength) {
   const text = typeof value === "string" ? value.trim() : "";
