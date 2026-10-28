@@ -40,7 +40,7 @@
     selectedContactId: null,
     contactCreateIdentityDrafts: [],
     contactEditIdentityDrafts: [],
-    contactRouteSelection: null,
+    contactRouteMenu: null,
     expandedChannelIds: new Set(),
     detailsOpen: false,
     currentUser: null,
@@ -2809,6 +2809,8 @@
         chooseRoute.dataset.contactId = contact?.contactId || "";
         chooseRoute.dataset.identityId = draft.identityId;
         chooseRoute.disabled = !eligibleRoutes.length;
+        chooseRoute.setAttribute("aria-haspopup", "menu");
+        chooseRoute.setAttribute("aria-expanded", "false");
         chooseRoute.setAttribute("aria-label", `Choose ${profile.label} channel`);
         chooseRoute.title = "Choose another connected channel";
         messageSplit.append(message, chooseRoute);
@@ -3044,6 +3046,8 @@
         choose.dataset.contactId = contact.contactId;
         choose.dataset.identityId = identity.identityId;
         choose.disabled = !eligibleRoutes.length;
+        choose.setAttribute("aria-haspopup", "menu");
+        choose.setAttribute("aria-expanded", "false");
         choose.setAttribute("aria-label", `Choose ${profile.label} channel`);
         choose.title = "Choose another connected channel";
         actions.append(message, choose);
@@ -3173,6 +3177,7 @@
           identityId: identity.identityId,
           platform,
           profileId: identity.profileId,
+          scopedProfileId: identity.profileId,
           channelId: "",
           channelName: identity.username || identity.profileId,
           connectorType: "email",
@@ -3204,6 +3209,7 @@
           identityId: identity.identityId,
           platform,
           profileId: identity.profileId,
+          scopedProfileId: binding?.scopedProfileId || identity.profileId,
           username: identity.username,
           channelId: channel.channelId,
           channelName: binding?.channelName || channel.name,
@@ -3226,8 +3232,7 @@
 
   async function openContactRoute(route) {
     if (!route?.eligible) return;
-    if ($("contactRouteDialog").open) $("contactRouteDialog").close();
-    state.contactRouteSelection = null;
+    closeContactRouteMenu();
     if (route.kind === "email") {
       window.location.href = `mailto:${encodeURIComponent(route.profileId)}`;
       return;
@@ -3249,32 +3254,116 @@
     }
   }
 
-  function showContactRouteDialog(contact, platform, routes) {
-    state.contactRouteSelection = { contactId: contact.contactId, platform, routes };
-    $("contactRouteDialogEyebrow").textContent = identityLabel(platform);
-    $("contactRouteDialogTitle").textContent = `Open ${contact.displayName}`;
-    $("contactRouteDialogCopy").textContent = "Choose a connected account. The most recently used route is listed first.";
-    const host = $("contactRouteList");
-    host.replaceChildren();
+  function closeContactRouteMenu({ restoreFocus = false } = {}) {
+    const current = state.contactRouteMenu;
+    if (!current) return;
+    current.trigger?.setAttribute("aria-expanded", "false");
+    current.trigger?.removeAttribute("aria-controls");
+    current.menu?.remove();
+    state.contactRouteMenu = null;
+    if (restoreFocus && current.trigger?.isConnected) current.trigger.focus();
+  }
+
+  function positionContactRouteMenu() {
+    const current = state.contactRouteMenu;
+    if (!current?.trigger?.isConnected || !current?.menu?.isConnected) {
+      closeContactRouteMenu();
+      return;
+    }
+    const triggerRect = current.trigger.getBoundingClientRect();
+    if (triggerRect.bottom < 0 || triggerRect.top > window.innerHeight ||
+        triggerRect.right < 0 || triggerRect.left > window.innerWidth) {
+      closeContactRouteMenu();
+      return;
+    }
+    const edge = 8;
+    const gap = 6;
+    const width = Math.max(1, Math.min(340, window.innerWidth - (edge * 2)));
+    current.menu.style.width = `${width}px`;
+    current.menu.style.left = `${Math.min(Math.max(edge, triggerRect.right - width), window.innerWidth - width - edge)}px`;
+    current.menu.style.top = `${triggerRect.bottom + gap}px`;
+    current.menu.style.visibility = "hidden";
+    const menuHeight = current.menu.getBoundingClientRect().height;
+    const below = window.innerHeight - triggerRect.bottom - gap - edge;
+    const above = triggerRect.top - gap - edge;
+    const top = below < Math.min(menuHeight, 220) && above > below
+      ? Math.max(edge, triggerRect.top - Math.min(menuHeight, above) - gap)
+      : Math.min(triggerRect.bottom + gap, window.innerHeight - Math.min(menuHeight, window.innerHeight - (edge * 2)) - edge);
+    current.menu.style.top = `${Math.max(edge, top)}px`;
+    current.menu.style.visibility = "visible";
+  }
+
+  function focusContactRouteOption(menu, direction) {
+    const options = [...menu.querySelectorAll('[role="menuitem"]:not(:disabled)')];
+    if (!options.length) return;
+    const currentIndex = options.indexOf(document.activeElement);
+    let nextIndex;
+    if (direction === "first") nextIndex = 0;
+    else if (direction === "last") nextIndex = options.length - 1;
+    else if (direction > 0) nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % options.length;
+    else nextIndex = currentIndex < 0 ? options.length - 1 : (currentIndex - 1 + options.length) % options.length;
+    options[nextIndex].focus();
+  }
+
+  function showContactRouteMenu(trigger, contact, platform, routes) {
+    if (state.contactRouteMenu?.trigger === trigger) {
+      closeContactRouteMenu({ restoreFocus: true });
+      return;
+    }
+    closeContactRouteMenu();
+    const menu = element("section", "contact-route-menu");
+    const menuId = `contact-route-menu-${String(contact.contactId).replace(/[^a-z0-9_-]/gi, "-")}-${String(Date.now())}`;
+    menu.id = menuId;
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", `Choose ${identityLabel(platform)} channel for ${contact.displayName}`);
+    menu.append(element("div", "contact-route-menu-title", `Choose ${identityLabel(platform)} channel`));
+    const defaultRoute = routes.find((route) => route.eligible) || null;
     routes.forEach((route, index) => {
-      const button = element("button", "contact-route-option");
+      const button = element("button", "contact-route-menu-option");
       button.type = "button";
       button.dataset.action = "choose-contact-route";
       button.dataset.routeIndex = String(index);
+      button.setAttribute("role", "menuitem");
       button.disabled = !route.eligible;
-      const copy = document.createElement("div");
+      const logo = element("span", "contact-route-menu-logo");
+      logo.append(providerLogo(route.connectorType, "contact-route-provider-logo"));
+      const copy = element("span", "contact-route-menu-copy");
       copy.append(
         element("strong", "", route.channelName || identityLabel(platform)),
-        element("span", "", [route.username || route.profileId, route.lastUsedAt ? `Used ${relativeTime(route.lastUsedAt)}` : "Never used"].filter(Boolean).join(" · ")),
+        element("span", "contact-route-menu-profile", route.scopedProfileId || route.profileId || "No profile ID"),
       );
-      const status = element("span", `contact-route-state${route.isLastUsed ? " is-last-used" : ""}`,
-        route.isLastUsed ? "Last used" : route.eligible
-          ? (route.conversationId ? "Open" : route.isBound ? "Start" : "New route")
-          : "Unavailable");
-      button.append(copy, status);
-      host.append(button);
+      if (route.lastUsedAt) copy.append(element("span", "contact-route-menu-used", `Last used ${relativeTime(route.lastUsedAt)}`));
+      const isDefault = defaultRoute?.key === route.key;
+      const statusText = !route.eligible ? "Unavailable"
+        : isDefault && route.isLastUsed ? "Default · Last used"
+          : isDefault ? "Default"
+            : route.isBound ? "Available" : "New";
+      const status = element("span", `contact-route-state${isDefault ? " is-default" : ""}${route.isLastUsed ? " is-last-used" : ""}`, statusText);
+      button.append(logo, copy, status);
+      menu.append(button);
     });
-    $("contactRouteDialog").showModal();
+    menu.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        focusContactRouteOption(menu, event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        focusContactRouteOption(menu, event.key === "Home" ? "first" : "last");
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeContactRouteMenu({ restoreFocus: true });
+      } else if (event.key === "Tab") {
+        setTimeout(() => {
+          if (state.contactRouteMenu?.menu === menu && !menu.contains(document.activeElement)) closeContactRouteMenu();
+        }, 0);
+      }
+    });
+    document.body.append(menu);
+    trigger.setAttribute("aria-expanded", "true");
+    trigger.setAttribute("aria-controls", menuId);
+    state.contactRouteMenu = { trigger, menu, routes, contactId: contact.contactId, platform };
+    positionContactRouteMenu();
+    focusContactRouteOption(menu, "first");
   }
 
   function contactIdentityRouteContext(contactId, identityId) {
@@ -3299,18 +3388,19 @@
     openContactRoute(route);
   }
 
-  function chooseContactIdentityRoute(contactId, identityId) {
+  function chooseContactIdentityRoute(contactId, identityId, trigger) {
     const context = contactIdentityRouteContext(contactId, identityId);
-    if (!context) return;
-    const eligible = context.routes.filter((route) => route.eligible);
-    if (!eligible.length) {
+    if (!context || !trigger) return;
+    const eligibleRoutes = context.routes.filter((route) => route.eligible);
+    if (!eligibleRoutes.length) {
       showToast("No available route", `Connect a ${identityLabel(context.identity.platform)} channel before starting this conversation.`, true);
       return;
     }
-    showContactRouteDialog(context.contact, context.identity.platform, context.routes);
+    showContactRouteMenu(trigger, context.contact, context.identity.platform, eligibleRoutes);
   }
 
   function showContactEditor(contact, { loading = false, error = "" } = {}) {
+    closeContactRouteMenu();
     const panel = $("contactEditor");
     const fields = $("contactEditorFields");
     const actions = $("contactEditorActions");
@@ -3352,6 +3442,7 @@
   }
 
   function closeContactEditor() {
+    closeContactRouteMenu();
     state.selectedContactId = null;
     $("contactsWorkspace").classList.remove("has-editor");
     $("contactEditor").hidden = true;
@@ -5919,6 +6010,7 @@
   }
 
   function setRoute(route, { preserveLocation = false } = {}) {
+    closeContactRouteMenu();
     if (!["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "workspace", "settings"].includes(route)) route = "inbox";
     if (!canAdmin() && ["channels", "whatsapp-templates", "developer", "team"].includes(route)) route = "inbox";
     if (!preserveLocation) {
@@ -6649,6 +6741,9 @@
 
   function bindEvents() {
     document.addEventListener("click", (event) => {
+      if (state.contactRouteMenu &&
+          !state.contactRouteMenu.menu.contains(event.target) &&
+          !state.contactRouteMenu.trigger.contains(event.target)) closeContactRouteMenu();
       if (!event.target.closest(".template-filter")) closeTemplateFilterMenus();
       if (!event.target.closest(".conversation-filter-desktop")) closeConversationFilterMenu();
       if (!event.target.closest(".conversation-menu-wrap")) closeConversationActionMenu();
@@ -6758,11 +6853,11 @@
           return;
         }
         if (actionButton.dataset.action === "choose-contact-identity-route") {
-          chooseContactIdentityRoute(actionButton.dataset.contactId, actionButton.dataset.identityId);
+          chooseContactIdentityRoute(actionButton.dataset.contactId, actionButton.dataset.identityId, actionButton);
           return;
         }
         if (actionButton.dataset.action === "choose-contact-route") {
-          const route = state.contactRouteSelection?.routes?.[Number(actionButton.dataset.routeIndex)];
+          const route = state.contactRouteMenu?.routes?.[Number(actionButton.dataset.routeIndex)];
           if (route) openContactRoute(route);
           return;
         }
@@ -6786,10 +6881,6 @@
           "export-contacts": () => exportContacts(actionButton),
           "add-contact-platform-id": addContactPlatformId,
           "close-contact-dialog": () => $("contactDialog").close(),
-          "close-contact-route-dialog": () => {
-            $("contactRouteDialog").close();
-            state.contactRouteSelection = null;
-          },
           "close-contact-editor": closeContactEditor,
           "delete-contact": deleteSelectedContact,
           "cancel-contact-edit": () => {
@@ -7116,6 +7207,8 @@
     });
     window.addEventListener("hashchange", () => applyLocationRoute().catch(() => {}));
     window.addEventListener("focus", () => prepareBrowserPush().catch(() => {}));
+    window.addEventListener("resize", positionContactRouteMenu);
+    document.addEventListener("scroll", positionContactRouteMenu, true);
     window.addEventListener("pagehide", () => state.disconnectRealtime?.());
     window.addEventListener("beforeunload", () => state.disconnectRealtime?.());
     window.addEventListener("helixcer:unauthorized", () => showSignedOut("Your session expired. Sign in again to continue."));
@@ -7126,6 +7219,7 @@
         $("conversationSearch").focus();
       }
       if (event.key === "Escape") {
+        closeContactRouteMenu({ restoreFocus: true });
         closeConversationActionMenu({ restoreFocus: true });
         closeTemplateFilterMenus("", { restoreFocus: true });
         closeConversationFilterMenu({ restoreFocus: true });

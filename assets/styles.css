@@ -673,6 +673,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .identity-message-main { padding: 6px 10px; }
 .identity-message-menu { width: 30px; border-left: 1px solid #d3e6dd; padding: 0; font-size: 13px; }
 .identity-message-main:hover, .identity-message-menu:hover { background: #eef8f3; }
+.identity-message-menu[aria-expanded="true"] { background: #e4f4eb; color: #18583d; }
 .identity-message-main:disabled, .identity-message-menu:disabled { cursor: not-allowed; opacity: .48; }
 .identity-expand-button { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: white; color: #64716e; padding: 0; font-size: 13px; }
 .identity-expand-button:hover { border-color: #b8a5f3; color: var(--brand-deep); }
@@ -945,16 +946,22 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .modal::backdrop { background: rgba(17,25,25,.54); backdrop-filter: blur(3px); }
 .modal-card { border: 1px solid rgba(255,255,255,.45); border-radius: 18px; background: white; padding: 21px; }
 .contact-modal { width: min(780px, calc(100vw - 28px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
-.contact-route-modal { width: min(560px, calc(100vw - 28px)); }
-.contact-route-list { display: grid; gap: 8px; max-height: min(52vh, 440px); overflow-y: auto; margin-top: 14px; }
-.contact-route-option { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; border: 1px solid var(--line); border-radius: 12px; background: #fafbf9; color: var(--ink); padding: 11px 12px; text-align: left; }
-.contact-route-option:hover { border-color: #cfc2f7; background: #f8f6ff; }
-.contact-route-option:disabled { cursor: not-allowed; opacity: .6; }
-.contact-route-option strong, .contact-route-option span { display: block; }
-.contact-route-option strong { font-size: 11px; }
-.contact-route-option span { color: var(--muted); margin-top: 2px; font-size: 9px; }
-.contact-route-state { display: inline-flex !important; align-items: center; min-height: 22px; border-radius: 999px; background: #edf0ed; color: #65706d !important; margin: 0 !important; padding: 4px 7px; font-size: 8px !important; font-weight: 800; white-space: nowrap; }
-.contact-route-state.is-last-used { background: var(--green-soft); color: var(--green) !important; }
+.contact-route-menu { position: fixed; z-index: 90; display: grid; gap: 3px; max-height: min(380px, calc(100dvh - 16px)); overflow-y: auto; border: 1px solid #d9dfdb; border-radius: 13px; background: white; padding: 6px; box-shadow: 0 16px 44px rgba(27,37,33,.2), 0 2px 8px rgba(27,37,33,.1); }
+.contact-route-menu-title { color: #66716e; padding: 6px 8px 5px; font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.contact-route-menu-option { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; width: 100%; min-height: 52px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); padding: 7px 8px; text-align: left; }
+.contact-route-menu-option:hover { background: #f3f7f4; }
+.contact-route-menu-option:focus-visible { outline: 2px solid rgba(109,59,234,.42); outline-offset: -2px; background: #f7f4ff; }
+.contact-route-menu-option:disabled { cursor: not-allowed; opacity: .52; }
+.contact-route-menu-logo { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: #f1f4f2; }
+.contact-route-provider-logo { width: 22px; height: 22px; object-fit: contain; }
+.contact-route-menu-logo .provider-logo-fallback { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: #e9edeb; color: #5e6c69; font-size: 7px; font-weight: 850; }
+.contact-route-menu-copy { display: block; min-width: 0; }
+.contact-route-menu-copy strong, .contact-route-menu-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-route-menu-copy strong { color: var(--ink); font-size: 10px; }
+.contact-route-menu-profile { color: #64706d; margin-top: 2px; font-size: 9px; }
+.contact-route-menu-used { color: var(--muted); margin-top: 2px; font-size: 8px; }
+.contact-route-state { display: inline-flex; align-items: center; min-height: 22px; border-radius: 999px; background: #edf0ed; color: #65706d; padding: 4px 7px; font-size: 8px; font-weight: 800; white-space: nowrap; }
+.contact-route-state.is-default, .contact-route-state.is-last-used { background: var(--green-soft); color: var(--green); }
 .channel-modal { width: min(760px, calc(100vw - 28px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
 .channel-modal .modal-card { min-height: 100%; }
 .modal-head { display: flex; align-items: start; justify-content: space-between; gap: 14px; }
