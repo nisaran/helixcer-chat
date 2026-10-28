@@ -622,10 +622,24 @@ test("contacts use one flat ID per platform and open the exact saved channel rou
   const createContactBody = app.match(/async function createContact\(form\) \{([\s\S]*?)\n  \}/)?.[1] || "";
   assert.match(createContactBody, /platformIds/);
   assert.doesNotMatch(createContactBody, /channelId\s*:|channelProfileId\s*:/);
+  assert.match(createContactBody, /setRoute\("contacts"\);[\s\S]*?closeContactEditor\(\)/);
+  assert.doesNotMatch(createContactBody, /selectContact\(/);
   assert.match(html, /data-action="export-contacts"/);
   assert.match(app, /\/api\/contacts\/export\.csv/);
   assert.match(app, /"WhatsApp ID", "Telegram ID", "Instagram ID", "Facebook ID", "Email ID"/);
   assert.match(app, /Each contact is one CSV row with a separate column for every platform ID/);
+});
+
+test("conversation and contact lists provide compact press feedback and breathing room", () => {
+  assert.match(styles, /\.conversation-item\s*\{[^}]*min-height:\s*72px[^}]*padding:\s*15px 14px/s);
+  assert.match(styles, /\.conversation-item:active\s*\{[^}]*background:\s*#edf0ed/s);
+  assert.match(styles, /\.contact-table td\s*\{[^}]*padding:\s*15px 17px/s);
+  assert.match(styles, /\.contact-table tbody tr:active\s*\{[^}]*background:\s*#edf0ed/s);
+});
+
+test("message dates remain visible as a floating sticky pill while scrolling", () => {
+  assert.match(styles, /\.date-divider\s*\{[^}]*position:\s*sticky[^}]*top:\s*8px[^}]*border-radius:\s*999px/s);
+  assert.match(styles, /\.date-divider::before, \.date-divider::after\s*\{[^}]*content:\s*none/s);
 });
 
 test("expanded channel cards expose the internal channel ID with a copy action", () => {

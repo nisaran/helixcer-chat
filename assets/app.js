@@ -6757,14 +6757,16 @@
     const submit = form.querySelector('[type="submit"]');
     submit.disabled = true;
     try {
-      const result = await state.api.createContact(payload);
+      await state.api.createContact(payload);
       $("contactDialog").close();
       form.reset();
       $("contactCreatePlatformIds").replaceChildren();
       await loadAll({ preserveSelection: false });
       setRoute("contacts");
-      const contactId = String(result.contactId || result.item?.contactId || "");
-      if (contactId) await selectContact(contactId);
+      // Creating a contact should not navigate into a chat or open the detail
+      // editor. Keep Contacts as the neutral landing view so the user can
+      // choose what to open next.
+      closeContactEditor();
       const idCount = Object.values(platformIds).filter(Boolean).length;
       showToast("Contact created", `${payload.displayName} was added with ${idCount} messaging ID${idCount === 1 ? "" : "s"}.`);
     } catch (error) {
