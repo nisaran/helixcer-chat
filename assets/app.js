@@ -2965,11 +2965,40 @@
     return normalized;
   }
 
-  function renderContactPlatformIdFields(host, contact = null, mode = "create") {
+  function visibleContactPlatformIdDraft(host) {
+    const ids = {};
+    host?.querySelectorAll("[data-contact-platform-id]").forEach((input) => {
+      const platform = connectorPlatform(input.dataset.contactPlatformId);
+      if (platform) ids[platform] = String(input.value || "");
+    });
+    return ids;
+  }
+
+  function refreshContactPlatformAddControl() {
+    const control = $("contactEditPlatformAdd");
+    const select = $("contactEditPlatformSelect");
+    if (!control || !select) return;
+    const visible = new Set($("contactEditPlatformIds")?.querySelectorAll("[data-contact-platform-id]") || []);
+    const shownPlatforms = new Set([...visible].map((input) => connectorPlatform(input.dataset.contactPlatformId)).filter(Boolean));
+    const missing = Object.entries(identityPlatforms).filter(([platform]) => !shownPlatforms.has(platform));
+    select.replaceChildren(...missing.map(([platform, profile]) => {
+      const option = document.createElement("option");
+      option.value = platform;
+      option.textContent = profile.profileLabel;
+      return option;
+    }));
+    control.hidden = !missing.length;
+    select.disabled = !missing.length;
+    control.querySelector("button")?.toggleAttribute("disabled", !missing.length);
+  }
+
+  function renderContactPlatformIdFields(host, contact = null, mode = "create", options = {}) {
     if (!host) return;
     host.replaceChildren();
-    const ids = contactPlatformIds(contact || {});
-    Object.entries(identityPlatforms).forEach(([platform, profile]) => {
+    const ids = { ...contactPlatformIds(contact || {}), ...(options.draftIds || {}) };
+    const visiblePlatforms = new Set(options.visiblePlatforms || []);
+    Object.entries(identityPlatforms).filter(([platform]) =>
+      mode !== "edit" || Boolean(ids[platform]) || visiblePlatforms.has(platform)).forEach(([platform, profile]) => {
       const value = ids[platform] || "";
       const identity = asItems(contact?.identities).find((item) => item.platform === platform) || null;
       const locked = Boolean(identity && value && identityHasHistory(identity));
@@ -3024,6 +3053,21 @@
       }
       host.append(row);
     });
+    if (mode === "edit") refreshContactPlatformAddControl();
+  }
+
+  function addContactPlatformId() {
+    const platform = connectorPlatform($("contactEditPlatformSelect")?.value);
+    const host = $("contactEditPlatformIds");
+    const contact = state.contacts.find((item) => item.contactId === state.selectedContactId);
+    if (!platform || !host || !contact) return;
+    const visiblePlatforms = [...host.querySelectorAll("[data-contact-platform-id]")]
+      .map((input) => connectorPlatform(input.dataset.contactPlatformId)).filter(Boolean);
+    if (visiblePlatforms.includes(platform)) return;
+    const draftIds = visibleContactPlatformIdDraft(host);
+    visiblePlatforms.push(platform);
+    renderContactPlatformIdFields(host, normalizeContact(contact), "edit", { visiblePlatforms, draftIds });
+    host.querySelector(`[data-contact-platform-id="${CSS.escape(platform)}"]`)?.focus();
   }
 
   function contactIdentityDraftContext(mode) {
@@ -3314,6 +3358,7 @@
     $("contactEditForm").reset();
     $("contactEditorTitle").textContent = "Edit contact";
     $("contactEditPlatformIds").replaceChildren();
+    refreshContactPlatformAddControl();
     renderContacts();
   }
 
@@ -6739,6 +6784,7 @@
           "new-conversation": openContactDialog,
           "new-contact": openContactDialog,
           "export-contacts": () => exportContacts(actionButton),
+          "add-contact-platform-id": addContactPlatformId,
           "close-contact-dialog": () => $("contactDialog").close(),
           "close-contact-route-dialog": () => {
             $("contactRouteDialog").close();

@@ -499,6 +499,8 @@ test("contacts use one flat ID per platform and open the exact saved channel rou
   assert.match(html, /id="contactEditName"/);
   assert.match(html, /id="contactEditPlatformIds"/);
   assert.match(html, /id="contactCreatePlatformIds"/);
+  assert.match(html, /id="contactEditPlatformSelect"/);
+  assert.match(html, /data-action="add-contact-platform-id"/);
   assert.doesNotMatch(html, /Add identity|add-contact-(?:create|edit)-identity/);
   assert.doesNotMatch(html, /id="contactPlatformActions"|Open a conversation/);
   assert.match(html, /id="contactRouteDialog"/);
@@ -517,6 +519,7 @@ test("contacts use one flat ID per platform and open the exact saved channel rou
     app.indexOf("function contactIdentityDraftContext"),
   );
   assert.match(platformEditorBody, /Object\.entries\(identityPlatforms\)/);
+  assert.match(platformEditorBody, /mode !== "edit" \|\| Boolean\(ids\[platform\]\) \|\| visiblePlatforms\.has\(platform\)/);
   assert.match(platformEditorBody, /dataset\.contactPlatformId = platform/);
   assert.match(platformEditorBody, /contact-platform-id-row/);
   assert.match(platformEditorBody, /dataset\.action = "open-contact-identity-default"/);
@@ -525,6 +528,11 @@ test("contacts use one flat ID per platform and open the exact saved channel rou
   assert.match(app, /function identityHasHistory\(identity\)/);
   assert.match(platformEditorBody, /identityHasHistory\(identity\)/);
   assert.match(platformEditorBody, /Used by conversation history · locked/);
+  assert.match(app, /function refreshContactPlatformAddControl\(\)/);
+  assert.match(app, /filter\(\(\[platform\]\) => !shownPlatforms\.has\(platform\)\)/);
+  assert.match(app, /function addContactPlatformId\(\)/);
+  assert.match(app, /visibleContactPlatformIdDraft\(host\)/);
+  assert.match(app, /"add-contact-platform-id": addContactPlatformId/);
   assert.match(app, /function validateContactPlatformIds\(ids\)/);
   assert.match(app, /Enter at least one WhatsApp, Telegram, Instagram, Facebook or Email ID/);
   assert.match(app, /row\.dataset\.contactId = contact\.contactId/);
@@ -684,6 +692,17 @@ test("desktop and mobile chats share the Android light chat palette", () => {
   assert.match(mobileStyles, /\.message-bubble\s*\{[^}]*max-width:\s*86%/i);
   assert.doesNotMatch(mobileStyles, /\.message-bubble\s*\{[^}]*(?:background|background-color)\s*:/i);
   assert.doesNotMatch(mobileStyles, /\.chat-panel\s*\{[^}]*(?:background|background-color)\s*:/i);
+});
+
+test("chat history fills the available viewport without covering the composer", () => {
+  assert.match(styles, /\.app-shell\s*\{[^}]*height:\s*100dvh[^}]*overflow:\s*hidden/i);
+  assert.match(styles, /\.main\s*\{[^}]*grid-template-rows:\s*60px minmax\(0, 1fr\)[^}]*height:\s*100%[^}]*overflow:\s*hidden/i);
+  assert.match(styles, /\.route\s*\{[^}]*height:\s*100%[^}]*overflow:\s*hidden/i);
+  assert.match(styles, /\.inbox-grid\s*\{[^}]*height:\s*100%[^}]*overflow:\s*hidden/i);
+  assert.match(styles, /\.chat-content\s*\{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\) auto auto auto[^}]*height:\s*100%[^}]*overflow:\s*hidden/i);
+  assert.match(styles, /\.message-thread\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto[^}]*overscroll-behavior:\s*contain/i);
+  assert.match(styles, /\.composer\s*\{[^}]*padding:[^;}]*env\(safe-area-inset-bottom\)/i);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.main\s*\{\s*grid-template-rows:\s*56px minmax\(0, 1fr\)/i);
 });
 
 test("conversation filters are multi-selectable with responsive desktop and mobile controls", () => {
