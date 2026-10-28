@@ -367,9 +367,7 @@
                   <div class="contact-identities-head">
                     <div><strong id="contactEditPlatformIdsTitle">Messaging IDs</strong><span>One ID per platform. Add at least one ID to keep this contact reachable.</span></div>
                     <div class="contact-platform-add" id="contactEditPlatformAdd">
-                      <label class="sr-only" for="contactEditPlatformSelect">Platform to add</label>
-                      <select class="compact-select" id="contactEditPlatformSelect" aria-label="Platform to add"></select>
-                      <button class="secondary-button compact-button" type="button" data-action="add-contact-platform-id">Add platform ID</button>
+                      <button class="secondary-button compact-button" id="contactEditPlatformAddButton" type="button" data-action="toggle-contact-platform-menu" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add platform ID</button>
                     </div>
                   </div>
                   <div class="contact-platform-id-list" id="contactEditPlatformIds"></div>

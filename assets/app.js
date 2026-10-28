@@ -41,6 +41,7 @@
     contactCreateIdentityDrafts: [],
     contactEditIdentityDrafts: [],
     contactRouteMenu: null,
+    contactPlatformMenu: null,
     expandedChannelIds: new Set(),
     detailsOpen: false,
     currentUser: null,
@@ -2976,22 +2977,20 @@
     return ids;
   }
 
-  function refreshContactPlatformAddControl() {
-    const control = $("contactEditPlatformAdd");
-    const select = $("contactEditPlatformSelect");
-    if (!control || !select) return;
+  function missingContactPlatforms() {
     const visible = new Set($("contactEditPlatformIds")?.querySelectorAll("[data-contact-platform-id]") || []);
     const shownPlatforms = new Set([...visible].map((input) => connectorPlatform(input.dataset.contactPlatformId)).filter(Boolean));
-    const missing = Object.entries(identityPlatforms).filter(([platform]) => !shownPlatforms.has(platform));
-    select.replaceChildren(...missing.map(([platform, profile]) => {
-      const option = document.createElement("option");
-      option.value = platform;
-      option.textContent = profile.profileLabel;
-      return option;
-    }));
+    return Object.entries(identityPlatforms).filter(([platform]) => !shownPlatforms.has(platform));
+  }
+
+  function refreshContactPlatformAddControl() {
+    const control = $("contactEditPlatformAdd");
+    const button = $("contactEditPlatformAddButton");
+    if (!control || !button) return;
+    const missing = missingContactPlatforms();
     control.hidden = !missing.length;
-    select.disabled = !missing.length;
-    control.querySelector("button")?.toggleAttribute("disabled", !missing.length);
+    button.toggleAttribute("disabled", !missing.length);
+    if (!missing.length) closeContactPlatformMenu();
   }
 
   function renderContactPlatformIdFields(host, contact = null, mode = "create", options = {}) {
@@ -3060,11 +3059,12 @@
     if (mode === "edit") refreshContactPlatformAddControl();
   }
 
-  function addContactPlatformId() {
-    const platform = connectorPlatform($("contactEditPlatformSelect")?.value);
+  function addContactPlatformId(value) {
+    const platform = connectorPlatform(value);
     const host = $("contactEditPlatformIds");
     const contact = state.contacts.find((item) => item.contactId === state.selectedContactId);
     if (!platform || !host || !contact) return;
+    closeContactPlatformMenu();
     const visiblePlatforms = [...host.querySelectorAll("[data-contact-platform-id]")]
       .map((input) => connectorPlatform(input.dataset.contactPlatformId)).filter(Boolean);
     if (visiblePlatforms.includes(platform)) return;
@@ -3264,16 +3264,15 @@
     if (restoreFocus && current.trigger?.isConnected) current.trigger.focus();
   }
 
-  function positionContactRouteMenu() {
-    const current = state.contactRouteMenu;
+  function positionAnchoredContactMenu(current, closeMenu) {
     if (!current?.trigger?.isConnected || !current?.menu?.isConnected) {
-      closeContactRouteMenu();
+      closeMenu();
       return;
     }
     const triggerRect = current.trigger.getBoundingClientRect();
     if (triggerRect.bottom < 0 || triggerRect.top > window.innerHeight ||
         triggerRect.right < 0 || triggerRect.left > window.innerWidth) {
-      closeContactRouteMenu();
+      closeMenu();
       return;
     }
     const edge = 8;
@@ -3293,7 +3292,11 @@
     current.menu.style.visibility = "visible";
   }
 
-  function focusContactRouteOption(menu, direction) {
+  function positionContactRouteMenu() {
+    positionAnchoredContactMenu(state.contactRouteMenu, closeContactRouteMenu);
+  }
+
+  function focusAnchoredMenuOption(menu, direction) {
     const options = [...menu.querySelectorAll('[role="menuitem"]:not(:disabled)')];
     if (!options.length) return;
     const currentIndex = options.indexOf(document.activeElement);
@@ -3311,6 +3314,7 @@
       return;
     }
     closeContactRouteMenu();
+    closeContactPlatformMenu();
     const menu = element("section", "contact-route-menu");
     const menuId = `contact-route-menu-${String(contact.contactId).replace(/[^a-z0-9_-]/gi, "-")}-${String(Date.now())}`;
     menu.id = menuId;
@@ -3345,10 +3349,10 @@
     menu.addEventListener("keydown", (event) => {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        focusContactRouteOption(menu, event.key === "ArrowDown" ? 1 : -1);
+        focusAnchoredMenuOption(menu, event.key === "ArrowDown" ? 1 : -1);
       } else if (event.key === "Home" || event.key === "End") {
         event.preventDefault();
-        focusContactRouteOption(menu, event.key === "Home" ? "first" : "last");
+        focusAnchoredMenuOption(menu, event.key === "Home" ? "first" : "last");
       } else if (event.key === "Escape") {
         event.preventDefault();
         closeContactRouteMenu({ restoreFocus: true });
@@ -3363,7 +3367,81 @@
     trigger.setAttribute("aria-controls", menuId);
     state.contactRouteMenu = { trigger, menu, routes, contactId: contact.contactId, platform };
     positionContactRouteMenu();
-    focusContactRouteOption(menu, "first");
+    focusAnchoredMenuOption(menu, "first");
+  }
+
+  function closeContactPlatformMenu({ restoreFocus = false } = {}) {
+    const current = state.contactPlatformMenu;
+    if (!current) return;
+    current.trigger?.setAttribute("aria-expanded", "false");
+    current.trigger?.removeAttribute("aria-controls");
+    current.menu?.remove();
+    state.contactPlatformMenu = null;
+    if (restoreFocus && current.trigger?.isConnected) current.trigger.focus();
+  }
+
+  function positionContactPlatformMenu() {
+    positionAnchoredContactMenu(state.contactPlatformMenu, closeContactPlatformMenu);
+  }
+
+  function platformConnectorType(platform) {
+    if (platform === "whatsapp") return "whatsapp_cloud";
+    return platform;
+  }
+
+  function showContactPlatformMenu(trigger) {
+    if (state.contactPlatformMenu?.trigger === trigger) {
+      closeContactPlatformMenu({ restoreFocus: true });
+      return;
+    }
+    const missing = missingContactPlatforms();
+    if (!missing.length) return;
+    closeContactPlatformMenu();
+    closeContactRouteMenu();
+    const menu = element("section", "contact-route-menu contact-platform-menu");
+    const menuId = `contact-platform-menu-${String(Date.now())}`;
+    menu.id = menuId;
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "Add a platform ID");
+    menu.append(element("div", "contact-route-menu-title", "Add platform ID"));
+    missing.forEach(([platform, profile]) => {
+      const button = element("button", "contact-route-menu-option contact-platform-menu-option");
+      button.type = "button";
+      button.dataset.action = "choose-contact-platform-id";
+      button.dataset.platform = platform;
+      button.setAttribute("role", "menuitem");
+      const logo = element("span", "contact-route-menu-logo");
+      logo.append(providerLogo(platformConnectorType(platform), "contact-route-provider-logo"));
+      const copy = element("span", "contact-route-menu-copy");
+      copy.append(
+        element("strong", "", profile.label),
+        element("span", "contact-route-menu-profile", profile.profileLabel),
+      );
+      button.append(logo, copy, element("span", "contact-platform-menu-add", "+"));
+      menu.append(button);
+    });
+    menu.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        focusAnchoredMenuOption(menu, event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        focusAnchoredMenuOption(menu, event.key === "Home" ? "first" : "last");
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeContactPlatformMenu({ restoreFocus: true });
+      } else if (event.key === "Tab") {
+        setTimeout(() => {
+          if (state.contactPlatformMenu?.menu === menu && !menu.contains(document.activeElement)) closeContactPlatformMenu();
+        }, 0);
+      }
+    });
+    document.body.append(menu);
+    trigger.setAttribute("aria-expanded", "true");
+    trigger.setAttribute("aria-controls", menuId);
+    state.contactPlatformMenu = { trigger, menu };
+    positionContactPlatformMenu();
+    focusAnchoredMenuOption(menu, "first");
   }
 
   function contactIdentityRouteContext(contactId, identityId) {
@@ -3401,6 +3479,7 @@
 
   function showContactEditor(contact, { loading = false, error = "" } = {}) {
     closeContactRouteMenu();
+    closeContactPlatformMenu();
     const panel = $("contactEditor");
     const fields = $("contactEditorFields");
     const actions = $("contactEditorActions");
@@ -3443,6 +3522,7 @@
 
   function closeContactEditor() {
     closeContactRouteMenu();
+    closeContactPlatformMenu();
     state.selectedContactId = null;
     $("contactsWorkspace").classList.remove("has-editor");
     $("contactEditor").hidden = true;
@@ -6011,6 +6091,7 @@
 
   function setRoute(route, { preserveLocation = false } = {}) {
     closeContactRouteMenu();
+    closeContactPlatformMenu();
     if (!["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "workspace", "settings"].includes(route)) route = "inbox";
     if (!canAdmin() && ["channels", "whatsapp-templates", "developer", "team"].includes(route)) route = "inbox";
     if (!preserveLocation) {
@@ -6744,6 +6825,9 @@
       if (state.contactRouteMenu &&
           !state.contactRouteMenu.menu.contains(event.target) &&
           !state.contactRouteMenu.trigger.contains(event.target)) closeContactRouteMenu();
+      if (state.contactPlatformMenu &&
+          !state.contactPlatformMenu.menu.contains(event.target) &&
+          !state.contactPlatformMenu.trigger.contains(event.target)) closeContactPlatformMenu();
       if (!event.target.closest(".template-filter")) closeTemplateFilterMenus();
       if (!event.target.closest(".conversation-filter-desktop")) closeConversationFilterMenu();
       if (!event.target.closest(".conversation-menu-wrap")) closeConversationActionMenu();
@@ -6861,6 +6945,14 @@
           if (route) openContactRoute(route);
           return;
         }
+        if (actionButton.dataset.action === "toggle-contact-platform-menu") {
+          showContactPlatformMenu(actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "choose-contact-platform-id") {
+          addContactPlatformId(actionButton.dataset.platform);
+          return;
+        }
         const actions = {
           "toggle-user-menu": () => toggleUserMenu(),
           "logout": logout,
@@ -6879,7 +6971,6 @@
           "new-conversation": openContactDialog,
           "new-contact": openContactDialog,
           "export-contacts": () => exportContacts(actionButton),
-          "add-contact-platform-id": addContactPlatformId,
           "close-contact-dialog": () => $("contactDialog").close(),
           "close-contact-editor": closeContactEditor,
           "delete-contact": deleteSelectedContact,
@@ -7208,7 +7299,9 @@
     window.addEventListener("hashchange", () => applyLocationRoute().catch(() => {}));
     window.addEventListener("focus", () => prepareBrowserPush().catch(() => {}));
     window.addEventListener("resize", positionContactRouteMenu);
+    window.addEventListener("resize", positionContactPlatformMenu);
     document.addEventListener("scroll", positionContactRouteMenu, true);
+    document.addEventListener("scroll", positionContactPlatformMenu, true);
     window.addEventListener("pagehide", () => state.disconnectRealtime?.());
     window.addEventListener("beforeunload", () => state.disconnectRealtime?.());
     window.addEventListener("helixcer:unauthorized", () => showSignedOut("Your session expired. Sign in again to continue."));
@@ -7220,6 +7313,7 @@
       }
       if (event.key === "Escape") {
         closeContactRouteMenu({ restoreFocus: true });
+        closeContactPlatformMenu({ restoreFocus: true });
         closeConversationActionMenu({ restoreFocus: true });
         closeTemplateFilterMenus("", { restoreFocus: true });
         closeConversationFilterMenu({ restoreFocus: true });

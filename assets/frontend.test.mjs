@@ -499,8 +499,8 @@ test("contacts use one flat ID per platform and open the exact saved channel rou
   assert.match(html, /id="contactEditName"/);
   assert.match(html, /id="contactEditPlatformIds"/);
   assert.match(html, /id="contactCreatePlatformIds"/);
-  assert.match(html, /id="contactEditPlatformSelect"/);
-  assert.match(html, /data-action="add-contact-platform-id"/);
+  assert.doesNotMatch(html, /id="contactEditPlatformSelect"|<select[^>]+Platform to add/);
+  assert.match(html, /id="contactEditPlatformAddButton"[^>]*data-action="toggle-contact-platform-menu"[^>]*aria-haspopup="menu"[^>]*aria-expanded="false"/);
   assert.doesNotMatch(html, /Add identity|add-contact-(?:create|edit)-identity/);
   assert.doesNotMatch(html, /id="contactPlatformActions"|Open a conversation/);
   assert.doesNotMatch(html, /id="contactRouteDialog"|contact-route-modal/);
@@ -530,9 +530,23 @@ test("contacts use one flat ID per platform and open the exact saved channel rou
   assert.match(platformEditorBody, /Used by conversation history · locked/);
   assert.match(app, /function refreshContactPlatformAddControl\(\)/);
   assert.match(app, /filter\(\(\[platform\]\) => !shownPlatforms\.has\(platform\)\)/);
-  assert.match(app, /function addContactPlatformId\(\)/);
+  assert.match(app, /function addContactPlatformId\(value\)/);
   assert.match(app, /visibleContactPlatformIdDraft\(host\)/);
-  assert.match(app, /"add-contact-platform-id": addContactPlatformId/);
+  assert.match(app, /function showContactPlatformMenu\(trigger\)/);
+  assert.match(app, /missingContactPlatforms\(\)/);
+  assert.match(app, /providerLogo\(platformConnectorType\(platform\), "contact-route-provider-logo"\)/);
+  assert.match(app, /profile\.profileLabel/);
+  assert.match(app, /dataset\.action = "choose-contact-platform-id"/);
+  assert.match(app, /showContactPlatformMenu\(actionButton\)/);
+  assert.match(app, /addContactPlatformId\(actionButton\.dataset\.platform\)/);
+  assert.match(app, /closeContactPlatformMenu\(\{ restoreFocus: true \}\)/);
+  const platformMenuBody = app.slice(app.indexOf("function showContactPlatformMenu"),
+    app.indexOf("function contactIdentityRouteContext"));
+  assert.match(platformMenuBody, /document\.body\.append\(menu\)/);
+  assert.match(platformMenuBody, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"/);
+  assert.match(platformMenuBody, /event\.key === "Escape"/);
+  assert.match(app, /!state\.contactPlatformMenu\.menu\.contains\(event\.target\)/);
+  assert.match(styles, /\.contact-platform-menu-add/);
   assert.match(app, /function validateContactPlatformIds\(ids\)/);
   assert.match(app, /Enter at least one WhatsApp, Telegram, Instagram, Facebook or Email ID/);
   assert.match(app, /row\.dataset\.contactId = contact\.contactId/);
@@ -708,13 +722,15 @@ test("desktop and mobile chats share the Android light chat palette", () => {
 
 test("chat history fills the available viewport without covering the composer", () => {
   assert.match(styles, /\.app-shell\s*\{[^}]*height:\s*100dvh[^}]*overflow:\s*hidden/i);
-  assert.match(styles, /\.main\s*\{[^}]*grid-template-rows:\s*60px minmax\(0, 1fr\)[^}]*height:\s*100%[^}]*overflow:\s*hidden/i);
+  assert.match(styles, /\.main\s*\{[^}]*grid-template-rows:\s*50px minmax\(0, 1fr\)[^}]*height:\s*100%[^}]*overflow:\s*hidden/i);
   assert.match(styles, /\.route\s*\{[^}]*height:\s*100%[^}]*overflow:\s*hidden/i);
   assert.match(styles, /\.inbox-grid\s*\{[^}]*height:\s*100%[^}]*overflow:\s*hidden/i);
   assert.match(styles, /\.chat-content\s*\{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\) auto auto auto[^}]*height:\s*100%[^}]*overflow:\s*hidden/i);
+  assert.match(styles, /\.chat-header\s*\{[^}]*min-height:\s*52px[^}]*padding:\s*5px 12px/i);
+  assert.match(styles, /\.chat-title\s*\{[^}]*font:\s*720 14px\/1\.2/i);
   assert.match(styles, /\.message-thread\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto[^}]*overscroll-behavior:\s*contain/i);
   assert.match(styles, /\.composer\s*\{[^}]*padding:[^;}]*env\(safe-area-inset-bottom\)/i);
-  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.main\s*\{\s*grid-template-rows:\s*56px minmax\(0, 1fr\)/i);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.main\s*\{\s*grid-template-rows:\s*56px minmax\(0, 1fr\)[\s\S]*?\.chat-header\s*\{\s*min-height:\s*56px;\s*padding:\s*5px 8px[\s\S]*?\.chat-title\s*\{\s*font-size:\s*16px/i);
 });
 
 test("conversation filters are multi-selectable with responsive desktop and mobile controls", () => {
