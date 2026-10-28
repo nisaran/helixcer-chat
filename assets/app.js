@@ -2683,6 +2683,7 @@
         platform,
         profileId,
         username: card.querySelector("[data-identity-username]")?.value || "",
+        displayName: card.querySelector("[data-identity-display-name]")?.value || "",
         phoneNumber: card.querySelector("[data-identity-phone]")?.value || "",
         isPrimary: card.querySelector("[data-identity-primary]")?.checked === true,
         bindings: checkedRoutes,
@@ -2698,40 +2699,82 @@
       return;
     }
     drafts.forEach((draft, index) => {
-      const card = element("article", `contact-identity-card${draft.isPrimary ? " is-primary" : ""}`);
+      const persisted = Boolean(draft.identityId);
+      const expanded = !persisted;
+      const card = element("article", `contact-identity-card${draft.isPrimary ? " is-primary" : ""}${expanded ? " is-expanded" : ""}`);
       card.dataset.contactIdentityKey = draft.clientKey;
       card.dataset.platform = draft.platform;
-      const head = element("div", "contact-identity-card-head");
-      const platforms = element("div", "identity-platform-options");
-      Object.entries(identityPlatforms).forEach(([value, profile]) => {
-        const button = element("button", `identity-platform-button${draft.platform === value ? " is-selected" : ""}`, profile.label);
-        button.type = "button";
-        button.dataset.action = "choose-contact-identity-platform";
-        button.dataset.identityMode = mode;
-        button.dataset.identityKey = draft.clientKey;
-        button.dataset.platform = value;
-        button.setAttribute("aria-pressed", String(draft.platform === value));
-        button.disabled = Boolean(draft.identityId);
-        if (draft.identityId) button.title = "An existing identity's platform cannot be changed. Add another identity instead.";
-        platforms.append(button);
-      });
-      const remove = element("button", "identity-remove-button", "×");
-      remove.type = "button";
-      remove.dataset.action = "remove-contact-identity";
-      remove.dataset.identityMode = mode;
-      remove.dataset.identityKey = draft.clientKey;
-      remove.setAttribute("aria-label", `Remove ${identityLabel(draft.platform)} identity`);
-      // An unresolved legacy conversation is not always visible in the hydrated
-      // binding list. Keep every persisted identity in a combined contact save;
-      // only unsaved drafts may be removed from this editor.
-      remove.disabled = mode === "edit" && Boolean(draft.identityId);
-      if (remove.disabled) remove.title = identityHasHistory(draft)
-        ? "This identity has conversation history and cannot be removed."
-        : "Existing identities cannot be removed from this contact editor.";
-      head.append(platforms, remove);
+      const profile = identityPlatforms[draft.platform] || identityPlatforms.email;
+      const summary = element("div", "contact-identity-summary");
+      const platformBadge = element("span", "contact-identity-platform-badge", profile.label);
+      platformBadge.dataset.platform = draft.platform;
+      const summaryCopy = element("div", "contact-identity-summary-copy");
+      summaryCopy.append(
+        element("span", "contact-identity-profile-label", profile.profileLabel),
+        element("strong", "contact-identity-profile-value", draft.profileId || "Not entered"),
+      );
+      summary.append(platformBadge, summaryCopy);
+
+      if (persisted && mode === "edit") {
+        const contact = state.contacts.find((item) => item.contactId === state.selectedContactId);
+        const routes = contact ? contactPlatformRoutes(contact, draft.platform, draft.identityId) : [];
+        const eligibleRoutes = routes.filter((route) => route.eligible);
+        const defaultRoute = eligibleRoutes[0] || null;
+        const messageSplit = element("div", "identity-message-split");
+        const message = element("button", "identity-message-main", "Message");
+        message.type = "button";
+        message.dataset.action = "open-contact-identity-default";
+        message.dataset.contactId = contact?.contactId || "";
+        message.dataset.identityId = draft.identityId;
+        message.disabled = !defaultRoute;
+        message.title = defaultRoute
+          ? `Message using ${defaultRoute.channelName || profile.label}`
+          : `No available ${profile.label} route`;
+        const chooseRoute = element("button", "identity-message-menu", "▾");
+        chooseRoute.type = "button";
+        chooseRoute.dataset.action = "choose-contact-identity-route";
+        chooseRoute.dataset.contactId = contact?.contactId || "";
+        chooseRoute.dataset.identityId = draft.identityId;
+        chooseRoute.disabled = !eligibleRoutes.length;
+        chooseRoute.setAttribute("aria-label", `Choose ${profile.label} channel`);
+        chooseRoute.title = "Choose another connected channel";
+        messageSplit.append(message, chooseRoute);
+        summary.append(messageSplit);
+      }
+
+      const expand = element("button", "identity-expand-button", expanded ? "⌃" : "⌄");
+      expand.type = "button";
+      expand.dataset.action = "toggle-contact-identity-details";
+      expand.setAttribute("aria-expanded", String(expanded));
+      expand.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${profile.label} identity details`);
+      summary.append(expand);
+
+      const details = element("div", "contact-identity-details");
+      details.hidden = !expanded;
+      if (!persisted) {
+        const head = element("div", "contact-identity-card-head");
+        const platforms = element("div", "identity-platform-options");
+        Object.entries(identityPlatforms).forEach(([value, optionProfile]) => {
+          const button = element("button", `identity-platform-button${draft.platform === value ? " is-selected" : ""}`, optionProfile.label);
+          button.type = "button";
+          button.dataset.action = "choose-contact-identity-platform";
+          button.dataset.identityMode = mode;
+          button.dataset.identityKey = draft.clientKey;
+          button.dataset.platform = value;
+          button.setAttribute("aria-pressed", String(draft.platform === value));
+          platforms.append(button);
+        });
+        const remove = element("button", "identity-remove-button", "×");
+        remove.type = "button";
+        remove.dataset.action = "remove-contact-identity";
+        remove.dataset.identityMode = mode;
+        remove.dataset.identityKey = draft.clientKey;
+        remove.setAttribute("aria-label", `Remove ${identityLabel(draft.platform)} identity`);
+        head.append(platforms, remove);
+        details.append(head);
+      }
 
       const fields = element("div", "contact-identity-fields");
-      const profile = identityPlatforms[draft.platform] || identityPlatforms.email;
       const profileLabel = element("label", "field-label", profile.profileLabel);
       const profileInput = document.createElement("input");
       profileInput.className = "text-field";
@@ -2755,8 +2798,16 @@
       username.maxLength = 160;
       username.dataset.identityUsername = "";
       usernameLabel.append(username);
+      const displayNameLabel = element("label", "field-label", "Display name");
+      const displayName = document.createElement("input");
+      displayName.className = "text-field";
+      displayName.value = draft.displayName || "";
+      displayName.placeholder = "Optional platform display name";
+      displayName.maxLength = 160;
+      displayName.dataset.identityDisplayName = "";
+      displayNameLabel.append(displayName);
       if (draft.platform === "whatsapp") profileInput.inputMode = "tel";
-      fields.append(profileLabel, usernameLabel);
+      fields.append(profileLabel, usernameLabel, displayNameLabel);
       const routeFieldset = element("fieldset", "identity-route-fieldset");
       routeFieldset.append(element("legend", "", "Connected routes"));
       const routeOptions = element("div", "identity-route-options");
@@ -2815,7 +2866,8 @@
       primaryInput.checked = draft.isPrimary || (!drafts.some((item) => item.isPrimary) && index === 0);
       primary.append(primaryInput, document.createTextNode("Primary identity"));
       fields.append(primary);
-      card.append(head, fields);
+      details.append(fields);
+      card.append(summary, details);
       host.append(card);
     });
   }
@@ -2912,9 +2964,9 @@
     });
   }
 
-  function contactPlatformRoutes(contact, platform) {
+  function contactPlatformRoutes(contact, platform, identityId = "") {
     const routes = [];
-    contact.identities.filter((identity) => identity.platform === platform).forEach((identity) => {
+    contact.identities.filter((identity) => identity.platform === platform && (!identityId || identity.identityId === identityId)).forEach((identity) => {
       if (platform === "email" && identity.profileId) {
         routes.push({
           key: `email:${identity.identityId}`,
@@ -2968,31 +3020,6 @@
         new Date(b.lastUsedAt || 0) - new Date(a.lastUsedAt || 0));
   }
 
-  function renderContactPlatformActions(contact) {
-    const host = $("contactPlatformActions");
-    host.replaceChildren();
-    const platforms = [...new Set(contact.identities.map((identity) => identity.platform).filter(Boolean))];
-    if (!platforms.length) {
-      host.append(element("span", "contact-platform-empty", "Add a platform identity to start or open a conversation."));
-      return;
-    }
-    platforms.forEach((platform) => {
-      const routes = contactPlatformRoutes(contact, platform);
-      const eligible = routes.filter((route) => route.eligible).length;
-      const button = element("button", "contact-platform-action");
-      button.type = "button";
-      button.dataset.action = "open-contact-platform";
-      button.dataset.contactId = contact.contactId;
-      button.dataset.platform = platform;
-      button.disabled = eligible === 0;
-      button.append(
-        document.createTextNode(identityLabel(platform)),
-        element("span", "", eligible ? `${eligible} route${eligible === 1 ? "" : "s"}` : "Unavailable"),
-      );
-      host.append(button);
-    });
-  }
-
   async function openContactRoute(route) {
     if (!route?.eligible) return;
     if ($("contactRouteDialog").open) $("contactRouteDialog").close();
@@ -3044,20 +3071,37 @@
     $("contactRouteDialog").showModal();
   }
 
-  function openContactPlatform(contactId, platform) {
+  function contactIdentityRouteContext(contactId, identityId) {
     const contact = state.contacts.find((item) => item.contactId === contactId);
-    if (!contact) return;
-    const routes = contactPlatformRoutes(contact, platform);
-    const eligible = routes.filter((route) => route.eligible);
+    const identity = contact?.identities.find((item) => item.identityId === identityId);
+    if (!contact || !identity) return null;
+    return {
+      contact,
+      identity,
+      routes: contactPlatformRoutes(contact, identity.platform, identity.identityId),
+    };
+  }
+
+  function openContactIdentityDefault(contactId, identityId) {
+    const context = contactIdentityRouteContext(contactId, identityId);
+    if (!context) return;
+    const route = context.routes.find((item) => item.eligible);
+    if (!route) {
+      showToast("No available route", `Connect a ${identityLabel(context.identity.platform)} channel before starting this conversation.`, true);
+      return;
+    }
+    openContactRoute(route);
+  }
+
+  function chooseContactIdentityRoute(contactId, identityId) {
+    const context = contactIdentityRouteContext(contactId, identityId);
+    if (!context) return;
+    const eligible = context.routes.filter((route) => route.eligible);
     if (!eligible.length) {
-      showToast("No available route", `Connect a ${identityLabel(platform)} channel before starting this conversation.`, true);
+      showToast("No available route", `Connect a ${identityLabel(context.identity.platform)} channel before starting this conversation.`, true);
       return;
     }
-    if (eligible.length === 1) {
-      openContactRoute(eligible[0]);
-      return;
-    }
-    showContactRouteDialog(contact, platform, routes);
+    showContactRouteDialog(context.contact, context.identity.platform, context.routes);
   }
 
   function showContactEditor(contact, { loading = false, error = "" } = {}) {
@@ -3080,7 +3124,6 @@
     $("contactEditTags").value = normalized.tags.join(", ");
     state.contactEditIdentityDrafts = normalized.identities.map((identity) => identityDraft(identity, identity.platform));
     renderContactIdentityList($("contactEditIdentities"), state.contactEditIdentityDrafts, "edit");
-    renderContactPlatformActions(normalized);
   }
 
   async function selectContact(contactId) {
@@ -3111,7 +3154,6 @@
     $("contactEditorTitle").textContent = "Edit contact";
     state.contactEditIdentityDrafts = [];
     $("contactEditIdentities").replaceChildren();
-    $("contactPlatformActions").replaceChildren();
     renderContacts();
   }
 
@@ -6532,8 +6574,24 @@
             : draft));
           return;
         }
-        if (actionButton.dataset.action === "open-contact-platform") {
-          openContactPlatform(actionButton.dataset.contactId, actionButton.dataset.platform);
+        if (actionButton.dataset.action === "toggle-contact-identity-details") {
+          const card = actionButton.closest("[data-contact-identity-key]");
+          const details = card?.querySelector(".contact-identity-details");
+          if (!card || !details) return;
+          const expanded = details.hidden;
+          details.hidden = !expanded;
+          card.classList.toggle("is-expanded", expanded);
+          actionButton.textContent = expanded ? "⌃" : "⌄";
+          actionButton.setAttribute("aria-expanded", String(expanded));
+          actionButton.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} identity details`);
+          return;
+        }
+        if (actionButton.dataset.action === "open-contact-identity-default") {
+          openContactIdentityDefault(actionButton.dataset.contactId, actionButton.dataset.identityId);
+          return;
+        }
+        if (actionButton.dataset.action === "choose-contact-identity-route") {
+          chooseContactIdentityRoute(actionButton.dataset.contactId, actionButton.dataset.identityId);
           return;
         }
         if (actionButton.dataset.action === "choose-contact-route") {

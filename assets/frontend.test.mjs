@@ -498,7 +498,7 @@ test("person-first contacts edit multiple immutable identities and open lazy cha
   assert.match(html, /id="contactEditor"/);
   assert.match(html, /id="contactEditName"/);
   assert.match(html, /id="contactEditIdentities"/);
-  assert.match(html, /id="contactPlatformActions"/);
+  assert.doesNotMatch(html, /id="contactPlatformActions"|Open a conversation/);
   assert.match(html, /id="contactRouteDialog"/);
   assert.doesNotMatch(html, /id="contactEditChannel(?:Help|ProfileId)?"/);
   assert.match(html, /id="contactEditCompany"/);
@@ -518,12 +518,20 @@ test("person-first contacts edit multiple immutable identities and open lazy cha
     app.indexOf("function contactPlatformRoutes"),
   );
   assert.doesNotMatch(identityEditorBody, /WhatsApp phone number|dataset\.identityPhone/);
+  assert.match(identityEditorBody, /contact-identity-summary/);
+  assert.match(identityEditorBody, /contact-identity-platform-badge/);
+  assert.match(identityEditorBody, /contact-identity-details/);
+  assert.match(identityEditorBody, /if \(!persisted\)[\s\S]*?identity-platform-options/);
+  assert.match(identityEditorBody, /dataset\.action = "open-contact-identity-default"/);
+  assert.match(identityEditorBody, /dataset\.action = "choose-contact-identity-route"/);
+  assert.match(identityEditorBody, /dataset\.action = "toggle-contact-identity-details"/);
+  assert.match(identityEditorBody, /dataset\.identityDisplayName/);
   assert.match(app, /dataset\.identityRouteProfile = channel\.channelId/);
   assert.match(app, /scopedProfileId/);
   assert.match(app, /scopedProfile\.readOnly = Boolean\(existingBinding\)/);
   assert.match(app, /existing channel route ID cannot be changed/);
   assert.match(app, /function identityHasHistory\(identity\)/);
-  assert.match(app, /remove\.disabled = mode === "edit" && Boolean\(draft\.identityId\)/);
+  assert.match(identityEditorBody, /if \(!persisted\)[\s\S]*?remove-contact-identity/);
   assert.match(app, /omittedHistoryIdentity[\s\S]*?An identity with conversation history cannot be removed/);
   assert.match(app, /mode === "edit" && currentDraft\?\.identityId/);
   const identityPayloadBody = app.match(/function identityRequestPayload\(identity\) \{([\s\S]*?)\n  \}/)?.[1] || "";
@@ -540,9 +548,14 @@ test("person-first contacts edit multiple immutable identities and open lazy cha
   assert.match(app, /route\.isLastUsed \? "Last used"/);
   assert.match(app, /"Never used"/);
   const platformRoutesBody = app.slice(app.indexOf("function contactPlatformRoutes"),
-    app.indexOf("function renderContactPlatformActions"));
+    app.indexOf("async function openContactRoute"));
+  assert.match(platformRoutesBody, /!identityId \|\| identity\.identityId === identityId/);
   assert.match(platformRoutesBody, /filter\(\(channel\) =>\s*bindingByChannel\.has\(channel\.channelId\)\)/);
   assert.doesNotMatch(platformRoutesBody, /bindingByChannel\.has\(channel\.channelId\) \|\|/);
+  assert.match(app, /function openContactIdentityDefault\(contactId, identityId\)/);
+  assert.match(app, /function chooseContactIdentityRoute\(contactId, identityId\)/);
+  assert.match(app, /context\.routes\.find\(\(item\) => item\.eligible\)/);
+  assert.match(app, /showContactRouteDialog\(context\.contact, context\.identity\.platform, context\.routes\)/);
   assert.match(app, /state\.contactCreateIdentityDrafts = \[\]/);
   assert.match(app, /No platform identities yet\. Add one when you are ready\./);
   const createContactBody = app.match(/async function createContact\(form\) \{([\s\S]*?)\n  \}/)?.[1] || "";
