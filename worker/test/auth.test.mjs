@@ -126,6 +126,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0011_mobile_push_devices.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0012_contact_identities.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0013_flat_contact_platform_ids.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0014_unified_contact_conversations.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -1381,6 +1382,9 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
       channelMessageId: 'wamid.inbound-first',
       error: '',
       senderName: 'Asha',
+      connectorType: 'whatsapp_cloud',
+      channelName: 'Inbound-first WhatsApp',
+      channelProfileId: '919999999999',
       attachment: null,
       reply: null
     });
@@ -3005,8 +3009,9 @@ test('conversation, contact, and channel deletion removes only local workspace d
     database.prepare(`INSERT INTO channels
         (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
       VALUES ('delete-channel','Delete WhatsApp','whatsapp_cloud','whatsapp_cloud',1,'["text"]','{}','DELETE_TEST',?,?, 'ws_default'),
-        ('keep-channel','Keep Telegram','telegram','telegram',1,'["text"]','{}','KEEP_TEST',?,?, 'ws_default')`)
-      .run(now, now, now, now);
+        ('keep-channel','Keep Telegram','telegram','telegram',1,'["text"]','{}','KEEP_TEST',?,?, 'ws_default'),
+        ('empty-delete-channel','Unused channel','generic_http','generic_http',1,'["text"]','{}','EMPTY_DELETE_TEST',?,?, 'ws_default')`)
+      .run(now, now, now, now, now, now);
     database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
       VALUES ('delete-exclusive','Exclusive',?,?, 'ws_default'),('delete-shared','Shared',?,?, 'ws_default')`)
       .run(now, now, now, now);
@@ -3019,13 +3024,12 @@ test('conversation, contact, and channel deletion removes only local workspace d
     database.prepare(`INSERT INTO conversations
         (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
       VALUES ('conversation-delete','delete-exclusive','delete-channel','open','Exclusive',?,0,?,?,'ws_default'),
-        ('conversation-shared-delete','delete-shared','delete-channel','open','Shared A',?,0,?,?,'ws_default'),
         ('conversation-keep','delete-shared','keep-channel','open','Shared B',?,0,?,?,'ws_default')`)
-      .run(now, now, now, now, now, now, now, now, now);
+      .run(now, now, now, now, now, now);
     database.prepare(`INSERT INTO messages
         (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
       VALUES ('message-delete','conversation-delete','delete-exclusive','delete-channel','outbound','text','Delete','pending',?,'ws_default'),
-        ('message-shared-delete','conversation-shared-delete','delete-shared','delete-channel','inbound','text','Delete shared','received',?,'ws_default'),
+        ('message-shared-delete','conversation-keep','delete-shared','delete-channel','inbound','text','Delete shared','received',?,'ws_default'),
         ('message-keep','conversation-keep','delete-shared','keep-channel','inbound','text','Keep','received',?,'ws_default')`)
       .run(now, now, now);
     database.prepare(`INSERT INTO outbox
@@ -3049,21 +3053,21 @@ test('conversation, contact, and channel deletion removes only local workspace d
     const deletedChannelResponse = await handleRequest(new Request(
       'https://api.chat.helixcer.com/api/channels/delete-channel', { method: 'DELETE', headers }
     ), env);
-    assert.equal(deletedChannelResponse.status, 200);
-    const deletedChannel = await deletedChannelResponse.json();
-    assert.equal(deletedChannel.localOnly, true);
-    assert.equal(deletedChannel.deletedConversations, 2);
-    assert.equal(deletedChannel.deletedMessages, 2);
+    assert.equal(deletedChannelResponse.status, 409);
+    assert.match((await deletedChannelResponse.json()).error, /conversation history/i);
     assert.equal(providerCalls, 0);
-    for (const table of ['channels', 'channel_credentials', 'webhook_events']) {
-      const column = table === 'webhook_events' ? 'channel_id' : 'channel_id';
-      assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column}='delete-channel'`).get().count, 0);
-    }
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM conversations WHERE channel_id='delete-channel'").get().count, 0);
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE channel_id='delete-channel'").get().count, 0);
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM outbox WHERE message_id='message-delete'").get().count, 0);
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM outbound_payloads WHERE message_id='message-delete'").get().count, 0);
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM external_api_requests WHERE message_id='message-delete'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE channel_id='delete-channel'").get().count, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE channel_id='delete-channel'").get().count, 2);
+
+    const emptyDeletedResponse = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/channels/empty-delete-channel', { method: 'DELETE', headers }
+    ), env);
+    assert.equal(emptyDeletedResponse.status, 200);
+    const emptyDeleted = await emptyDeletedResponse.json();
+    assert.equal(emptyDeleted.localOnly, true);
+    assert.equal(emptyDeleted.deletedConversations, 0);
+    assert.equal(emptyDeleted.deletedMessages, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE channel_id='empty-delete-channel'").get().count, 0);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contacts WHERE contact_id='delete-exclusive'").get().count, 1);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contacts WHERE contact_id='delete-shared'").get().count, 1);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM conversations WHERE conversation_id='conversation-keep'").get().count, 1);
@@ -3073,9 +3077,10 @@ test('conversation, contact, and channel deletion removes only local workspace d
       'https://api.chat.helixcer.com/api/conversations/conversation-keep', { method: 'DELETE', headers }
     ), env);
     assert.equal(deletedConversationResponse.status, 200);
-    assert.equal((await deletedConversationResponse.json()).deletedMessages, 1);
+    assert.equal((await deletedConversationResponse.json()).deletedMessages, 2);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM conversations WHERE conversation_id='conversation-keep'").get().count, 0);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE message_id='message-keep'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE message_id='message-shared-delete'").get().count, 0);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM contacts WHERE contact_id='delete-shared'").get().count, 1);
 
     database.prepare(`INSERT INTO conversations
@@ -3485,10 +3490,10 @@ test('identity routes are explicit, prevalidated, and never claim ambiguous lega
   }), env);
   if (opened.status !== 201) assert.fail(`Conversation open failed: ${opened.status} ${await opened.text()}`);
   const openedBody = await opened.json();
-  assert.notEqual(openedBody.conversationId, legacyConversationId);
-  assert.equal(database.prepare('SELECT identity_id FROM conversations WHERE conversation_id=?').get(legacyConversationId).identity_id, '');
-  assert.equal(database.prepare('SELECT identity_id FROM conversations WHERE conversation_id=?').get(openedBody.conversationId).identity_id,
-    firstIdentityId);
+  assert.equal(openedBody.conversationId, legacyConversationId,
+    'one contact reuses its existing inbox thread when an explicit route is selected');
+  assert.equal(database.prepare('SELECT identity_id FROM conversations WHERE conversation_id=?').get(legacyConversationId).identity_id,
+    '', 'selecting an explicit route does not falsely resolve an ambiguous legacy compatibility identity');
 
   // A retry created before identity migration may still point at an ambiguous
   // legacy conversation. It must fail closed rather than selecting the first
@@ -3640,5 +3645,188 @@ test('flat contact platform IDs create, extend, protect history, and export one 
   assert.match(csv, /contact_id,display_name,company,tags,whatsapp_id,telegram_id,instagram_id,facebook_id,email/);
   assert.match(csv, /Flat Contact,"Example, Inc\.","VIP, Retail",919999911111,tg-flat-1,ig-flat-1,,/);
   assert.equal(csv.split('\r\n').filter(line => line.includes('Flat Contact')).length, 1);
+  database.close();
+});
+
+test('unified-thread retries dispatch through the message route, not the conversation compatibility route', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, { ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true' });
+  const now = new Date().toISOString();
+  const due = new Date(Date.now() - 1000).toISOString();
+  const channelConfig = endpoint => JSON.stringify({
+    endpoint,
+    allowedHosts: ['provider.example'],
+    responseMapping: { providerMessageId: 'id', status: 'status' }
+  });
+
+  database.prepare(`INSERT INTO channels
+      (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,
+       secret_key,created_at,updated_at,workspace_id)
+    VALUES ('route-compatibility','Compatibility route','generic_http','generic_http',1,'["text"]',?1,
+        'ROUTE_COMPATIBILITY',?2,?2,'ws_default'),
+      ('route-message','Exact message route','generic_http','generic_http',1,'["text"]',?3,
+        'ROUTE_MESSAGE',?2,?2,'ws_default')`)
+    .run(channelConfig('https://provider.example/compatibility'), now,
+      channelConfig('https://provider.example/message'));
+  database.prepare(`INSERT INTO contacts
+      (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
+    VALUES ('contact-unified-route','Unified route','','[]',?1,?1,'ws_default')`).run(now);
+  database.prepare(`INSERT INTO contact_identities
+      (identity_id,workspace_id,contact_id,platform,profile_id,display_name,created_at,updated_at)
+    VALUES ('identity-unified-route','ws_default','contact-unified-route','generic_http',
+      'identity-profile','Unified route',?1,?1)`).run(now);
+  database.prepare(`INSERT INTO channel_identity_bindings
+      (binding_id,workspace_id,identity_id,channel_id,scoped_profile_id,active,
+       first_seen_at,last_seen_at,created_at,updated_at)
+    VALUES ('binding-compatibility','ws_default','identity-unified-route','route-compatibility',
+        'recipient-compatibility',1,?1,?1,?1,?1),
+      ('binding-message','ws_default','identity-unified-route','route-message',
+        'recipient-message',1,?1,?1,?1,?1)`).run(now);
+  database.prepare(`INSERT INTO conversations
+      (conversation_id,contact_id,channel_id,identity_id,status,subject,last_message_at,unread_count,
+       created_at,updated_at,workspace_id)
+    VALUES ('conversation-unified-route','contact-unified-route','route-compatibility',
+      'identity-unified-route','open','Unified route',?1,0,?1,?1,'ws_default')`).run(now);
+  database.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,
+       timestamp,workspace_id)
+    VALUES ('message-exact-route','conversation-unified-route','contact-unified-route','route-message',
+      'identity-unified-route','outbound','text','Use the exact route','retrying',?1,'ws_default')`).run(now);
+  database.prepare(`INSERT INTO outbox
+      (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,created_at,updated_at,workspace_id)
+    VALUES ('outbox-exact-route','message-exact-route',0,6,?1,'pending',?2,?2,'ws_default')`)
+    .run(due, now);
+
+  const originalFetch = globalThis.fetch;
+  const providerRequests = [];
+  globalThis.fetch = async (input, init = {}) => {
+    providerRequests.push({ url: String(input), body: JSON.parse(String(init.body || '{}')) });
+    return new Response(JSON.stringify({ id: 'provider-exact-route', status: 'submitted' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    });
+  };
+  try {
+    const scheduled = [];
+    worker.scheduled({}, env, { waitUntil(promise) { scheduled.push(promise); } });
+    await Promise.all(scheduled);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(providerRequests, [{
+    url: 'https://provider.example/message',
+    body: { to: 'recipient-message', text: 'Use the exact route' }
+  }]);
+  assert.deepEqual({ ...database.prepare(`SELECT status,provider_message_id,channel_id,identity_id
+    FROM messages WHERE message_id='message-exact-route'`).get() }, {
+    status: 'submitted', provider_message_id: 'provider-exact-route',
+    channel_id: 'route-message', identity_id: 'identity-unified-route'
+  });
+  assert.equal(database.prepare(`SELECT channel_id FROM conversations
+    WHERE conversation_id='conversation-unified-route'`).get().channel_id, 'route-compatibility');
+
+  const resolvedRequests = [];
+  globalThis.fetch = async (input, init = {}) => {
+    resolvedRequests.push({ url: String(input), body: JSON.parse(String(init.body || '{}')) });
+    return new Response(JSON.stringify({ id: 'provider-resolved-route', status: 'submitted' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    });
+  };
+  let resolvedItem;
+  try {
+    const pending = [];
+    const response = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-unified-route/messages', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Resolve the latest message route' })
+      }
+    ), env, { waitUntil(promise) { pending.push(promise); } });
+    assert.equal(response.status, 202);
+    resolvedItem = (await response.json()).item;
+    await Promise.all(pending);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(resolvedItem.channelId, 'route-message');
+  assert.equal(resolvedItem.contactIdentityId, 'identity-unified-route');
+  assert.equal(resolvedItem.channelName, 'Exact message route');
+  assert.equal(resolvedItem.channelProfileId, 'recipient-message');
+  assert.deepEqual(resolvedRequests, [{
+    url: 'https://provider.example/message',
+    body: { to: 'recipient-message', text: 'Resolve the latest message route' }
+  }]);
+  assert.equal(database.prepare(`SELECT channel_id FROM conversations
+    WHERE conversation_id='conversation-unified-route'`).get().channel_id, 'route-message');
+
+  const listed = await handleRequest(new Request(
+    'https://api.chat.helixcer.com/api/conversations/conversation-unified-route/messages', {
+      headers: { Authorization: 'Bearer recovery-secret' }
+    }
+  ), env);
+  assert.equal(listed.status, 200);
+  const item = (await listed.json()).items.find(candidate => candidate.messageId === 'message-exact-route');
+  assert.equal(item.channelId, 'route-message');
+  assert.equal(item.contactIdentityId, 'identity-unified-route');
+  assert.equal(item.channelName, 'Exact message route');
+  assert.equal(item.channelProfileId, 'recipient-message');
+  database.close();
+});
+
+test('unified conversation defaults to the newest exact inbound route when binding timestamps are stale', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, { ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true' });
+  const createdAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const olderInbound = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  const newerInbound = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+  database.prepare(`INSERT INTO channels
+      (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,
+       secret_key,created_at,updated_at,workspace_id)
+    VALUES ('stale-binding-a','Older exact route','generic_http','generic_http',1,'["text"]','{}',
+        'STALE_A',?1,?1,'ws_default'),
+      ('stale-binding-b','Newest exact route','generic_http','generic_http',1,'["text"]','{}',
+        'STALE_B',?1,?1,'ws_default')`).run(createdAt);
+  database.prepare(`INSERT INTO contacts
+      (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
+    VALUES ('contact-stale-route','Stale route contact','','[]',?1,?1,'ws_default')`).run(createdAt);
+  database.prepare(`INSERT INTO contact_identities
+      (identity_id,workspace_id,contact_id,platform,profile_id,display_name,created_at,updated_at)
+    VALUES ('identity-stale-route','ws_default','contact-stale-route','generic_http',
+      'profile-stale-route','Stale route contact',?1,?1)`).run(createdAt);
+  database.prepare(`INSERT INTO channel_identity_bindings
+      (binding_id,workspace_id,identity_id,channel_id,scoped_profile_id,active,
+       first_seen_at,last_seen_at,last_inbound_at,created_at,updated_at)
+    VALUES ('binding-stale-a','ws_default','identity-stale-route','stale-binding-a',
+        'recipient-a',1,?1,?1,?2,?1,?1),
+      ('binding-stale-b','ws_default','identity-stale-route','stale-binding-b',
+        'recipient-b',1,?1,?1,?3,?1,?1)`)
+    .run(createdAt, newerInbound, olderInbound);
+  database.prepare(`INSERT INTO conversations
+      (conversation_id,contact_id,channel_id,identity_id,status,subject,last_message_at,unread_count,
+       created_at,updated_at,workspace_id)
+    VALUES ('conversation-stale-route','contact-stale-route','stale-binding-a','identity-stale-route',
+      'open','Stale route contact',?1,2,?2,?1,'ws_default')`).run(newerInbound, createdAt);
+  database.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,
+       timestamp,workspace_id)
+    VALUES ('inbound-stale-a','conversation-stale-route','contact-stale-route','stale-binding-a',
+        'identity-stale-route','inbound','text','Older route message','received',?1,'ws_default'),
+      ('inbound-stale-b','conversation-stale-route','contact-stale-route','stale-binding-b',
+        'identity-stale-route','inbound','text','Newest route message','received',?2,'ws_default')`)
+    .run(olderInbound, newerInbound);
+
+  const response = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations?limit=100', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  assert.equal(response.status, 200);
+  const conversation = (await response.json()).items.find(item =>
+    item.conversationId === 'conversation-stale-route');
+  assert.ok(conversation);
+  assert.equal(conversation.defaultRoute.channelId, 'stale-binding-b');
+  assert.equal(conversation.defaultRoute.identityId, 'identity-stale-route');
+  assert.equal(conversation.defaultRoute.lastInboundAt, newerInbound);
+  assert.equal(conversation.routeOptions.find(route => route.channelId === 'stale-binding-a').lastInboundAt,
+    olderInbound);
   database.close();
 });

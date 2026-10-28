@@ -227,10 +227,10 @@
                   <span class="chat-person">
                     <span class="chat-person-title-row">
                       <span class="chat-title" id="chatTitle">Conversation</span>
-                      <span class="chat-profile-id" id="chatChannelProfileId" title=""></span>
+                      <span class="chat-profile-id" id="chatChannelProfileId" title="" hidden></span>
                     </span>
-                    <span class="chat-meta">
-                      <span class="chat-channel-badge" id="chatChannelBadge"><img id="chatProviderLogo" alt="" src="./assets/provider-whatsapp.svg"><span id="chatChannel">Channel</span></span>
+                    <span class="chat-meta" hidden>
+                      <span class="chat-channel-badge" id="chatChannelBadge" hidden><img id="chatProviderLogo" alt="" src="./assets/provider-whatsapp.svg"><span id="chatChannel">Channel</span></span>
                       <span id="chatPresence">Recently active</span>
                     </span>
                   </span>
@@ -288,6 +288,13 @@
                     </div>
                     <div class="send-group">
                       <span class="send-hint" id="sendHint">Use Send to send</span>
+                      <div class="composer-route-wrap">
+                        <button class="composer-route-button" id="composerRouteButton" type="button" aria-label="Choose sending channel" aria-haspopup="menu" aria-expanded="false" data-action="toggle-composer-route-menu">
+                          <span id="composerRouteLogo"></span>
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+                        </button>
+                        <div class="composer-route-menu" id="composerRouteMenu" role="menu" hidden></div>
+                      </div>
                       <button class="send-button" id="sendButton" type="button" aria-label="Send message">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 17 8-17 8 3-8Zm3 8h14"/></svg>
                       </button>

@@ -35,6 +35,7 @@
     pendingConversationId: null,
     unreadMarker: null,
     replyingTo: null,
+    composerRoutes: new Map(),
     recentVerifyTokens: new Map(),
     selectedConversationId: null,
     selectedContactId: null,
@@ -342,7 +343,7 @@
       return { items: clone(this.data.messages[conversationId] || []) };
     }
 
-    async sendMessage(conversationId, text, replyToMessageId = "") {
+    async sendMessage(conversationId, text, replyToMessageId = "", route = {}) {
       const replyTarget = (this.data.messages[conversationId] || []).find((message) => message.messageId === replyToMessageId);
       const item = {
         messageId: `demo-${Date.now()}`,
@@ -353,6 +354,11 @@
         timestamp: new Date().toISOString(),
         status: "sent",
         senderName: "You",
+        channelId: String(route.channelId || ""),
+        identityId: String(route.identityId || ""),
+        connectorType: String(route.connectorType || ""),
+        channelName: String(route.channelName || ""),
+        channelProfileId: String(route.channelProfileId || ""),
         reply: replyTarget ? {
           messageId: replyTarget.messageId,
           channelMessageId: replyTarget.channelMessageId || "",
@@ -374,9 +380,9 @@
       return { ok: true, item: clone(item) };
     }
 
-    async sendTemplate(conversationId, payload) {
+    async sendTemplate(conversationId, payload, route = {}) {
       const templateName = payload?.name || "template";
-      const response = await this.sendMessage(conversationId, payload.previewText || `[Template: ${templateName}]`);
+      const response = await this.sendMessage(conversationId, payload.previewText || `[Template: ${templateName}]`, "", route);
       response.item.messageType = "template";
       const stored = (this.data.messages[conversationId] || []).find((message) => message.messageId === response.item.messageId);
       if (stored) stored.messageType = "template";
@@ -447,7 +453,15 @@
       const file = formData.get("file");
       const caption = String(formData.get("caption") || "").trim();
       const replyToMessageId = String(formData.get("replyToMessageId") || "");
-      const result = await this.sendMessage(conversationId, caption || `[Attachment: ${file?.name || "file"}]`, replyToMessageId);
+      const conversation = this.data.conversations.find((entry) => entry.conversationId === conversationId) || {};
+      const route = {
+        channelId: String(formData.get("channelId") || conversation.channelId || ""),
+        identityId: String(formData.get("identityId") || conversation.contactIdentityId || ""),
+        connectorType: conversation.connectorType || "",
+        channelName: conversation.channelName || "",
+        channelProfileId: conversation.channelProfileId || "",
+      };
+      const result = await this.sendMessage(conversationId, caption || `[Attachment: ${file?.name || "file"}]`, replyToMessageId, route);
       result.item.messageType = file?.type?.startsWith("image/") ? "image"
         : file?.type?.startsWith("video/") ? "video" : file?.type?.startsWith("audio/") ? "audio" : "document";
       result.item.attachment = {
@@ -456,7 +470,6 @@
       };
       const stored = (this.data.messages[conversationId] || []).find((message) => message.messageId === result.item.messageId);
       if (stored) Object.assign(stored, { messageType: result.item.messageType, attachment: result.item.attachment });
-      const conversation = this.data.conversations.find((entry) => entry.conversationId === conversationId);
       if (conversation) conversation.lastMessageType = result.item.messageType;
       return result;
     }
@@ -806,21 +819,25 @@
         : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=100`);
     }
 
-    sendMessage(conversationId, text, replyToMessageId = "") {
+    sendMessage(conversationId, text, replyToMessageId = "", route = {}) {
       return this.isDemo
-        ? this.demo.sendMessage(conversationId, text, replyToMessageId)
+        ? this.demo.sendMessage(conversationId, text, replyToMessageId, route)
         : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
           method: "POST",
-          body: JSON.stringify({ text, ...(replyToMessageId ? { replyToMessageId } : {}) }),
+          body: JSON.stringify({ text, ...(replyToMessageId ? { replyToMessageId } : {}),
+            ...(route.channelId ? { channelId: route.channelId } : {}),
+            ...(route.identityId ? { identityId: route.identityId } : {}) }),
         });
     }
 
-    sendTemplate(conversationId, payload) {
+    sendTemplate(conversationId, payload, route = {}) {
       return this.isDemo
-        ? this.demo.sendTemplate(conversationId, payload)
+        ? this.demo.sendTemplate(conversationId, payload, route)
         : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/template`, {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ ...payload,
+            ...(route.channelId ? { channelId: route.channelId } : {}),
+            ...(route.identityId ? { identityId: route.identityId } : {}) }),
         });
     }
 
@@ -833,10 +850,15 @@
         });
     }
 
-    getTemplates(conversationId) {
+    getTemplates(conversationId, route = {}) {
       return this.isDemo
         ? this.demo.getTemplates(conversationId)
-        : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/templates`);
+        : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/templates${(() => {
+          const query = new URLSearchParams();
+          if (route.channelId) query.set("channelId", route.channelId);
+          if (route.identityId) query.set("identityId", route.identityId);
+          return query.size ? `?${query}` : "";
+        })()}`);
     }
 
     getWhatsAppTemplates() {
@@ -1511,11 +1533,108 @@
     };
   }
 
+  function normalizeConversationRoute(raw = {}, conversation = {}) {
+    const channelId = String(raw.channelId || conversation.channelId || "");
+    const channel = state.channels.find((item) => item.channelId === channelId) || {};
+    return {
+      ...raw,
+      channelId,
+      identityId: String(raw.identityId || raw.contactIdentityId || conversation.contactIdentityId || ""),
+      connectorType: String(raw.connectorType || channel.connectorType || conversation.connectorType || ""),
+      channelName: String(raw.channelName || channel.name || conversation.channelName || "Channel"),
+      channelProfileId: String(raw.channelProfileId || raw.profileId || raw.scopedProfileId || conversation.channelProfileId || ""),
+      enabled: raw.enabled !== false && raw.channelEnabled !== false,
+      freeformAllowed: typeof raw.freeformAllowed === "boolean" ? raw.freeformAllowed : undefined,
+      replyWindowExpiresAt: String(raw.replyWindowExpiresAt || raw.replyWindow?.expiresAt || ""),
+      replyWindowReason: String(raw.replyWindowReason || raw.replyWindow?.reason || ""),
+      lastInboundAt: String(raw.lastInboundAt || ""),
+    };
+  }
+
+  function conversationRouteKey(route = {}) {
+    return `${route.channelId || ""}:${route.identityId || ""}`;
+  }
+
+  function conversationRoutes(conversation) {
+    if (!conversation) return [];
+    const source = asItems(conversation.routeOptions).length
+      ? asItems(conversation.routeOptions)
+      : [{
+        channelId: conversation.channelId,
+        identityId: conversation.contactIdentityId,
+        connectorType: conversation.connectorType,
+        channelName: conversation.channelName,
+        channelProfileId: conversation.channelProfileId,
+        freeformAllowed: conversation.freeformAllowed,
+        replyWindowExpiresAt: conversation.replyWindowExpiresAt,
+        replyWindowReason: conversation.replyWindowReason,
+      }];
+    const seen = new Set();
+    return source.map((route) => normalizeConversationRoute(route, conversation)).filter((route) => {
+      const key = conversationRouteKey(route);
+      if (!route.channelId || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function messageRoute(message, conversation = selectedConversation()) {
+    if (!message || !conversation) return null;
+    const routes = conversationRoutes(conversation);
+    return routes.find((route) => route.channelId === message.channelId &&
+      (!message.identityId || !route.identityId || route.identityId === message.identityId)) ||
+      (message.channelId ? normalizeConversationRoute(message, conversation) : null);
+  }
+
+  function defaultConversationRoute(conversation) {
+    const routes = conversationRoutes(conversation);
+    const rawDefault = conversation?.defaultRoute && typeof conversation.defaultRoute === "object"
+      ? normalizeConversationRoute(conversation.defaultRoute, conversation) : null;
+    const defaultChannelId = rawDefault?.channelId || conversation?.defaultChannelId || conversation?.channelId || "";
+    const defaultIdentityId = rawDefault?.identityId || conversation?.defaultIdentityId || conversation?.contactIdentityId || "";
+    return routes.find((route) => route.channelId === defaultChannelId &&
+      (!defaultIdentityId || !route.identityId || route.identityId === defaultIdentityId)) ||
+      routes.filter((route) => route.enabled).sort((a, b) => new Date(b.lastInboundAt || 0) - new Date(a.lastInboundAt || 0))[0] ||
+      routes[0] || null;
+  }
+
+  function selectedComposerRoute(conversation = selectedConversation()) {
+    if (!conversation) return null;
+    const replyMessage = state.replyingTo?.conversationId === conversation.conversationId
+      ? selectedMessageById(state.replyingTo.messageId) || state.replyingTo.message : null;
+    const replyRoute = messageRoute(replyMessage, conversation);
+    if (replyRoute) return replyRoute;
+    const selectedKey = state.composerRoutes.get(conversation.conversationId);
+    return conversationRoutes(conversation).find((route) => conversationRouteKey(route) === selectedKey) ||
+      defaultConversationRoute(conversation);
+  }
+
+  function promoteInboundConversationRoute(conversation, message) {
+    if (!conversation || !message?.channelId) return;
+    const expiresAt = new Date(new Date(message.timestamp).getTime() + 24 * 60 * 60 * 1000).toISOString();
+    const inboundRoute = normalizeConversationRoute({
+      ...message,
+      lastInboundAt: message.timestamp,
+      freeformAllowed: true,
+      replyWindowExpiresAt: expiresAt,
+      replyWindowReason: "",
+    }, conversation);
+    const routes = conversationRoutes(conversation);
+    const key = conversationRouteKey(inboundRoute);
+    const routeIndex = routes.findIndex((route) => conversationRouteKey(route) === key);
+    if (routeIndex >= 0) routes[routeIndex] = { ...routes[routeIndex], ...inboundRoute };
+    else routes.push(inboundRoute);
+    conversation.routeOptions = routes;
+    conversation.defaultRoute = inboundRoute;
+    conversation.defaultChannelId = inboundRoute.channelId;
+    conversation.defaultIdentityId = inboundRoute.identityId;
+  }
+
   function normalizeConversation(raw) {
     const replyWindow = raw.replyWindow && typeof raw.replyWindow === "object" ? raw.replyWindow : {};
     const lastMessage = raw.lastMessage?.text || raw.lastMessageText || raw.preview || raw.lastMessage || "No messages yet";
     const lastMessageType = String(raw.lastMessageType || raw.lastMessage?.messageType || "").trim().toLocaleLowerCase();
-    return {
+    const normalized = {
       ...raw,
       conversationId: String(raw.conversationId || raw.id || ""),
       contactId: String(raw.contactId || raw.contact?.contactId || raw.contact?.id || ""),
@@ -1536,6 +1655,16 @@
       replyWindowExpiresAt: raw.replyWindowExpiresAt || replyWindow.expiresAt || "",
       replyWindowReason: raw.replyWindowReason || replyWindow.reason || "",
     };
+    normalized.routeOptions = asItems(raw.routeOptions || raw.routes)
+      .map((route) => normalizeConversationRoute(route, normalized));
+    if (!normalized.routeOptions.length && normalized.channelId && normalized.channelId !== "unknown") {
+      normalized.routeOptions = [normalizeConversationRoute({}, normalized)];
+    }
+    normalized.defaultRoute = raw.defaultRoute && typeof raw.defaultRoute === "object"
+      ? normalizeConversationRoute(raw.defaultRoute, normalized) : null;
+    normalized.defaultChannelId = String(raw.defaultChannelId || normalized.defaultRoute?.channelId || normalized.channelId || "");
+    normalized.defaultIdentityId = String(raw.defaultIdentityId || normalized.defaultRoute?.identityId || normalized.contactIdentityId || "");
+    return normalized;
   }
 
   function contactPlatformIds(contact = {}) {
@@ -1657,6 +1786,11 @@
       status: raw.status || (raw.direction === "outbound" ? "sent" : "received"),
       senderName: raw.senderName || raw.sender || "",
       channelMessageId: raw.channelMessageId || raw.providerMessageId || "",
+      channelId: String(raw.channelId || raw.route?.channelId || ""),
+      identityId: String(raw.identityId || raw.contactIdentityId || raw.route?.identityId || ""),
+      connectorType: String(raw.connectorType || raw.route?.connectorType || ""),
+      channelName: String(raw.channelName || raw.route?.channelName || ""),
+      channelProfileId: String(raw.channelProfileId || raw.profileId || raw.route?.channelProfileId || ""),
       template,
       reply,
     };
@@ -1892,12 +2026,13 @@
   }
 
   function renderCounts() {
-    const open = state.conversations.filter((item) => item.status !== "closed").length;
-    const closed = state.conversations.filter((item) => item.status === "closed").length;
-    const unread = state.conversations.filter((item) => item.unreadCount > 0).length;
-    const mine = state.conversations.filter((item) => isAssignedToCurrentUser(item)).length;
-    const unassigned = state.conversations.filter((item) => !item.assignedTo || item.assignedTo === "Unassigned").length;
-    const counts = { all: state.conversations.length, mine, unassigned, open, unread, closed };
+    const conversations = unifiedConversations();
+    const open = conversations.filter((item) => item.status !== "closed").length;
+    const closed = conversations.filter((item) => item.status === "closed").length;
+    const unread = conversations.filter((item) => item.unreadCount > 0).length;
+    const mine = conversations.filter((item) => isAssignedToCurrentUser(item)).length;
+    const unassigned = conversations.filter((item) => !item.assignedTo || item.assignedTo === "Unassigned").length;
+    const counts = { all: conversations.length, mine, unassigned, open, unread, closed };
     Object.entries(counts).forEach(([filter, count]) => {
       document.querySelectorAll(`[data-filter-count="${filter}"]`).forEach((node) => { node.textContent = String(count); });
     });
@@ -1952,7 +2087,7 @@
     const selected = state.filters;
     const statusFilters = ["open", "closed"].filter((filter) => selected.has(filter));
     const assignmentFilters = ["mine", "unassigned"].filter((filter) => selected.has(filter));
-    return [...state.conversations]
+    return unifiedConversations()
       .filter((item) => {
         if (statusFilters.length && !statusFilters.some((filter) => filter === "open" ? item.status !== "closed" : item.status === "closed")) return false;
         if (assignmentFilters.length && !assignmentFilters.some((filter) => filter === "mine"
@@ -1963,6 +2098,29 @@
         return `${item.subject} ${item.lastMessage} ${item.channelId}`.toLocaleLowerCase().includes(search);
       })
       .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
+  }
+
+  function unifiedConversations() {
+    const groups = new Map();
+    state.conversations.forEach((conversation) => {
+      const key = conversation.contactId || `conversation:${conversation.conversationId}`;
+      const group = groups.get(key);
+      if (!group) {
+        groups.set(key, { ...conversation, routeOptions: conversationRoutes(conversation) });
+        return;
+      }
+      const conversationIsNewer = new Date(conversation.lastMessageAt || 0) > new Date(group.lastMessageAt || 0);
+      const primary = conversationIsNewer ? conversation : group;
+      const routes = [...conversationRoutes(group), ...conversationRoutes(conversation)];
+      const routeMap = new Map(routes.map((route) => [conversationRouteKey(route), route]));
+      groups.set(key, {
+        ...group,
+        ...primary,
+        unreadCount: Number(group.unreadCount || 0) + Number(conversation.unreadCount || 0),
+        routeOptions: [...routeMap.values()],
+      });
+    });
+    return [...groups.values()];
   }
 
   function renderConversationList() {
@@ -1982,8 +2140,6 @@
     }
 
     items.forEach((conversation, index) => {
-      const channel = channelFor(conversation.channelId);
-      const style = channelStyle(channel);
       const button = element("button", "conversation-item");
       button.type = "button";
       button.dataset.conversationId = conversation.conversationId;
@@ -1997,9 +2153,6 @@
       avatar.style.setProperty("--avatar-bg", palette[0]);
       avatar.style.setProperty("--avatar-fg", palette[1]);
       avatarWrap.append(avatar);
-      const mini = providerLogo(channel.connectorType, "channel-mini");
-      mini.title = `${channel.name || style.label} · ${style.label}`;
-      avatarWrap.append(mini);
 
       const copy = element("span", "conversation-copy");
       const nameRow = element("span", "conversation-name-row");
@@ -2024,6 +2177,7 @@
     const changingConversation = state.selectedConversationId !== conversationId;
     if (changingConversation) {
       closeConversationActionMenu();
+      closeComposerRouteMenu();
       state.unreadMarker = markRead && unreadCount > 0 ? { conversationId, count: unreadCount } : null;
       state.replyingTo = null;
     }
@@ -2076,7 +2230,11 @@
     const channelProfileId = conversation.channelProfileId || activeIdentity?.profileId || contact?.channelProfileId || "";
     $("chatChannelProfileId").textContent = channelProfileId === "—" ? "" : channelProfileId;
     $("chatChannelProfileId").title = channelProfileId === "—" ? "" : channelProfileId;
-    $("chatChannelProfileId").hidden = !channelProfileId || channelProfileId === "—";
+    // The unified inbox header identifies the person only.  Route identity is
+    // deliberately rendered on each message and in the composer route picker.
+    $("chatChannelProfileId").hidden = true;
+    $("chatChannelBadge").hidden = true;
+    $("chatChannelBadge").closest(".chat-meta")?.setAttribute("hidden", "");
     const chatLogo = $("chatProviderLogo");
     const logoPath = providerLogoPaths[channel?.connectorType];
     chatLogo.hidden = !logoPath;
@@ -2291,7 +2449,7 @@
   function messagePlainText(message, conversation) {
     const presentation = templateMessagePresentation(message, messageDisplayText(message));
     const labels = presentation.buttons.map((button) => String(button?.text || button?.label || "").trim()).filter(Boolean);
-    return [channelPlainText(presentation.text, conversation), labels.length ? `Actions: ${labels.join(", ")}` : ""]
+    return [channelPlainText(presentation.text, messageRoute(message, conversation) || conversation), labels.length ? `Actions: ${labels.join(", ")}` : ""]
       .filter(Boolean).join(". ");
   }
 
@@ -2319,7 +2477,8 @@
 
   function canReplyToMessage(conversation, message) {
     if (!conversation || !message?.messageId || !message.channelMessageId) return false;
-    const connectorType = conversation.connectorType || channelFor(conversation.channelId).connectorType;
+    const route = messageRoute(message, conversation) || defaultConversationRoute(conversation);
+    const connectorType = route?.connectorType || channelFor(route?.channelId).connectorType;
     return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot"].includes(connectorType);
   }
 
@@ -2329,6 +2488,7 @@
     row.dataset.messageTimestamp = String(new Date(message.timestamp).getTime() || 0);
     row.dataset.messageDate = dateLabel(message.timestamp);
     if (canReplyToMessage(conversation, message)) row.dataset.replyable = "true";
+    const stack = element("div", "message-stack");
     const bubble = element("div", "message-bubble");
     if (message.direction === "inbound" && message.senderName) bubble.append(element("p", "message-sender", message.senderName));
     const quoted = renderQuotedReply(message.reply, conversation);
@@ -2339,7 +2499,8 @@
       ? String(message.attachment.caption || (!/^\[[^\]]+\]$/.test(message.text || "") ? message.text || "" : ""))
       : messageDisplayText(message);
     const presentation = templateMessagePresentation(message, visibleText);
-    if (presentation.text) bubble.append(appendChannelFormattedText(element("p", "message-text"), presentation.text, conversation));
+    const route = messageRoute(message, conversation) || defaultConversationRoute(conversation);
+    if (presentation.text) bubble.append(appendChannelFormattedText(element("p", "message-text"), presentation.text, route || conversation));
     const templateActions = renderTemplateMessageActions(presentation.buttons);
     const foot = element("div", "message-foot");
     foot.append(element("time", "", formatClock(message.timestamp)));
@@ -2352,7 +2513,14 @@
     }
     bubble.append(foot);
     if (templateActions) bubble.append(templateActions);
-    row.append(bubble);
+    stack.append(bubble);
+    if (route) {
+      const routeMeta = element("div", "message-route-meta");
+      routeMeta.append(providerLogo(route.connectorType, "message-route-logo"));
+      routeMeta.append(element("span", "", [route.channelName, route.channelProfileId].filter(Boolean).join(" · ")));
+      stack.append(routeMeta);
+    }
+    row.append(stack);
     if (canReplyToMessage(conversation, message)) {
       const replyButton = element("button", "message-reply-button", "↩");
       replyButton.type = "button";
@@ -2459,15 +2627,21 @@
     host.scrollTop = stayAtBottom ? host.scrollHeight : Math.min(previousScrollTop, host.scrollHeight - host.clientHeight);
   }
 
+  function isWhatsAppRoute(route) {
+    if (!route) return false;
+    const connectorType = route.connectorType || channelFor(route.channelId).connectorType;
+    return connectorType === "whatsapp" || connectorType === "whatsapp_cloud";
+  }
+
   function isWhatsAppConversation(conversation = selectedConversation()) {
     if (!conversation) return false;
-    const connectorType = conversation.connectorType || channelFor(conversation.channelId).connectorType;
-    return connectorType === "whatsapp" || connectorType === "whatsapp_cloud";
+    return isWhatsAppRoute(conversation.conversationId ? selectedComposerRoute(conversation) : conversation);
   }
 
   function supportsChatAttachments(conversation = selectedConversation()) {
     if (!conversation) return false;
-    const connectorType = conversation.connectorType || channelFor(conversation.channelId).connectorType;
+    const route = conversation.conversationId ? selectedComposerRoute(conversation) : conversation;
+    const connectorType = route?.connectorType || channelFor(route?.channelId).connectorType;
     return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot"].includes(connectorType);
   }
 
@@ -2500,18 +2674,19 @@
       showToast("Reply is unavailable", "This message does not have a reply-compatible channel reference yet.", true);
       return;
     }
-    if (isWhatsAppConversation(conversation) && !whatsappReplyWindow(conversation).allowed) {
+    const replyRoute = messageRoute(message, conversation);
+    if (isWhatsAppRoute(replyRoute) && !whatsappReplyWindow(conversation, replyRoute).allowed) {
       showToast("Use a WhatsApp template", "A specific-message reply can only be sent inside the 24-hour reply window.", true);
       return;
     }
     state.replyingTo = { conversationId: conversation.conversationId, messageId: message.messageId, message };
-    renderComposerReply();
+    renderComposerState();
     $("messageInput").focus();
   }
 
   function clearReplyTarget() {
     state.replyingTo = null;
-    renderComposerReply();
+    renderComposerState();
   }
 
   function jumpToMessage(messageId) {
@@ -2609,25 +2784,89 @@
     });
   }
 
-  function whatsappReplyWindow(conversation = selectedConversation()) {
-    if (!isWhatsAppConversation(conversation)) return { allowed: true, expiresAt: "" };
-    if (typeof conversation.freeformAllowed === "boolean") {
-      return { allowed: conversation.freeformAllowed, expiresAt: conversation.replyWindowExpiresAt || "" };
+  function whatsappReplyWindow(conversation = selectedConversation(), route = selectedComposerRoute(conversation)) {
+    if (!isWhatsAppRoute(route)) return { allowed: true, expiresAt: "" };
+    if (typeof route?.freeformAllowed === "boolean") {
+      return { allowed: route.freeformAllowed, expiresAt: route.replyWindowExpiresAt || "" };
     }
     const messages = state.messages.get(conversation.conversationId);
     if (!messages) return { allowed: true, expiresAt: "" };
     const latestInbound = messages
-      .filter((message) => message.direction === "inbound")
+      .filter((message) => message.direction === "inbound" &&
+        conversationRouteKey(messageRoute(message, conversation) || {}) === conversationRouteKey(route))
       .reduce((latest, message) => Math.max(latest, new Date(message.timestamp).getTime() || 0), 0);
     if (!latestInbound) return { allowed: false, expiresAt: "" };
     const expiresAt = new Date(latestInbound + 24 * 60 * 60 * 1000).toISOString();
     return { allowed: Date.now() < new Date(expiresAt).getTime(), expiresAt };
   }
 
+  function closeComposerRouteMenu({ restoreFocus = false } = {}) {
+    const menu = $("composerRouteMenu");
+    const button = $("composerRouteButton");
+    if (!menu || !button) return;
+    menu.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    if (restoreFocus) button.focus();
+  }
+
+  function toggleComposerRouteMenu() {
+    const conversation = selectedConversation();
+    const menu = $("composerRouteMenu");
+    const button = $("composerRouteButton");
+    if (!conversation || !menu || !button || button.disabled) return;
+    const opening = menu.hidden;
+    menu.hidden = !opening;
+    button.setAttribute("aria-expanded", String(opening));
+    if (opening) menu.querySelector("button:not(:disabled)")?.focus();
+  }
+
+  function chooseComposerRoute(index) {
+    const conversation = selectedConversation();
+    const route = conversationRoutes(conversation)[Number(index)];
+    if (!conversation || !route || !route.enabled) return;
+    state.composerRoutes.set(conversation.conversationId, conversationRouteKey(route));
+    closeComposerRouteMenu();
+    renderComposerState();
+  }
+
+  function renderComposerRouteControl(conversation, selectedRoute = selectedComposerRoute(conversation)) {
+    const button = $("composerRouteButton");
+    const logo = $("composerRouteLogo");
+    const menu = $("composerRouteMenu");
+    if (!button || !logo || !menu) return;
+    const routes = conversationRoutes(conversation);
+    const replying = state.replyingTo?.conversationId === conversation?.conversationId;
+    button.hidden = !conversation || !routes.length;
+    button.disabled = !selectedRoute || replying;
+    button.title = selectedRoute
+      ? `${selectedRoute.channelName}${selectedRoute.channelProfileId ? ` · ${selectedRoute.channelProfileId}` : ""}`
+      : "Choose sending channel";
+    logo.replaceChildren();
+    if (selectedRoute) logo.append(providerLogo(selectedRoute.connectorType, "composer-route-logo"));
+    menu.replaceChildren();
+    routes.forEach((route, index) => {
+      const option = element("button", "composer-route-option");
+      option.type = "button";
+      option.role = "menuitem";
+      option.dataset.action = "choose-composer-route";
+      option.dataset.routeIndex = String(index);
+      option.disabled = !route.enabled;
+      option.classList.toggle("is-selected", selectedRoute && conversationRouteKey(route) === conversationRouteKey(selectedRoute));
+      option.append(providerLogo(route.connectorType, "composer-route-option-logo"));
+      const copy = element("span", "composer-route-option-copy");
+      copy.append(element("strong", "", route.channelName || "Channel"));
+      copy.append(element("small", "", route.channelProfileId || "No profile ID"));
+      option.append(copy);
+      menu.append(option);
+    });
+    if (replying) closeComposerRouteMenu();
+  }
+
   function renderComposerState() {
     const conversation = selectedConversation();
-    const whatsapp = isWhatsAppConversation(conversation);
-    const windowState = whatsappReplyWindow(conversation);
+    const route = selectedComposerRoute(conversation);
+    const whatsapp = isWhatsAppRoute(route);
+    const windowState = whatsappReplyWindow(conversation, route);
     const blocked = Boolean(conversation && whatsapp && !windowState.allowed);
     const input = $("messageInput");
     const send = $("sendButton");
@@ -2652,10 +2891,11 @@
       const expiryCopy = expiry && !Number.isNaN(expiry.getTime())
         ? ` The reply window ended ${relativeTime(expiry.toISOString())}.`
         : "";
-      const reason = conversation.replyWindowReason || "A free-form reply is no longer allowed.";
+      const reason = route?.replyWindowReason || conversation.replyWindowReason || "A free-form reply is no longer allowed.";
       const templatePrompt = /approved template/i.test(reason) ? "" : " Send an approved template to continue.";
       $("replyWindowMessage").textContent = `${reason}${expiryCopy}${templatePrompt}`;
     }
+    renderComposerRouteControl(conversation, route);
     renderAttachmentQueue();
   }
 
@@ -4641,13 +4881,14 @@
 
   async function sendCurrentMessage() {
     const conversation = selectedConversation();
+    const route = selectedComposerRoute(conversation);
     const input = $("messageInput");
     const text = input.value.trim();
     const queued = currentAttachmentQueue(conversation);
     const replyToMessageId = state.replyingTo?.conversationId === conversation?.conversationId
       ? state.replyingTo.messageId : "";
     if (!conversation || (!text && !queued.length)) return;
-    if (isWhatsAppConversation(conversation) && !whatsappReplyWindow(conversation).allowed) {
+    if (isWhatsAppRoute(route) && !whatsappReplyWindow(conversation, route).allowed) {
       renderComposerState();
       showToast("Use a WhatsApp template", "The 24-hour reply window is closed for this conversation.", true);
       return;
@@ -4660,8 +4901,8 @@
     resizeComposer();
     $("sendButton").disabled = true;
     try {
-      const result = await state.api.sendMessage(conversation.conversationId, text, replyToMessageId);
-      const message = normalizeMessage(result.item || { text, direction: "outbound", status: "sent" });
+      const result = await state.api.sendMessage(conversation.conversationId, text, replyToMessageId, route || {});
+      const message = normalizeMessage(result.item || { text, direction: "outbound", status: "sent", ...route });
       upsertMessage(conversation.conversationId, message);
       conversation.lastMessage = message.text;
       conversation.lastMessageType = String(message.messageType || "text").toLocaleLowerCase();
@@ -4754,7 +4995,7 @@
   }
 
   function currentTemplate() {
-    const templates = state.templatesByConversation.get(state.templateConversationId) || [];
+    const templates = state.templatesByConversation.get(templateConversationCacheKey(state.templateConversationId)) || [];
     return templates.find((template) => template._selectionKey === $("templateSelect").value) || null;
   }
 
@@ -5175,6 +5416,11 @@
     return `${template.name}${language ? ` · ${language}` : ""}`;
   }
 
+  function templateConversationCacheKey(conversationId) {
+    const conversation = state.conversations.find((item) => item.conversationId === conversationId);
+    return `${conversationId || ""}|${conversationRouteKey(selectedComposerRoute(conversation) || {})}`;
+  }
+
   function chooseTemplateOption(value, label) {
     const select = $("templateSelect");
     const search = $("templateSearch");
@@ -5200,7 +5446,7 @@
     const select = $("templateSelect");
     const search = $("templateSearch");
     const menu = $("templateOptions");
-    const templates = state.templatesByConversation.get(state.templateConversationId) || [];
+    const templates = state.templatesByConversation.get(templateConversationCacheKey(state.templateConversationId)) || [];
     const selected = select.value;
     const needle = String(query || "").trim().toLocaleLowerCase();
     const filtered = templates.filter((template) => !needle || templateSearchText(template).includes(needle));
@@ -5235,15 +5481,18 @@
     $("templateVariableFields").replaceChildren();
     $("templateSummary").hidden = true;
     try {
-      let templates = !refresh ? state.templatesByConversation.get(conversationId) : null;
+      const conversation = state.conversations.find((item) => item.conversationId === conversationId);
+      const route = selectedComposerRoute(conversation);
+      const cacheKey = `${conversationId}|${conversationRouteKey(route || {})}`;
+      let templates = !refresh ? state.templatesByConversation.get(cacheKey) : null;
       if (!templates) {
-        const result = await state.api.getTemplates(conversationId);
+        const result = await state.api.getTemplates(conversationId, route || {});
         templates = asItems(result).filter((template) => !template.status || String(template.status).toUpperCase() === "APPROVED");
         templates = templates.map((template, index) => ({
           ...template,
           _selectionKey: `${template.templateId || template.name || index}::${template.language?.code || template.language || ""}::${index}`,
         }));
-        state.templatesByConversation.set(conversationId, templates);
+        state.templatesByConversation.set(cacheKey, templates);
       }
       if (state.templateConversationId !== conversationId) return;
       renderTemplateSelectOptions("", { open: false });
@@ -5274,7 +5523,8 @@
 
   function openTemplateDialog() {
     const conversation = selectedConversation();
-    if (!conversation || !isWhatsAppConversation(conversation)) {
+    const route = selectedComposerRoute(conversation);
+    if (!conversation || !isWhatsAppRoute(route)) {
       showToast("WhatsApp conversation required", "Templates can currently be sent from WhatsApp conversations only.", true);
       return;
     }
@@ -5290,7 +5540,8 @@
 
   async function sendCurrentTemplate(form) {
     const conversation = selectedConversation();
-    if (!conversation || !isWhatsAppConversation(conversation)) return;
+    const route = selectedComposerRoute(conversation);
+    if (!conversation || !isWhatsAppRoute(route)) return;
     const template = currentTemplate();
     if (!template) {
       showToast("Choose a template", "Select an approved template before sending.", true);
@@ -5343,6 +5594,8 @@
             const mediaForm = new FormData();
             mediaForm.append("file", file, file.name);
             mediaForm.append("type", descriptor.mediaType);
+            if (route?.channelId) mediaForm.append("channelId", route.channelId);
+            if (route?.identityId) mediaForm.append("identityId", route.identityId);
             const uploaded = await state.api.uploadTemplateMedia(conversation.conversationId, mediaForm);
             component.parameters.push({ type: descriptor.mediaType, [descriptor.mediaType]: { id: uploaded.mediaId } });
             mediaPreview = {
@@ -5371,9 +5624,9 @@
       const request = { name, language: { code: languageCode }, previewText };
       if (componentMap.size) request.components = [...componentMap.values()];
       if (mediaPreview) request.mediaPreview = mediaPreview;
-      const result = await state.api.sendTemplate(conversation.conversationId, request);
+      const result = await state.api.sendTemplate(conversation.conversationId, request, route || {});
       const fallback = previewText || `Template: ${name}`;
-      const message = normalizeMessage(result.item || result.message || { text: fallback, direction: "outbound", status: "pending", messageType: "template" });
+      const message = normalizeMessage(result.item || result.message || { text: fallback, direction: "outbound", status: "pending", messageType: "template", ...route });
       upsertMessage(conversation.conversationId, message);
       conversation.lastMessage = message.text || fallback;
       conversation.lastMessageType = "template";
@@ -5479,6 +5732,7 @@
     let sent = 0;
     const replyToMessageId = state.replyingTo?.conversationId === conversation.conversationId
       ? state.replyingTo.messageId : "";
+    const route = selectedComposerRoute(conversation);
     try {
       while (queue.length) {
         const item = queue[0];
@@ -5487,9 +5741,11 @@
         formData.append("file", item.file, item.file.name);
         if (sent === 0 && caption) formData.append("caption", caption);
         if (sent === 0 && replyToMessageId) formData.append("replyToMessageId", replyToMessageId);
+        if (route?.channelId) formData.append("channelId", route.channelId);
+        if (route?.identityId) formData.append("identityId", route.identityId);
         const result = await state.api.sendAttachment(conversation.conversationId, formData);
         const fallback = sent === 0 && caption ? caption : `[Attachment: ${item.file.name}]`;
-        const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "document" });
+        const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "document", ...route });
         upsertMessage(conversation.conversationId, message);
         conversation.lastMessage = message.text || fallback;
         conversation.lastMessageType = String(message.messageType || "document").toLocaleLowerCase();
@@ -5608,6 +5864,7 @@
         if (message.direction === "inbound") {
           conversation.freeformAllowed = true;
           conversation.replyWindowExpiresAt = new Date(new Date(message.timestamp).getTime() + 24 * 60 * 60 * 1000).toISOString();
+          promoteInboundConversationRoute(conversation, message);
           if (isConversationActivelyViewed(conversationId)) {
             conversation.unreadCount = 0;
             state.api.updateConversation(conversationId, { markRead: true }).catch(() => {});
@@ -6652,6 +6909,7 @@
   function clearSelectedConversation({ updateUrl = true } = {}) {
     const conversationId = state.selectedConversationId;
     closeConversationActionMenu();
+    closeComposerRouteMenu();
     discardAttachmentQueue(conversationId);
     if (state.templateConversationId === conversationId) closeTemplateDialog();
     state.selectedConversationId = null;
@@ -6831,10 +7089,15 @@
       if (!event.target.closest(".template-filter")) closeTemplateFilterMenus();
       if (!event.target.closest(".conversation-filter-desktop")) closeConversationFilterMenu();
       if (!event.target.closest(".conversation-menu-wrap")) closeConversationActionMenu();
+      if (!event.target.closest(".composer-route-wrap")) closeComposerRouteMenu();
       const routeButton = event.target.closest("[data-route]");
       if (routeButton) { setRoute(routeButton.dataset.route); return; }
       const actionButton = event.target.closest("[data-action]");
       if (actionButton) {
+        if (actionButton.dataset.action === "choose-composer-route") {
+          chooseComposerRoute(actionButton.dataset.routeIndex);
+          return;
+        }
         if (actionButton.dataset.action === "toggle-channel-nav") {
           toggleSidebarNavigation("channelNavToggle", "channelNavChildren", "channelNavGroup");
           return;
@@ -6954,6 +7217,7 @@
           return;
         }
         const actions = {
+          "toggle-composer-route-menu": toggleComposerRouteMenu,
           "toggle-user-menu": () => toggleUserMenu(),
           "logout": logout,
           "toggle-details": toggleDetails,

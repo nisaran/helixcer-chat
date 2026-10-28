@@ -466,7 +466,7 @@ test("notification clicks accept only inbox deep links and navigate an existing 
   assert.match(serviceWorker, /self\.clients\.openWindow\(targetUrl\)/);
 });
 
-test("channel cards and the inbox retain provider artwork while contacts stay person-first", () => {
+test("the unified inbox is person-first while route identity stays on messages and the composer", () => {
   assert.match(app, /expandedChannelIds: new Set\(\)/);
   assert.match(app, /data\.action = "toggle-channel-details"|dataset\.action = "toggle-channel-details"/);
   assert.match(app, /details\.hidden = !expanded/);
@@ -477,20 +477,46 @@ test("channel cards and the inbox retain provider artwork while contacts stay pe
   assert.match(app, /provider-whatsapp\.svg/);
   assert.match(app, /provider-telegram\.svg/);
   assert.match(app, /provider-instagram\.svg/);
-  assert.match(html, /id="chatProviderLogo"/);
-  assert.match(html, /id="chatChannelProfileId"/);
+  assert.match(html, /id="chatChannelProfileId"[^>]*hidden/);
+  assert.match(html, /id="chatChannelBadge"[^>]*hidden/);
   assert.match(html, /class="chat-contact-card"[^>]*data-action="toggle-details"/);
-  assert.match(html, /class="chat-person-title-row"[\s\S]*?id="chatTitle"[\s\S]*?id="chatChannelProfileId"/);
+  assert.match(html, /id="composerRouteButton"[^>]*data-action="toggle-composer-route-menu"/);
+  assert.match(html, /id="composerRouteMenu"[^>]*role="menu"/);
   assert.match(styles, /\.chat-contact-card\s*\{/);
-  assert.match(styles, /\.chat-person-title-row\s*\{/);
-  assert.match(styles, /\.chat-profile-id \{ max-width: min\(30vw, 140px\); \}/);
-  assert.match(app, /\$\("chatChannel"\)\.textContent = channel\?\.name/);
-  assert.match(app, /conversation\.channelProfileId \|\| activeIdentity\?\.profileId \|\| contact\?\.channelProfileId/);
+  assert.match(styles, /\.message-route-meta\s*\{/);
+  assert.match(styles, /\.composer-route-menu\s*\{/);
+  assert.match(app, /function unifiedConversations\(\)/);
+  assert.match(app, /const key = conversation\.contactId \|\| `conversation:/);
+  assert.match(app, /routeMeta\.append\(providerLogo\(route\.connectorType, "message-route-logo"\)\)/);
+  assert.match(app, /\[route\.channelName, route\.channelProfileId\]\.filter\(Boolean\)\.join\(" · "\)/);
+  const conversationsStart = app.indexOf("function renderConversationList()");
+  const conversationsEnd = app.indexOf("async function selectConversation", conversationsStart);
+  const renderConversationsBody = app.slice(conversationsStart, conversationsEnd);
+  assert.doesNotMatch(renderConversationsBody, /providerLogo|providerLogoPaths|channel-mini/);
+  assert.match(renderConversationsBody, /conversation-time/);
+  assert.match(renderConversationsBody, /unread-badge/);
   const contactsStart = app.indexOf("function renderContacts()");
   const contactsEnd = app.indexOf("function contactPlatformRoutes", contactsStart);
   const renderContactsBody = app.slice(contactsStart, contactsEnd);
   assert.match(renderContactsBody, /messaging ID/);
   assert.doesNotMatch(renderContactsBody, /providerLogo|providerLogoPaths|provider-(?:whatsapp|telegram|instagram)\.svg/);
+});
+
+test("conversation routes drive replies, templates, media, and every outbound API request", () => {
+  assert.match(app, /composerRoutes: new Map\(\)/);
+  assert.match(app, /function conversationRoutes\(conversation\)/);
+  assert.match(app, /function defaultConversationRoute\(conversation\)/);
+  assert.match(app, /sort\(\(a, b\) => new Date\(b\.lastInboundAt \|\| 0\) - new Date\(a\.lastInboundAt \|\| 0\)\)/);
+  assert.match(app, /function selectedComposerRoute\(conversation = selectedConversation\(\)\)[\s\S]*?messageRoute\(replyMessage, conversation\)/);
+  assert.match(app, /function promoteInboundConversationRoute\(conversation, message\)[\s\S]*?conversation\.defaultRoute = inboundRoute/);
+  assert.match(app, /message\.direction === "inbound"[\s\S]*?promoteInboundConversationRoute\(conversation, message\)/);
+  assert.match(app, /dataset\.action = "choose-composer-route"/);
+  assert.match(app, /state\.api\.sendMessage\(conversation\.conversationId, text, replyToMessageId, route \|\| \{\}\)/);
+  assert.match(app, /state\.api\.sendTemplate\(conversation\.conversationId, request, route \|\| \{\}\)/);
+  assert.match(app, /formData\.append\("channelId", route\.channelId\)/);
+  assert.match(app, /formData\.append\("identityId", route\.identityId\)/);
+  assert.match(app, /getTemplates\(conversationId, route = \{\}\)[\s\S]*?query\.set\("channelId", route\.channelId\)[\s\S]*?query\.set\("identityId", route\.identityId\)/);
+  assert.match(app, /function whatsappReplyWindow\(conversation = selectedConversation\(\), route = selectedComposerRoute\(conversation\)\)/);
 });
 
 test("contacts use one flat ID per platform and open the exact saved channel route", () => {
@@ -715,7 +741,8 @@ test("desktop and mobile chats share the Android light chat palette", () => {
   const mobileEnd = styles.indexOf("@media (prefers-reduced-motion: reduce)", mobileStart);
   const mobileStyles = styles.slice(mobileStart, mobileEnd);
   assert.ok(mobileStart >= 0, "the mobile chat breakpoint must remain present");
-  assert.match(mobileStyles, /\.message-bubble\s*\{[^}]*max-width:\s*86%/i);
+  assert.match(mobileStyles, /\.message-stack\s*\{[^}]*max-width:\s*86%/i);
+  assert.match(mobileStyles, /\.message-bubble\s*\{[^}]*max-width:\s*100%/i);
   assert.doesNotMatch(mobileStyles, /\.message-bubble\s*\{[^}]*(?:background|background-color)\s*:/i);
   assert.doesNotMatch(mobileStyles, /\.chat-panel\s*\{[^}]*(?:background|background-color)\s*:/i);
 });

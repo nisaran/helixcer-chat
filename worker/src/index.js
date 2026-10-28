@@ -454,7 +454,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (conversationTemplatesMatch && request.method === 'GET') {
       const id = decodeURIComponent(conversationTemplatesMatch[1]);
       return withCors(json({ items: await listConversationTemplates(env, workspaceId, id, {
-        forceRefresh: url.searchParams.get('refresh') === '1'
+        forceRefresh: url.searchParams.get('refresh') === '1',
+        channelId: url.searchParams.get('channelId') || '',
+        identityId: url.searchParams.get('identityId') || ''
       }) }), cors);
     }
     const templateMessageMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/template$/);
@@ -2033,6 +2035,9 @@ async function deleteChannel(env, workspaceId, channelId, principal) {
       (SELECT COUNT(*) FROM conversations WHERE channel_id=?1 AND workspace_id=?2) AS conversations,
       (SELECT COUNT(*) FROM messages WHERE channel_id=?1 AND workspace_id=?2) AS messages`)
     .bind(id, workspaceId).first();
+  if (Number(counts?.messages || 0) > 0 || Number(counts?.conversations || 0) > 0) {
+    throw httpError(409, 'This channel has conversation history. Disable it instead so unified contact threads and message route history remain intact.');
+  }
   await env.DB.batch([
     env.DB.prepare(`DELETE FROM external_api_requests WHERE workspace_id=?2 AND message_id IN
       (SELECT message_id FROM messages WHERE channel_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
@@ -2370,12 +2375,25 @@ async function listConversations(env, workspaceId, url) {
     FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id
     LEFT JOIN channel_identity_bindings b ON b.workspace_id=c.workspace_id AND b.identity_id=c.identity_id
       AND b.channel_id=c.channel_id AND b.active=1
-    WHERE c.workspace_id=?1 AND ch.workspace_id=?1 AND (?2='' OR c.status=?2) AND (?3='' OR c.channel_id=?3)
+    WHERE c.workspace_id=?1 AND ch.workspace_id=?1 AND (?2='' OR c.status=?2)
+      AND (?3='' OR EXISTS (SELECT 1 FROM messages route_message
+        WHERE route_message.workspace_id=c.workspace_id
+          AND route_message.conversation_id=c.conversation_id
+          AND route_message.channel_id=?3))
       AND (?4='' OR c.subject LIKE '%'||?4||'%' OR c.conversation_id LIKE '%'||?4||'%'
-        OR COALESCE(b.scoped_profile_id,'') LIKE '%'||?4||'%')
+        OR EXISTS (SELECT 1 FROM contact_identities route_identity
+          JOIN channel_identity_bindings route_binding
+            ON route_binding.workspace_id=route_identity.workspace_id
+           AND route_binding.identity_id=route_identity.identity_id
+          WHERE route_identity.workspace_id=c.workspace_id
+            AND route_identity.contact_id=c.contact_id
+            AND (route_binding.scoped_profile_id LIKE '%'||?4||'%'
+              OR route_identity.profile_id LIKE '%'||?4||'%')))
       AND (?5='' OR c.last_message_at<?5)
     ORDER BY c.last_message_at DESC LIMIT ?6`).bind(workspaceId, status, channelId, q, cursor, limit).all();
-  return result.results.map(conversationListItem);
+  const items = result.results.map(conversationListItem);
+  const routes = await conversationRouteOptionsByContact(env, workspaceId);
+  return items.map(item => withConversationRoutes(item, routes.get(item.contactId) || []));
 }
 
 /**
@@ -2389,15 +2407,18 @@ export async function searchMessages(env, workspaceId, url) {
   const limit = clampInt(url.searchParams.get('limit'), 1, 100, 50);
   const result = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.identity_id,m.text,m.message_type,m.direction,m.timestamp,
       c.contact_id,c.status AS conversation_status,c.assigned_to,c.unread_count,
-      ct.display_name,ct.company,ch.channel_id,ch.name AS channel_name,ch.connector_type,ch.provider_type,
-      COALESCE(b.scoped_profile_id,ci.profile_id,'') AS channel_profile_id
+      ct.display_name,ct.company,ch.channel_id,
+      COALESCE(NULLIF(m.route_channel_name,''),ch.name) AS channel_name,
+      COALESCE(NULLIF(m.route_connector_type,''),NULLIF(ch.provider_type,''),ch.connector_type) AS connector_type,
+      '' AS provider_type,
+      COALESCE(NULLIF(m.route_channel_profile_id,''),b.scoped_profile_id,ci.profile_id,'') AS channel_profile_id
     FROM messages m
     JOIN conversations c ON c.workspace_id=m.workspace_id AND c.conversation_id=m.conversation_id
     JOIN contacts ct ON ct.workspace_id=m.workspace_id AND ct.contact_id=c.contact_id
-    JOIN channels ch ON ch.workspace_id=m.workspace_id AND ch.channel_id=c.channel_id
+    JOIN channels ch ON ch.workspace_id=m.workspace_id AND ch.channel_id=m.channel_id
     LEFT JOIN contact_identities ci ON ci.workspace_id=m.workspace_id AND ci.identity_id=m.identity_id
     LEFT JOIN channel_identity_bindings b ON b.workspace_id=m.workspace_id AND b.identity_id=m.identity_id
-      AND b.channel_id=c.channel_id AND b.active=1
+      AND b.channel_id=m.channel_id AND b.active=1
     WHERE m.workspace_id=?1
       AND (instr(lower(COALESCE(m.text,'')),lower(?2))>0
         OR instr(lower(COALESCE(ct.display_name,'')),lower(?2))>0
@@ -2457,17 +2478,94 @@ async function getConversationItem(env, workspaceId, conversationId) {
     LEFT JOIN channel_identity_bindings b ON b.workspace_id=c.workspace_id AND b.identity_id=c.identity_id
       AND b.channel_id=c.channel_id AND b.active=1
     WHERE c.workspace_id=?1 AND c.conversation_id=?2 LIMIT 1`).bind(workspaceId, conversationId).first();
-  return row ? conversationListItem(row) : null;
+  if (!row) return null;
+  const item = conversationListItem(row);
+  const routes = await listConversationRouteOptions(env, workspaceId, item.contactId);
+  return withConversationRoutes(item, routes);
+}
+
+async function conversationRouteOptionsByContact(env, workspaceId) {
+  const result = await env.DB.prepare(`SELECT ci.contact_id,b.identity_id,b.channel_id,
+      b.scoped_profile_id,
+      COALESCE((SELECT MAX(inbound.timestamp) FROM messages inbound
+        WHERE inbound.workspace_id=b.workspace_id AND inbound.contact_id=ci.contact_id
+          AND inbound.channel_id=b.channel_id AND inbound.identity_id=b.identity_id
+          AND inbound.direction='inbound'),b.last_inbound_at) AS last_inbound_at,
+      COALESCE((SELECT MAX(outbound.timestamp) FROM messages outbound
+        WHERE outbound.workspace_id=b.workspace_id AND outbound.contact_id=ci.contact_id
+          AND outbound.channel_id=b.channel_id AND outbound.identity_id=b.identity_id
+          AND outbound.direction='outbound'),b.last_outbound_at) AS last_outbound_at,
+      ch.name AS channel_name,ch.connector_type,ch.provider_type,ch.enabled
+    FROM channel_identity_bindings b
+    JOIN contact_identities ci ON ci.workspace_id=b.workspace_id AND ci.identity_id=b.identity_id
+    JOIN channels ch ON ch.workspace_id=b.workspace_id AND ch.channel_id=b.channel_id
+    WHERE b.workspace_id=?1 AND b.active=1
+    ORDER BY ci.contact_id,
+      CASE WHEN b.last_inbound_at='' THEN 1 ELSE 0 END,b.last_inbound_at DESC,
+      b.last_seen_at DESC,ch.name COLLATE NOCASE,b.channel_id`)
+    .bind(workspaceId).all();
+  const grouped = new Map();
+  for (const row of result.results || []) {
+    const connectorType = logicalConnectorType(row);
+    const replyWindow = whatsappReplyWindowState(connectorType, row.last_inbound_at);
+    const option = {
+      channelId: row.channel_id,
+      identityId: row.identity_id,
+      contactIdentityId: row.identity_id,
+      connectorType,
+      channelName: row.channel_name || '',
+      channelProfileId: row.scoped_profile_id || '',
+      enabled: Boolean(row.enabled),
+      lastInboundAt: row.last_inbound_at || '',
+      lastOutboundAt: row.last_outbound_at || '',
+      ...replyWindow
+    };
+    if (!grouped.has(row.contact_id)) grouped.set(row.contact_id, []);
+    grouped.get(row.contact_id).push(option);
+  }
+  return grouped;
+}
+
+async function listConversationRouteOptions(env, workspaceId, contactId) {
+  const grouped = await conversationRouteOptionsByContact(env, workspaceId);
+  return grouped.get(contactId) || [];
+}
+
+function withConversationRoutes(item, routeOptions) {
+  const options = Array.isArray(routeOptions) ? routeOptions : [];
+  const newestInboundRoute = routes => routes.reduce((newest, route) => {
+    const timestamp = new Date(String(route.lastInboundAt || '')).valueOf();
+    if (!Number.isFinite(timestamp)) return newest;
+    if (!newest || timestamp > newest.timestamp) return { route, timestamp };
+    return newest;
+  }, null)?.route || null;
+  const defaultRoute = newestInboundRoute(options.filter(route => route.enabled))
+    || options.find(route => route.enabled && route.channelId === item.channelId && route.identityId === item.identityId)
+    || options.find(route => route.enabled)
+    || newestInboundRoute(options)
+    || options.find(route => route.channelId === item.channelId && route.identityId === item.identityId)
+    || options[0] || null;
+  return {
+    ...item,
+    routeOptions: options,
+    defaultChannelId: defaultRoute?.channelId || item.channelId || '',
+    defaultIdentityId: defaultRoute?.identityId || item.identityId || '',
+    defaultRoute: defaultRoute || null
+  };
 }
 
 async function getConversationReplyWindow(env, workspaceId, conversationId) {
-  const row = await env.DB.prepare(`SELECT ch.connector_type,ch.provider_type,
-      (SELECT MAX(timestamp) FROM messages m WHERE m.workspace_id=c.workspace_id
-        AND m.conversation_id=c.conversation_id AND m.direction='inbound') AS last_inbound_at
-    FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
-    WHERE c.conversation_id=?1 AND c.workspace_id=?2`).bind(conversationId, workspaceId).first();
-  if (!row) throw httpError(404, 'Conversation not found.');
-  return whatsappReplyWindowState(logicalConnectorType(row), row.last_inbound_at);
+  const item = await getConversationItem(env, workspaceId, conversationId);
+  if (!item) throw httpError(404, 'Conversation not found.');
+  const route = item.defaultRoute;
+  if (!route) {
+    return { freeformAllowed: false, replyWindowExpiresAt: '', replyWindowReason: 'No active channel route is available.' };
+  }
+  return {
+    freeformAllowed: Boolean(route.enabled) && Boolean(route.freeformAllowed),
+    replyWindowExpiresAt: route.replyWindowExpiresAt || '',
+    replyWindowReason: route.enabled ? (route.replyWindowReason || '') : 'The selected channel is disabled.'
+  };
 }
 
 export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Date.now()) {
@@ -2726,9 +2824,13 @@ async function identityChannelHasHistory(env, workspaceId, identityId, channelId
       EXISTS(SELECT 1 FROM messages
         WHERE workspace_id=?1 AND channel_id=?3 AND (
           identity_id=?2 OR (identity_id='' AND contact_id=(SELECT contact_id FROM contact_identities
-            WHERE workspace_id=?1 AND identity_id=?2 LIMIT 1))) LIMIT 1) AS has_message`)
+            WHERE workspace_id=?1 AND identity_id=?2 LIMIT 1))) LIMIT 1) AS has_message,
+      EXISTS(SELECT 1 FROM channel_identity_bindings
+        WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3
+          AND last_conversation_id<>'') AS has_bound_conversation`)
     .bind(workspaceId, identityId, channelId).first();
-  return Boolean(Number(history?.has_conversation || 0) || Number(history?.has_message || 0));
+  return Boolean(Number(history?.has_conversation || 0) || Number(history?.has_message || 0) ||
+    Number(history?.has_bound_conversation || 0));
 }
 
 async function prevalidateIdentityRouteRemovals(env, workspaceId, identityId, normalized) {
@@ -3160,8 +3262,8 @@ async function ensureIdentityConversation(env, workspaceId, contactId, identityI
     .bind(workspaceId, contactId, identityId, channelId).first();
   if (!route) throw httpError(409, 'This identity is not routed through the selected channel.');
   let conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
-    WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 LIMIT 1`)
-    .bind(workspaceId, identityId, channelId).first();
+    WHERE workspace_id=?1 AND contact_id=?2 LIMIT 1`)
+    .bind(workspaceId, contactId).first();
   if (conversation) {
     await touchIdentityBinding(env, workspaceId, identityId, channelId, '', conversation.conversation_id);
     return conversation.conversation_id;
@@ -3198,8 +3300,8 @@ async function ensureIdentityConversation(env, workspaceId, contactId, identityI
     } catch (error) {
       if (!isUniqueConstraintError(error)) throw error;
       conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
-        WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 LIMIT 1`)
-        .bind(workspaceId, identityId, channelId).first();
+        WHERE workspace_id=?1 AND contact_id=?2 LIMIT 1`)
+        .bind(workspaceId, contactId).first();
       if (conversation) {
         await touchIdentityBinding(env, workspaceId, identityId, channelId, '', conversation.conversation_id, now);
         return conversation.conversation_id;
@@ -3220,8 +3322,8 @@ async function ensureIdentityConversation(env, workspaceId, contactId, identityI
   } catch (error) {
     if (!isUniqueConstraintError(error)) throw error;
     conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
-      WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 LIMIT 1`)
-      .bind(workspaceId, identityId, channelId).first();
+      WHERE workspace_id=?1 AND contact_id=?2 LIMIT 1`)
+      .bind(workspaceId, contactId).first();
     if (!conversation) throw error;
     await touchIdentityBinding(env, workspaceId, identityId, channelId, '', conversation.conversation_id, now);
     return conversation.conversation_id;
@@ -3698,8 +3800,19 @@ async function listMessages(env, workspaceId, conversationId, url) {
   const limit = clampInt(url.searchParams.get('limit'), 1, 200, 100);
   const before = url.searchParams.get('before') || '';
   if (!await env.DB.prepare('SELECT 1 FROM conversations WHERE conversation_id=?1 AND workspace_id=?2').bind(conversationId, workspaceId).first()) throw httpError(404, 'Conversation not found.');
-  const result = await env.DB.prepare(`SELECT message_id,identity_id,direction,text,message_type,status,timestamp,channel_id,provider_message_id,error,payload_json
-    FROM messages WHERE workspace_id=?1 AND conversation_id=?2 AND (?3='' OR timestamp<?3) ORDER BY timestamp DESC LIMIT ?4`)
+  const result = await env.DB.prepare(`SELECT m.message_id,m.identity_id,m.direction,m.text,m.message_type,m.status,m.timestamp,
+      m.channel_id,m.provider_message_id,m.error,m.payload_json,
+      COALESCE(NULLIF(m.route_channel_name,''),ch.name) AS channel_name,
+      COALESCE(NULLIF(m.route_connector_type,''),NULLIF(ch.provider_type,''),ch.connector_type) AS connector_type,
+      '' AS provider_type,
+      COALESCE(NULLIF(m.route_channel_profile_id,''),b.scoped_profile_id,ci.profile_id,'') AS channel_profile_id
+    FROM messages m
+    JOIN channels ch ON ch.workspace_id=m.workspace_id AND ch.channel_id=m.channel_id
+    LEFT JOIN contact_identities ci ON ci.workspace_id=m.workspace_id AND ci.identity_id=m.identity_id
+    LEFT JOIN channel_identity_bindings b ON b.workspace_id=m.workspace_id
+      AND b.identity_id=m.identity_id AND b.channel_id=m.channel_id AND b.active=1
+    WHERE m.workspace_id=?1 AND m.conversation_id=?2 AND (?3='' OR m.timestamp<?3)
+    ORDER BY m.timestamp DESC,m.message_id DESC LIMIT ?4`)
     .bind(workspaceId, conversationId, before, limit).all();
   return result.results.reverse().map(row => {
     const payload = safeJsonParse(row.payload_json, {});
@@ -3708,6 +3821,8 @@ async function listMessages(env, workspaceId, conversationId, url) {
       messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
       contactIdentityId: row.identity_id || '', identityId: row.identity_id || '',
       status: row.status, timestamp: row.timestamp, channelId: row.channel_id,
+      connectorType: logicalConnectorType(row), channelName: row.channel_name || '',
+      channelProfileId: row.channel_profile_id || '',
       channelMessageId: row.provider_message_id, error: row.error,
       attachment: messageAttachmentView(row.message_type, payload, row.message_id),
       ...(template ? { template } : {}),
@@ -3909,24 +4024,11 @@ async function createContact(env, workspaceId, payload, principal) {
 
 async function createOutboundMessage(env, workspaceId, conversationId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Message payload must be an object.');
-  rejectUnknownKeys(payload, new Set(['text', 'replyToMessageId']), 'message request');
+  rejectUnknownKeys(payload, new Set(['text', 'replyToMessageId', 'channelId', 'identityId', 'contactIdentityId']), 'message request');
   const text = cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH);
-  await reconcileLegacyConversationIdentity(env, workspaceId, conversationId);
-  const row = await env.DB.prepare(`SELECT c.contact_id,c.channel_id,c.identity_id,
-      COALESCE(b.scoped_profile_id,CASE WHEN c.identity_id='' THEN (SELECT legacy.channel_profile_id FROM channel_identities legacy
-        WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id AND legacy.channel_id=c.channel_id
-        ORDER BY legacy.created_at LIMIT 1) ELSE '' END,'') AS channel_profile_id,
-      ch.connector_type,ch.provider_type,
-      (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
-        AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
-    FROM conversations c
-    JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
-    LEFT JOIN channel_identity_bindings b ON b.workspace_id=c.workspace_id AND b.identity_id=c.identity_id
-      AND b.channel_id=c.channel_id AND b.active=1
-    WHERE c.conversation_id=?1 AND c.workspace_id=?2`).bind(conversationId, workspaceId).first();
-  if (!row || !row.channel_profile_id) throw httpError(404, 'Conversation or channel identity not found.');
-  if (!row.identity_id) throw httpError(409, 'This legacy conversation has an unresolved contact identity. Repair its route before sending.');
-  const connectorType = logicalConnectorType(row);
+  const row = await conversationDeliveryTarget(env, workspaceId, conversationId, payload);
+  if (!row.enabled) throw httpError(409, 'The selected channel is disabled.');
+  const connectorType = row.connectorType;
   assertFreeformReplyAllowed(connectorType, row.last_inbound_at);
   const reply = await resolveReplyTarget(env, workspaceId, conversationId, row.channel_id,
     connectorType, payload.replyToMessageId);
@@ -3936,7 +4038,8 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,payload_json,workspace_id)
       VALUES (?1,?2,?3,?4,?5,'outbound','text',?6,'pending',?7,?8,?9)`).bind(messageId, conversationId, row.contact_id,
         row.channel_id, row.identity_id || '', text, now, reply ? JSON.stringify({ reply }) : '{}', workspaceId),
-    env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2').bind(conversationId, workspaceId, now)
+    env.DB.prepare(`UPDATE conversations SET channel_id=?3,identity_id=?4,last_message_at=?5,updated_at=?5
+      WHERE conversation_id=?1 AND workspace_id=?2`).bind(conversationId, workspaceId, row.channel_id, row.identity_id, now)
   ]);
   if (row.identity_id) await touchIdentityBinding(env, workspaceId, row.identity_id, row.channel_id, 'outbound', conversationId, now);
   await audit(env, principal, 'send_message', 'conversation', conversationId, {
@@ -3945,7 +4048,8 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
   return { message: {
     messageId, conversationId, channelId: row.channel_id, contactIdentityId: row.identity_id || '',
     identityId: row.identity_id || '', direction: 'outbound', messageType: 'text',
-    text, status: 'pending', timestamp: now, reply: reply || null
+    text, status: 'pending', timestamp: now, reply: reply || null,
+    connectorType, channelName: row.channel_name || '', channelProfileId: row.channel_profile_id || ''
   } };
 }
 
@@ -3992,23 +4096,58 @@ function assertFreeformReplyAllowed(connectorType, lastInboundAt) {
   return state;
 }
 
-async function conversationDeliveryTarget(env, workspaceId, conversationId) {
-  await reconcileLegacyConversationIdentity(env, workspaceId, conversationId);
-  const row = await env.DB.prepare(`SELECT c.contact_id,c.channel_id,c.identity_id,
-      COALESCE(b.scoped_profile_id,CASE WHEN c.identity_id='' THEN (SELECT legacy.channel_profile_id FROM channel_identities legacy
-        WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id AND legacy.channel_id=c.channel_id
-        ORDER BY legacy.created_at LIMIT 1) ELSE '' END,'') AS channel_profile_id,
-      ch.connector_type,ch.provider_type,
-      ch.config_json,ch.secret_key,ch.enabled,
+async function conversationDeliveryTarget(env, workspaceId, conversationId, selection = {}) {
+  const conversation = await env.DB.prepare(`SELECT contact_id,channel_id,identity_id
+    FROM conversations WHERE conversation_id=?1 AND workspace_id=?2`)
+    .bind(conversationId, workspaceId).first();
+  if (!conversation) throw httpError(404, 'Conversation not found.');
+  if (!conversation.identity_id) {
+    await reconcileLegacyConversationIdentity(env, workspaceId, conversationId);
+  }
+
+  let channelId = String(selection.channelId || '').trim();
+  let identityId = String(selection.identityId || selection.contactIdentityId || '').trim();
+  const replyToMessageId = String(selection.replyToMessageId || '').trim();
+  if (replyToMessageId) {
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(replyToMessageId)) throw httpError(400, 'Reply message ID is invalid.');
+    const original = await env.DB.prepare(`SELECT channel_id,identity_id FROM messages
+      WHERE workspace_id=?1 AND conversation_id=?2 AND message_id=?3`)
+      .bind(workspaceId, conversationId, replyToMessageId).first();
+    if (!original) throw httpError(404, 'The message being replied to was not found in this conversation.');
+    // A provider reply must use the exact account/profile route of the original
+    // message.  Ignore a stale client-side route selection rather than sending
+    // the reply through the wrong account.
+    channelId = String(original.channel_id || '');
+    identityId = String(original.identity_id || '');
+  }
+
+  if (!channelId) {
+    const latestInbound = await env.DB.prepare(`SELECT channel_id,identity_id FROM messages
+      WHERE workspace_id=?1 AND conversation_id=?2 AND direction='inbound'
+      ORDER BY timestamp DESC,message_id DESC LIMIT 1`)
+      .bind(workspaceId, conversationId).first();
+    const latestMessage = latestInbound || await env.DB.prepare(`SELECT channel_id,identity_id FROM messages
+      WHERE workspace_id=?1 AND conversation_id=?2
+      ORDER BY timestamp DESC,message_id DESC LIMIT 1`)
+      .bind(workspaceId, conversationId).first();
+    channelId = String(latestMessage?.channel_id || conversation.channel_id || '');
+    identityId = String(latestMessage?.identity_id || conversation.identity_id || '');
+  }
+
+  const row = await env.DB.prepare(`SELECT c.contact_id,b.channel_id,b.identity_id,b.scoped_profile_id AS channel_profile_id,
+      ch.name AS channel_name,ch.connector_type,ch.provider_type,ch.config_json,ch.secret_key,ch.enabled,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
-        AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
+        AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound'
+        AND inbound.channel_id=b.channel_id AND inbound.identity_id=b.identity_id) AS last_inbound_at
     FROM conversations c
-    JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
-    LEFT JOIN channel_identity_bindings b ON b.workspace_id=c.workspace_id AND b.identity_id=c.identity_id
-      AND b.channel_id=c.channel_id AND b.active=1
-    WHERE c.conversation_id=?1 AND c.workspace_id=?2`).bind(conversationId, workspaceId).first();
-  if (!row || !row.channel_profile_id) throw httpError(404, 'Conversation or channel identity not found.');
-  if (!row.identity_id) throw httpError(409, 'This legacy conversation has an unresolved contact identity. Repair its route before sending.');
+    JOIN contact_identities ci ON ci.workspace_id=c.workspace_id AND ci.contact_id=c.contact_id
+    JOIN channel_identity_bindings b ON b.workspace_id=ci.workspace_id AND b.identity_id=ci.identity_id AND b.active=1
+    JOIN channels ch ON ch.workspace_id=b.workspace_id AND ch.channel_id=b.channel_id
+    WHERE c.workspace_id=?1 AND c.conversation_id=?2 AND b.channel_id=?3
+      AND (?4='' OR b.identity_id=?4)
+    ORDER BY CASE WHEN b.identity_id=?4 THEN 0 ELSE 1 END,b.last_inbound_at DESC,b.last_seen_at DESC
+    LIMIT 1`).bind(workspaceId, conversationId, channelId, identityId).first();
+  if (!row || !row.channel_profile_id) throw httpError(409, 'The selected channel route is not available for this contact.');
   return {
     ...row,
     connectorType: logicalConnectorType(row),
@@ -4022,8 +4161,9 @@ async function conversationDeliveryTarget(env, workspaceId, conversationId) {
   };
 }
 
-async function listConversationTemplates(env, workspaceId, conversationId, { forceRefresh = false } = {}) {
-  const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
+async function listConversationTemplates(env, workspaceId, conversationId,
+  { forceRefresh = false, channelId = '', identityId = '' } = {}) {
+  const target = await conversationDeliveryTarget(env, workspaceId, conversationId, { channelId, identityId });
   if (target.connectorType !== 'whatsapp_cloud') {
     throw httpError(409, 'Templates are available only for WhatsApp conversations.');
   }
@@ -4546,8 +4686,9 @@ function whatsappTemplateLocationPreview(location) {
 
 async function createConversationTemplateMessage(env, workspaceId, conversationId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Template payload must be an object.');
-  rejectUnknownKeys(payload, new Set(['name', 'language', 'components', 'previewText', 'mediaPreview']), 'template request');
-  const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
+  rejectUnknownKeys(payload, new Set(['name', 'language', 'components', 'previewText', 'mediaPreview',
+    'channelId', 'identityId', 'contactIdentityId']), 'template request');
+  const target = await conversationDeliveryTarget(env, workspaceId, conversationId, payload);
   if (target.connectorType !== 'whatsapp_cloud') throw httpError(409, 'Templates are available only for WhatsApp conversations.');
   if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
   const template = validateWhatsAppTemplate({
@@ -4579,8 +4720,9 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
       VALUES (?1,?2,0,6,?3,'pending','',?4,?4,?5)`)
       .bind(crypto.randomUUID(), messageId, now, now, workspaceId),
-    env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2')
-      .bind(conversationId, workspaceId, now)
+    env.DB.prepare(`UPDATE conversations SET channel_id=?3,identity_id=?4,last_message_at=?5,updated_at=?5
+      WHERE conversation_id=?1 AND workspace_id=?2`)
+      .bind(conversationId, workspaceId, target.channel_id, target.identity_id, now)
   ]);
   await touchIdentityBinding(env, workspaceId, target.identity_id, target.channel_id, 'outbound', conversationId, now);
   await audit(env, principal, 'send_template', 'conversation', conversationId, {
@@ -4591,7 +4733,9 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
     identityId: target.identity_id, direction: 'outbound', messageType: 'template',
     text: previewText, status: 'pending', timestamp: now,
     template: templateMessageView(storedPayload),
-    attachment: messageAttachmentView('template', storedPayload, messageId)
+    attachment: messageAttachmentView('template', storedPayload, messageId),
+    connectorType: target.connectorType, channelName: target.channel_name || '',
+    channelProfileId: target.channel_profile_id || ''
   } };
 }
 
@@ -4642,12 +4786,6 @@ function templateMediaAttachment(template, preview) {
 }
 
 async function createConversationAttachmentMessage(env, workspaceId, conversationId, request, principal) {
-  const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
-  if (!['whatsapp_cloud', 'telegram'].includes(target.connectorType)) {
-    throw httpError(409, 'Attachments are currently available for WhatsApp and Telegram conversations.');
-  }
-  if (!target.enabled) throw httpError(409, 'The channel is disabled.');
-  assertFreeformReplyAllowed(target.connectorType, target.last_inbound_at);
   const contentType = request.headers.get('Content-Type') || '';
   if (!contentType.toLowerCase().startsWith('multipart/form-data;')) throw httpError(415, 'Content-Type must be multipart/form-data.');
   const declaredLength = Number(request.headers.get('Content-Length'));
@@ -4656,6 +4794,15 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   }
   let form;
   try { form = await request.formData(); } catch { throw httpError(400, 'Multipart attachment data is invalid.'); }
+  const target = await conversationDeliveryTarget(env, workspaceId, conversationId, {
+    channelId: form.get('channelId'), identityId: form.get('identityId') || form.get('contactIdentityId'),
+    replyToMessageId: form.get('replyToMessageId')
+  });
+  if (!['whatsapp_cloud', 'telegram'].includes(target.connectorType)) {
+    throw httpError(409, 'Attachments are currently available for WhatsApp and Telegram conversations.');
+  }
+  if (!target.enabled) throw httpError(409, 'The channel is disabled.');
+  assertFreeformReplyAllowed(target.connectorType, target.last_inbound_at);
   const file = form.get('file');
   if (!file || typeof file !== 'object' || typeof file.arrayBuffer !== 'function') throw httpError(400, 'A file field is required.');
   const attachment = validateWhatsAppAttachment(file, form.get('caption'), target.connectorType);
@@ -4675,8 +4822,9 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
         VALUES (?1,?2,?3,?4,?5,'outbound',?6,?7,'','pending',?8,?9,?10)`)
         .bind(messageId, conversationId, target.contact_id, target.channel_id, target.identity_id, attachment.type, preview, now,
           JSON.stringify({ attachment: safeAttachment, ...(reply ? { reply } : {}) }), workspaceId),
-      env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2')
-        .bind(conversationId, workspaceId, now)
+      env.DB.prepare(`UPDATE conversations SET channel_id=?3,identity_id=?4,last_message_at=?5,updated_at=?5
+        WHERE conversation_id=?1 AND workspace_id=?2`)
+        .bind(conversationId, workspaceId, target.channel_id, target.identity_id, now)
     ]);
     await touchIdentityBinding(env, workspaceId, target.identity_id, target.channel_id, 'outbound', conversationId, now);
     let sent;
@@ -4705,7 +4853,8 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
       return { message: {
         messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
         text: preview, status: 'failed', error: failure, timestamp: now, channelMessageId: '',
-        attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null
+        attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null,
+        connectorType: target.connectorType, channelName: target.channel_name || '', channelProfileId: target.channel_profile_id || ''
       } };
     }
     await auditAttachmentBestEffort(env, principal, conversationId, {
@@ -4714,7 +4863,8 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
     return { message: {
       messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
       text: preview, status: sent.status, timestamp: now, channelMessageId: sent.providerMessageId,
-      attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null
+      attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null,
+      connectorType: target.connectorType, channelName: target.channel_name || '', channelProfileId: target.channel_profile_id || ''
     } };
   }
 
@@ -4732,8 +4882,9 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
       VALUES (?1,?2,0,6,?3,'pending','',?4,?4,?5)`)
       .bind(crypto.randomUUID(), messageId, now, now, workspaceId),
-    env.DB.prepare('UPDATE conversations SET last_message_at=?3,updated_at=?3 WHERE conversation_id=?1 AND workspace_id=?2')
-      .bind(conversationId, workspaceId, now)
+    env.DB.prepare(`UPDATE conversations SET channel_id=?3,identity_id=?4,last_message_at=?5,updated_at=?5
+      WHERE conversation_id=?1 AND workspace_id=?2`)
+      .bind(conversationId, workspaceId, target.channel_id, target.identity_id, now)
   ];
   await env.DB.batch(statements);
   await touchIdentityBinding(env, workspaceId, target.identity_id, target.channel_id, 'outbound', conversationId, now);
@@ -4743,7 +4894,8 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   return { message: {
     messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
     text: preview, status: 'pending', timestamp: now, channelMessageId: '',
-    attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null
+    attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null,
+    connectorType: target.connectorType, channelName: target.channel_name || '', channelProfileId: target.channel_profile_id || ''
   } };
 }
 
@@ -4833,9 +4985,6 @@ async function uploadWhatsAppMedia(env, channel, file, attachment) {
 }
 
 async function uploadConversationTemplateMedia(env, workspaceId, conversationId, request) {
-  const target = await conversationDeliveryTarget(env, workspaceId, conversationId);
-  if (target.connectorType !== 'whatsapp_cloud') throw httpError(409, 'Template media is available only for WhatsApp conversations.');
-  if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
   const contentType = request.headers.get('Content-Type') || '';
   if (!contentType.toLowerCase().startsWith('multipart/form-data;')) throw httpError(415, 'Content-Type must be multipart/form-data.');
   const declaredLength = Number(request.headers.get('Content-Length'));
@@ -4844,6 +4993,11 @@ async function uploadConversationTemplateMedia(env, workspaceId, conversationId,
   }
   let form;
   try { form = await request.formData(); } catch { throw httpError(400, 'Multipart template media is invalid.'); }
+  const target = await conversationDeliveryTarget(env, workspaceId, conversationId, {
+    channelId: form.get('channelId'), identityId: form.get('identityId') || form.get('contactIdentityId')
+  });
+  if (target.connectorType !== 'whatsapp_cloud') throw httpError(409, 'Template media is available only for WhatsApp conversations.');
+  if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
   const file = form.get('file');
   if (!file || typeof file !== 'object' || typeof file.arrayBuffer !== 'function') throw httpError(400, 'A file field is required.');
   const expectedType = String(form.get('type') || '').toLowerCase();
@@ -5044,7 +5198,7 @@ async function dispatchOutbound(env, messageId) {
       AND c.workspace_id=m.workspace_id JOIN conversations cv ON cv.conversation_id=m.conversation_id AND cv.workspace_id=m.workspace_id
       LEFT JOIN channel_identity_bindings b ON b.workspace_id=m.workspace_id
         AND b.identity_id=COALESCE(NULLIF(m.identity_id,''),NULLIF(cv.identity_id,''),'')
-        AND b.channel_id=cv.channel_id AND b.active=1
+        AND b.channel_id=m.channel_id AND b.active=1
       WHERE m.message_id=?1`).bind(messageId).first();
   if (!row) throw new Error('Outbound message not found.');
   // Ambiguous legacy conversations intentionally keep an empty identity_id.
@@ -5477,8 +5631,10 @@ async function storeInbound(env, channel, event, rawPayload) {
       .bind(messageId, conversation.conversation_id, identity.contact_id, channel.channelId, identity.identity_id,
         String(event.messageType || 'text').slice(0, 40), String(event.text || '').slice(0, MAX_TEXT_LENGTH),
         String(event.providerMessageId || ''), timestamp, truncateJson(storedPayload), channel.workspaceId),
-    env.DB.prepare("UPDATE conversations SET status='open',last_message_at=?3,unread_count=unread_count+1,updated_at=?4 WHERE conversation_id=?1 AND workspace_id=?2")
-      .bind(conversation.conversation_id, channel.workspaceId, timestamp, now)
+    env.DB.prepare(`UPDATE conversations SET status='open',channel_id=?3,identity_id=?4,
+        last_message_at=?5,unread_count=unread_count+1,updated_at=?6
+      WHERE conversation_id=?1 AND workspace_id=?2`)
+      .bind(conversation.conversation_id, channel.workspaceId, channel.channelId, identity.identity_id, timestamp, now)
   ]);
   await touchIdentityBinding(env, channel.workspaceId, identity.identity_id, channel.channelId,
     'inbound', conversation.conversation_id, timestamp);
@@ -5490,6 +5646,7 @@ async function storeInbound(env, channel, event, rawPayload) {
     contactIdentityId: identity.identity_id, identityId: identity.identity_id,
     direction: 'inbound', messageType, text, status: 'received', timestamp,
     channelMessageId: String(event.providerMessageId || ''), error: '', senderName,
+    connectorType: channel.connectorType, channelName: channel.name || '', channelProfileId: profileId,
     attachment: messageAttachmentView(messageType, storedPayload, messageId),
     reply: messageReplyView(storedPayload)
   };

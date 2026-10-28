@@ -393,6 +393,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const mobilePushDevices = await readFile(new URL('../migrations/0011_mobile_push_devices.sql', import.meta.url), 'utf8');
   const contactIdentities = await readFile(new URL('../migrations/0012_contact_identities.sql', import.meta.url), 'utf8');
   const flatContactPlatformIds = await readFile(new URL('../migrations/0013_flat_contact_platform_ids.sql', import.meta.url), 'utf8');
+  const unifiedContactConversations = await readFile(new URL('../migrations/0014_unified_contact_conversations.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -465,6 +466,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   database.exec(mobilePushDevices);
   database.exec(contactIdentities);
   database.exec(flatContactPlatformIds);
+  database.exec(unifiedContactConversations);
   const migratedWorkspaceId = database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id;
   assert.match(migratedWorkspaceId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(database.prepare("SELECT count(*) AS count FROM workspaces WHERE workspace_id='ws_default'").get().count, 0);
@@ -534,8 +536,8 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
     'idx_outbox_workspace_due', 'idx_channel_credentials_channel', 'idx_channels_workspace_provider',
     'idx_channels_workspace_whatsapp_phone', 'idx_channels_workspace_instagram_account', 'idx_channels_workspace_telegram_bot',
     'idx_api_keys_workspace_status', 'idx_outbound_payloads_workspace', 'idx_external_requests_message', 'idx_external_requests_expiry',
-    'idx_conversations_workspace_identity_channel_unique', 'idx_conversations_workspace_legacy_contact_channel_unique',
-    'idx_conversations_workspace_contact_channel_compat', 'idx_push_subscriptions_workspace', 'idx_push_subscriptions_membership',
+    'idx_conversations_workspace_contact_unique', 'idx_messages_workspace_conversation_route',
+    'idx_push_subscriptions_workspace', 'idx_push_subscriptions_membership',
     'idx_mobile_push_devices_workspace', 'idx_mobile_push_devices_membership', 'idx_mobile_push_devices_session',
     'idx_sessions_type_expiry', 'idx_mobile_auth_challenges_expiry']) {
     assert.ok(indexes.has(name), `missing index ${name}`);
