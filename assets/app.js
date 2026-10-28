@@ -2517,7 +2517,7 @@
     if (route) {
       const routeMeta = element("div", "message-route-meta");
       routeMeta.append(providerLogo(route.connectorType, "message-route-logo"));
-      routeMeta.append(element("span", "", [route.channelName, route.channelProfileId].filter(Boolean).join(" · ")));
+      routeMeta.append(element("span", "", route.channelName || "Channel"));
       stack.append(routeMeta);
     }
     row.append(stack);
@@ -2832,17 +2832,23 @@
   function renderComposerRouteControl(conversation, selectedRoute = selectedComposerRoute(conversation)) {
     const button = $("composerRouteButton");
     const logo = $("composerRouteLogo");
+    const name = $("composerRouteName");
     const menu = $("composerRouteMenu");
-    if (!button || !logo || !menu) return;
+    if (!button || !logo || !name || !menu) return;
     const routes = conversationRoutes(conversation);
     const replying = state.replyingTo?.conversationId === conversation?.conversationId;
     button.hidden = !conversation || !routes.length;
     button.disabled = !selectedRoute || replying;
-    button.title = selectedRoute
-      ? `${selectedRoute.channelName}${selectedRoute.channelProfileId ? ` · ${selectedRoute.channelProfileId}` : ""}`
-      : "Choose sending channel";
+    button.title = selectedRoute?.channelName || "Choose sending channel";
+    button.setAttribute("aria-label", selectedRoute
+      ? `Sending channel: ${selectedRoute.channelName || "Channel"}`
+      : "Choose sending channel");
     logo.replaceChildren();
-    if (selectedRoute) logo.append(providerLogo(selectedRoute.connectorType, "composer-route-logo"));
+    name.textContent = selectedRoute?.channelName || "";
+    if (selectedRoute) {
+      logo.append(providerLogo(selectedRoute.connectorType, "composer-route-logo"));
+      name.textContent ||= "Channel";
+    }
     menu.replaceChildren();
     routes.forEach((route, index) => {
       const option = element("button", "composer-route-option");
@@ -2855,7 +2861,6 @@
       option.append(providerLogo(route.connectorType, "composer-route-option-logo"));
       const copy = element("span", "composer-route-option-copy");
       copy.append(element("strong", "", route.channelName || "Channel"));
-      copy.append(element("small", "", route.channelProfileId || "No profile ID"));
       option.append(copy);
       menu.append(option);
     });

@@ -481,6 +481,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /id="chatChannelBadge"[^>]*hidden/);
   assert.match(html, /class="chat-contact-card"[^>]*data-action="toggle-details"/);
   assert.match(html, /id="composerRouteButton"[^>]*data-action="toggle-composer-route-menu"/);
+  assert.match(html, /id="composerRouteName"/);
   assert.match(html, /id="composerRouteMenu"[^>]*role="menu"/);
   assert.match(styles, /\.chat-contact-card\s*\{/);
   assert.match(styles, /\.message-route-meta\s*\{/);
@@ -488,7 +489,14 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(app, /function unifiedConversations\(\)/);
   assert.match(app, /const key = conversation\.contactId \|\| `conversation:/);
   assert.match(app, /routeMeta\.append\(providerLogo\(route\.connectorType, "message-route-logo"\)\)/);
-  assert.match(app, /\[route\.channelName, route\.channelProfileId\]\.filter\(Boolean\)\.join\(" · "\)/);
+  assert.match(app, /routeMeta\.append\(element\("span", "", route\.channelName \|\| "Channel"\)\)/);
+  const messageRowBody = app.slice(app.indexOf("function createMessageRow"), app.indexOf("function syncMessageDateDividers"));
+  assert.doesNotMatch(messageRowBody, /route\.channelProfileId/);
+  const composerRouteBody = app.slice(app.indexOf("function renderComposerRouteControl"), app.indexOf("function renderComposerState"));
+  assert.match(composerRouteBody, /name\.textContent = selectedRoute\?\.channelName \|\| ""/);
+  assert.match(composerRouteBody, /copy\.append\(element\("strong", "", route\.channelName \|\| "Channel"\)\)/);
+  assert.match(composerRouteBody, /`Sending channel: \$\{selectedRoute\.channelName \|\| "Channel"\}`/);
+  assert.doesNotMatch(composerRouteBody, /channelProfileId|No profile ID/);
   const conversationsStart = app.indexOf("function renderConversationList()");
   const conversationsEnd = app.indexOf("async function selectConversation", conversationsStart);
   const renderConversationsBody = app.slice(conversationsStart, conversationsEnd);
