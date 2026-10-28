@@ -640,6 +640,13 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .contact-identities-head strong, .contact-identities-head span { display: block; }
 .contact-identities-head strong { color: var(--ink); font-size: 12px; }
 .contact-identities-head span { color: var(--muted); margin-top: 2px; font-size: 9px; line-height: 1.4; }
+.route-heading-actions { display: flex; align-items: center; gap: 8px; }
+.contact-platform-id-list { display: grid; gap: 8px; }
+.contact-platform-id-row { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 12px; background: #fafbf9; padding: 9px; }
+.contact-platform-id-field { min-width: 0; }
+.contact-platform-id-field .text-field { margin-top: 5px; }
+.contact-platform-id-field .field-help { display: block; margin-top: 4px; }
+.contact-platform-id-action-spacer { width: 0; }
 .contact-identity-list { display: grid; gap: 10px; }
 .contact-identities-empty { border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--muted); padding: 15px; text-align: center; font-size: 10px; }
 .contact-identity-card { overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: #fafbf9; }
@@ -1134,6 +1141,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .details-panel { position: fixed; z-index: 45; top: 0; bottom: 0; width: min(330px, 92vw); }
   .content-route { padding: 22px 14px; }
   .route-heading { align-items: flex-start; }
+  .route-heading-actions { align-items: stretch; flex-direction: column-reverse; }
+  .route-heading-actions > * { width: 100%; }
   .route-heading .primary-button { padding-inline: 10px; }
   .route-heading .primary-button svg { display: none; }
   .stats-grid { grid-template-columns: 1fr; gap: 8px; }
@@ -1176,6 +1185,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .contact-identity-fields .form-span, .identity-route-fieldset { grid-column: auto; }
   .identity-route-option-row { grid-template-columns: 1fr; }
   .contact-identities-head { align-items: flex-start; }
+  .contact-platform-id-row { grid-template-columns: 68px minmax(0, 1fr); }
+  .contact-platform-id-row .identity-message-split { grid-column: 2; justify-self: start; }
   .contact-modal { max-height: calc(100dvh - 16px); }
   .contact-modal .modal-card { padding: 18px 15px; }
   .channel-modal { max-height: calc(100dvh - 16px); }

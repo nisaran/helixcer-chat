@@ -327,8 +327,11 @@
 
       <section class="route content-route" id="contactsRoute" data-route-panel="contacts" aria-labelledby="contactsTitle" hidden>
         <div class="route-heading">
-          <div><p class="eyebrow">Audience</p><h2 id="contactsTitle">Contacts</h2><p>One person record with every available messaging identity.</p></div>
-          <button class="primary-button" type="button" data-action="new-contact"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add contact</button>
+          <div><p class="eyebrow">Audience</p><h2 id="contactsTitle">Contacts</h2><p>One person record with one ID for each messaging platform.</p></div>
+          <div class="route-heading-actions">
+            <button class="secondary-button" type="button" data-action="export-contacts">Export contacts</button>
+            <button class="primary-button" type="button" data-action="new-contact"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add contact</button>
+          </div>
         </div>
         <div class="contacts-workspace" id="contactsWorkspace">
           <div class="surface contact-list-surface">
@@ -360,12 +363,11 @@
                 <label class="field-label">Company<input class="text-field" id="contactEditCompany" name="company" maxlength="160" placeholder="Optional company"></label>
                 <label class="field-label">Tags<input class="text-field" id="contactEditTags" name="tags" maxlength="500" placeholder="Priority, Customer"></label>
                 <span class="field-help">Separate tags with commas.</span>
-                <section class="contact-identities" aria-labelledby="contactEditIdentitiesTitle">
+                <section class="contact-identities" aria-labelledby="contactEditPlatformIdsTitle">
                   <div class="contact-identities-head">
-                    <div><strong id="contactEditIdentitiesTitle">Platform identities</strong><span>Add every account that belongs to this person.</span></div>
-                    <button class="secondary-button compact-button" type="button" data-action="add-contact-edit-identity">Add identity</button>
+                    <div><strong id="contactEditPlatformIdsTitle">Messaging IDs</strong><span>One ID per platform. Add at least one ID to keep this contact reachable.</span></div>
                   </div>
-                  <div class="contact-identity-list" id="contactEditIdentities"></div>
+                  <div class="contact-platform-id-list" id="contactEditPlatformIds"></div>
                 </section>
               </div>
               <div class="contact-editor-actions" id="contactEditorActions" hidden>
@@ -717,12 +719,11 @@
         <label class="field-label">Company<input class="text-field" name="company" maxlength="160" placeholder="Optional company"></label>
         <label class="field-label form-span">Tags<input class="text-field" name="tags" maxlength="500" placeholder="Priority, Customer"><span class="field-help">Separate tags with commas.</span></label>
       </div>
-      <section class="contact-identities contact-create-identities" aria-labelledby="contactCreateIdentitiesTitle">
+      <section class="contact-identities contact-create-identities" aria-labelledby="contactCreatePlatformIdsTitle">
         <div class="contact-identities-head">
-          <div><strong id="contactCreateIdentitiesTitle">Platform identities</strong><span>A contact can have WhatsApp, Telegram, Instagram, Facebook and email identities.</span></div>
-          <button class="secondary-button compact-button" type="button" data-action="add-contact-create-identity">Add identity</button>
+          <div><strong id="contactCreatePlatformIdsTitle">Messaging IDs</strong><span>Enter any available WhatsApp, Telegram, Instagram, Facebook or Email ID. At least one is required.</span></div>
         </div>
-        <div class="contact-identity-list" id="contactCreateIdentities"></div>
+        <div class="contact-platform-id-list" id="contactCreatePlatformIds"></div>
       </section>
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-contact-dialog">Cancel</button>

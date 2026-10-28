@@ -56,7 +56,7 @@ async function fixture() {
   for (const name of ['0001_initial.sql', '0002_identity_and_workspaces.sql', '0003_whatsapp_channel.sql',
     '0004_multichannel_credentials.sql', '0005_external_template_api.sql', '0006_contact_profiles.sql',
     '0007_conversation_uniqueness.sql', '0008_push_subscriptions.sql', '0009_workspace_profile.sql',
-    '0011_mobile_push_devices.sql', '0012_contact_identities.sql']) {
+    '0011_mobile_push_devices.sql', '0012_contact_identities.sql', '0013_flat_contact_platform_ids.sql']) {
     database.exec(await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));
   }
   const now = new Date().toISOString();

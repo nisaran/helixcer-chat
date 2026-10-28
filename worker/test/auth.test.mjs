@@ -125,6 +125,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0009_workspace_profile.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0011_mobile_push_devices.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0012_contact_identities.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0013_flat_contact_platform_ids.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -3236,18 +3237,24 @@ test('identity routes are explicit, prevalidated, and never claim ambiguous lega
   }), env);
   assert.equal(inferredOpen.status, 409);
   assert.match((await inferredOpen.json()).error, /add a channel route/i);
+  const autoBoundResponse = await createIdentity(contactId, {
+    platform: 'generic_http', profileId: 'route-auto-bound'
+  });
+  assert.equal(autoBoundResponse.status, 201);
+  const autoBoundId = (await autoBoundResponse.json()).identityId;
   const explicitOpen = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
-    method: 'POST', headers, body: JSON.stringify({ identityId: unboundId, channelId: 'route-generic-a' })
+    method: 'POST', headers, body: JSON.stringify({ identityId: autoBoundId, channelId: 'route-generic-a' })
   }), env);
-  assert.equal(explicitOpen.status, 409);
-  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM channel_identity_bindings WHERE identity_id=?').get(unboundId).count, 0);
-  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM conversations WHERE identity_id=?').get(unboundId).count, 0);
+  assert.equal(explicitOpen.status, 201);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM channel_identity_bindings WHERE identity_id=?').get(autoBoundId).count, 1,
+    'an explicit compatible channel safely creates the missing route');
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM conversations WHERE identity_id=?').get(autoBoundId).count, 1);
 
   const invalidLegacyAlias = await handleRequest(new Request(
     `https://api.chat.helixcer.com/api/contacts/${contactId}`, {
       method: 'PATCH', headers,
       body: JSON.stringify({
-        displayName: 'Alias must not persist', channelId: 'route-generic-a',
+        displayName: 'Alias must not persist', channelId: 'route-generic-b',
         identities: [{ identityId: unboundId, platform: 'generic_http', profileId: 'route-unbound',
           username: 'alias-must-not-persist' }]
       })
@@ -3518,5 +3525,120 @@ test('identity routes are explicit, prevalidated, and never claim ambiguous lega
   assert.match(failedRetry.error, /identity is unresolved/i);
   assert.deepEqual({ ...database.prepare(`SELECT status,attempts FROM outbox
     WHERE outbox_id='ambiguous-legacy-outbox'`).get() }, { status: 'failed', attempts: 1 });
+  database.close();
+});
+
+test('flat contact platform IDs create, extend, protect history, and export one CSV row', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, { ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true' });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+
+  const empty = await handleRequest(new Request('https://api.chat.helixcer.com/api/contacts', {
+    method: 'POST', headers,
+    body: JSON.stringify({ displayName: 'No identifier', platformIds: {} })
+  }), env);
+  assert.equal(empty.status, 400);
+  assert.match((await empty.json()).error, /at least one platform ID/i);
+
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/contacts', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      displayName: 'Flat Contact', company: 'Example, Inc.', tags: ['VIP', 'Retail'],
+      platformIds: { whatsapp: '+91 99999 11111', telegram: 'tg-flat-1' }
+    })
+  }), env);
+  assert.equal(created.status, 201);
+  const createdBody = await created.json();
+  const contactId = createdBody.contactId;
+  assert.deepEqual(createdBody.item.platformIds, {
+    whatsapp: '919999911111', telegram: 'tg-flat-1', instagram: '', facebook: '', email: ''
+  });
+  assert.equal(createdBody.item.identities.length, 2, 'legacy identity views remain available for routing clients');
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM contact_platform_ids
+    WHERE workspace_id='ws_default' AND contact_id=?`).get(contactId).count, 2);
+
+  const duplicateWhatsApp = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/api/contacts/${contactId}/identities`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ platform: 'whatsapp', profileId: '919999922222' })
+    }), env);
+  assert.equal(duplicateWhatsApp.status, 409);
+  assert.match((await duplicateWhatsApp.json()).error, /already has a whatsapp ID/i);
+
+  const added = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ platformIds: { instagram: 'ig-flat-1' } })
+  }), env);
+  assert.equal(added.status, 200);
+  const addedBody = await added.json();
+  assert.equal(addedBody.item.platformIds.instagram, 'ig-flat-1');
+  assert.equal(addedBody.item.platformIds.whatsapp, '919999911111', 'omitted platform IDs are preserved by PATCH');
+
+  const whatsappIdentity = database.prepare(`SELECT identity_id FROM contact_platform_ids
+    WHERE workspace_id='ws_default' AND contact_id=? AND platform='whatsapp'`).get(contactId).identity_id;
+  const telegramIdentity = database.prepare(`SELECT identity_id FROM contact_platform_ids
+    WHERE workspace_id='ws_default' AND contact_id=? AND platform='telegram'`).get(contactId).identity_id;
+  const now = new Date().toISOString();
+  database.prepare(`INSERT INTO channels
+      (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+    VALUES ('flat-history-channel','Flat history','whatsapp_cloud','whatsapp_cloud',1,'["text"]',?,'FLAT',?,?, 'ws_default'),
+      ('flat-telegram-channel','Flat Telegram','telegram','telegram',1,'["text"]','{}','FLAT_TELEGRAM',?,?, 'ws_default')`)
+    .run(JSON.stringify({ wabaId: '111111111111111', phoneNumberId: '222222222222222',
+      credentialsVerifiedAt: now, webhookVerifiedAt: now }), now, now, now, now);
+  database.prepare(`INSERT INTO channel_credentials
+      (workspace_id,channel_id,credential_key,encrypted_value,created_at,updated_at)
+    VALUES ('ws_default','flat-history-channel','accessToken','test',?,?),
+      ('ws_default','flat-history-channel','verifyToken','test',?,?),
+      ('ws_default','flat-history-channel','appSecret','test',?,?)`)
+    .run(now, now, now, now, now, now);
+  database.prepare(`INSERT INTO channel_identity_bindings
+      (binding_id,workspace_id,identity_id,channel_id,scoped_profile_id,active,first_seen_at,last_seen_at,created_at,updated_at)
+    VALUES ('flat-telegram-binding','ws_default',?,'flat-telegram-channel','tg-flat-1',1,?,?,?,?)`)
+    .run(telegramIdentity, now, now, now, now);
+  const changedBound = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ platformIds: { telegram: 'tg-flat-2' } })
+  }), env);
+  assert.equal(changedBound.status, 409);
+  assert.match((await changedBound.json()).error, /connected to a channel route/i);
+
+  const opened = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations', {
+    method: 'POST', headers,
+    body: JSON.stringify({ contactId, identityId: whatsappIdentity, channelId: 'flat-history-channel' })
+  }), env);
+  assert.equal(opened.status, 201);
+  assert.equal(database.prepare(`SELECT scoped_profile_id FROM channel_identity_bindings
+    WHERE identity_id=? AND channel_id='flat-history-channel' AND active=1`).get(whatsappIdentity).scoped_profile_id,
+  '919999911111', 'opening through a selected compatible channel creates the missing route safely');
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM conversations
+    WHERE contact_id=? AND identity_id=? AND channel_id='flat-history-channel'`).get(contactId, whatsappIdentity).count, 1);
+
+  const changedHistorical = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ platformIds: {
+      whatsapp: '919999933333', telegram: 'tg-flat-1', instagram: 'ig-flat-1'
+    } })
+  }), env);
+  assert.equal(changedHistorical.status, 409);
+  assert.match((await changedHistorical.json()).error, /conversation history/i);
+  assert.equal(database.prepare(`SELECT profile_id FROM contact_platform_ids
+    WHERE contact_id=? AND platform='whatsapp'`).get(contactId).profile_id, '919999911111');
+
+  const removedHistorical = await handleRequest(new Request(`https://api.chat.helixcer.com/api/contacts/${contactId}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ platformIds: { whatsapp: '' } })
+  }), env);
+  assert.equal(removedHistorical.status, 409);
+  assert.match((await removedHistorical.json()).error, /conversation history/i);
+
+  const exported = await handleRequest(new Request('https://api.chat.helixcer.com/api/contacts/export.csv', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  assert.equal(exported.status, 200);
+  assert.match(exported.headers.get('content-type'), /text\/csv/);
+  const csv = await exported.text();
+  assert.match(csv, /contact_id,display_name,company,tags,whatsapp_id,telegram_id,instagram_id,facebook_id,email/);
+  assert.match(csv, /Flat Contact,"Example, Inc\.","VIP, Retail",919999911111,tg-flat-1,ig-flat-1,,/);
+  assert.equal(csv.split('\r\n').filter(line => line.includes('Flat Contact')).length, 1);
   database.close();
 });

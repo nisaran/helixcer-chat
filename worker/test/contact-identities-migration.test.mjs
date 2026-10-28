@@ -93,6 +93,7 @@ test('contact identity migration preserves scoped routes without auto-merging ma
     insertMessage(database, workspaceId, 'message-ambiguous', 'conversation-ambiguous', 'contact-ambiguous', 'wa-ambiguous');
 
     database.exec(await readFile(new URL('../migrations/0012_contact_identities.sql', import.meta.url), 'utf8'));
+    database.exec(await readFile(new URL('../migrations/0013_flat_contact_platform_ids.sql', import.meta.url), 'utf8'));
 
     const sharedIdentities = database.prepare(`SELECT identity_id,contact_id,platform,profile_id
       FROM contact_identities WHERE workspace_id=? AND profile_id='919100000001'
@@ -117,6 +118,15 @@ test('contact identity migration preserves scoped routes without auto-merging ma
       '');
     assert.equal(database.prepare("SELECT identity_id FROM messages WHERE message_id='message-ambiguous'").get().identity_id,
       '');
+
+    const ambiguousFlat = database.prepare(`SELECT platform,profile_id,identity_id
+      FROM contact_platform_ids WHERE workspace_id=? AND contact_id='contact-ambiguous'`).all(workspaceId);
+    assert.equal(ambiguousFlat.length, 1);
+    assert.equal(ambiguousFlat[0].platform, 'whatsapp');
+    assert.ok(['identity-ambiguous-a', 'identity-ambiguous-b'].includes(ambiguousFlat[0].identity_id));
+    assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM contact_identities
+      WHERE workspace_id=? AND contact_id='contact-ambiguous' AND platform='whatsapp'`).get(workspaceId).count, 2,
+    'migration must preserve the non-selected historical identity');
 
     // An inactive historical route may coexist, while duplicate active routes may not.
     database.prepare(`INSERT INTO channel_identity_bindings

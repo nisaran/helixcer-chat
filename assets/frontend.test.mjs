@@ -98,8 +98,8 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /Instagram Business or Creator account/);
   assert.match(html, /Instagram User access token/);
   assert.doesNotMatch(html, /Facebook Page ID|Page access token/);
-  assert.match(html, /id="contactCreateIdentities"/);
-  assert.match(html, /data-action="add-contact-create-identity"/);
+  assert.match(html, /id="contactCreatePlatformIds"/);
+  assert.doesNotMatch(html, /data-action="add-contact-create-identity"/);
   assert.match(app, /request\("\/api\/channels", \{ method: "POST"/);
   assert.match(app, /request\(`\/api\/channels\/\$\{encodeURIComponent\(channelId\)\}`, \{ method: "PATCH"/);
   assert.match(app, /\/api\/channels\/\$\{encodeURIComponent\(channelId\)\}\/verify/);
@@ -489,15 +489,17 @@ test("channel cards and the inbox retain provider artwork while contacts stay pe
   const contactsStart = app.indexOf("function renderContacts()");
   const contactsEnd = app.indexOf("function contactPlatformRoutes", contactsStart);
   const renderContactsBody = app.slice(contactsStart, contactsEnd);
-  assert.match(renderContactsBody, /platform identit/);
+  assert.match(renderContactsBody, /messaging ID/);
   assert.doesNotMatch(renderContactsBody, /providerLogo|providerLogoPaths|provider-(?:whatsapp|telegram|instagram)\.svg/);
 });
 
-test("person-first contacts edit multiple immutable identities and open lazy channel routes", () => {
+test("contacts use one flat ID per platform and open the exact saved channel route", () => {
   assert.match(html, /id="contactsWorkspace"/);
   assert.match(html, /id="contactEditor"/);
   assert.match(html, /id="contactEditName"/);
-  assert.match(html, /id="contactEditIdentities"/);
+  assert.match(html, /id="contactEditPlatformIds"/);
+  assert.match(html, /id="contactCreatePlatformIds"/);
+  assert.doesNotMatch(html, /Add identity|add-contact-(?:create|edit)-identity/);
   assert.doesNotMatch(html, /id="contactPlatformActions"|Open a conversation/);
   assert.match(html, /id="contactRouteDialog"/);
   assert.doesNotMatch(html, /id="contactEditChannel(?:Help|ProfileId)?"/);
@@ -505,42 +507,30 @@ test("person-first contacts edit multiple immutable identities and open lazy cha
   assert.match(html, /id="contactEditTags"/);
   assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`\)/);
   assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`, \{ method: "PATCH"/);
-  assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}\/identities`, \{ method: "POST"/);
-  assert.match(app, /identities\/\$\{encodeURIComponent\(identityId\)\}/);
-  assert.match(app, /profileInput\.readOnly = Boolean\(draft\.identityId\)/);
-  assert.match(app, /Existing profile IDs are read only/);
-  assert.match(app, /whatsapp: \{ label: "WhatsApp", profileLabel: "WhatsApp No", profilePlaceholder: "WhatsApp no with country code" \}/);
-  assert.match(app, /telegram: \{ label: "Telegram", profileLabel: "Telegram Profile ID"/);
-  assert.match(app, /instagram: \{ label: "Instagram", profileLabel: "Instagram Profile ID"/);
-  assert.match(app, /facebook: \{ label: "Facebook", profileLabel: "Facebook Profile ID"/);
-  const identityEditorBody = app.slice(
-    app.indexOf("function renderContactIdentityList"),
-    app.indexOf("function contactPlatformRoutes"),
+  assert.match(app, /whatsapp: \{ label: "WhatsApp", profileLabel: "WhatsApp ID", profilePlaceholder: "Phone number or WhatsApp username" \}/);
+  assert.match(app, /telegram: \{ label: "Telegram", profileLabel: "Telegram ID"/);
+  assert.match(app, /instagram: \{ label: "Instagram", profileLabel: "Instagram ID"/);
+  assert.match(app, /facebook: \{ label: "Facebook", profileLabel: "Facebook ID"/);
+  assert.match(app, /email: \{ label: "Email", profileLabel: "Email Address"/);
+  const platformEditorBody = app.slice(
+    app.indexOf("function renderContactPlatformIdFields"),
+    app.indexOf("function contactIdentityDraftContext"),
   );
-  assert.doesNotMatch(identityEditorBody, /WhatsApp phone number|dataset\.identityPhone/);
-  assert.match(identityEditorBody, /contact-identity-summary/);
-  assert.match(identityEditorBody, /contact-identity-platform-badge/);
-  assert.match(identityEditorBody, /contact-identity-details/);
-  assert.match(identityEditorBody, /if \(!persisted\)[\s\S]*?identity-platform-options/);
-  assert.match(identityEditorBody, /dataset\.action = "open-contact-identity-default"/);
-  assert.match(identityEditorBody, /dataset\.action = "choose-contact-identity-route"/);
-  assert.match(identityEditorBody, /dataset\.action = "toggle-contact-identity-details"/);
-  assert.match(identityEditorBody, /dataset\.identityDisplayName/);
-  assert.match(app, /dataset\.identityRouteProfile = channel\.channelId/);
-  assert.match(app, /scopedProfileId/);
-  assert.match(app, /scopedProfile\.readOnly = Boolean\(existingBinding\)/);
-  assert.match(app, /existing channel route ID cannot be changed/);
+  assert.match(platformEditorBody, /Object\.entries\(identityPlatforms\)/);
+  assert.match(platformEditorBody, /dataset\.contactPlatformId = platform/);
+  assert.match(platformEditorBody, /contact-platform-id-row/);
+  assert.match(platformEditorBody, /dataset\.action = "open-contact-identity-default"/);
+  assert.match(platformEditorBody, /dataset\.action = "choose-contact-identity-route"/);
+  assert.doesNotMatch(platformEditorBody, /identity-platform-options|identityUsername|identityDisplayName|Username|Display name/);
   assert.match(app, /function identityHasHistory\(identity\)/);
-  assert.match(identityEditorBody, /if \(!persisted\)[\s\S]*?remove-contact-identity/);
-  assert.match(app, /omittedHistoryIdentity[\s\S]*?An identity with conversation history cannot be removed/);
-  assert.match(app, /mode === "edit" && currentDraft\?\.identityId/);
-  const identityPayloadBody = app.match(/function identityRequestPayload\(identity\) \{([\s\S]*?)\n  \}/)?.[1] || "";
-  assert.match(identityPayloadBody, /bindings/);
-  assert.match(identityPayloadBody, /platform === "whatsapp" \? profileId/);
-  assert.doesNotMatch(identityPayloadBody, /payload\.channelId/);
+  assert.match(platformEditorBody, /identityHasHistory\(identity\)/);
+  assert.match(platformEditorBody, /Used by conversation history · locked/);
+  assert.match(app, /function validateContactPlatformIds\(ids\)/);
+  assert.match(app, /Enter at least one WhatsApp, Telegram, Instagram, Facebook or Email ID/);
   assert.match(app, /row\.dataset\.contactId = contact\.contactId/);
   const saveContactBody = app.match(/async function saveContactEdits\(form\) \{([\s\S]*?)\n  \}/)?.[1] || "";
-  assert.doesNotMatch(saveContactBody, /channelProfileId\s*:/);
+  assert.match(saveContactBody, /payload\.platformIds = platformIds/);
+  assert.doesNotMatch(saveContactBody, /payload\.identities/);
   assert.match(app, /type === "contact\.updated"[\s\S]*?await reconcileWorkspace\(\)[\s\S]*?await selectContact/);
   assert.match(app, /JSON\.stringify\(\{ contactId, identityId, \.\.\.payload \}\)/);
   assert.match(app, /conversation\.channelId === channelId/);
@@ -550,17 +540,24 @@ test("person-first contacts edit multiple immutable identities and open lazy cha
   const platformRoutesBody = app.slice(app.indexOf("function contactPlatformRoutes"),
     app.indexOf("async function openContactRoute"));
   assert.match(platformRoutesBody, /!identityId \|\| identity\.identityId === identityId/);
-  assert.match(platformRoutesBody, /filter\(\(channel\) =>\s*bindingByChannel\.has\(channel\.channelId\)\)/);
-  assert.doesNotMatch(platformRoutesBody, /bindingByChannel\.has\(channel\.channelId\) \|\|/);
+  assert.match(platformRoutesBody, /bindingByChannel\.has\(channel\.channelId\) \|\|\s*\(channel\.enabled !== false && channel\.health === "connected"\)/);
+  assert.match(platformRoutesBody, /isBound: Boolean\(binding\)/);
+  assert.match(platformRoutesBody, /Number\(b\.isBound\) - Number\(a\.isBound\)/);
+  assert.match(app, /route\.isBound \? "Start" : "New route"/);
+  const openRouteBody = app.slice(app.indexOf("async function openContactRoute"),
+    app.indexOf("function showContactRouteDialog"));
+  assert.match(openRouteBody, /route\.channelId \? \{ channelId: route\.channelId \} : \{\}/);
   assert.match(app, /function openContactIdentityDefault\(contactId, identityId\)/);
   assert.match(app, /function chooseContactIdentityRoute\(contactId, identityId\)/);
   assert.match(app, /context\.routes\.find\(\(item\) => item\.eligible\)/);
   assert.match(app, /showContactRouteDialog\(context\.contact, context\.identity\.platform, context\.routes\)/);
-  assert.match(app, /state\.contactCreateIdentityDrafts = \[\]/);
-  assert.match(app, /No platform identities yet\. Add one when you are ready\./);
   const createContactBody = app.match(/async function createContact\(form\) \{([\s\S]*?)\n  \}/)?.[1] || "";
-  assert.match(createContactBody, /identities: identityPayloads/);
+  assert.match(createContactBody, /platformIds/);
   assert.doesNotMatch(createContactBody, /channelId\s*:|channelProfileId\s*:/);
+  assert.match(html, /data-action="export-contacts"/);
+  assert.match(app, /\/api\/contacts\/export\.csv/);
+  assert.match(app, /"WhatsApp ID", "Telegram ID", "Instagram ID", "Facebook ID", "Email ID"/);
+  assert.match(app, /Each contact is one CSV row with a separate column for every platform ID/);
 });
 
 test("expanded channel cards expose the internal channel ID with a copy action", () => {

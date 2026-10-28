@@ -42,6 +42,8 @@ const LEGACY_WORKSPACE_ID = 'ws_default';
 const WHATSAPP_TEMPLATE_CACHE_SECONDS = 5 * 60;
 const WHATSAPP_TEMPLATE_CACHE_ORIGIN = 'https://template-cache.helixcer.internal';
 const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram']);
+const CONTACT_ID_PLATFORMS = Object.freeze(['whatsapp', 'telegram', 'instagram', 'facebook', 'email']);
+const CONTACT_ID_PLATFORM_SET = new Set(CONTACT_ID_PLATFORMS);
 // Only these providers expose an address that is portable between connected
 // accounts. Instagram/Facebook profile ids are account/app scoped, so an
 // identical value observed on another channel is not evidence of one person.
@@ -479,6 +481,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       });
       if (result.message.status === 'pending') ctx.waitUntil(sendOrQueue(env, result.message.messageId));
       return withCors(json({ ok: true, item: result.message }, 202), cors);
+    }
+    if (['/api/contacts/export', '/api/contacts/export.csv'].includes(url.pathname) && request.method === 'GET') {
+      return withCors(await exportContactsCsv(env, workspaceId), cors);
     }
     if (url.pathname === '/api/contacts' && request.method === 'POST') {
       const result = await createContact(env, workspaceId, await readJson(request), principal);
@@ -2498,13 +2503,61 @@ async function listContacts(env, workspaceId, url) {
     WHERE c.workspace_id=?1 AND (?2='' OR
       instr(lower(COALESCE(c.display_name,'')),lower(?2))>0 OR
       instr(lower(COALESCE(c.company,'')),lower(?2))>0 OR
-      EXISTS (SELECT 1 FROM contact_identities ci
-        WHERE ci.workspace_id=c.workspace_id AND ci.contact_id=c.contact_id AND (
-          instr(lower(COALESCE(ci.profile_id,'')),lower(?2))>0 OR
-          instr(lower(COALESCE(ci.username,'')),lower(?2))>0 OR
-          instr(lower(COALESCE(ci.phone_number,'')),lower(?2))>0)))
+      EXISTS (SELECT 1 FROM contact_platform_ids flat
+        WHERE flat.workspace_id=c.workspace_id AND flat.contact_id=c.contact_id
+          AND instr(lower(COALESCE(flat.profile_id,'')),lower(?2))>0) OR
+      EXISTS (SELECT 1 FROM contact_identities legacy
+        WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id
+          AND legacy.platform NOT IN ('whatsapp','telegram','instagram','facebook','email')
+          AND instr(lower(COALESCE(legacy.profile_id,'')),lower(?2))>0))
     ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?3`).bind(workspaceId, q, limit).all();
   return hydrateContactViews(env, workspaceId, result.results || []);
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+async function exportContactsCsv(env, workspaceId) {
+  const result = await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,
+      MAX(CASE WHEN flat.platform='whatsapp' THEN flat.profile_id ELSE '' END) AS whatsapp_id,
+      MAX(CASE WHEN flat.platform='telegram' THEN flat.profile_id ELSE '' END) AS telegram_id,
+      MAX(CASE WHEN flat.platform='instagram' THEN flat.profile_id ELSE '' END) AS instagram_id,
+      MAX(CASE WHEN flat.platform='facebook' THEN flat.profile_id ELSE '' END) AS facebook_id,
+      MAX(CASE WHEN flat.platform='email' THEN flat.profile_id ELSE '' END) AS email
+    FROM contacts c
+    LEFT JOIN contact_platform_ids flat
+      ON flat.workspace_id=c.workspace_id AND flat.contact_id=c.contact_id
+    WHERE c.workspace_id=?1
+    GROUP BY c.workspace_id,c.contact_id,c.display_name,c.company,c.tags_json
+    ORDER BY lower(c.display_name),c.contact_id`).bind(workspaceId).all();
+  const headers = [
+    'contact_id', 'display_name', 'company', 'tags',
+    'whatsapp_id', 'telegram_id', 'instagram_id', 'facebook_id', 'email'
+  ];
+  const lines = [headers.join(',')];
+  for (const row of result.results || []) {
+    lines.push([
+      row.contact_id,
+      row.display_name,
+      row.company,
+      storedContactTags(row.tags_json).join(', '),
+      row.whatsapp_id,
+      row.telegram_id,
+      row.instagram_id,
+      row.facebook_id,
+      row.email
+    ].map(csvCell).join(','));
+  }
+  return new Response(`\uFEFF${lines.join('\r\n')}\r\n`, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="helixcer-contacts.csv"',
+      'Cache-Control': 'no-store'
+    }
+  });
 }
 
 function canonicalIdentityPlatform(value) {
@@ -2525,6 +2578,34 @@ function normalizeIdentityProfileValue(platform, value, label = 'Profile ID') {
   // through phone normalization.
   if (platform === 'whatsapp' && /^\+?[\d\s().-]+$/.test(profile)) return normalizeWhatsAppRecipient(profile);
   return profile;
+}
+
+function validateContactPlatformIds(value, { requireOne = true } = {}) {
+  if (!isPlainObject(value)) throw httpError(400, 'Platform IDs must be an object.');
+  rejectUnknownKeys(value, CONTACT_ID_PLATFORM_SET, 'platform IDs');
+  const result = Object.fromEntries(CONTACT_ID_PLATFORMS.map(platform => [platform, '']));
+  for (const platform of CONTACT_ID_PLATFORMS) {
+    const raw = value[platform];
+    if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+    result[platform] = normalizeIdentityProfileValue(platform,
+      cleanRequired(raw, `${platform} ID`, platform === 'email' ? 254 : 512), `${platform} ID`);
+    if (platform === 'email') result[platform] = result[platform].toLowerCase();
+  }
+  if (requireOne && !CONTACT_ID_PLATFORMS.some(platform => result[platform])) {
+    throw httpError(400, 'Provide at least one platform ID.');
+  }
+  return result;
+}
+
+function platformIdsFromIdentities(identities = []) {
+  const result = Object.fromEntries(CONTACT_ID_PLATFORMS.map(platform => [platform, '']));
+  for (const identity of identities) {
+    const platform = String(identity?.platform || '').toLowerCase();
+    if (CONTACT_ID_PLATFORM_SET.has(platform) && !result[platform]) {
+      result[platform] = String(identity?.profileId || '');
+    }
+  }
+  return result;
 }
 
 function validateContactIdentityInput(value, defaults = {}) {
@@ -2678,6 +2759,7 @@ async function prevalidateContactIdentityBatch(env, workspaceId, contactId, valu
   const seenTargets = new Set();
   const seenCanonical = new Map();
   const seenRoutes = new Map();
+  const seenFlatPlatforms = new Set();
   let primaryCount = 0;
 
   for (const value of values) {
@@ -2699,6 +2781,12 @@ async function prevalidateContactIdentityBatch(env, workspaceId, contactId, valu
       metadata: value.metadata ?? safeJsonParse(existing?.metadata_json, {})
     }, { displayName });
     const canonicalKey = `${preliminary.platform}\n${preliminary.profileId}`;
+    if (CONTACT_ID_PLATFORM_SET.has(preliminary.platform)) {
+      if (seenFlatPlatforms.has(preliminary.platform)) {
+        throw httpError(409, `A contact can have only one ${preliminary.platform} ID.`);
+      }
+      seenFlatPlatforms.add(preliminary.platform);
+    }
     if (!existing) existing = existingByCanonical.get(canonicalKey) || null;
     const targetKey = existing?.identity_id || suppliedIdentityId || `new:${canonicalKey}`;
     if (seenTargets.has(targetKey)) throw httpError(400, 'The same contact identity was supplied more than once.');
@@ -2738,12 +2826,17 @@ async function contactIdentityRows(env, workspaceId, contactIds = []) {
       ch.name AS channel_name,ch.connector_type,ch.provider_type,ch.enabled,
       cv.conversation_id,cv.status AS conversation_status,cv.last_message_at
     FROM contact_identities ci
+    LEFT JOIN contact_platform_ids flat
+      ON flat.workspace_id=ci.workspace_id AND flat.contact_id=ci.contact_id
+      AND flat.platform=ci.platform AND flat.identity_id=ci.identity_id
     LEFT JOIN channel_identity_bindings b
       ON b.workspace_id=ci.workspace_id AND b.identity_id=ci.identity_id AND b.active=1
     LEFT JOIN channels ch ON ch.workspace_id=ci.workspace_id AND ch.channel_id=b.channel_id
     LEFT JOIN conversations cv ON cv.workspace_id=ci.workspace_id AND cv.identity_id=ci.identity_id
       AND cv.channel_id=b.channel_id
     WHERE ci.workspace_id=?1 AND ci.contact_id IN (${placeholders})
+      AND (ci.platform NOT IN ('whatsapp','telegram','instagram','facebook','email')
+        OR flat.identity_id IS NOT NULL)
     ORDER BY ci.created_at,ci.identity_id,b.last_seen_at DESC,b.created_at DESC`)
     .bind(workspaceId, ...ids).all();
   return result.results || [];
@@ -2881,6 +2974,7 @@ function contactView(row, identities = []) {
     name: displayName,
     company: String(row.company || '').slice(0, 160),
     tags,
+    platformIds: platformIdsFromIdentities(identities),
     identities,
     identityId: preferred?.identityId || row.identity_id || '',
     channelId: preferredBinding?.channelId || row.channel_id || '',
@@ -2936,6 +3030,14 @@ async function ensureContactIdentity(env, workspaceId, contactId, input, now = n
     throw httpError(400, 'Identity platform and profile ID cannot be changed. Add another identity instead.');
   }
   const identityId = existing?.identity_id || normalized.identityId || crypto.randomUUID();
+  if (CONTACT_ID_PLATFORM_SET.has(normalized.platform)) {
+    const flatOwner = await env.DB.prepare(`SELECT identity_id FROM contact_platform_ids
+      WHERE workspace_id=?1 AND contact_id=?2 AND platform=?3`)
+      .bind(workspaceId, contactId, normalized.platform).first();
+    if (flatOwner && flatOwner.identity_id !== identityId) {
+      throw httpError(409, `This contact already has a ${normalized.platform} ID.`);
+    }
+  }
   // Validate every requested route before changing primary flags or inserting
   // anything.  A bad/conflicting later route must not leave a ghost identity
   // or an earlier partial binding behind.
@@ -2968,6 +3070,12 @@ async function ensureContactIdentity(env, workspaceId, contactId, input, now = n
         normalized.username, normalized.phoneNumber, normalized.displayName || contact.display_name,
         JSON.stringify(normalized.metadata), now));
     existing = { identity_id: identityId };
+  }
+  if (CONTACT_ID_PLATFORM_SET.has(normalized.platform)) {
+    statements.push(env.DB.prepare(`INSERT OR IGNORE INTO contact_platform_ids
+        (workspace_id,contact_id,platform,profile_id,identity_id,created_at,updated_at)
+      VALUES (?1,?2,?3,?4,?5,?6,?6)`)
+      .bind(workspaceId, contactId, normalized.platform, normalized.profileId, existing.identity_id, now));
   }
   const bindings = [];
   for (const route of normalized.routes) {
@@ -3221,12 +3329,21 @@ async function openIdentityConversation(env, workspaceId, payload, principal) {
   const currentBinding = await env.DB.prepare(`SELECT binding_id FROM channel_identity_bindings
     WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 AND active=1 LIMIT 1`)
     .bind(workspaceId, identityId, channelId).first();
+  let routeCreated = false;
   if (!currentBinding) {
-    throw httpError(409, 'Add the selected channel route to this identity before starting a conversation.');
+    await ensureIdentityBinding(env, workspaceId, contactId, identityId, {
+      platform: identity.platform,
+      profileId: identity.profile_id,
+      channelId,
+      scopedProfileId: identity.profile_id,
+      displayName: identity.display_name || '',
+      metadata: safeJsonParse(identity.metadata_json, {})
+    });
+    routeCreated = true;
   }
   const conversationId = await ensureIdentityConversation(env, workspaceId, contactId, identityId, channelId,
     principal?.user?.email || '');
-  await audit(env, principal, 'open', 'conversation', conversationId, { contactId, identityId, channelId });
+  await audit(env, principal, 'open', 'conversation', conversationId, { contactId, identityId, channelId, routeCreated });
   return { ok: true, conversationId, contactId, identityId, channelId,
     item: await getConversationItem(env, workspaceId, conversationId) };
 }
@@ -3347,9 +3464,117 @@ async function deleteContactIdentity(env, workspaceId, contactId, identityId, pr
   return { ok: true, contactId: id, identityId: identity, deleted: true, item: await getContactDetail(env, workspaceId, id) };
 }
 
+async function flatIdentityHasHistory(env, workspaceId, contactId, identityId) {
+  const result = await env.DB.prepare(`SELECT
+      EXISTS(SELECT 1 FROM conversations conversation
+        WHERE conversation.workspace_id=?1 AND conversation.contact_id=?2 AND (
+          conversation.identity_id=?3 OR (conversation.identity_id='' AND EXISTS (
+            SELECT 1 FROM channel_identity_bindings binding
+            WHERE binding.workspace_id=?1 AND binding.identity_id=?3
+              AND binding.channel_id=conversation.channel_id)))) AS has_conversation,
+      EXISTS(SELECT 1 FROM messages message
+        WHERE message.workspace_id=?1 AND message.contact_id=?2 AND (
+          message.identity_id=?3 OR (message.identity_id='' AND EXISTS (
+            SELECT 1 FROM channel_identity_bindings binding
+            WHERE binding.workspace_id=?1 AND binding.identity_id=?3
+              AND binding.channel_id=message.channel_id)))) AS has_message`)
+    .bind(workspaceId, contactId, identityId).first();
+  return Boolean(Number(result?.has_conversation || 0) || Number(result?.has_message || 0));
+}
+
+async function flatIdentityHasBinding(env, workspaceId, identityId) {
+  const result = await env.DB.prepare(`SELECT 1 AS found FROM channel_identity_bindings
+    WHERE workspace_id=?1 AND identity_id=?2 LIMIT 1`).bind(workspaceId, identityId).first();
+  return Boolean(result?.found);
+}
+
+async function prepareContactPlatformIdMutation(env, workspaceId, contactId, platformIds, displayName, now) {
+  const supplied = validateContactPlatformIds(platformIds, { requireOne: false });
+  const currentResult = await env.DB.prepare(`SELECT flat.platform,flat.profile_id,flat.identity_id,
+      identity.created_at,identity.metadata_json
+    FROM contact_platform_ids flat
+    JOIN contact_identities identity ON identity.workspace_id=flat.workspace_id
+      AND identity.identity_id=flat.identity_id
+    WHERE flat.workspace_id=?1 AND flat.contact_id=?2`)
+    .bind(workspaceId, contactId).all();
+  const current = new Map((currentResult.results || []).map(row => [String(row.platform), row]));
+  const desired = Object.fromEntries(CONTACT_ID_PLATFORMS.map(platform => [
+    platform,
+    Object.prototype.hasOwnProperty.call(platformIds, platform)
+      ? supplied[platform]
+      : String(current.get(platform)?.profile_id || '')
+  ]));
+  if (!CONTACT_ID_PLATFORMS.some(platform => desired[platform])) {
+    throw httpError(400, 'Provide at least one platform ID.');
+  }
+  const statements = [];
+  const identityIds = [];
+  for (const platform of CONTACT_ID_PLATFORMS) {
+    const profileId = desired[platform];
+    const previous = current.get(platform);
+    if (previous && previous.profile_id === profileId) {
+      identityIds.push(previous.identity_id);
+      continue;
+    }
+    if (previous) {
+      if (await flatIdentityHasHistory(env, workspaceId, contactId, previous.identity_id)) {
+        const action = profileId ? 'changed' : 'removed';
+        throw httpError(409, `The ${platform} ID cannot be ${action} because it has conversation history.`);
+      }
+      if (await flatIdentityHasBinding(env, workspaceId, previous.identity_id)) {
+        const action = profileId ? 'changed' : 'removed';
+        throw httpError(409, `The ${platform} ID cannot be ${action} because it is connected to a channel route. Remove the route first.`);
+      }
+      if (!profileId) {
+        statements.push(
+          env.DB.prepare(`DELETE FROM channel_identities WHERE workspace_id=?1 AND identity_id IN
+            (SELECT binding_id FROM channel_identity_bindings WHERE workspace_id=?1 AND identity_id=?2)`)
+            .bind(workspaceId, previous.identity_id),
+          env.DB.prepare(`DELETE FROM contact_platform_ids
+            WHERE workspace_id=?1 AND contact_id=?2 AND platform=?3`)
+            .bind(workspaceId, contactId, platform),
+          env.DB.prepare(`DELETE FROM channel_identity_bindings WHERE workspace_id=?1 AND identity_id=?2`)
+            .bind(workspaceId, previous.identity_id),
+          env.DB.prepare(`DELETE FROM contact_identities
+            WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`)
+            .bind(workspaceId, contactId, previous.identity_id)
+        );
+        continue;
+      }
+      statements.push(
+        env.DB.prepare(`UPDATE contact_identities SET profile_id=?4,username='',phone_number='',display_name='',updated_at=?5
+          WHERE workspace_id=?1 AND contact_id=?2 AND identity_id=?3`)
+          .bind(workspaceId, contactId, previous.identity_id, profileId, now),
+        env.DB.prepare(`UPDATE contact_platform_ids SET profile_id=?4,updated_at=?5
+          WHERE workspace_id=?1 AND contact_id=?2 AND platform=?3`)
+          .bind(workspaceId, contactId, platform, profileId, now)
+      );
+      identityIds.push(previous.identity_id);
+      continue;
+    }
+    if (!profileId) continue;
+    const identityId = crypto.randomUUID();
+    const isFirst = identityIds.length === 0 && current.size === 0;
+    statements.push(
+      env.DB.prepare(`INSERT INTO contact_identities
+          (identity_id,workspace_id,contact_id,platform,profile_id,username,phone_number,display_name,
+           metadata_json,created_at,updated_at)
+        VALUES (?1,?2,?3,?4,?5,'','','',?6,?7,?7)`)
+        .bind(identityId, workspaceId, contactId, platform, profileId,
+          JSON.stringify(isFirst ? { isPrimary: true } : {}), now),
+      env.DB.prepare(`INSERT INTO contact_platform_ids
+          (workspace_id,contact_id,platform,profile_id,identity_id,created_at,updated_at)
+        VALUES (?1,?2,?3,?4,?5,?6,?6)`)
+        .bind(workspaceId, contactId, platform, profileId, identityId, now)
+    );
+    identityIds.push(identityId);
+  }
+  return { desired, statements, identityIds };
+}
+
 async function updateContact(env, workspaceId, contactId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Contact update must be a JSON object.');
-  rejectUnknownKeys(payload, new Set(['displayName', 'name', 'company', 'tags', 'channelId', 'channelProfileId', 'identities']), 'contact');
+  rejectUnknownKeys(payload, new Set(['displayName', 'name', 'company', 'tags', 'channelId', 'channelProfileId', 'platformIds', 'identities']), 'contact');
   if (!Object.keys(payload).length) throw httpError(400, 'Provide at least one contact field to update.');
   if (payload.displayName !== undefined && payload.name !== undefined &&
       String(payload.displayName).trim() !== String(payload.name).trim()) {
@@ -3368,6 +3593,9 @@ async function updateContact(env, workspaceId, contactId, payload, principal) {
     ? String(existing.company || '')
     : cleanOptionalText(payload.company, 'Company', 160);
   const tags = payload.tags === undefined ? storedContactTags(existing.tags_json) : validateContactTags(payload.tags);
+  if (payload.platformIds !== undefined && payload.identities !== undefined) {
+    throw httpError(400, 'Use platformIds or legacy identities, not both.');
+  }
   // Validate the complete identity graph before changing even the base contact
   // fields. This prevents a bad second identity/route from leaving the contact
   // and an earlier identity partially updated.
@@ -3392,6 +3620,9 @@ async function updateContact(env, workspaceId, contactId, payload, principal) {
     }
   }
   const now = new Date().toISOString();
+  const flatMutation = payload.platformIds === undefined
+    ? null
+    : await prepareContactPlatformIdMutation(env, workspaceId, id, payload.platformIds, displayName, now);
   await env.DB.batch([
     env.DB.prepare(`UPDATE contacts SET display_name=?3,company=?4,tags_json=?5,updated_at=?6
       WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, id, displayName, company, JSON.stringify(tags), now),
@@ -3401,7 +3632,8 @@ async function updateContact(env, workspaceId, contactId, payload, principal) {
       updated_at=?5 WHERE workspace_id=?1 AND contact_id=?2`)
       .bind(workspaceId, id, existing.display_name, displayName, now),
     env.DB.prepare(`UPDATE conversations SET subject=?3,tags_json=?4,updated_at=?5
-      WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, id, displayName, JSON.stringify(tags), now)
+      WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, id, displayName, JSON.stringify(tags), now),
+    ...(flatMutation?.statements || [])
   ]);
   if (payload.identities !== undefined) {
     for (const identity of payload.identities) {
@@ -3415,7 +3647,7 @@ async function updateContact(env, workspaceId, contactId, payload, principal) {
   const changedFields = [...new Set(Object.keys(payload).map(key => key === 'name' ? 'displayName' : key))];
   await audit(env, principal, 'update', 'contact', id, {
     fields: changedFields,
-    identitiesUpdated: Array.isArray(payload.identities) ? payload.identities.length : 0
+    identitiesUpdated: flatMutation?.identityIds?.length || (Array.isArray(payload.identities) ? payload.identities.length : 0)
   });
   return getContactDetail(env, workspaceId, id);
 }
@@ -3597,7 +3829,7 @@ async function deleteConversation(env, workspaceId, conversationId, principal) {
 
 async function createContact(env, workspaceId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Contact must be a JSON object.');
-  rejectUnknownKeys(payload, new Set(['displayName', 'name', 'company', 'tags', 'channelId', 'channelProfileId', 'identities']), 'contact');
+  rejectUnknownKeys(payload, new Set(['displayName', 'name', 'company', 'tags', 'channelId', 'channelProfileId', 'platformIds', 'identities']), 'contact');
   if (payload.displayName !== undefined && payload.name !== undefined &&
       String(payload.displayName).trim() !== String(payload.name).trim()) {
     throw httpError(400, 'Display name and name must match when both are supplied.');
@@ -3607,6 +3839,10 @@ async function createContact(env, workspaceId, payload, principal) {
   const displayName = cleanRequired(suppliedName, 'Display name', 120);
   const company = payload.company === undefined ? '' : cleanOptionalText(payload.company, 'Company', 160);
   const tags = payload.tags === undefined ? [] : validateContactTags(payload.tags);
+  if (payload.platformIds !== undefined &&
+      (payload.identities !== undefined || payload.channelId !== undefined || payload.channelProfileId !== undefined)) {
+    throw httpError(400, 'Use platformIds or legacy identity/channel fields, not both.');
+  }
   if (payload.identities !== undefined && (!Array.isArray(payload.identities) || payload.identities.length > 50)) {
     throw httpError(400, 'Identities must be an array with no more than 50 items.');
   }
@@ -3628,17 +3864,23 @@ async function createContact(env, workspaceId, payload, principal) {
       isPrimary: !identityInputs.length
     });
   }
+  const flatMutation = payload.platformIds === undefined
+    ? null
+    : await prepareContactPlatformIdMutation(env, workspaceId, contactId, payload.platformIds, displayName, now);
   try {
-    await env.DB.prepare(`INSERT INTO contacts
-        (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
-      VALUES (?1,?2,?3,?4,?5,?5,?6)`)
-      .bind(contactId, displayName, company, JSON.stringify(tags), now, workspaceId).run();
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO contacts
+          (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
+        VALUES (?1,?2,?3,?4,?5,?5,?6)`)
+        .bind(contactId, displayName, company, JSON.stringify(tags), now, workspaceId),
+      ...(flatMutation?.statements || [])
+    ]);
   } catch (error) {
     if (isUniqueConstraintError(error)) throw httpError(409, 'Contact ID already exists.');
     throw error;
   }
   const conversationIds = [];
-  const identityIds = [];
+  const identityIds = [...(flatMutation?.identityIds || [])];
   try {
     for (const identityInput of identityInputs) {
       const result = await ensureContactIdentity(env, workspaceId, contactId, identityInput, now);
@@ -3660,7 +3902,7 @@ async function createContact(env, workspaceId, payload, principal) {
     throw error;
   }
   await audit(env, principal, 'create', 'contact', contactId,
-    { identityIds, conversationIds, channelIndependent: identityInputs.length === 0 });
+    { identityIds, conversationIds, channelIndependent: identityIds.length === 0 });
   return { ok: true, contactId, identityIds, conversationIds,
     conversationId: conversationIds[0] || '', item: await getContactDetail(env, workspaceId, contactId) };
 }
