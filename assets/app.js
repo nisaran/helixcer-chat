@@ -116,11 +116,11 @@
   };
 
   const identityPlatforms = {
-    whatsapp: { label: "WhatsApp", profileLabel: "Profile ID", profilePlaceholder: "WhatsApp-scoped profile ID" },
-    telegram: { label: "Telegram", profileLabel: "Profile ID", profilePlaceholder: "Telegram user or chat ID" },
-    instagram: { label: "Instagram", profileLabel: "Profile ID", profilePlaceholder: "Instagram-scoped user ID" },
-    facebook: { label: "Facebook", profileLabel: "Profile ID", profilePlaceholder: "Facebook-scoped user ID" },
-    email: { label: "Email", profileLabel: "Email address", profilePlaceholder: "name@example.com" },
+    whatsapp: { label: "WhatsApp", profileLabel: "WhatsApp No", profilePlaceholder: "WhatsApp no with country code" },
+    telegram: { label: "Telegram", profileLabel: "Telegram Profile ID", profilePlaceholder: "Telegram user or chat ID" },
+    instagram: { label: "Instagram", profileLabel: "Instagram Profile ID", profilePlaceholder: "Instagram-scoped user ID" },
+    facebook: { label: "Facebook", profileLabel: "Facebook Profile ID", profilePlaceholder: "Facebook-scoped user ID" },
+    email: { label: "Email", profileLabel: "Email Address", profilePlaceholder: "name@example.com" },
   };
 
   const avatarPalettes = [
@@ -2616,16 +2616,20 @@
   }
 
   function identityRequestPayload(identity) {
+    const platform = connectorPlatform(identity.platform) || identity.platform;
+    const profileId = String(identity.profileId || identity.channelProfileId || "").trim();
     const bindings = asItems(identity.bindings || identity.routes).map((binding) => ({
       channelId: String(binding.channelId || ""),
-      scopedProfileId: String(binding.scopedProfileId || binding.channelProfileId || identity.profileId || "").trim(),
+      scopedProfileId: String(binding.scopedProfileId || binding.channelProfileId || profileId).trim(),
     })).filter((binding) => binding.channelId);
     const payload = {
-      platform: connectorPlatform(identity.platform) || identity.platform,
-      profileId: String(identity.profileId || identity.channelProfileId || "").trim(),
-      channelProfileId: String(identity.profileId || identity.channelProfileId || "").trim(),
+      platform,
+      profileId,
+      channelProfileId: profileId,
       username: String(identity.username || "").trim(),
-      phoneNumber: String(identity.phoneNumber || "").trim(),
+      // WhatsApp uses one canonical UI value. Keep the legacy phone field in
+      // sync for API compatibility while avoiding a second, conflicting input.
+      phoneNumber: platform === "whatsapp" ? profileId : String(identity.phoneNumber || "").trim(),
       displayName: String(identity.displayName || "").trim(),
       metadata: identity.metadata && typeof identity.metadata === "object" ? identity.metadata : {},
       isPrimary: identity.isPrimary === true,
@@ -2751,19 +2755,8 @@
       username.maxLength = 160;
       username.dataset.identityUsername = "";
       usernameLabel.append(username);
+      if (draft.platform === "whatsapp") profileInput.inputMode = "tel";
       fields.append(profileLabel, usernameLabel);
-      if (draft.platform === "whatsapp") {
-        const phoneLabel = element("label", "field-label form-span", "WhatsApp phone number");
-        const phone = document.createElement("input");
-        phone.className = "text-field";
-        phone.value = draft.phoneNumber;
-        phone.placeholder = "Optional, including country code";
-        phone.inputMode = "tel";
-        phone.maxLength = 40;
-        phone.dataset.identityPhone = "";
-        phoneLabel.append(phone);
-        fields.append(phoneLabel);
-      }
       const routeFieldset = element("fieldset", "identity-route-fieldset");
       routeFieldset.append(element("legend", "", "Connected routes"));
       const routeOptions = element("div", "identity-route-options");
@@ -3128,7 +3121,10 @@
       return { ...draft, profileId };
     });
     const missing = normalized.find((identity) => !identity.profileId);
-    if (missing) throw new Error(`${identityLabel(missing.platform)} profile ID is required.`);
+    if (missing) {
+      const label = identityPlatforms[missing.platform]?.profileLabel || `${identityLabel(missing.platform)} Profile ID`;
+      throw new Error(`${label} is required.`);
+    }
     const keys = normalized.map((identity) => `${identity.platform}:${identity.profileId.toLocaleLowerCase()}`);
     if (new Set(keys).size !== keys.length) throw new Error("The same platform identity was added more than once.");
     if (normalized.length && !normalized.some((identity) => identity.isPrimary)) normalized[0].isPrimary = true;

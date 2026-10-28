@@ -509,6 +509,15 @@ test("person-first contacts edit multiple immutable identities and open lazy cha
   assert.match(app, /identities\/\$\{encodeURIComponent\(identityId\)\}/);
   assert.match(app, /profileInput\.readOnly = Boolean\(draft\.identityId\)/);
   assert.match(app, /Existing profile IDs are read only/);
+  assert.match(app, /whatsapp: \{ label: "WhatsApp", profileLabel: "WhatsApp No", profilePlaceholder: "WhatsApp no with country code" \}/);
+  assert.match(app, /telegram: \{ label: "Telegram", profileLabel: "Telegram Profile ID"/);
+  assert.match(app, /instagram: \{ label: "Instagram", profileLabel: "Instagram Profile ID"/);
+  assert.match(app, /facebook: \{ label: "Facebook", profileLabel: "Facebook Profile ID"/);
+  const identityEditorBody = app.slice(
+    app.indexOf("function renderContactIdentityList"),
+    app.indexOf("function contactPlatformRoutes"),
+  );
+  assert.doesNotMatch(identityEditorBody, /WhatsApp phone number|dataset\.identityPhone/);
   assert.match(app, /dataset\.identityRouteProfile = channel\.channelId/);
   assert.match(app, /scopedProfileId/);
   assert.match(app, /scopedProfile\.readOnly = Boolean\(existingBinding\)/);
@@ -519,6 +528,7 @@ test("person-first contacts edit multiple immutable identities and open lazy cha
   assert.match(app, /mode === "edit" && currentDraft\?\.identityId/);
   const identityPayloadBody = app.match(/function identityRequestPayload\(identity\) \{([\s\S]*?)\n  \}/)?.[1] || "";
   assert.match(identityPayloadBody, /bindings/);
+  assert.match(identityPayloadBody, /platform === "whatsapp" \? profileId/);
   assert.doesNotMatch(identityPayloadBody, /payload\.channelId/);
   assert.match(app, /row\.dataset\.contactId = contact\.contactId/);
   const saveContactBody = app.match(/async function saveContactEdits\(form\) \{([\s\S]*?)\n  \}/)?.[1] || "";
