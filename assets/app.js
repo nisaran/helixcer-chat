@@ -3050,30 +3050,19 @@
     const attach = $("attachmentButton");
     const greeting = document.querySelector('#messageForm [data-action="insert-greeting"]');
     const template = $("templateButton");
-    const notice = $("replyWindowNotice");
     renderComposerReply();
     template.hidden = !whatsapp;
-    notice.hidden = !blocked;
     input.disabled = blocked;
     send.disabled = blocked;
     const attachmentSupported = supportsChatAttachments(conversation);
     attach.disabled = blocked || !attachmentSupported;
     greeting.disabled = blocked;
-    input.placeholder = blocked ? "24-hour window closed — only approved templates can be sent" : "Write a reply…";
-    if (blocked) input.setAttribute("aria-describedby", "replyWindowMessage");
-    else input.removeAttribute("aria-describedby");
+    input.placeholder = blocked
+      ? "The customer has not messaged on WhatsApp in the last 24 hours. You can only send approved WhatsApp message templates"
+      : "Message...";
     $("messageForm").classList.toggle("is-window-closed", blocked);
     attach.title = !attachmentSupported ? "Attachments are available for WhatsApp and Telegram conversations"
       : blocked ? "Send an approved template to reopen the conversation" : "Attach files";
-    if (blocked) {
-      const expiry = windowState.expiresAt ? new Date(windowState.expiresAt) : null;
-      const expiryCopy = expiry && !Number.isNaN(expiry.getTime())
-        ? ` The reply window ended ${relativeTime(expiry.toISOString())}.`
-        : "";
-      const reason = route?.replyWindowReason || conversation.replyWindowReason || "A free-form reply is no longer allowed.";
-      const templatePrompt = /approved template/i.test(reason) ? "" : " Send an approved template to continue.";
-      $("replyWindowMessage").textContent = `${reason}${expiryCopy}${templatePrompt}`;
-    }
     renderComposerRouteControl(conversation, route);
     renderAttachmentQueue();
     syncWhatsAppReplyCountdown(conversation);

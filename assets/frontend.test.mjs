@@ -212,14 +212,17 @@ test("saving a channel never runs provider verification and avoids duplicate cre
 });
 
 test("WhatsApp inbox supports rendered templates, queued attachments, and reply-window blocking", () => {
-  assert.match(html, /id="replyWindowNotice"/);
+  assert.doesNotMatch(html, /id="replyWindowNotice"|The 24-hour WhatsApp reply window is closed/);
   assert.match(html, /id="attachmentInput" type="file" multiple/);
   assert.match(html, /id="templateDialog"/);
   assert.match(app, /freeformAllowed/);
   assert.match(app, /\/api\/conversations\/\$\{encodeURIComponent\(conversationId\)\}\/templates/);
   assert.match(app, /\/api\/conversations\/\$\{encodeURIComponent\(conversationId\)\}\/template/);
   assert.match(app, /\/api\/conversations\/\$\{encodeURIComponent\(conversationId\)\}\/attachments/);
-  assert.match(app, /The 24-hour reply window is closed/);
+  assert.match(app, /The customer has not messaged on WhatsApp in the last 24 hours\. You can only send approved WhatsApp message templates"/);
+  assert.match(app, /: "Message\.\.\."/);
+  assert.match(html, /placeholder="Message\.\.\."/);
+  assert.match(styles, /\.composer\.is-window-closed textarea::placeholder\s*\{[^}]*color:\s*#9a4f12[^}]*opacity:\s*1/);
   assert.match(html, /id="templateSelect"/);
   assert.match(html, /id="templateVariableFields"/);
   assert.match(app, /parameter_name/);
@@ -227,7 +230,6 @@ test("WhatsApp inbox supports rendered templates, queued attachments, and reply-
   assert.match(app, /\[descriptor\.mediaType\]: \{ link: value \}/);
   assert.match(app, /\[descriptor\.mediaType\]: \{ id: uploaded\.mediaId \}/);
   assert.match(app, /const request = \{ name, language: \{ code: languageCode \}, previewText \}/);
-  assert.match(app, /\/approved template\/i\.test\(reason\)/);
   assert.match(styles, /#templateDialog\s*\{[^}]*max-height:\s*calc\(100dvh - 24px\)[^}]*overflow-y:\s*auto/);
   assert.match(app, /\["", "Choose source"\]/);
   assert.match(app, /suggestedTemplateSource\(descriptor\)/);
@@ -529,8 +531,8 @@ test("conversation routes drive replies, templates, media, and every outbound AP
   assert.match(app, /function whatsappReplyWindow\(conversation = selectedConversation\(\), route = selectedComposerRoute\(conversation\)\)/);
   assert.match(app, /function selectRequestedComposerRoute\(conversationId, requestedRoute\)/);
   assert.match(app, /state\.composerRoutes\.set\(conversationId, conversationRouteKey\(selected\)\)/);
-  assert.match(app, /24-hour window closed — only approved templates can be sent/);
-  assert.match(app, /input\.setAttribute\("aria-describedby", "replyWindowMessage"\)/);
+  assert.match(app, /The customer has not messaged on WhatsApp in the last 24 hours\. You can only send approved WhatsApp message templates"/);
+  assert.doesNotMatch(app, /replyWindowNotice|replyWindowMessage/);
 });
 
 test("contacts use one flat ID per platform and open the exact saved channel route", () => {

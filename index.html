@@ -271,17 +271,13 @@
               </button>
               <div class="typing-row" id="typingIndicator" hidden><span></span><span></span><span></span><em>A customer is typing</em></div>
 
-              <div class="reply-window-notice" id="replyWindowNotice" hidden>
-                <div><strong>The 24-hour WhatsApp reply window is closed</strong><span id="replyWindowMessage">Send an approved WhatsApp template to continue this conversation.</span></div>
-                <button class="secondary-button compact-button" type="button" data-action="open-template">Send template</button>
-              </div>
               <form class="composer" id="messageForm">
                 <div class="composer-box">
                   <div class="composer-reply" id="composerReply" hidden>
                     <div><strong id="composerReplyAuthor">Replying to message</strong><span id="composerReplyPreview"></span></div>
                     <button class="composer-reply-close" type="button" data-action="cancel-reply" aria-label="Cancel reply">×</button>
                   </div>
-                  <textarea id="messageInput" rows="1" maxlength="4000" enterkeyhint="enter" placeholder="Write a reply…" aria-label="Message"></textarea>
+                  <textarea id="messageInput" rows="1" maxlength="4000" enterkeyhint="enter" placeholder="Message..." aria-label="Message"></textarea>
                   <input class="sr-only" id="attachmentInput" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/3gpp,audio/aac,audio/amr,audio/mpeg,audio/mp4,audio/ogg,application/pdf,text/plain,text/csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv" tabindex="-1">
                   <div class="attachment-queue" id="attachmentQueue" aria-label="Files ready to send" hidden></div>
                   <div class="composer-tools">
