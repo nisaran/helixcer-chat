@@ -778,10 +778,14 @@
           : String(payload || "");
         const error = new Error(message || `Request failed (${response.status})`);
         error.status = response.status;
-        if (response.status === 401 && path !== "/api/me") window.dispatchEvent(new CustomEvent("helixcer:unauthorized"));
+        if (response.status === 401 && path !== "/api/me" && path !== "/api/auth/password") window.dispatchEvent(new CustomEvent("helixcer:unauthorized"));
         throw error;
       }
       return payload;
+    }
+
+    passwordLogin(email, password) {
+      return this.request("/api/auth/password", { method: "POST", body: JSON.stringify({ email, password }) });
     }
 
     loginUrl() {
@@ -1388,6 +1392,21 @@
     document.querySelectorAll("[data-owner-only]").forEach((node) => { node.hidden = !isOwner(); node.disabled = !isOwner(); });
     setWorkspaceFormBusy(state.workspaceProfileLoading);
     if (!admin && ["channels", "whatsapp-templates", "developer", "team"].includes(state.route)) setRoute("inbox");
+  }
+
+  async function signInWithPassword(form) {
+    const button = form.querySelector("button[type='submit']");
+    button.disabled = true;
+    try {
+      if (!state.api || state.api.isDemo) throw Object.assign(new Error("Password sign-in is available on the live Helixcer service."), { status: 400 });
+      await state.api.passwordLogin(form.email.value.trim(), form.password.value);
+      form.reset();
+      await initializeSession();
+    } catch (error) {
+      showSignedOut(error.message || "Sign-in failed.");
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function initializeSession() {
@@ -7726,6 +7745,7 @@
       $("attachmentPreviewDialog").querySelectorAll("video,audio").forEach((media) => media.pause());
       $("attachmentPreviewBody").replaceChildren();
     });
+    $("clientSignInForm").addEventListener("submit", (event) => { event.preventDefault(); signInWithPassword(event.currentTarget); });
     $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
     $("apiKeyForm").addEventListener("submit", (event) => { event.preventDefault(); createDeveloperApiKey(event.currentTarget); });
     $("confirmationForm").addEventListener("submit", (event) => { event.preventDefault(); finishConfirmation(true); });

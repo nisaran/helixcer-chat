@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261030-4">
-  <script src="./assets/app.js?v=20261028-18" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261030-6">
+  <script src="./assets/app.js?v=20261030-6" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -36,16 +36,24 @@
       <div class="auth-signed-out" id="signedOutContent">
         <p class="eyebrow">One shared customer inbox</p>
         <h1 id="signedOutTitle">Welcome back</h1>
-        <p class="auth-copy">Sign in with your approved Google account to continue to the Helixcer workspace.</p>
+        <p class="auth-copy">Sign in with the email and password issued for your company, or continue with an approved Google account.</p>
         <p class="auth-alert" id="authAlert" hidden></p>
+        <form class="client-signin" id="clientSignInForm">
+          <label class="sr-only" for="clientEmail">Email</label>
+          <input id="clientEmail" name="email" type="email" autocomplete="username" required maxlength="254" placeholder="Work email">
+          <label class="sr-only" for="clientPassword">Password</label>
+          <input id="clientPassword" name="password" type="password" autocomplete="current-password" required maxlength="128" placeholder="Password">
+          <button type="submit">Sign in</button>
+        </form>
+        <p class="auth-divider"><span>or</span></p>
         <a class="google-signin" id="googleSignInLink" href="#">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.2c0-.7-.1-1.4-.2-2H12v3.7h5a4.3 4.3 0 0 1-1.9 2.8v2.4h3.1c1.8-1.7 2.8-4.1 2.8-6.9Z"/><path d="M12 21c2.5 0 4.7-.8 6.2-2.2l-3.1-2.4c-.8.6-1.9.9-3.1.9a5.5 5.5 0 0 1-5.2-3.8H3.6V16A9.4 9.4 0 0 0 12 21Z"/><path d="M6.8 13.5a5.6 5.6 0 0 1 0-3.5V7.5H3.6a9.4 9.4 0 0 0 0 8.5l3.2-2.5Z"/><path d="M12 6.3c1.4 0 2.6.5 3.6 1.4L18.3 5A9.1 9.1 0 0 0 3.6 7.5L6.8 10A5.5 5.5 0 0 1 12 6.3Z"/></svg>
           Continue with Google
         </a>
-        <p class="auth-footnote">Only workspace members can sign in. Contact the owner if your email has not been added.</p>
+        <p class="auth-footnote">Client owners use the email and password from Helixcer. Invited teammates can continue with Google.</p>
       </div>
     </div>
-    <p class="auth-footer">Single workspace · Secure session · No billing portal</p>
+    <p class="auth-footer">Client workspaces · Secure session · No billing portal</p>
   </section>
 
   <div class="app-shell" id="appShell" hidden>

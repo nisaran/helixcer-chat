@@ -49,6 +49,15 @@ test("technical connection and recovery controls are not exposed in the UI", () 
   assert.doesNotMatch(app, /url\.searchParams\.set\([^,]*token/i);
 });
 
+test("client owners can sign in with the email and password issued for their company", () => {
+  assert.match(html, /id="clientSignInForm"/);
+  assert.match(html, /id="clientEmail"/);
+  assert.match(html, /id="clientPassword"/);
+  assert.match(app, /\/api\/auth\/password/);
+  assert.match(app, /passwordLogin\(email, password\)/);
+  assert.match(html, /Client workspaces/);
+});
+
 test("role-aware single-workspace UI includes team management and no billing surface", () => {
   assert.match(html, /data-route="team"/);
   assert.match(html, /data-route="developer" data-admin-only/);
