@@ -255,13 +255,13 @@ test("chat renders WhatsApp formatting and template actions without unsafe HTML"
   assert.match(app, /const isTemplate = String\(messageType \|\| ""\)[\s\S]*?=== "template"/);
   assert.match(app, /if \(isTemplate && last >= 0 && \/\^\\s\*Actions:/);
   assert.match(app, /conversation\.lastMessage, conversation\.lastMessageType, conversation/);
-  assert.match(app, /const lastMessageType = String\(raw\.lastMessageType \|\| raw\.lastMessage\?\.messageType \|\| ""\)/);
+  assert.match(app, /const lastMessageType = String\(raw\.lastMessageType \|\| lastMessageObject\?\.messageType \|\| lastMessageObject\?\.attachment\?\.type \|\| ""\)/);
   assert.match(app, /function messagePlainText\(message, conversation\)/);
   assert.match(app, /Reply to \$\{messagePlainText\(message, conversation\)\}/);
   assert.match(app, /body: channelPlainText\(message\.text, conversation\)/);
   assert.match(app, /conversation\.lastMessageType = "template"/);
   assert.match(app, /conversation\.lastMessageType = String\(message\.messageType \|\| "text"\)/);
-  const messageRenderer = app.slice(app.indexOf("function appendWhatsAppFormattedText"), app.indexOf("function syncMessageDateDividers"));
+  const messageRenderer = app.slice(app.indexOf("function appendWhatsAppFormattedText"), app.indexOf("function messageThreadNearBottom"));
   assert.doesNotMatch(messageRenderer, /innerHTML|insertAdjacentHTML/);
   assert.match(styles, /\.message-template-actions\s*\{/);
   assert.match(styles, /\.message-template-action\s*\{/);
@@ -490,7 +490,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(app, /const key = conversation\.contactId \|\| `conversation:/);
   assert.match(app, /routeMeta\.append\(providerLogo\(route\.connectorType, "message-route-logo"\)\)/);
   assert.match(app, /routeMeta\.append\(element\("span", "", route\.channelName \|\| "Channel"\)\)/);
-  const messageRowBody = app.slice(app.indexOf("function createMessageRow"), app.indexOf("function syncMessageDateDividers"));
+  const messageRowBody = app.slice(app.indexOf("function createMessageRow"), app.indexOf("function messageThreadNearBottom"));
   assert.doesNotMatch(messageRowBody, /route\.channelProfileId/);
   const composerRouteBody = app.slice(app.indexOf("function renderComposerRouteControl"), app.indexOf("function renderComposerState"));
   assert.match(composerRouteBody, /name\.textContent = selectedRoute\?\.channelName \|\| ""/);
@@ -637,9 +637,16 @@ test("conversation and contact lists provide compact press feedback and breathin
   assert.match(styles, /\.contact-table tbody tr:active\s*\{[^}]*background:\s*#edf0ed/s);
 });
 
-test("message dates remain visible as a floating sticky pill while scrolling", () => {
-  assert.match(styles, /\.date-divider\s*\{[^}]*position:\s*sticky[^}]*top:\s*8px[^}]*border-radius:\s*999px/s);
-  assert.match(styles, /\.date-divider::before, \.date-divider::after\s*\{[^}]*content:\s*none/s);
+test("every message carries an exact local date and time without date-divider pills", () => {
+  assert.doesNotMatch(html, /date-divider/);
+  assert.doesNotMatch(styles, /\.date-divider/);
+  assert.doesNotMatch(app, /element\("div", "date-divider"/);
+  const start = app.indexOf("function formatClock");
+  const end = app.indexOf("function formatCalendarDate", start);
+  const formatClock = Function(`${app.slice(start, end)}\nreturn formatClock;`)();
+  const currentYear = new Date().getFullYear();
+  assert.equal(formatClock(new Date(currentYear, 9, 27, 7, 5)), "27 Oct · 07:05 am");
+  assert.equal(formatClock(new Date(currentYear - 2, 9, 27, 19, 5)), `27 Oct ${currentYear - 2} · 07:05 pm`);
 });
 
 test("expanded channel cards expose the internal channel ID with a copy action", () => {
@@ -726,7 +733,7 @@ test("opening a conversation clears its unread badge before the first list rende
   assert.ok(selectHandler.indexOf("updateConversation(conversationId, { markRead: true })") < selectHandler.indexOf("await state.api.getMessages(conversationId)"));
 });
 
-test("opening unread conversations preserves a WhatsApp-style unread divider until the chat changes", () => {
+test("opening unread conversations preserves a WhatsApp-style unread divider until the chat changes or an outbound message is sent", () => {
   const selectHandler = app.slice(app.indexOf("async function selectConversation"), app.indexOf("function renderSelectedConversation"));
   const messageRenderer = app.slice(app.indexOf("function renderMessages"), app.indexOf("function isWhatsAppConversation"));
   const clearHandler = app.slice(app.indexOf("function clearSelectedConversation"), app.indexOf("function contactFor"));
@@ -738,7 +745,80 @@ test("opening unread conversations preserves a WhatsApp-style unread divider unt
   assert.match(messageRenderer, /`\$\{marker\.count\} unread message\$\{marker\.count === 1 \? "" : "s"\}`/);
   assert.match(messageRenderer, /element\("div", "unread-divider", label\)/);
   assert.match(clearHandler, /state\.unreadMarker = null/);
+  const clearAfterOutbound = app.slice(app.indexOf("function clearUnreadMarkerAfterOutbound"), app.indexOf("function upsertRenderedMessage"));
+  assert.match(clearAfterOutbound, /message\?\.direction !== "outbound"/);
+  assert.match(clearAfterOutbound, /state\.unreadMarker = null/);
+  assert.match(clearAfterOutbound, /querySelector\("\.unread-divider"\)\?\.remove\(\)/);
+  assert.match(app, /clearUnreadMarkerAfterOutbound\(message, conversationId\)/);
+  const sendText = app.slice(app.indexOf("async function sendCurrentMessage"), app.indexOf("function templatePlaceholders"));
+  const sendTemplate = app.slice(app.indexOf("async function sendCurrentTemplate"), app.indexOf("function attachmentSizeLimit"));
+  const sendAttachments = app.slice(app.indexOf("async function sendQueuedAttachments"), app.indexOf("async function uploadCurrentAttachment"));
+  [sendText, sendTemplate, sendAttachments].forEach((handler) => {
+    assert.match(handler, /clearUnreadMarkerAfterOutbound\(\{ direction: "outbound" \}, conversation\.conversationId\)/);
+  });
   assert.match(styles, /\.unread-divider \{/);
+});
+
+test("the chat header shows a live WhatsApp reply-window countdown only for inbound WhatsApp routes", () => {
+  assert.match(html, /id="whatsappReplyCountdown"[^>]*role="timer"[^>]*hidden/);
+  assert.match(html, /assets\/whatsapp-window-timer\.png/);
+  assert.match(html, /id="whatsappReplyCountdownText"/);
+  assert.match(styles, /\.whatsapp-reply-countdown\s*\{/);
+  assert.match(styles, /\.whatsapp-reply-countdown img\s*\{/);
+  assert.match(styles, /\.whatsapp-reply-countdown\[hidden\]\s*\{\s*display:\s*none/);
+
+  const formatterStart = app.indexOf("function replyWindowCountdownText");
+  const formatterEnd = app.indexOf("function latestInboundWhatsAppReplyWindow", formatterStart);
+  const { replyWindowCountdownText } = Function(`${app.slice(formatterStart, formatterEnd)}\nreturn { replyWindowCountdownText };`)();
+  const now = Date.parse("2026-10-29T00:00:00.000Z");
+  assert.equal(replyWindowCountdownText(new Date(now + ((18 * 3600 + 45 * 60 + 23) * 1000)).toISOString(), now), "18:45:23");
+  assert.equal(replyWindowCountdownText(new Date(now - 1000).toISOString(), now), "00:00:00");
+  assert.equal(replyWindowCountdownText("not-a-date", now), "");
+
+  const resolver = app.slice(app.indexOf("function latestInboundWhatsAppReplyWindow"), app.indexOf("function stopWhatsAppReplyCountdown"));
+  assert.match(resolver, /conversationRoutes\(conversation\)\.filter\(isWhatsAppRoute\)/);
+  assert.match(resolver, /message\.direction !== "inbound"/);
+  assert.match(resolver, /route\.replyWindowExpiresAt/);
+  assert.match(resolver, /inboundAt \+ WHATSAPP_REPLY_WINDOW_MS/);
+
+  const timer = app.slice(app.indexOf("function stopWhatsAppReplyCountdown"), app.indexOf("function closeComposerRouteMenu"));
+  assert.match(timer, /clearInterval\(whatsappReplyCountdownTimer\)/);
+  assert.match(timer, /conversation\.conversationId}:\$\{windowState\.routeKey}:\$\{windowState\.expiresAt}/);
+  assert.match(timer, /setInterval\(update, 1000\)/);
+  assert.match(timer, /textHost\.textContent = remaining \|\| "00:00:00"/);
+  assert.match(timer, /stopWhatsAppReplyCountdown\(\{ hide: true \}\)/);
+  assert.doesNotMatch(timer, /renderSelectedConversation|renderMessages|renderComposerState/);
+  assert.match(app, /renderAttachmentQueue\(\);\s*syncWhatsAppReplyCountdown\(conversation\);/);
+});
+
+test("new inbound messages below the viewport are counted on a jump-to-latest control", () => {
+  assert.match(html, /id="messageJumpButton"[^>]*aria-label="Jump to latest message"[^>]*hidden/);
+  assert.match(html, /id="messageJumpCount"[^>]*hidden/);
+  assert.match(app, /newMessagesBelow:\s*\{\s*conversationId:\s*"",\s*count:\s*0\s*\}/);
+  const upsert = app.slice(app.indexOf("function upsertRenderedMessage"), app.indexOf("function renderMessages"));
+  assert.match(upsert, /const existing = host\.querySelector/);
+  assert.match(upsert, /const isNewInbound = !existing && message\.direction === "inbound"/);
+  assert.match(upsert, /if \(!stayAtBottom && isNewInbound\)/);
+  assert.match(upsert, /count: previousCount \+ 1/);
+  assert.match(app, /messageThread\.addEventListener\("scroll"[\s\S]*?messageThreadNearBottom[\s\S]*?resetNewMessagesBelow/);
+  assert.match(app, /\$\("messageJumpButton"\)\.addEventListener\("click"[\s\S]*?scrollTop = messageThread\.scrollHeight[\s\S]*?resetNewMessagesBelow/);
+  assert.match(styles, /\.message-jump-count\s*\{/);
+  assert.match(styles, /\.message-jump-button\[hidden\]\s*\{\s*display:\s*none/);
+});
+
+test("attachment-only conversation previews use a human media type", () => {
+  const start = app.indexOf("function attachmentPreviewLabel");
+  const end = app.indexOf("function appendWhatsAppFormattedText", start);
+  const helpers = Function(`${app.slice(start, end)}\nreturn { attachmentPreviewLabel, conversationMessagePreview };`)();
+  assert.equal(helpers.conversationMessagePreview({ messageType: "image", attachment: { type: "image" } }), "Image");
+  assert.equal(helpers.conversationMessagePreview({ messageType: "document", attachment: { mimeType: "application/pdf" } }), "Document");
+  assert.equal(helpers.conversationMessagePreview({ messageType: "audio", attachment: { type: "voice" } }), "Audio");
+  assert.equal(helpers.conversationMessagePreview({ messageType: "video", attachment: { type: "video" } }), "Video");
+  assert.equal(helpers.conversationMessagePreview({ messageType: "video", attachment: { mimeType: "video\/mpeg" } }), "Video");
+  assert.equal(helpers.conversationMessagePreview({ messageType: "file", attachment: { filename: "archive.bin" } }), "File");
+  assert.equal(helpers.conversationMessagePreview({ messageType: "image", text: "[WhatsApp image received]", attachment: { type: "image" } }), "Image");
+  assert.match(app, /conversation\.lastMessage = conversationMessagePreview\(message\)/);
+  assert.match(app, /return channelPlainText\(lines\.join\("\\n"\)\.trim\(\), conversation\) \|\| attachmentPreviewLabel\(messageType\)/);
 });
 
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {

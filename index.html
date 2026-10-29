@@ -236,6 +236,10 @@
                   </span>
                 </button>
                 <div class="chat-actions">
+                  <span class="whatsapp-reply-countdown" id="whatsappReplyCountdown" role="timer" aria-label="WhatsApp reply window remaining" hidden>
+                    <img src="./assets/whatsapp-window-timer.png" alt="" aria-hidden="true">
+                    <span id="whatsappReplyCountdownText"></span>
+                  </span>
                   <div class="conversation-menu-wrap" data-admin-only>
                     <button class="conversation-more-button" id="conversationMenuButton" type="button" data-action="toggle-conversation-menu" aria-label="Conversation options" aria-haspopup="menu" aria-expanded="false" aria-controls="conversationActionMenu">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="6.5" r="1.35"/><circle cx="12" cy="12" r="1.35"/><circle cx="12" cy="17.5" r="1.35"/></svg>
@@ -261,6 +265,10 @@
               </header>
 
               <div class="message-thread" id="messageThread" aria-live="polite"></div>
+              <button class="message-jump-button" id="messageJumpButton" type="button" aria-label="Jump to latest message" hidden>
+                <span class="message-jump-count" id="messageJumpCount" aria-label="New messages" hidden></span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
               <div class="typing-row" id="typingIndicator" hidden><span></span><span></span><span></span><em>A customer is typing</em></div>
 
               <div class="reply-window-notice" id="replyWindowNotice" hidden>

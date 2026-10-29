@@ -7,6 +7,7 @@
   const SERVICE_WORKER_URL = "/sw.js?v=20261026-15";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
+  const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -34,6 +35,7 @@
     },
     pendingConversationId: null,
     unreadMarker: null,
+    newMessagesBelow: { conversationId: "", count: 0 },
     replyingTo: null,
     composerRoutes: new Map(),
     recentVerifyTokens: new Map(),
@@ -69,6 +71,8 @@
     confirmationResolve: null,
     loading: true,
   };
+  let whatsappReplyCountdownTimer = null;
+  let whatsappReplyCountdownKey = "";
 
   const channelStyles = {
     whatsapp_cloud: { label: "WhatsApp", short: "WA", color: "#168f66", soft: "#e7f6ef" },
@@ -1632,8 +1636,17 @@
 
   function normalizeConversation(raw) {
     const replyWindow = raw.replyWindow && typeof raw.replyWindow === "object" ? raw.replyWindow : {};
-    const lastMessage = raw.lastMessage?.text || raw.lastMessageText || raw.preview || raw.lastMessage || "No messages yet";
-    const lastMessageType = String(raw.lastMessageType || raw.lastMessage?.messageType || "").trim().toLocaleLowerCase();
+    const lastMessageObject = raw.lastMessage && typeof raw.lastMessage === "object" ? raw.lastMessage : null;
+    const lastMessageType = String(raw.lastMessageType || lastMessageObject?.messageType || lastMessageObject?.attachment?.type || "")
+      .trim().toLocaleLowerCase();
+    const lastMessageText = lastMessageObject?.text || raw.lastMessageText || raw.preview ||
+      (typeof raw.lastMessage === "string" ? raw.lastMessage : "");
+    const lastMessage = conversationMessagePreview({
+      ...lastMessageObject,
+      text: lastMessageText,
+      messageType: lastMessageType,
+      attachment: lastMessageObject?.attachment || raw.lastMessageAttachment || raw.attachment || null,
+    }) || "No messages yet";
     const normalized = {
       ...raw,
       conversationId: String(raw.conversationId || raw.id || ""),
@@ -2183,6 +2196,7 @@
     }
     state.selectedConversationId = conversationId;
     state.pendingConversationId = null;
+    if (changingConversation) resetNewMessagesBelow(conversationId);
     if (updateUrl) replaceAppHash(conversationHash(conversationId));
     $("inboxGrid").classList.add("chat-open");
     const shouldMarkRead = markRead && unreadCount > 0 && isConversationActivelyViewed(conversationId);
@@ -2215,6 +2229,7 @@
     $("emptyConversation").hidden = Boolean(conversation);
     $("chatContent").hidden = !conversation;
     if (!conversation) {
+      syncWhatsAppReplyCountdown(null);
       state.detailsOpen = false;
       updateDetailsVisibility();
       return;
@@ -2263,6 +2278,7 @@
     host.replaceChildren();
     const loading = element("div", "empty-list", "Loading messages…");
     host.append(loading);
+    resetNewMessagesBelow(state.selectedConversationId);
   }
 
   function messageAttachmentUrl(message, download = false) {
@@ -2361,6 +2377,27 @@
     return String(message.text || `[${message.messageType || "Message"}]`);
   }
 
+  function attachmentPreviewLabel(messageType, attachment = {}) {
+    const descriptor = [messageType, attachment?.type, attachment?.mimeType]
+      .filter(Boolean).join(" ").toLocaleLowerCase();
+    if (/image|photo|picture/.test(descriptor)) return "Image";
+    if (/video/.test(descriptor)) return "Video";
+    if (/audio|voice|ogg|mpeg/.test(descriptor)) return "Audio";
+    if (/document|pdf|text|csv|word|sheet|presentation/.test(descriptor)) return "Document";
+    if (/file|media|attachment/.test(descriptor) || Object.keys(attachment || {}).length) return "File";
+    return "";
+  }
+
+  function conversationMessagePreview(message) {
+    if (!message) return "";
+    const attachment = message.attachment && typeof message.attachment === "object" ? message.attachment : null;
+    const text = String(attachment?.caption || message.text || "").trim();
+    const generatedAttachmentText = /^\[(?:whatsapp|telegram|instagram|facebook)?\s*(?:image|photo|document|file|audio|voice|video|media|attachment)(?:\s+received)?\]$/i.test(text)
+      || /^\[Attachment:[^\]]+\]$/i.test(text);
+    if (text && !generatedAttachmentText) return text;
+    return attachmentPreviewLabel(message.messageType, attachment || {});
+  }
+
   function appendWhatsAppFormattedText(host, value) {
     const text = String(value || "");
     const pattern = /```([\s\S]*?)```|\*([^*\n]+)\*|_([^_\n]+)_|~([^~\n]+)~/g;
@@ -2406,7 +2443,7 @@
     while (last >= 0 && !lines[last].trim()) last--;
     const isTemplate = String(messageType || "").trim().toLocaleLowerCase() === "template";
     if (isTemplate && last >= 0 && /^\s*Actions:\s*.+$/i.test(lines[last])) lines.splice(last, 1);
-    return channelPlainText(lines.join("\n").trim(), conversation);
+    return channelPlainText(lines.join("\n").trim(), conversation) || attachmentPreviewLabel(messageType);
   }
 
   function templateMessagePresentation(message, value) {
@@ -2486,7 +2523,6 @@
     const row = element("div", `message-row${message.direction === "outbound" ? " is-outbound" : ""}`);
     row.dataset.messageId = message.messageId;
     row.dataset.messageTimestamp = String(new Date(message.timestamp).getTime() || 0);
-    row.dataset.messageDate = dateLabel(message.timestamp);
     if (canReplyToMessage(conversation, message)) row.dataset.replyable = "true";
     const stack = element("div", "message-stack");
     const bubble = element("div", "message-bubble");
@@ -2532,34 +2568,50 @@
     return row;
   }
 
-  function syncMessageDateDividers(host) {
-    host.querySelectorAll(".date-divider").forEach((divider) => divider.remove());
-    let previousDate = "";
-    host.querySelectorAll(".message-row").forEach((row) => {
-      const currentDate = row.dataset.messageDate || "";
-      if (currentDate && currentDate !== previousDate) {
-        const divider = element("div", "date-divider", currentDate);
-        const anchor = row.previousElementSibling?.classList.contains("unread-divider")
-          ? row.previousElementSibling : row;
-        anchor.before(divider);
-        previousDate = currentDate;
-      }
-    });
+  function messageThreadNearBottom(host = $("messageThread")) {
+    return !host || host.scrollHeight - host.scrollTop - host.clientHeight < 90;
+  }
+
+  function renderMessageJumpButton() {
+    const button = $("messageJumpButton");
+    const countHost = $("messageJumpCount");
+    const conversationId = state.selectedConversationId || "";
+    const count = state.newMessagesBelow.conversationId === conversationId
+      ? state.newMessagesBelow.count : 0;
+    const show = Boolean(conversationId) && !messageThreadNearBottom();
+    button.hidden = !show;
+    countHost.hidden = count <= 0;
+    countHost.textContent = count > 99 ? "99+" : String(count || "");
+    button.setAttribute("aria-label", count > 0
+      ? `Jump to latest message, ${count} new message${count === 1 ? "" : "s"}`
+      : "Jump to latest message");
+  }
+
+  function resetNewMessagesBelow(conversationId = state.selectedConversationId) {
+    state.newMessagesBelow = { conversationId: conversationId || "", count: 0 };
+    renderMessageJumpButton();
+  }
+
+  function clearUnreadMarkerAfterOutbound(message, conversationId) {
+    if (message?.direction !== "outbound" || state.unreadMarker?.conversationId !== conversationId) return;
+    state.unreadMarker = null;
+    $("messageThread").querySelector(".unread-divider")?.remove();
   }
 
   function upsertRenderedMessage(message, conversationId = message?.conversationId) {
     const conversation = selectedConversation();
     if (!conversation || conversation.conversationId !== conversationId) return false;
     const host = $("messageThread");
-    const distanceFromBottom = host.scrollHeight - host.scrollTop - host.clientHeight;
-    const stayAtBottom = distanceFromBottom < 90;
+    const stayAtBottom = messageThreadNearBottom(host);
     const visibleAnchor = [...host.querySelectorAll(".message-row")]
       .find((row) => row.offsetTop + row.offsetHeight >= host.scrollTop);
     const anchorId = visibleAnchor?.dataset.messageId || "";
     const anchorOffset = visibleAnchor ? visibleAnchor.offsetTop - host.scrollTop : 0;
     host.querySelector(".empty-list")?.remove();
-    const replacement = createMessageRow(message, conversation);
     const existing = host.querySelector(`.message-row[data-message-id="${CSS.escape(message.messageId)}"]`);
+    const isNewInbound = !existing && message.direction === "inbound";
+    clearUnreadMarkerAfterOutbound(message, conversationId);
+    const replacement = createMessageRow(message, conversation);
     if (existing) {
       existing.replaceWith(replacement);
     } else {
@@ -2569,12 +2621,20 @@
       if (nextRow) host.insertBefore(replacement, nextRow);
       else host.append(replacement);
     }
-    syncMessageDateDividers(host);
-    if (stayAtBottom) host.scrollTop = host.scrollHeight;
+    if (stayAtBottom) {
+      host.scrollTop = host.scrollHeight;
+      resetNewMessagesBelow(conversationId);
+    }
     else if (anchorId) {
       const restoredAnchor = host.querySelector(`.message-row[data-message-id="${CSS.escape(anchorId)}"]`);
       if (restoredAnchor) host.scrollTop = Math.max(0, restoredAnchor.offsetTop - anchorOffset);
     }
+    if (!stayAtBottom && isNewInbound) {
+      const previousCount = state.newMessagesBelow.conversationId === conversationId
+        ? state.newMessagesBelow.count : 0;
+      state.newMessagesBelow = { conversationId, count: previousCount + 1 };
+    }
+    renderMessageJumpButton();
     renderComposerState();
     return true;
   }
@@ -2583,8 +2643,7 @@
     const conversation = selectedConversation();
     if (!conversation) return;
     const host = $("messageThread");
-    const distanceFromBottom = host.scrollHeight - host.scrollTop - host.clientHeight;
-    const stayAtBottom = !preserveScroll || distanceFromBottom < 90;
+    const stayAtBottom = !preserveScroll || messageThreadNearBottom(host);
     const previousScrollTop = host.scrollTop;
     host.replaceChildren();
     const messages = state.messages.get(conversation.conversationId);
@@ -2595,9 +2654,9 @@
     if (!messages.length) {
       host.append(element("div", "empty-list", "No messages yet. Send the first reply below."));
       renderComposerState();
+      resetNewMessagesBelow(conversation.conversationId);
       return;
     }
-    let dateKey = "";
     const sortedMessages = messages
       .slice()
       .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -2609,11 +2668,6 @@
       ? marker.count > inboundIndexes.length ? 0 : inboundIndexes[inboundIndexes.length - marker.count]
       : -1;
     sortedMessages.forEach((message, index) => {
-      const currentDate = dateLabel(message.timestamp);
-      if (currentDate !== dateKey) {
-        host.append(element("div", "date-divider", currentDate));
-        dateKey = currentDate;
-      }
       if (index === unreadStartIndex) {
         const label = `${marker.count} unread message${marker.count === 1 ? "" : "s"}`;
         const divider = element("div", "unread-divider", label);
@@ -2625,6 +2679,8 @@
     });
     renderComposerState();
     host.scrollTop = stayAtBottom ? host.scrollHeight : Math.min(previousScrollTop, host.scrollHeight - host.clientHeight);
+    if (stayAtBottom) resetNewMessagesBelow(conversation.conversationId);
+    else renderMessageJumpButton();
   }
 
   function isWhatsAppRoute(route) {
@@ -2800,6 +2856,105 @@
     return { allowed: Date.now() < new Date(expiresAt).getTime(), expiresAt };
   }
 
+  function replyWindowCountdownText(expiresAt, now = Date.now()) {
+    const expiryTime = new Date(expiresAt).getTime();
+    if (!Number.isFinite(expiryTime)) return "";
+    const seconds = Math.max(0, Math.ceil((expiryTime - Number(now)) / 1000));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = seconds % 60;
+    return [hours, minutes, remainder].map((value) => String(value).padStart(2, "0")).join(":");
+  }
+
+  function latestInboundWhatsAppReplyWindow(conversation = selectedConversation()) {
+    if (!conversation) return null;
+    const routes = conversationRoutes(conversation).filter(isWhatsAppRoute);
+    const candidates = [];
+    routes.forEach((route) => {
+      const routeExpiry = new Date(route.replyWindowExpiresAt || "").getTime();
+      const routeInbound = new Date(route.lastInboundAt || "").getTime();
+      const inboundAt = Number.isFinite(routeInbound)
+        ? routeInbound
+        : Number.isFinite(routeExpiry) ? routeExpiry - WHATSAPP_REPLY_WINDOW_MS : NaN;
+      if (!Number.isFinite(inboundAt)) return;
+      const expectedExpiry = inboundAt + WHATSAPP_REPLY_WINDOW_MS;
+      const authoritativeExpiry = Number.isFinite(routeExpiry) &&
+        (!Number.isFinite(routeInbound) || Math.abs(routeExpiry - expectedExpiry) < 60_000);
+      candidates.push({
+        inboundAt,
+        expiresAt: authoritativeExpiry ? routeExpiry : expectedExpiry,
+        routeKey: conversationRouteKey(route),
+      });
+    });
+    (state.messages.get(conversation.conversationId) || []).forEach((message) => {
+      if (message.direction !== "inbound") return;
+      const route = messageRoute(message, conversation);
+      if (!isWhatsAppRoute(route)) return;
+      const inboundAt = new Date(message.timestamp || "").getTime();
+      if (!Number.isFinite(inboundAt)) return;
+      const routeKey = conversationRouteKey(route || {});
+      const authoritativeRoute = candidates.find((candidate) => candidate.routeKey === routeKey && candidate.inboundAt >= inboundAt);
+      candidates.push({
+        inboundAt,
+        expiresAt: authoritativeRoute?.expiresAt || inboundAt + WHATSAPP_REPLY_WINDOW_MS,
+        routeKey,
+      });
+    });
+    if (!candidates.length) return null;
+    return candidates.reduce((latest, candidate) => candidate.inboundAt > latest.inboundAt ? candidate : latest);
+  }
+
+  function stopWhatsAppReplyCountdown({ hide = false } = {}) {
+    if (whatsappReplyCountdownTimer !== null) {
+      clearInterval(whatsappReplyCountdownTimer);
+      whatsappReplyCountdownTimer = null;
+    }
+    whatsappReplyCountdownKey = "";
+    if (!hide) return;
+    const host = $("whatsappReplyCountdown");
+    const textHost = $("whatsappReplyCountdownText");
+    host.hidden = true;
+    textHost.textContent = "";
+    host.removeAttribute("data-expired");
+    host.title = "";
+  }
+
+  function syncWhatsAppReplyCountdown(conversation = selectedConversation()) {
+    const host = $("whatsappReplyCountdown");
+    const textHost = $("whatsappReplyCountdownText");
+    const windowState = latestInboundWhatsAppReplyWindow(conversation);
+    if (!conversation || !windowState) {
+      stopWhatsAppReplyCountdown({ hide: true });
+      return;
+    }
+    const key = `${conversation.conversationId}:${windowState.routeKey}:${windowState.expiresAt}`;
+    if (key !== whatsappReplyCountdownKey) {
+      stopWhatsAppReplyCountdown();
+      whatsappReplyCountdownKey = key;
+    }
+    const update = () => {
+      if (state.selectedConversationId !== conversation.conversationId || whatsappReplyCountdownKey !== key) {
+        stopWhatsAppReplyCountdown({ hide: true });
+        return;
+      }
+      const remaining = replyWindowCountdownText(windowState.expiresAt);
+      const expired = new Date(windowState.expiresAt).getTime() <= Date.now();
+      host.hidden = false;
+      textHost.textContent = remaining || "00:00:00";
+      host.dataset.expired = String(expired);
+      host.title = expired ? "WhatsApp reply window expired" : `WhatsApp reply window: ${textHost.textContent} remaining`;
+      host.setAttribute("aria-label", host.title);
+      if (expired && whatsappReplyCountdownTimer !== null) {
+        clearInterval(whatsappReplyCountdownTimer);
+        whatsappReplyCountdownTimer = null;
+      }
+    };
+    update();
+    if (whatsappReplyCountdownTimer === null && new Date(windowState.expiresAt).getTime() > Date.now()) {
+      whatsappReplyCountdownTimer = setInterval(update, 1000);
+    }
+  }
+
   function closeComposerRouteMenu({ restoreFocus = false } = {}) {
     const menu = $("composerRouteMenu");
     const button = $("composerRouteButton");
@@ -2902,6 +3057,7 @@
     }
     renderComposerRouteControl(conversation, route);
     renderAttachmentQueue();
+    syncWhatsAppReplyCountdown(conversation);
   }
 
   let contactIdentityDraftSequence = 0;
@@ -4677,7 +4833,7 @@
 
       const statusCell = document.createElement("td");
       statusCell.append(element("span", `status-chip${member.status !== "active" ? " is-inactive" : ""}`, member.status === "active" ? "Enabled" : "Disabled"));
-      row.append(statusCell, tableCell(dateLabel(member.createdAt)));
+      row.append(statusCell, tableCell(formatCalendarDate(member.createdAt)));
 
       const actionCell = document.createElement("td");
       const actionWrap = element("div", "member-actions");
@@ -4905,11 +5061,12 @@
     input.value = "";
     resizeComposer();
     $("sendButton").disabled = true;
+    clearUnreadMarkerAfterOutbound({ direction: "outbound" }, conversation.conversationId);
     try {
       const result = await state.api.sendMessage(conversation.conversationId, text, replyToMessageId, route || {});
       const message = normalizeMessage(result.item || { text, direction: "outbound", status: "sent", ...route });
       upsertMessage(conversation.conversationId, message);
-      conversation.lastMessage = message.text;
+      conversation.lastMessage = conversationMessagePreview(message) || message.text;
       conversation.lastMessageType = String(message.messageType || "text").toLocaleLowerCase();
       conversation.lastMessageAt = message.timestamp;
       upsertRenderedMessage(message, conversation.conversationId);
@@ -5583,6 +5740,7 @@
     const submit = $("templateSubmit");
     submit.disabled = true;
     submit.textContent = "Sending…";
+    clearUnreadMarkerAfterOutbound({ direction: "outbound" }, conversation.conversationId);
     try {
       const componentMap = new Map();
       let mediaPreview = null;
@@ -5633,7 +5791,7 @@
       const fallback = previewText || `Template: ${name}`;
       const message = normalizeMessage(result.item || result.message || { text: fallback, direction: "outbound", status: "pending", messageType: "template", ...route });
       upsertMessage(conversation.conversationId, message);
-      conversation.lastMessage = message.text || fallback;
+      conversation.lastMessage = conversationMessagePreview(message) || fallback;
       conversation.lastMessageType = "template";
       conversation.lastMessageAt = message.timestamp;
       closeTemplateDialog();
@@ -5738,6 +5896,7 @@
     const replyToMessageId = state.replyingTo?.conversationId === conversation.conversationId
       ? state.replyingTo.messageId : "";
     const route = selectedComposerRoute(conversation);
+    clearUnreadMarkerAfterOutbound({ direction: "outbound" }, conversation.conversationId);
     try {
       while (queue.length) {
         const item = queue[0];
@@ -5752,7 +5911,7 @@
         const fallback = sent === 0 && caption ? caption : `[Attachment: ${item.file.name}]`;
         const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "document", ...route });
         upsertMessage(conversation.conversationId, message);
-        conversation.lastMessage = message.text || fallback;
+        conversation.lastMessage = conversationMessagePreview(message) || fallback;
         conversation.lastMessageType = String(message.messageType || "document").toLocaleLowerCase();
         conversation.lastMessageAt = message.timestamp;
         if (stillSelected()) upsertRenderedMessage(message, conversation.conversationId);
@@ -5863,7 +6022,7 @@
       if (conversation) {
         conversation.lastMessageType = String(message.messageType || "text").toLocaleLowerCase();
         if (!rawConversation) {
-          conversation.lastMessage = messageDisplayText(message);
+          conversation.lastMessage = conversationMessagePreview(message) || messageDisplayText(message);
           conversation.lastMessageAt = message.timestamp;
         }
         if (message.direction === "inbound") {
@@ -6922,6 +7081,7 @@
     state.selectedConversationId = null;
     state.pendingConversationId = null;
     state.unreadMarker = null;
+    resetNewMessagesBelow("");
     state.replyingTo = null;
     state.detailsOpen = false;
     $("inboxGrid").classList.remove("chat-open", "has-details");
@@ -7046,19 +7206,23 @@
     return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(timestamp));
   }
 
-  function dateLabel(value) {
-    const date = new Date(value);
-    const today = new Date();
-    const yesterday = new Date();
-    yesterday.setDate(today.getDate() - 1);
-    if (date.toDateString() === today.toDateString()) return "Today";
-    if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
-    return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: date.getFullYear() === today.getFullYear() ? undefined : "numeric" }).format(date);
-  }
-
   function formatClock(value) {
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+    if (Number.isNaN(date.getTime())) return "";
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const day = String(date.getDate()).padStart(2, "0");
+    const year = date.getFullYear() === new Date().getFullYear() ? "" : ` ${date.getFullYear()}`;
+    const hour = String(date.getHours() % 12 || 12).padStart(2, "0");
+    const minute = String(date.getMinutes()).padStart(2, "0");
+    const period = date.getHours() < 12 ? "am" : "pm";
+    return `${day} ${monthNames[date.getMonth()]}${year} · ${hour}:${minute} ${period}`;
+  }
+
+  function formatCalendarDate(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(undefined, {
+      day: "numeric", month: "short", year: "numeric",
+    }).format(date);
   }
 
   function resizeComposer() {
@@ -7321,6 +7485,14 @@
 
     let replySwipe = null;
     const messageThread = $("messageThread");
+    messageThread.addEventListener("scroll", () => {
+      if (messageThreadNearBottom(messageThread)) resetNewMessagesBelow(state.selectedConversationId);
+      else renderMessageJumpButton();
+    }, { passive: true });
+    $("messageJumpButton").addEventListener("click", () => {
+      messageThread.scrollTop = messageThread.scrollHeight;
+      resetNewMessagesBelow(state.selectedConversationId);
+    });
     messageThread.addEventListener("pointerdown", (event) => {
       const row = event.target.closest(".message-row[data-replyable='true']");
       if (!row || event.button > 0 || event.target.closest("button,a,input,video,audio")) return;

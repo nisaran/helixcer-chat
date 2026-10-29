@@ -457,6 +457,10 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .chat-channel-badge span { overflow: hidden; max-width: 190px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-profile-id { min-width: 0; overflow: hidden; max-width: 210px; flex: 0 1 auto; color: #526075; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; font-variant-numeric: tabular-nums; }
 .chat-actions { display: flex; align-items: center; gap: 5px; margin-left: auto; }
+.whatsapp-reply-countdown { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 93px; height: 28px; border: 1px solid #bfe4d3; border-radius: 999px; background: #eef9f4; color: #247153; padding: 0 8px; white-space: nowrap; font: 750 11px/1 ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.whatsapp-reply-countdown img { width: 17px; height: 17px; flex: 0 0 17px; object-fit: contain; }
+.whatsapp-reply-countdown[hidden] { display: none; }
+.whatsapp-reply-countdown[data-expired="true"] { border-color: var(--line); background: #f3f5f3; color: var(--muted); }
 .conversation-menu-wrap { position: relative; flex: 0 0 auto; }
 .conversation-more-button { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: #697572; padding: 0; }
 .conversation-more-button:hover, .conversation-more-button[aria-expanded="true"] { border-color: var(--line); background: #f6f7f5; color: var(--ink); }
@@ -469,28 +473,12 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .assignee-select { max-width: 145px; }
 
 .message-thread { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scroll-behavior: auto; padding: 16px clamp(16px, 3vw, 38px) 12px; scrollbar-color: #d1d5d2 transparent; }
-.date-divider {
-  position: sticky;
-  top: 8px;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  width: max-content;
-  max-width: calc(100% - 24px);
-  border: 1px solid rgba(102,113,109,.14);
-  border-radius: 999px;
-  background: rgba(248,249,247,.94);
-  box-shadow: 0 2px 7px rgba(20,29,26,.08);
-  margin: 10px auto 20px;
-  padding: 5px 10px;
-  color: #6f7a77;
-  backdrop-filter: blur(8px);
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: .02em;
-  text-transform: none;
-}
-.date-divider::before, .date-divider::after { content: none; }
+.message-jump-button { position: absolute; z-index: 18; right: clamp(18px, 3vw, 38px); bottom: 108px; display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid rgba(102,113,109,.18); border-radius: 50%; background: var(--chat-incoming); box-shadow: 0 5px 16px rgba(20,29,26,.18); color: #52605d; padding: 0; cursor: pointer; }
+.message-jump-button[hidden] { display: none; }
+.message-jump-button:hover { border-color: rgba(109,59,234,.35); color: var(--brand); }
+.message-jump-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.message-jump-count { position: absolute; top: -7px; right: -4px; display: grid; place-items: center; min-width: 21px; height: 21px; border: 2px solid var(--chat-canvas); border-radius: 999px; background: var(--brand); color: white; padding: 0 5px; font-size: 9px; font-weight: 850; line-height: 1; }
+.message-jump-count[hidden] { display: none; }
 .unread-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--brand); font-size: 10px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; }
 .unread-divider::before, .unread-divider::after { content: ""; flex: 1; height: 1px; background: rgba(109,59,234,.28); }
 .message-row { display: flex; align-items: flex-end; gap: 8px; margin: 8px 0; }
@@ -508,7 +496,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .message-row.is-located .message-bubble { animation: located-message 1.3s ease; }
 @keyframes located-message { 20%, 70% { box-shadow: 0 0 0 4px rgba(109,59,234,.2), 0 8px 24px rgba(16,24,40,.1); } }
 .message-row.is-outbound .message-bubble { border-color: transparent; border-radius: 18px 18px 5px 18px; background: var(--chat-outgoing); }
-.message-route-meta { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; color: #74807d; margin-top: 3px; padding-inline: 3px; font-size: 9px; line-height: 1.25; }
+.message-route-meta { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; color: #74807d; margin-top: 1px; font-size: 9px; line-height: 1.25; }
 .message-route-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .message-route-logo { width: 13px; height: 13px; flex: 0 0 13px; border-radius: 50%; object-fit: contain; }
 .message-route-meta .provider-logo-fallback { display: grid; place-items: center; background: #e6eae7; color: #56625f; font-size: 5px; font-weight: 850; }
@@ -582,7 +570,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .composer-icon:hover { background: #f2f4f1; color: var(--ink); }
 .composer-icon:disabled { cursor: not-allowed; opacity: .42; }
 .composer-icon svg { width: 18px; height: 18px; }
-.template-button { min-height: 29px; border: 1px solid #cce2d7; border-radius: 8px; background: #eff9f4; color: var(--green); padding: 4px 9px; font-size: 10px; font-weight: 800; }
+.template-button { height: 36px; min-height: 36px; border: 1px solid #cce2d7; border-radius: 10px; background: #eff9f4; color: var(--green); padding: 0 10px; font-size: 10px; font-weight: 800; }
 .template-button:hover { border-color: #9fcbb6; background: #e4f5ec; }
 .attachment-status { border-top: 1px solid #edf0ed; color: var(--green); margin-top: 7px; padding: 8px 2px 1px; font-size: 10px; font-weight: 650; overflow-wrap: anywhere; }
 .attachment-status.is-error { color: #a33d2b; }
@@ -1196,6 +1184,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .chat-profile-id { max-width: min(30vw, 140px); }
   #chatPresence { display: none; }
   .chat-actions .icon-button { display: none; }
+  .whatsapp-reply-countdown { min-width: 88px; height: 27px; gap: 4px; padding-inline: 6px; font-size: 10px; }
+  .whatsapp-reply-countdown img { width: 16px; height: 16px; flex-basis: 16px; }
   .compact-select { max-width: 92px; }
   .assignee-select { display: none; }
   .message-stack { max-width: 86%; }
