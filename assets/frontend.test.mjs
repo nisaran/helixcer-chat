@@ -223,8 +223,8 @@ test("WhatsApp inbox supports rendered templates, queued attachments, and reply-
   assert.match(app, /: "Message\.\.\."/);
   assert.match(html, /placeholder="Message\.\.\."/);
   assert.match(styles, /\.composer\.is-window-closed textarea::placeholder\s*\{[^}]*color:\s*#9a4f12[^}]*opacity:\s*1/);
-  assert.match(styles, /\.composer\.is-window-closed \.composer-box[\s\S]*border-color:\s*#e7b67c;[^}]*background:\s*#e5e7eb;[^}]*box-shadow:\s*none/);
-  assert.match(styles, /\.composer\.is-window-closed textarea\s*\{[^}]*background:\s*#e5e7eb/);
+  assert.match(styles, /\.composer\.is-window-closed \.composer-box[\s\S]*border-color:\s*#e7b67c;[^}]*background:\s*#eef0f3;[^}]*box-shadow:\s*none/);
+  assert.match(styles, /\.composer\.is-window-closed textarea\s*\{[^}]*background:\s*#eef0f3/);
   assert.match(html, /id="templateSelect"/);
   assert.match(html, /id="templateVariableFields"/);
   assert.match(app, /parameter_name/);
