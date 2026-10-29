@@ -527,6 +527,10 @@ test("conversation routes drive replies, templates, media, and every outbound AP
   assert.match(app, /formData\.append\("identityId", route\.identityId\)/);
   assert.match(app, /getTemplates\(conversationId, route = \{\}\)[\s\S]*?query\.set\("channelId", route\.channelId\)[\s\S]*?query\.set\("identityId", route\.identityId\)/);
   assert.match(app, /function whatsappReplyWindow\(conversation = selectedConversation\(\), route = selectedComposerRoute\(conversation\)\)/);
+  assert.match(app, /function selectRequestedComposerRoute\(conversationId, requestedRoute\)/);
+  assert.match(app, /state\.composerRoutes\.set\(conversationId, conversationRouteKey\(selected\)\)/);
+  assert.match(app, /24-hour window closed — only approved templates can be sent/);
+  assert.match(app, /input\.setAttribute\("aria-describedby", "replyWindowMessage"\)/);
 });
 
 test("contacts use one flat ID per platform and open the exact saved channel route", () => {
@@ -605,6 +609,8 @@ test("contacts use one flat ID per platform and open the exact saved channel rou
   const openRouteBody = app.slice(app.indexOf("async function openContactRoute"),
     app.indexOf("function closeContactRouteMenu"));
   assert.match(openRouteBody, /route\.channelId \? \{ channelId: route\.channelId \} : \{\}/);
+  assert.match(openRouteBody, /selectRequestedComposerRoute\(route\.conversationId, route\)/);
+  assert.match(openRouteBody, /selectRequestedComposerRoute\(conversationId, route\)/);
   assert.match(app, /function openContactIdentityDefault\(contactId, identityId\)/);
   assert.match(app, /function chooseContactIdentityRoute\(contactId, identityId, trigger\)/);
   assert.match(app, /context\.routes\.find\(\(item\) => item\.eligible\)/);

@@ -2984,6 +2984,23 @@
     renderComposerState();
   }
 
+  function selectRequestedComposerRoute(conversationId, requestedRoute) {
+    const conversation = state.conversations.find((item) => item.conversationId === conversationId);
+    if (!conversation || !requestedRoute?.channelId) return false;
+    const routes = conversationRoutes(conversation);
+    const exact = routes.find((route) => route.channelId === requestedRoute.channelId &&
+      (!requestedRoute.identityId || route.identityId === requestedRoute.identityId));
+    const selected = exact || routes.find((route) => route.channelId === requestedRoute.channelId);
+    if (!selected) return false;
+    // A route chosen from a contact is an explicit agent choice. Keep that
+    // route selected even when its WhatsApp free-form window is closed; the
+    // composer will block text while leaving templates and route switching
+    // available instead of silently falling back to another provider.
+    state.composerRoutes.set(conversationId, conversationRouteKey(selected));
+    if (state.selectedConversationId === conversationId) renderComposerState();
+    return true;
+  }
+
   function renderComposerRouteControl(conversation, selectedRoute = selectedComposerRoute(conversation)) {
     const button = $("composerRouteButton");
     const logo = $("composerRouteLogo");
@@ -3042,7 +3059,9 @@
     const attachmentSupported = supportsChatAttachments(conversation);
     attach.disabled = blocked || !attachmentSupported;
     greeting.disabled = blocked;
-    input.placeholder = blocked ? "The WhatsApp reply window is closed" : "Write a reply…";
+    input.placeholder = blocked ? "24-hour window closed — only approved templates can be sent" : "Write a reply…";
+    if (blocked) input.setAttribute("aria-describedby", "replyWindowMessage");
+    else input.removeAttribute("aria-describedby");
     $("messageForm").classList.toggle("is-window-closed", blocked);
     attach.title = !attachmentSupported ? "Attachments are available for WhatsApp and Telegram conversations"
       : blocked ? "Send an approved template to reopen the conversation" : "Attach files";
@@ -3641,6 +3660,7 @@
     if (route.conversationId && state.conversations.some((conversation) => conversation.conversationId === route.conversationId)) {
       setRoute("inbox");
       await selectConversation(route.conversationId);
+      selectRequestedComposerRoute(route.conversationId, route);
       return;
     }
     try {
@@ -3649,7 +3669,10 @@
       const conversationId = String(result.conversationId || result.item?.conversationId || "");
       await loadAll({ preserveSelection: false });
       setRoute("inbox");
-      if (conversationId) await selectConversation(conversationId);
+      if (conversationId) {
+        await selectConversation(conversationId);
+        selectRequestedComposerRoute(conversationId, route);
+      }
     } catch (error) {
       showToast("Conversation could not be opened", error.message, true);
     }
