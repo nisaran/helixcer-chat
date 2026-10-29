@@ -486,6 +486,8 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(styles, /\.chat-contact-card\s*\{/);
   assert.match(styles, /\.message-route-meta\s*\{/);
   assert.match(styles, /\.composer-route-menu\s*\{/);
+  assert.match(styles, /\.template-button\s*\{[^}]*height:\s*34px;[^}]*min-height:\s*34px/);
+  assert.match(styles, /\.composer-route-button\s*\{[^}]*height:\s*34px/);
   assert.match(app, /function unifiedConversations\(\)/);
   assert.match(app, /const key = conversation\.contactId \|\| `conversation:/);
   assert.match(app, /routeMeta\.append\(providerLogo\(route\.connectorType, "message-route-logo"\)\)/);
@@ -641,6 +643,7 @@ test("every message carries an exact local date and time without date-divider pi
   assert.doesNotMatch(html, /date-divider/);
   assert.doesNotMatch(styles, /\.date-divider/);
   assert.doesNotMatch(app, /element\("div", "date-divider"/);
+  assert.match(styles, /\.message-foot time\s*\{\s*font-size:\s*9px/);
   const start = app.indexOf("function formatClock");
   const end = app.indexOf("function formatCalendarDate", start);
   const formatClock = Function(`${app.slice(start, end)}\nreturn formatClock;`)();
@@ -765,6 +768,8 @@ test("the chat header shows a live WhatsApp reply-window countdown only for inbo
   assert.match(html, /id="whatsappReplyCountdownText"/);
   assert.match(styles, /\.whatsapp-reply-countdown\s*\{/);
   assert.match(styles, /\.whatsapp-reply-countdown img\s*\{/);
+  assert.match(styles, /\.whatsapp-reply-countdown\s*\{[^}]*height:\s*31px;[^}]*font:\s*750 12px\/1/);
+  assert.match(styles, /\.whatsapp-reply-countdown img\s*\{[^}]*width:\s*19px;[^}]*height:\s*19px/);
   assert.match(styles, /\.whatsapp-reply-countdown\[hidden\]\s*\{\s*display:\s*none/);
 
   const formatterStart = app.indexOf("function replyWindowCountdownText");

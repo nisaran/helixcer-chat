@@ -457,8 +457,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .chat-channel-badge span { overflow: hidden; max-width: 190px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-profile-id { min-width: 0; overflow: hidden; max-width: 210px; flex: 0 1 auto; color: #526075; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; font-variant-numeric: tabular-nums; }
 .chat-actions { display: flex; align-items: center; gap: 5px; margin-left: auto; }
-.whatsapp-reply-countdown { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 93px; height: 28px; border: 1px solid #bfe4d3; border-radius: 999px; background: #eef9f4; color: #247153; padding: 0 8px; white-space: nowrap; font: 750 11px/1 ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
-.whatsapp-reply-countdown img { width: 17px; height: 17px; flex: 0 0 17px; object-fit: contain; }
+.whatsapp-reply-countdown { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 101px; height: 31px; border: 1px solid #bfe4d3; border-radius: 999px; background: #eef9f4; color: #247153; padding: 0 9px; white-space: nowrap; font: 750 12px/1 ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.whatsapp-reply-countdown img { width: 19px; height: 19px; flex: 0 0 19px; object-fit: contain; }
 .whatsapp-reply-countdown[hidden] { display: none; }
 .whatsapp-reply-countdown[data-expired="true"] { border-color: var(--line); background: #f3f5f3; color: var(--muted); }
 .conversation-menu-wrap { position: relative; flex: 0 0 auto; }
@@ -508,6 +508,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .message-template-action + .message-template-action { border-top: 1px solid rgba(109,59,234,.12); }
 .message-template-action[aria-disabled="true"] { cursor: default; }
 .message-foot { display: flex; justify-content: flex-end; align-items: center; gap: 5px; min-width: 65px; margin-top: 5px; color: var(--chat-meta); font-size: 10px; }
+.message-foot time { font-size: 9px; }
 .delivery-status { font-size: 10px; font-weight: 750; white-space: nowrap; }
 .delivery-status.is-sent, .delivery-status.is-pending { color: #7b8582; }
 .delivery-status.is-delivered { color: #397468; }
@@ -570,7 +571,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .composer-icon:hover { background: #f2f4f1; color: var(--ink); }
 .composer-icon:disabled { cursor: not-allowed; opacity: .42; }
 .composer-icon svg { width: 18px; height: 18px; }
-.template-button { height: 36px; min-height: 36px; border: 1px solid #cce2d7; border-radius: 10px; background: #eff9f4; color: var(--green); padding: 0 10px; font-size: 10px; font-weight: 800; }
+.template-button { height: 34px; min-height: 34px; border: 1px solid #cce2d7; border-radius: 10px; background: #eff9f4; color: var(--green); padding: 0 10px; font-size: 10px; font-weight: 800; }
 .template-button:hover { border-color: #9fcbb6; background: #e4f5ec; }
 .attachment-status { border-top: 1px solid #edf0ed; color: var(--green); margin-top: 7px; padding: 8px 2px 1px; font-size: 10px; font-weight: 650; overflow-wrap: anywhere; }
 .attachment-status.is-error { color: #a33d2b; }
@@ -591,7 +592,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .attachment-preview-actions { justify-content: flex-end; }
 .send-group { gap: 10px !important; }
 .composer-route-wrap { position: relative; }
-.composer-route-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; max-width: min(220px, 32vw); height: 36px; border: 1px solid var(--line-strong); border-radius: 10px; background: white; color: #66716e; padding: 0 8px; }
+.composer-route-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; max-width: min(220px, 32vw); height: 34px; border: 1px solid var(--line-strong); border-radius: 10px; background: white; color: #66716e; padding: 0 8px; }
 .composer-route-button:hover, .composer-route-button[aria-expanded="true"] { border-color: #b9ade4; background: #f9f7ff; }
 .composer-route-button:disabled { cursor: not-allowed; opacity: .58; }
 .composer-route-button > svg { width: 13px; height: 13px; flex: 0 0 13px; fill: none; stroke: currentColor; stroke-width: 2; }
@@ -1184,8 +1185,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .chat-profile-id { max-width: min(30vw, 140px); }
   #chatPresence { display: none; }
   .chat-actions .icon-button { display: none; }
-  .whatsapp-reply-countdown { min-width: 88px; height: 27px; gap: 4px; padding-inline: 6px; font-size: 10px; }
-  .whatsapp-reply-countdown img { width: 16px; height: 16px; flex-basis: 16px; }
+  .whatsapp-reply-countdown { min-width: 96px; height: 30px; gap: 5px; padding-inline: 7px; font-size: 11px; }
+  .whatsapp-reply-countdown img { width: 18px; height: 18px; flex-basis: 18px; }
   .compact-select { max-width: 92px; }
   .assignee-select { display: none; }
   .message-stack { max-width: 86%; }
