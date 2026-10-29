@@ -5,6 +5,7 @@ import {
   createInvitation,
   finishGoogleOAuthResponse,
   listTeam,
+  loginWithPassword,
   logout,
   mobileAuthConfiguration,
   principalView,
@@ -23,6 +24,14 @@ import {
   sendWorkspaceMobileConversationRead,
   sendWorkspaceNotifications
 } from './push.js';
+import { adminAsset } from './admin-page.js';
+import {
+  assertPlatformAdmin,
+  createClientWorkspace,
+  listClientWorkspaces,
+  platformProfile,
+  updateClientWorkspace
+} from './platform.js';
 
 const API_VERSION = '2026-10-26-chat-media';
 const MAX_TEXT_LENGTH = 4096;
@@ -207,6 +216,7 @@ export class InboxHub {
         attachment.expiresAt <= new Date().toISOString()) return false;
     const active = await this.env.DB.prepare(`SELECT 1 FROM sessions s
       JOIN memberships m ON m.membership_id=?2 AND m.user_id=s.user_id AND m.workspace_id=s.workspace_id
+      JOIN workspaces w ON w.workspace_id=s.workspace_id AND w.status='active'
       WHERE s.session_id=?1 AND s.revoked_at IS NULL AND s.expires_at>?3 AND m.status='active'`)
       .bind(attachment.sessionId, attachment.membershipId, new Date().toISOString()).first();
     return Boolean(active);
@@ -224,6 +234,8 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     return new Response(null, { status: 204, headers: cors });
   }
   try {
+    const adminResponse = adminAsset(url);
+    if (adminResponse) return adminResponse;
     if (request.method === 'GET' && url.pathname === '/health') {
       return withCors(json({ ok: true, service: 'helixcer-chat-api', version: API_VERSION }), cors);
     }
@@ -233,6 +245,14 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return await startGoogleOAuth(request, env);
     }
     if (request.method === 'GET' && url.pathname === '/auth/google/callback') return await finishGoogleOAuthResponse(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/auth/password') {
+      if (request.headers.get('Origin') && !cors['Access-Control-Allow-Origin']) {
+        return json({ ok: false, error: 'Origin not allowed.' }, 403);
+      }
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return withCors(limited, cors);
+      return withCors(await loginWithPassword(env, await readJson(request)), cors);
+    }
     if (request.method === 'GET' && url.pathname === '/auth/mobile/config') {
       return json(mobileAuthConfiguration(env));
     }
@@ -287,6 +307,26 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return json({ ok: false, error: 'Origin not allowed.' }, 403);
     }
     const workspaceId = principal.workspace.workspaceId;
+    if (url.pathname.startsWith('/api/platform/')) {
+      await assertPlatformAdmin(env, principal);
+      if (url.pathname === '/api/platform/me' && request.method === 'GET') {
+        return withCors(json(await platformProfile(env, principal)), cors);
+      }
+      if (url.pathname === '/api/platform/clients' && request.method === 'GET') {
+        return withCors(json(await listClientWorkspaces(env)), cors);
+      }
+      if (url.pathname === '/api/platform/clients' && request.method === 'POST') {
+        return withCors(json(await createClientWorkspace(env, principal, await readJson(request)), 201), cors);
+      }
+      const clientMatch = url.pathname.match(/^\/api\/platform\/clients\/([^/]+)$/);
+      if (clientMatch && request.method === 'PATCH') {
+        const clientId = decodeURIComponent(clientMatch[1]);
+        const result = await updateClientWorkspace(env, principal, clientId, await readJson(request));
+        if (result.suspended) await disconnectRealtime(env, clientId, {});
+        return withCors(json(result), cors);
+      }
+      return withCors(json({ ok: false, error: 'API route not found.' }, 404), cors);
+    }
     if (url.pathname === '/api/me' && request.method === 'GET') {
       return withCors(json(principalView(principal)), cors);
     }

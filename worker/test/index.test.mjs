@@ -394,6 +394,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const contactIdentities = await readFile(new URL('../migrations/0012_contact_identities.sql', import.meta.url), 'utf8');
   const flatContactPlatformIds = await readFile(new URL('../migrations/0013_flat_contact_platform_ids.sql', import.meta.url), 'utf8');
   const unifiedContactConversations = await readFile(new URL('../migrations/0014_unified_contact_conversations.sql', import.meta.url), 'utf8');
+  const saasClients = await readFile(new URL('../migrations/0015_saas_clients.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -467,6 +468,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   database.exec(contactIdentities);
   database.exec(flatContactPlatformIds);
   database.exec(unifiedContactConversations);
+  database.exec(saasClients);
   const migratedWorkspaceId = database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id;
   assert.match(migratedWorkspaceId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(database.prepare("SELECT count(*) AS count FROM workspaces WHERE workspace_id='ws_default'").get().count, 0);
@@ -474,7 +476,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   for (const name of ['workspaces', 'users', 'memberships', 'sessions', 'oauth_states', 'invitations', 'channels', 'channel_credentials',
     'contacts', 'messages', 'audit_log', 'api_keys', 'outbound_payloads', 'external_api_requests', 'push_subscriptions',
     'mobile_push_devices', 'mobile_auth_challenges', 'contact_identities', 'channel_identity_bindings', 'contact_platform_ids',
-    'identity_migration_issues']) {
+    'identity_migration_issues', 'user_passwords', 'platform_admins']) {
     assert.ok(tables.includes(name), `missing table ${name}`);
   }
   for (const [table, idColumn, id] of [

@@ -94,7 +94,9 @@ Never place Google credentials, provider tokens, signing secrets, the bootstrap 
 
 The primary Owner is not hardcoded. The first matching, Google-verified identity can claim ownership only while the membership table is empty. After that one-time bootstrap, D1 memberships are authoritative and changing the environment value cannot replace the Owner. New people require an email-bound invitation.
 
-The current UI intentionally exposes one workspace and no billing. Business records, memberships, sessions, realtime hubs, and audit entries already carry `workspace_id`, so a future SaaS version can add workspace provisioning and switching without redesigning the inbox data model.
+Helixcer operators manage client companies at `https://admin.chat.helixcer.com`. That hostname is served by the same Worker as the API. Create a client with a company name, owner name, owner email, and password. The owner then signs in at `https://chat.helixcer.com` with those details. Google sign-in remains available for people invited into a workspace. The configured `BOOTSTRAP_OWNER_EMAIL` is the platform administrator. Apply migration `0015_saas_clients.sql` before deploying the Worker that reads client status, and add `admin.chat.helixcer.com` to the same Cloudflare Pages project as `api.chat.helixcer.com`.
+
+The inbox shows the signed-in client's workspace and has no billing page. Business records, memberships, sessions, realtime hubs, and audit entries stay scoped by `workspace_id`.
 
 ## Cost controls
 

@@ -140,7 +140,7 @@ export async function authenticateRequest(request, env) {
     FROM sessions s JOIN users u ON u.user_id=s.user_id
       JOIN memberships m ON m.user_id=s.user_id AND m.workspace_id=s.workspace_id
       JOIN workspaces w ON w.workspace_id=s.workspace_id
-    WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2 AND m.status='active'`)
+    WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2 AND m.status='active' AND w.status='active'`)
     .bind(await hashToken(rawToken), new Date().toISOString()).first();
   if (!row) return null;
   const expectedSource = row.session_type === 'mobile' ? 'bearer' : 'cookie';
@@ -167,6 +167,41 @@ export async function logout(request, env) {
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
     headers: { 'Content-Type': 'application/json; charset=utf-8', 'Set-Cookie': clearCookieHeader(SESSION_COOKIE) }
+  });
+}
+
+export async function loginWithPassword(env, payload) {
+  const email = normalizeEmail(payload?.email);
+  const password = String(payload?.password || '');
+  if (!email || !email.includes('@') || email.length > 254) throw authError(400, 'A valid email is required.');
+  if (!password || password.length > 128) throw authError(401, 'The email or password is incorrect.');
+  const user = await env.DB.prepare('SELECT user_id FROM users WHERE lower(email)=?1').bind(email).first();
+  const stored = user
+    ? await env.DB.prepare('SELECT password_hash,salt,iterations FROM user_passwords WHERE user_id=?1').bind(user.user_id).first()
+    : null;
+  const valid = await verifyPassword(password, stored || await dummyPasswordRecord());
+  if (!user || !stored || !valid) throw authError(401, 'The email or password is incorrect.');
+  const row = await env.DB.prepare(`SELECT u.user_id,u.email,u.display_name,u.avatar_url,m.membership_id,m.role,m.status,
+      w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
+    FROM users u JOIN memberships m ON m.user_id=u.user_id JOIN workspaces w ON w.workspace_id=m.workspace_id
+    WHERE u.user_id=?1 AND m.status='active'
+    ORDER BY CASE WHEN w.status='active' THEN 0 ELSE 1 END,
+      CASE m.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END
+    LIMIT 1`).bind(user.user_id).first();
+  if (!row) throw authError(403, 'This client account is not active.');
+  const workspace = await env.DB.prepare('SELECT status FROM workspaces WHERE workspace_id=?1')
+    .bind(row.workspace_id).first();
+  if (workspace?.status !== 'active') throw authError(403, 'This client workspace is suspended.');
+  const principal = principalFromRow(row);
+  const session = await createSession(env, principal);
+  await auditAuthAction(env, principal, 'login', 'session', session.sessionId, { authProvider: 'password' });
+  return new Response(JSON.stringify({ ok: true, me: principalView(principal) }), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Set-Cookie': cookieHeader(SESSION_COOKIE, session.token, session.maxAge)
+    }
   });
 }
 
@@ -320,7 +355,7 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
   const row = await env.DB.prepare(`SELECT u.user_id,u.email,u.display_name,u.avatar_url,m.membership_id,m.role,m.status,
       w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
     FROM users u JOIN memberships m ON m.user_id=u.user_id JOIN workspaces w ON w.workspace_id=m.workspace_id
-    WHERE u.user_id=?1 AND m.status='active' AND (?2='' OR m.workspace_id=?2)
+    WHERE u.user_id=?1 AND m.status='active' AND w.status='active' AND (?2='' OR m.workspace_id=?2)
     ORDER BY CASE m.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END LIMIT 1`)
     .bind(user.user_id, selectedWorkspaceId).first();
   if (!row) {
@@ -328,6 +363,10 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
       await env.DB.prepare('DELETE FROM users WHERE user_id=?1 AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=?1)')
         .bind(user.user_id).run();
     }
+    const suspended = await env.DB.prepare(`SELECT 1 FROM memberships m
+      JOIN workspaces w ON w.workspace_id=m.workspace_id
+      WHERE m.user_id=?1 AND m.status='active' AND w.status='suspended'`).bind(user.user_id).first();
+    if (suspended) throw authError(403, 'This client workspace is suspended.');
     throw authError(403, 'Your account has not been invited to this workspace.');
   }
   return principalFromRow(row);
@@ -518,7 +557,7 @@ async function getGoogleJwks(url, fetchImpl, forceRefresh = false) {
   return body.keys;
 }
 
-async function auditAuthAction(env, principal, action, targetType, targetId, details) {
+export async function auditAuthAction(env, principal, action, targetType, targetId, details) {
   await env.DB.prepare(`INSERT INTO audit_log
       (audit_id,actor,action,target_type,target_id,details_json,timestamp,workspace_id,actor_user_id,actor_email)
     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?2)`)
@@ -717,6 +756,55 @@ function cleanMobileDeviceId(value) {
 function googleAuthorizedParties(env) {
   return [env.GOOGLE_CLIENT_ID, ...String(env.GOOGLE_ANDROID_CLIENT_IDS || '')
     .split(',').map(value => value.trim()).filter(Boolean)];
+}
+
+const PASSWORD_ITERATIONS = 210000;
+let dummyPassword;
+
+export async function hashPasswordRecord(password) {
+  const value = String(password || '');
+  if (value.length < 10 || value.length > 128) throw authError(400, 'Password must be 10 to 128 characters.');
+  if (/[\u0000-\u001f\u007f]/.test(value)) throw authError(400, 'Password contains unsupported characters.');
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await derivePassword(value, salt, PASSWORD_ITERATIONS);
+  return {
+    password_hash: bytesToBase64(hash),
+    salt: bytesToBase64(salt),
+    iterations: PASSWORD_ITERATIONS
+  };
+}
+
+async function dummyPasswordRecord() {
+  if (!dummyPassword) dummyPassword = await hashPasswordRecord('incorrect-password');
+  return dummyPassword;
+}
+
+async function verifyPassword(password, record) {
+  const salt = base64ToBytes(record.salt);
+  const iterations = Number(record.iterations) || PASSWORD_ITERATIONS;
+  const actual = bytesToBase64(await derivePassword(String(password || ''), salt, iterations));
+  return timingSafeEqual(actual, record.password_hash);
+}
+
+async function derivePassword(password, salt, iterations) {
+  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256);
+  return new Uint8Array(bits);
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(String(value || ''));
+  return Uint8Array.from(binary, character => character.charCodeAt(0));
+}
+
+export function normalizeAuthEmail(value) {
+  return normalizeEmail(value);
 }
 
 export async function hashToken(value) {

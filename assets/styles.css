@@ -78,7 +78,13 @@ body {
 .auth-spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid #e4ddd8; border-top-color: var(--brand); border-radius: 50%; animation: spin .75s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .auth-alert { border: 1px solid #f1c3b8; border-radius: 10px; background: #fff1ec; color: #963723; margin: 18px 0 0; padding: 9px 11px; text-align: left; font-size: 11px; }
-.google-signin { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 48px; border: 1px solid #d9ddda; border-radius: 12px; background: #fff; color: #26312f; box-shadow: var(--shadow-sm); margin-top: 24px; text-decoration: none; font-size: 13px; font-weight: 750; transition: border .15s ease, transform .15s ease, box-shadow .15s ease; }
+.client-signin { display: grid; gap: 8px; margin-top: 18px; text-align: left; }
+.client-signin input { width: 100%; min-height: 46px; border: 1px solid #d6dbe5; border-radius: 12px; background: white; color: var(--ink); padding: 0 12px; font: inherit; }
+.client-signin button { min-height: 46px; border: 0; border-radius: 12px; background: var(--brand); color: white; font: 750 13px/1 var(--font-sans); cursor: pointer; }
+.client-signin button:disabled { cursor: progress; opacity: .7; }
+.auth-divider { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin: 16px 0 0; color: #8a94a6; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.auth-divider::before, .auth-divider::after { content: ""; height: 1px; background: #e4e7ee; }
+.google-signin { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 48px; border: 1px solid #d9ddda; border-radius: 12px; background: #fff; color: #26312f; box-shadow: var(--shadow-sm); margin-top: 14px; text-decoration: none; font-size: 13px; font-weight: 750; transition: border .15s ease, transform .15s ease, box-shadow .15s ease; }
 .google-signin:hover { border-color: #bfc6c2; box-shadow: 0 7px 20px rgba(34,44,40,.09); transform: translateY(-1px); }
 .google-signin svg { width: 21px; height: 21px; stroke: none; }
 .google-signin svg path:nth-child(1) { fill: #4285f4; }
