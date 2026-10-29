@@ -576,8 +576,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .attachment-status { border-top: 1px solid #edf0ed; color: var(--green); margin-top: 7px; padding: 8px 2px 1px; font-size: 10px; font-weight: 650; overflow-wrap: anywhere; }
 .attachment-status.is-error { color: #a33d2b; }
 .composer.is-window-closed .composer-box,
-.composer.is-window-closed .composer-box:focus-within { border-color: #e7b67c; background: #eef0f3; box-shadow: none; }
-.composer.is-window-closed textarea { background: #eef0f3; color: #9a4f12; -webkit-text-fill-color: #9a4f12; opacity: 1; }
+.composer.is-window-closed .composer-box:focus-within { border-color: #e7b67c; background: #f6f7f9; box-shadow: none; }
+.composer.is-window-closed textarea { background: #f6f7f9; color: #9a4f12; -webkit-text-fill-color: #9a4f12; opacity: 1; }
 .composer.is-window-closed textarea::placeholder { color: #9a4f12; opacity: 1; }
 dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-width: none; overflow: hidden; padding: 18px; }
 .attachment-preview-card { display: flex; width: min(900px, calc(100vw - 36px)); max-height: calc(100dvh - 36px); flex-direction: column; }
