@@ -197,6 +197,7 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `PATCH|DELETE /api/contacts/:contactId/identities/:identityId`
 - `GET /api/tags` (workspace-scoped tag suggestions derived from saved contacts)
 - `GET /api/channel-data/whatsapp-templates`
+- `POST /api/channel-data/import-chat` (owner/admin; Interakt history import into a WhatsApp channel; no provider send)
 - `POST /api/demo/seed`
 - `GET /api/realtime` (WebSocket)
 - `POST /api/v1/whatsapp/template-messages` (server-to-server API key)

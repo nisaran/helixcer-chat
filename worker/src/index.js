@@ -41,12 +41,19 @@ import {
   updateClientWorkspace,
   updateWorkspaceMember
 } from './platform.js';
+import {
+  INTERAKT_SOURCE,
+  extractInteraktCustomer,
+  mapInteraktMessage,
+  validateInteraktBatch
+} from './imports/interakt.js';
 
 const API_VERSION = '2026-10-26-chat-media';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
 const MAX_JSON_BODY = 32768;
+const MAX_IMPORT_JSON_BODY = 1_500_000;
 const MAX_EXTERNAL_JSON_BODY = 131072;
 const MAX_CREDENTIAL_LENGTH = 4096;
 const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -453,6 +460,12 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json(await listWorkspaceWhatsAppTemplates(env, workspaceId, {
         forceRefresh: url.searchParams.get('refresh') === '1'
       })), cors);
+    }
+    if (url.pathname === '/api/channel-data/import-chat' && request.method === 'POST') {
+      requireRole(principal, 'admin');
+      const result = await importChatHistory(env, workspaceId, principal, await readImportJson(request));
+      await broadcast(env, workspaceId, { type: 'bootstrap.changed' });
+      return withCors(json(result, 201), cors);
     }
     if (url.pathname === '/api/channels' && request.method === 'POST') {
       requireRole(principal, 'admin');
@@ -6076,6 +6089,200 @@ async function seedDemo(env, workspaceId, principal) {
   return { ok: true, channelId, contactId, conversationId };
 }
 
+async function importChatHistory(env, workspaceId, principal, payload) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Import payload must be a JSON object.');
+  rejectUnknownKeys(payload, new Set(['source', 'channelId', 'conversations']), 'import request');
+  const source = String(payload.source || '').trim().toLowerCase();
+  if (source !== INTERAKT_SOURCE) {
+    throw httpError(400, 'Unsupported import source. Choose Interakt for now.');
+  }
+  const channelId = cleanId(payload.channelId, 'Channel ID');
+  const channel = await getChannel(env, channelId, '', workspaceId);
+  if (!channel) throw httpError(404, 'Channel not found.');
+  if (channel.connectorType !== 'whatsapp_cloud') {
+    throw httpError(400, 'Interakt imports require a WhatsApp Cloud channel.');
+  }
+  assertPrincipalChannelAccess(principal, channelId);
+  await assertChannelReadyForConversation(env, workspaceId, channel);
+  const conversations = validateInteraktBatch(payload.conversations);
+  const summary = {
+    source: INTERAKT_SOURCE,
+    channelId,
+    contactsCreated: 0,
+    contactsReused: 0,
+    conversationsCreated: 0,
+    conversationsReused: 0,
+    messagesImported: 0,
+    messagesSkipped: 0,
+    failed: []
+  };
+  for (const conversation of conversations) {
+    try {
+      const result = await importInteraktConversation(env, workspaceId, channel, conversation);
+      summary.contactsCreated += result.contactsCreated;
+      summary.contactsReused += result.contactsReused;
+      summary.conversationsCreated += result.conversationsCreated;
+      summary.conversationsReused += result.conversationsReused;
+      summary.messagesImported += result.messagesImported;
+      summary.messagesSkipped += result.messagesSkipped;
+    } catch (error) {
+      const customer = extractInteraktCustomer(conversation);
+      summary.failed.push({
+        externalId: customer.externalId || '',
+        phone: customer.phone || '',
+        error: cleanError(error)
+      });
+      if (summary.failed.length >= 25) break;
+    }
+  }
+  await audit(env, principal, 'import_chat', 'channel', channelId, {
+    source: INTERAKT_SOURCE,
+    conversations: conversations.length,
+    messagesImported: summary.messagesImported,
+    messagesSkipped: summary.messagesSkipped,
+    failed: summary.failed.length
+  });
+  return { ok: true, ...summary };
+}
+
+async function importInteraktConversation(env, workspaceId, channel, conversation) {
+  const customer = extractInteraktCustomer(conversation);
+  if (!customer.phone) throw httpError(400, 'Conversation is missing a WhatsApp phone number.');
+  let profileId;
+  try {
+    profileId = normalizeWhatsAppRecipient(customer.phone);
+  } catch (error) {
+    throw httpError(400, error.message || 'Invalid WhatsApp phone number.');
+  }
+  const displayName = String(customer.displayName || profileId).slice(0, 120);
+  const now = new Date().toISOString();
+  const result = {
+    contactsCreated: 0, contactsReused: 0,
+    conversationsCreated: 0, conversationsReused: 0,
+    messagesImported: 0, messagesSkipped: 0
+  };
+
+  let identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+    FROM channel_identity_bindings b
+    JOIN contact_identities ci ON ci.identity_id=b.identity_id AND ci.workspace_id=b.workspace_id
+    JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+    WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
+    .bind(workspaceId, channel.channelId, profileId).first();
+  if (!identity) {
+    identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+      FROM contact_identities ci
+      JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+      WHERE ci.workspace_id=?1 AND ci.platform='whatsapp' AND ci.profile_id=?2
+      ORDER BY ci.created_at,ci.identity_id LIMIT 1`).bind(workspaceId, profileId).first();
+    if (identity) {
+      await ensureIdentityBinding(env, workspaceId, identity.contact_id, identity.identity_id, {
+        platform: 'whatsapp', profileId, scopedProfileId: profileId, channelId: channel.channelId,
+        phoneNumber: profileId, displayName: identity.contact_display_name || displayName, metadata: {}
+      }, now);
+      result.contactsReused += 1;
+    }
+  } else {
+    result.contactsReused += 1;
+  }
+  if (!identity) {
+    const contactId = crypto.randomUUID();
+    await env.DB.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,?3,?3,?4)`).bind(contactId, displayName, now, workspaceId).run();
+    const created = await ensureContactIdentity(env, workspaceId, contactId, {
+      platform: 'whatsapp', profileId, channelId: channel.channelId, scopedProfileId: profileId,
+      phoneNumber: profileId, displayName, isPrimary: true
+    }, now);
+    identity = { identity_id: created.identityId, contact_id: contactId, contact_display_name: displayName };
+    result.contactsCreated += 1;
+  } else if (displayName && displayName !== profileId
+      && (!identity.contact_display_name || identity.contact_display_name === profileId)) {
+    await env.DB.prepare(`UPDATE contacts SET display_name=?3,updated_at=?4
+      WHERE workspace_id=?1 AND contact_id=?2`)
+      .bind(workspaceId, identity.contact_id, displayName, now).run();
+  }
+
+  const existingConversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
+    WHERE workspace_id=?1 AND contact_id=?2 LIMIT 1`)
+    .bind(workspaceId, identity.contact_id).first();
+  const conversationId = await ensureIdentityConversation(env, workspaceId, identity.contact_id,
+    identity.identity_id, channel.channelId, '');
+  if (existingConversation) result.conversationsReused += 1;
+  else result.conversationsCreated += 1;
+
+  const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+  if (messages.length > 500) throw httpError(400, 'Send at most 500 messages per conversation batch.');
+  let latestTimestamp = '';
+  const pendingStatements = [];
+  const flush = async () => {
+    if (!pendingStatements.length) return;
+    await env.DB.batch(pendingStatements.splice(0, pendingStatements.length));
+  };
+
+  for (const rawMessage of messages) {
+    const mapped = mapInteraktMessage(rawMessage);
+    if (!mapped.providerMessageId && !mapped.text && !mapped.mediaUrl) {
+      result.messagesSkipped += 1;
+      continue;
+    }
+    if (mapped.providerMessageId) {
+      const existing = await env.DB.prepare(`SELECT message_id FROM messages
+        WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3 LIMIT 1`)
+        .bind(workspaceId, channel.channelId, mapped.providerMessageId).first();
+      if (existing) {
+        result.messagesSkipped += 1;
+        continue;
+      }
+    }
+    const timestamp = normalizeTimestamp(mapped.timestamp, now);
+    if (!latestTimestamp || timestamp > latestTimestamp) latestTimestamp = timestamp;
+    const payload = {
+      source: INTERAKT_SOURCE,
+      externalId: mapped.externalId,
+      contentType: mapped.contentType,
+      ...(mapped.replyTo ? { reply: { channelMessageId: mapped.replyTo } } : {}),
+      ...(mapped.mediaUrl ? {
+        attachment: {
+          type: mapped.messageType,
+          filename: mapped.mediaFileName || '',
+          externalUrl: mapped.mediaUrl
+        }
+      } : {})
+    };
+    const messageId = crypto.randomUUID();
+    pendingStatements.push(env.DB.prepare(`INSERT INTO messages
+        (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
+         provider_message_id,status,timestamp,payload_json,workspace_id)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)`)
+      .bind(
+        messageId, conversationId, identity.contact_id, channel.channelId, identity.identity_id,
+        mapped.direction, mapped.messageType, String(mapped.text || '').slice(0, MAX_TEXT_LENGTH),
+        mapped.providerMessageId, mapped.status, timestamp, truncateJson(payload), workspaceId
+      ));
+    result.messagesImported += 1;
+    if (pendingStatements.length >= 40) await flush();
+  }
+  await flush();
+
+  if (latestTimestamp || customer.status) {
+    await env.DB.prepare(`UPDATE conversations SET
+        status=CASE WHEN ?4<>'' THEN ?4 ELSE status END,
+        channel_id=?3,identity_id=?5,
+        last_message_at=CASE
+          WHEN ?6<>'' AND (last_message_at='' OR last_message_at < ?6) THEN ?6
+          ELSE last_message_at
+        END,
+        unread_count=0,updated_at=?7
+      WHERE conversation_id=?1 AND workspace_id=?2`)
+      .bind(conversationId, workspaceId, channel.channelId, customer.status || '',
+        identity.identity_id, latestTimestamp, now).run();
+  }
+  if (latestTimestamp) {
+    await touchIdentityBinding(env, workspaceId, identity.identity_id, channel.channelId,
+      '', conversationId, latestTimestamp);
+  }
+  return result;
+}
+
 export function normalizeWhatsApp(payload) {
   const messages = [];
   const statuses = [];
@@ -6155,6 +6362,12 @@ function whatsappInboundReply(message) {
   const channelMessageId = String(message?.context?.id || '').trim();
   return channelMessageId ? { channelMessageId } : null;
 }
+
+export {
+  INTERAKT_SOURCE,
+  extractInteraktCustomer,
+  mapInteraktMessage
+} from './imports/interakt.js';
 
 export function normalizeWhatsAppRecipient(value) {
   const input = String(value || '').trim();
@@ -6489,6 +6702,14 @@ function json(body, status = 200) {
 async function readJson(request) {
   if (!(request.headers.get('Content-Type') || '').toLowerCase().includes('application/json')) throw httpError(415, 'Content-Type must be application/json.');
   const raw = await readBoundedText(request, MAX_JSON_BODY);
+  try { return JSON.parse(raw); } catch { throw httpError(400, 'Invalid JSON body.'); }
+}
+
+async function readImportJson(request) {
+  if (!(request.headers.get('Content-Type') || '').toLowerCase().includes('application/json')) {
+    throw httpError(415, 'Content-Type must be application/json.');
+  }
+  const raw = await readBoundedText(request, MAX_IMPORT_JSON_BODY);
   try { return JSON.parse(raw); } catch { throw httpError(400, 'Invalid JSON body.'); }
 }
 

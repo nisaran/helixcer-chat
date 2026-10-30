@@ -33,6 +33,14 @@
     whatsappTemplateFilters: {
       channel: new Set(), category: new Set(), status: new Set(), language: new Set(),
     },
+    importChat: {
+      source: "interakt",
+      fileName: "",
+      conversations: [],
+      conversationCount: 0,
+      messageCount: 0,
+      importing: false,
+    },
     pendingConversationId: null,
     unreadMarker: null,
     newMessagesBelow: { conversationId: "", count: 0 },
@@ -454,6 +462,23 @@
       };
     }
 
+    async importChat(payload) {
+      await smallDelay(120);
+      const conversations = Array.isArray(payload?.conversations) ? payload.conversations : [];
+      return {
+        ok: true,
+        source: payload?.source || "interakt",
+        channelId: payload?.channelId || "",
+        contactsCreated: conversations.length,
+        contactsReused: 0,
+        conversationsCreated: conversations.length,
+        conversationsReused: 0,
+        messagesImported: conversations.reduce((total, item) => total + (item.messages?.length || 0), 0),
+        messagesSkipped: 0,
+        failed: [],
+      };
+    }
+
     async sendAttachment(conversationId, formData) {
       const file = formData.get("file");
       const caption = String(formData.get("caption") || "").trim();
@@ -870,6 +895,15 @@
       return this.isDemo
         ? this.demo.getWhatsAppTemplates()
         : this.request("/api/channel-data/whatsapp-templates");
+    }
+
+    importChat(payload) {
+      return this.isDemo
+        ? this.demo.importChat(payload)
+        : this.request("/api/channel-data/import-chat", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
     }
 
     sendAttachment(conversationId, formData) {
@@ -1389,7 +1423,7 @@
     document.querySelectorAll("[data-admin-only]").forEach((node) => { node.hidden = !admin; });
     document.querySelectorAll("[data-owner-only]").forEach((node) => { node.hidden = !isOwner(); node.disabled = !isOwner(); });
     setWorkspaceFormBusy(state.workspaceProfileLoading);
-    if (!admin && ["channels", "whatsapp-templates", "developer", "team"].includes(state.route)) setRoute("inbox");
+    if (!admin && ["channels", "whatsapp-templates", "import-chat", "developer", "team"].includes(state.route)) setRoute("inbox");
   }
 
   async function initializeSession() {
@@ -4144,9 +4178,11 @@
       add.dataset.action = "open-channel";
       empty.append(add);
       grid.append(empty);
+      if (state.route === "import-chat") renderImportChatPage();
       return;
     }
     channels.forEach((channel) => grid.append(renderChannelCard(channel)));
+    if (state.route === "import-chat") renderImportChatPage();
   }
 
   function renderChannelCard(channel) {
@@ -6635,7 +6671,7 @@
     const raw = String(value || "").replace(/^#/, "");
     const separator = raw.indexOf("/");
     const requestedRoute = separator >= 0 ? raw.slice(0, separator) : raw;
-    const allowedRoutes = ["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "workspace", "settings"];
+    const allowedRoutes = ["inbox", "contacts", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"];
     const route = allowedRoutes.includes(requestedRoute) ? requestedRoute : "inbox";
     if (route !== "inbox" || separator < 0) return { route, conversationId: "" };
     let conversationId = "";
@@ -6676,8 +6712,8 @@
   function setRoute(route, { preserveLocation = false } = {}) {
     closeContactRouteMenu();
     closeContactPlatformMenu();
-    if (!["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "workspace", "settings"].includes(route)) route = "inbox";
-    if (!canAdmin() && ["channels", "whatsapp-templates", "developer", "team"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"].includes(route)) route = "inbox";
+    if (!canAdmin() && ["channels", "whatsapp-templates", "import-chat", "developer", "team"].includes(route)) route = "inbox";
     if (!preserveLocation) {
       state.pendingConversationId = null;
       if (route === "inbox") clearSelectedConversation({ updateUrl: false });
@@ -6694,24 +6730,279 @@
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     });
-    const channelSectionActive = ["channels", "whatsapp-templates"].includes(route);
+    const channelSectionActive = ["channels", "whatsapp-templates", "import-chat"].includes(route);
     $("channelNavToggle").classList.toggle("is-active", channelSectionActive);
     if (channelSectionActive) {
       $("channelNavToggle").setAttribute("aria-expanded", "true");
       $("channelNavChildren").hidden = false;
       $("channelNavGroup").classList.add("is-open");
     }
-    if (route === "whatsapp-templates") {
+    if (route === "whatsapp-templates" || route === "import-chat") {
       $("channelDataNavToggle").setAttribute("aria-expanded", "true");
       $("channelDataNavChildren").hidden = false;
     }
-    const labels = { inbox: "Inbox", contacts: "Contacts", channels: "Channels", "whatsapp-templates": "WhatsApp Templates", developer: "Developer API", team: "Team", workspace: "Workspace", settings: "Settings" };
+    const labels = {
+      inbox: "Inbox", contacts: "Contacts", channels: "Channels",
+      "whatsapp-templates": "WhatsApp Templates", "import-chat": "Import Chat",
+      developer: "Developer API", team: "Team", workspace: "Workspace", settings: "Settings",
+    };
     $("pageTitle").textContent = labels[route];
     if (route === "settings") renderNotificationSetting();
     if (route === "workspace") loadWorkspaceProfile().catch(() => {});
     if (route === "whatsapp-templates") loadWhatsAppTemplateLibrary().catch(() => {});
+    if (route === "import-chat") renderImportChatPage();
     if (!preserveLocation) replaceAppHash(`#${route}`);
     closeMobileMenu();
+  }
+
+  function whatsappImportChannels() {
+    return state.channels
+      .filter((channel) => channel.connectorType === "whatsapp_cloud" || channel.connectorType === "whatsapp")
+      .slice()
+      .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }));
+  }
+
+  function renderImportChatPage() {
+    const channelSelect = $("importChatChannel");
+    const selected = channelSelect.value;
+    const channels = whatsappImportChannels();
+    channelSelect.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = channels.length ? "Select a channel…" : "No WhatsApp channel connected";
+    channelSelect.append(placeholder);
+    channels.forEach((channel) => {
+      const option = document.createElement("option");
+      option.value = channel.channelId;
+      option.textContent = channel.name || channel.channelId;
+      channelSelect.append(option);
+    });
+    if (selected && channels.some((channel) => channel.channelId === selected)) channelSelect.value = selected;
+    $("importChatSource").value = state.importChat.source || "interakt";
+    $("importChatSubmit").disabled = state.importChat.importing || !channels.length;
+    renderImportChatPreview();
+  }
+
+  function renderImportChatPreview() {
+    const preview = $("importChatPreview");
+    const stats = $("importChatStats");
+    const ready = state.importChat.conversations.length > 0;
+    preview.hidden = !ready;
+    if (!ready) {
+      stats.innerHTML = "";
+      return;
+    }
+    stats.innerHTML = "";
+    [
+      ["File", state.importChat.fileName || "export.json"],
+      ["Conversations", String(state.importChat.conversationCount)],
+      ["Messages", String(state.importChat.messageCount)],
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      item.append(dt, dd);
+      stats.append(item);
+    });
+  }
+
+  function setImportChatProgress(done, total, label) {
+    const host = $("importChatProgress");
+    const fill = $("importChatProgressFill");
+    const text = $("importChatProgressLabel");
+    if (!total) {
+      host.hidden = true;
+      fill.style.width = "0%";
+      text.textContent = "";
+      return;
+    }
+    host.hidden = false;
+    const ratio = Math.max(0, Math.min(1, done / total));
+    fill.style.width = `${Math.round(ratio * 100)}%`;
+    text.textContent = label || `Imported ${done} of ${total}…`;
+  }
+
+  function showImportChatResult(summary) {
+    const host = $("importChatResult");
+    host.hidden = false;
+    const failed = Array.isArray(summary.failed) ? summary.failed : [];
+    host.innerHTML = "";
+    const title = document.createElement("strong");
+    title.textContent = failed.length
+      ? `Import finished with ${failed.length} conversation issue${failed.length === 1 ? "" : "s"}`
+      : "Import finished";
+    const detail = document.createElement("p");
+    detail.className = "subtle";
+    detail.textContent = [
+      `${summary.messagesImported || 0} messages imported`,
+      `${summary.messagesSkipped || 0} skipped`,
+      `${summary.contactsCreated || 0} contacts created`,
+      `${summary.conversationsCreated || 0} conversations created`,
+    ].join(" · ");
+    host.append(title, detail);
+    if (failed.length) {
+      const list = document.createElement("ul");
+      failed.slice(0, 8).forEach((item) => {
+        const row = document.createElement("li");
+        row.textContent = `${item.phone || item.externalId || "Conversation"}: ${item.error || "Failed"}`;
+        list.append(row);
+      });
+      host.append(list);
+    }
+  }
+
+  function slimInteraktConversation(conversation) {
+    const customer = conversation?.raw_chat?.customer_id && typeof conversation.raw_chat.customer_id === "object"
+      ? conversation.raw_chat.customer_id
+      : {};
+    const traits = customer.traits && typeof customer.traits === "object" ? customer.traits : {};
+    return {
+      id: conversation?.id || conversation?.raw_chat?.id || "",
+      status: conversation?.status || conversation?.raw_chat?.chat_status || "",
+      customer: {
+        name: conversation?.customer?.name || "",
+        phone: conversation?.customer?.phone || "",
+      },
+      raw_chat: {
+        id: conversation?.raw_chat?.id || conversation?.id || "",
+        chat_status: conversation?.raw_chat?.chat_status || conversation?.status || "",
+        customer_id: {
+          phone_number: customer.phone_number || "",
+          country_code: customer.country_code || "",
+          channel_phone_number: customer.channel_phone_number || "",
+          channel_account_identifier: customer.channel_account_identifier || "",
+          traits: {
+            name: traits.name || traits.Name || traits.full_name || "",
+          },
+        },
+      },
+      messages: (Array.isArray(conversation?.messages) ? conversation.messages : []).map((message) => ({
+        id: message?.id || "",
+        channel_message_id: message?.channel_message_id || "",
+        timestamp: message?.timestamp || "",
+        direction: message?.direction || "",
+        content_type: message?.content_type || "",
+        text: message?.text || "",
+        media_url: message?.media_url || "",
+        media_file_name: message?.media_file_name || "",
+        status: message?.status || "",
+        reply_to: message?.reply_to || message?.raw?.reply_channel_message_id || "",
+      })),
+    };
+  }
+
+  function chunkInteraktConversations(conversations) {
+    const batches = [];
+    const maxMessages = 120;
+    const maxBatchChars = 900_000;
+    for (const conversation of conversations) {
+      const slim = slimInteraktConversation(conversation);
+      const messages = slim.messages;
+      if (!messages.length) {
+        batches.push({ ...slim, messages: [] });
+        continue;
+      }
+      for (let index = 0; index < messages.length; index += maxMessages) {
+        const slice = { ...slim, messages: messages.slice(index, index + maxMessages) };
+        const encoded = JSON.stringify(slice);
+        if (encoded.length <= maxBatchChars) {
+          batches.push(slice);
+          continue;
+        }
+        // Oversized message groups: send one message at a time.
+        slice.messages.forEach((message) => {
+          batches.push({ ...slim, messages: [message] });
+        });
+      }
+    }
+    return batches;
+  }
+
+  async function prepareImportChatFile(file) {
+    if (!file) {
+      state.importChat.fileName = "";
+      state.importChat.conversations = [];
+      state.importChat.conversationCount = 0;
+      state.importChat.messageCount = 0;
+      $("importChatResult").hidden = true;
+      renderImportChatPreview();
+      return;
+    }
+    const source = $("importChatSource").value || "interakt";
+    if (source !== "interakt") throw new Error("Only Interakt imports are available right now.");
+    const text = await file.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch { throw new Error("The selected file is not valid JSON."); }
+    const conversations = Array.isArray(data?.conversations) ? data.conversations : null;
+    if (!conversations) throw new Error("Interakt export must include a conversations array.");
+    if (data.source && String(data.source).toLowerCase() !== "interakt") {
+      throw new Error("This file does not look like an Interakt export.");
+    }
+    state.importChat.source = "interakt";
+    state.importChat.fileName = file.name || "export.json";
+    state.importChat.conversations = conversations;
+    state.importChat.conversationCount = Number(data.conversation_count) || conversations.length;
+    state.importChat.messageCount = Number(data.message_count)
+      || conversations.reduce((total, item) => total + (Array.isArray(item.messages) ? item.messages.length : 0), 0);
+    $("importChatResult").hidden = true;
+    renderImportChatPreview();
+  }
+
+  async function runImportChat(event) {
+    event.preventDefault();
+    if (state.importChat.importing) return;
+    if (!canAdmin()) {
+      showToast("Import unavailable", "Only owners and admins can import chat history.", true);
+      return;
+    }
+    const channelId = $("importChatChannel").value;
+    const source = $("importChatSource").value || "interakt";
+    if (!channelId) {
+      showToast("Choose a channel", "Select the WhatsApp channel that should receive this history.", true);
+      return;
+    }
+    if (!state.importChat.conversations.length) {
+      showToast("Choose a file", "Upload an Interakt JSON export first.", true);
+      return;
+    }
+    const batches = chunkInteraktConversations(state.importChat.conversations);
+    state.importChat.importing = true;
+    $("importChatSubmit").disabled = true;
+    $("importChatResult").hidden = true;
+    const summary = {
+      messagesImported: 0, messagesSkipped: 0, contactsCreated: 0, contactsReused: 0,
+      conversationsCreated: 0, conversationsReused: 0, failed: [],
+    };
+    try {
+      for (let index = 0; index < batches.length; index += 1) {
+        setImportChatProgress(index, batches.length, `Uploading batch ${index + 1} of ${batches.length}…`);
+        const result = await state.api.importChat({
+          source,
+          channelId,
+          conversations: [batches[index]],
+        });
+        summary.messagesImported += Number(result.messagesImported || 0);
+        summary.messagesSkipped += Number(result.messagesSkipped || 0);
+        summary.contactsCreated += Number(result.contactsCreated || 0);
+        summary.contactsReused += Number(result.contactsReused || 0);
+        summary.conversationsCreated += Number(result.conversationsCreated || 0);
+        summary.conversationsReused += Number(result.conversationsReused || 0);
+        if (Array.isArray(result.failed)) summary.failed.push(...result.failed);
+      }
+      setImportChatProgress(batches.length, batches.length, "Import complete");
+      showImportChatResult(summary);
+      showToast("Chat import complete", `${summary.messagesImported} messages imported.`);
+      await loadAll({ preserveSelection: true });
+    } catch (error) {
+      showToast("Import failed", error.message, true);
+      setImportChatProgress(0, 0, "");
+    } finally {
+      state.importChat.importing = false;
+      renderImportChatPage();
+    }
   }
 
   function toggleSidebarNavigation(toggleId, childrenId, groupId = "") {
@@ -7736,6 +8027,7 @@
     });
     $("refreshButton").addEventListener("click", () => state.route === "whatsapp-templates"
       ? loadWhatsAppTemplateLibrary({ refresh: true })
+      : state.route === "import-chat" ? renderImportChatPage()
       : state.route === "workspace" ? loadWorkspaceProfile({ force: true }) : loadAll());
     $("mobileMenu").addEventListener("click", openMobileMenu);
     $("mobileScrim").addEventListener("click", closeMobileMenu);
@@ -7754,6 +8046,22 @@
     $("workspaceGstin").addEventListener("input", (event) => {
       event.target.value = event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
       event.target.setCustomValidity("");
+    });
+    $("importChatForm").addEventListener("submit", runImportChat);
+    $("importChatSource").addEventListener("change", (event) => {
+      state.importChat.source = event.target.value || "interakt";
+    });
+    $("importChatFile").addEventListener("change", async (event) => {
+      try {
+        await prepareImportChatFile(event.target.files?.[0] || null);
+      } catch (error) {
+        event.target.value = "";
+        state.importChat.conversations = [];
+        state.importChat.conversationCount = 0;
+        state.importChat.messageCount = 0;
+        renderImportChatPreview();
+        showToast("File not ready", error.message, true);
+      }
     });
 
     $("conversationStatus").addEventListener("change", async (event) => {

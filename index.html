@@ -91,6 +91,10 @@
                 <span class="nav-icon nav-provider-icon" aria-hidden="true"><img src="./assets/provider-whatsapp.svg" alt=""></span>
                 <span>WhatsApp Templates</span>
               </button>
+              <button class="nav-button nav-subitem" type="button" data-route="import-chat" data-admin-only>
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg></span>
+                <span>Import Chat</span>
+              </button>
             </div>
           </div>
         </div>
@@ -402,6 +406,57 @@
         </div>
         <div class="stats-grid" id="channelStats"></div>
         <div class="channel-grid" id="channelGrid"></div>
+      </section>
+
+      <section class="route content-route" id="importChatRoute" data-route-panel="import-chat" aria-labelledby="importChatTitle" hidden>
+        <div class="route-heading">
+          <div>
+            <p class="eyebrow">Channel data</p>
+            <h2 id="importChatTitle">Import Chat</h2>
+            <p>Bring historical conversations into this workspace without resending them.</p>
+          </div>
+        </div>
+        <section class="surface import-chat-surface" aria-labelledby="importChatFormTitle">
+          <div class="surface-toolbar">
+            <div>
+              <strong id="importChatFormTitle">Import file</strong>
+              <span class="subtle">Choose a source, pick the WhatsApp channel, then upload the export.</span>
+            </div>
+          </div>
+          <form class="import-chat-form" id="importChatForm">
+            <div class="import-chat-grid">
+              <label class="field-label" for="importChatSource">
+                Source
+                <select class="text-field" id="importChatSource" name="source" required>
+                  <option value="interakt" selected>Interakt</option>
+                </select>
+              </label>
+              <label class="field-label" for="importChatChannel">
+                WhatsApp channel
+                <select class="text-field" id="importChatChannel" name="channelId" required>
+                  <option value="">Select a channel…</option>
+                </select>
+              </label>
+              <label class="field-label form-span" for="importChatFile">
+                Export file
+                <input class="text-field import-chat-file" id="importChatFile" name="file" type="file" accept=".json,application/json" required>
+              </label>
+            </div>
+            <div class="import-chat-preview" id="importChatPreview" hidden>
+              <p class="import-chat-preview-title">File ready</p>
+              <dl class="import-chat-stats" id="importChatStats"></dl>
+            </div>
+            <div class="import-chat-progress" id="importChatProgress" hidden>
+              <div class="import-chat-progress-bar" aria-hidden="true"><span id="importChatProgressFill"></span></div>
+              <p class="subtle" id="importChatProgressLabel">Preparing import…</p>
+            </div>
+            <div class="import-chat-result" id="importChatResult" hidden></div>
+            <div class="import-chat-actions">
+              <p class="subtle" id="importChatHelp">Interakt JSON exports are supported. More sources can be added later.</p>
+              <button class="primary-button" id="importChatSubmit" type="submit">Start import</button>
+            </div>
+          </form>
+        </section>
       </section>
 
       <section class="route content-route template-library-route" id="whatsappTemplatesRoute" data-route-panel="whatsapp-templates" aria-labelledby="whatsappTemplatesTitle" hidden>
