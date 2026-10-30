@@ -7259,13 +7259,14 @@
     closeConversationActionMenu();
     const confirmed = await requestConfirmation({
       title: `Delete conversation with ${conversation.subject}?`,
-      message: "This permanently deletes this conversation and its message history from Helixcer.",
+      message: "This permanently deletes this conversation, its message history, and attachment media from Helixcer so that storage can be reused.",
       note: "The contact and the original provider account are not deleted. A future customer message may create a new conversation.",
       confirmLabel: "Delete conversation",
     });
     if (!confirmed) return;
     try {
-      await state.api.deleteConversation(conversation.conversationId);
+      closeAttachmentPreview();
+      const result = await state.api.deleteConversation(conversation.conversationId);
       state.messages.delete(conversation.conversationId);
       state.conversationRevisions.delete(conversation.conversationId);
       state.conversations = state.conversations.filter((item) => item.conversationId !== conversation.conversationId);
@@ -7273,7 +7274,13 @@
       renderCounts();
       renderContacts();
       renderChannels();
-      showToast("Conversation deleted", `${conversation.subject}'s conversation was removed from Helixcer.`);
+      const deletedMedia = Number(result?.deletedMedia || 0);
+      showToast(
+        "Conversation deleted",
+        deletedMedia > 0
+          ? `${conversation.subject}'s conversation and ${deletedMedia} media file${deletedMedia === 1 ? "" : "s"} were removed.`
+          : `${conversation.subject}'s conversation was removed from Helixcer.`
+      );
     } catch (error) {
       showToast("Conversation was not deleted", error.message, true);
     }

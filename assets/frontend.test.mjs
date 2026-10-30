@@ -848,8 +848,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261030-media-spin/);
-  assert.match(html, /assets\/styles\.css\?v=20261030-media-spin/);
+  assert.match(html, /assets\/app\.js\?v=20261030-delete-media/);
+  assert.match(html, /assets\/styles\.css\?v=20261030-delete-media/);
 });
 
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {
@@ -972,6 +972,8 @@ test("destructive workspace actions use one in-app confirmation dialog", () => {
   assert.match(app, /deleteChannel\(channelId\)[\s\S]*?method: "DELETE"/);
   assert.match(app, /deleteApiKey\(apiKeyId\)[\s\S]*?method: "DELETE"/);
   assert.match(app, /deleteMember\(membershipId\)[\s\S]*?method: "DELETE"/);
+  assert.match(app, /attachment media from Helixcer so that storage can be reused/);
+  assert.match(app, /closeAttachmentPreview\(\);[\s\S]*?deleteConversation\(/);
   assert.match(app, /Only Helixcer data will be deleted\.[\s\S]*?provider-side message history will not be changed/);
   assert.match(app, /clearSelectedConversation\(\);[\s\S]*?Conversation deleted/);
   assert.match(app, /type === "conversation\.deleted"[\s\S]*?state\.conversations = state\.conversations\.filter/);

@@ -3110,6 +3110,85 @@ test('conversation, contact, and channel deletion removes only local workspace d
   }
 });
 
+test('conversation deletion removes WhatsApp media ids so provider storage can be reused', async () => {
+  const credentialKey = 'test-channel-master-key-material-'.repeat(2);
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret',
+    RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: credentialKey
+  });
+  const headers = { Authorization: 'Bearer recovery-secret' };
+  const now = new Date().toISOString();
+  const encryptedToken = await encryptChannelCredential('EAAtest-delete-media-token', credentialKey,
+    'ws_default', 'media-delete-channel', 'accessToken');
+  const deletedMediaUrls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    const method = String(init.method || 'GET').toUpperCase();
+    if (method === 'DELETE' && /graph\.facebook\.com\/v26\.0\/media-(keep|drop|gone)/.test(url)) {
+      deletedMediaUrls.push(url);
+      const status = url.includes('media-gone') ? 404 : 200;
+      return new Response(JSON.stringify({ success: true }), {
+        status, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    throw new Error(`Unexpected provider call: ${method} ${url}`);
+  };
+  try {
+    database.prepare(`INSERT INTO channels
+        (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+      VALUES ('media-delete-channel','Media delete','whatsapp_cloud','whatsapp_cloud',1,'["text"]',
+        '{"phoneNumberId":"1234567890","apiVersion":"v26.0"}','MEDIA_DELETE',?,?, 'ws_default'),
+        ('media-keep-channel','Keep Telegram','telegram','telegram',1,'["text"]','{}','MEDIA_KEEP',?,?, 'ws_default')`)
+      .run(now, now, now, now);
+    database.prepare(`INSERT INTO channel_credentials
+        (workspace_id,channel_id,credential_key,encrypted_value,created_at,updated_at)
+      VALUES ('ws_default','media-delete-channel','accessToken',?,?,?)`).run(encryptedToken, now, now);
+    database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+      VALUES ('media-contact','Media Contact',?,?, 'ws_default')`).run(now, now);
+    database.prepare(`INSERT INTO conversations
+        (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+      VALUES ('media-conversation','media-contact','media-delete-channel','open','Media Contact',?,0,?,?,'ws_default')`)
+      .run(now, now, now);
+    database.prepare(`INSERT INTO messages
+        (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,payload_json,workspace_id)
+      VALUES ('media-image','media-conversation','media-contact','media-delete-channel','outbound','image','[image: a.jpg]','sent',?,
+          '{"attachment":{"type":"image","filename":"a.jpg","providerMediaId":"media-keep"}}','ws_default'),
+        ('media-doc','media-conversation','media-contact','media-delete-channel','inbound','document','[document: b.pdf]','received',?,
+          '{"attachment":{"type":"document","filename":"b.pdf","providerMediaId":"media-drop"}}','ws_default'),
+        ('media-gone','media-conversation','media-contact','media-delete-channel','outbound','video','[video: c.mp4]','sent',?,
+          '{"attachment":{"type":"video","filename":"c.mp4","providerMediaId":"media-gone"}}','ws_default'),
+        ('media-telegram','media-conversation','media-contact','media-keep-channel','outbound','image','[image: d.jpg]','sent',?,
+          '{"attachment":{"type":"image","filename":"d.jpg","providerFileId":"tg-file-1"}}','ws_default'),
+        ('media-text','media-conversation','media-contact','media-delete-channel','outbound','text','hello','sent',?,'{}','ws_default')`)
+      .run(now, now, now, now, now);
+    database.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
+      VALUES ('media-image','ws_default','encrypted-media',?,?)`).run(now, now);
+
+    const response = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/media-conversation', { method: 'DELETE', headers }
+    ), env);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.deleted, true);
+    assert.equal(body.deletedMessages, 5);
+    assert.equal(body.deletedMedia, 3);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM conversations WHERE conversation_id='media-conversation'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE conversation_id='media-conversation'").get().count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM outbound_payloads WHERE message_id='media-image'").get().count, 0);
+    assert.equal(deletedMediaUrls.length, 3);
+    assert.ok(deletedMediaUrls.every(url => url.includes('/v26.0/media-')));
+    assert.ok(deletedMediaUrls.some(url => url.endsWith('/media-keep')));
+    assert.ok(deletedMediaUrls.some(url => url.endsWith('/media-drop')));
+    assert.ok(deletedMediaUrls.some(url => url.endsWith('/media-gone')));
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
 test('team member deletion follows role hierarchy, revokes access, and protects the last active owner', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB, { ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true' });

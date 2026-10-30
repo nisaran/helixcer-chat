@@ -3903,6 +3903,7 @@ async function deleteContact(env, workspaceId, contactId, principal) {
   const conversations = await env.DB.prepare(`SELECT conversation_id FROM conversations
     WHERE workspace_id=?1 AND contact_id=?2 ORDER BY created_at`).bind(workspaceId, id).all();
   const conversationIds = (conversations.results || []).map(row => String(row.conversation_id));
+  const mediaTargets = await listWhatsAppMediaTargets(env, workspaceId, { contactId: id });
   await env.DB.batch([
     env.DB.prepare(`DELETE FROM external_api_requests WHERE workspace_id=?2 AND message_id IN
       (SELECT message_id FROM messages WHERE contact_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
@@ -3920,17 +3921,21 @@ async function deleteContact(env, workspaceId, contactId, principal) {
     env.DB.prepare('DELETE FROM contact_identities WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM contacts WHERE contact_id=?1 AND workspace_id=?2').bind(id, workspaceId)
   ]);
+  const mediaCleanup = await deleteWhatsAppMediaTargets(env, mediaTargets);
   await audit(env, principal, 'delete', 'contact', id, {
     displayName: existing.display_name,
     company: existing.company || '',
     deletedIdentities: Number(existing.identity_count || 0),
     deletedConversations: Number(existing.conversation_count || 0),
-    deletedMessages: Number(existing.message_count || 0)
+    deletedMessages: Number(existing.message_count || 0),
+    deletedMedia: mediaCleanup.deletedMedia,
+    failedMedia: mediaCleanup.failedMedia
   });
   return {
     ok: true, contactId: id, deleted: true, conversationIds,
     deletedConversations: Number(existing.conversation_count || 0),
-    deletedMessages: Number(existing.message_count || 0)
+    deletedMessages: Number(existing.message_count || 0),
+    deletedMedia: mediaCleanup.deletedMedia
   };
 }
 
@@ -4049,6 +4054,84 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
     { conversationId: id, status, assignedTo, unreadCount: fallbackUnreadCount, updatedAt: now };
 }
 
+async function listWhatsAppMediaTargets(env, workspaceId, { conversationId = '', contactId = '' } = {}) {
+  const conversation = String(conversationId || '').trim();
+  const contact = String(contactId || '').trim();
+  if (!conversation && !contact) return [];
+  const rows = conversation
+    ? await env.DB.prepare(`SELECT m.payload_json,m.channel_id,c.connector_type,c.provider_type,c.config_json,
+          c.secret_key,c.workspace_id
+        FROM messages m
+        JOIN channels c ON c.channel_id=m.channel_id AND c.workspace_id=m.workspace_id
+        WHERE m.workspace_id=?1 AND m.conversation_id=?2`).bind(workspaceId, conversation).all()
+    : await env.DB.prepare(`SELECT m.payload_json,m.channel_id,c.connector_type,c.provider_type,c.config_json,
+          c.secret_key,c.workspace_id
+        FROM messages m
+        JOIN channels c ON c.channel_id=m.channel_id AND c.workspace_id=m.workspace_id
+        WHERE m.workspace_id=?1 AND m.contact_id=?2`).bind(workspaceId, contact).all();
+  const targets = [];
+  const seen = new Set();
+  for (const row of rows.results || []) {
+    if (logicalConnectorType(row) !== 'whatsapp_cloud') continue;
+    const mediaId = String(safeJsonParse(row.payload_json, {})?.attachment?.providerMediaId || '').trim();
+    if (!mediaId || seen.has(`${row.channel_id}:${mediaId}`)) continue;
+    seen.add(`${row.channel_id}:${mediaId}`);
+    targets.push({
+      mediaId,
+      channel: {
+        channelId: row.channel_id,
+        connectorType: 'whatsapp_cloud',
+        config: safeJsonParse(row.config_json, {}),
+        secretKey: row.secret_key,
+        workspaceId: row.workspace_id
+      }
+    });
+  }
+  return targets;
+}
+
+async function deleteWhatsAppMediaTargets(env, targets) {
+  const items = Array.isArray(targets) ? targets : [];
+  if (!items.length) return { deletedMedia: 0, failedMedia: 0 };
+  const credentialsByChannel = new Map();
+  let deletedMedia = 0;
+  let failedMedia = 0;
+  for (const target of items) {
+    const channelId = String(target?.channel?.channelId || '');
+    const mediaId = String(target?.mediaId || '').trim();
+    if (!channelId || !mediaId || !/^[A-Za-z0-9_-]{1,128}$/.test(mediaId)) {
+      failedMedia += 1;
+      continue;
+    }
+    try {
+      let credentials = credentialsByChannel.get(channelId);
+      if (!credentials) {
+        credentials = await readChannelCredentials(env, target.channel);
+        credentialsByChannel.set(channelId, credentials);
+      }
+      const token = String(credentials.accessToken || '');
+      if (!token) {
+        failedMedia += 1;
+        continue;
+      }
+      const version = metaApiVersion(target.channel.config?.apiVersion);
+      const response = await fetch(
+        `https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(mediaId)}`,
+        { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
+      );
+      // 404/410 means the media is already gone, which still frees reusable storage.
+      if (response.ok || response.status === 404 || response.status === 410) deletedMedia += 1;
+      else failedMedia += 1;
+    } catch (error) {
+      failedMedia += 1;
+      console.error('whatsapp_media_delete_failed', {
+        channelId, mediaId, error: cleanError(error)
+      });
+    }
+  }
+  return { deletedMedia, failedMedia };
+}
+
 async function deleteConversation(env, workspaceId, conversationId, principal) {
   const id = cleanId(conversationId, 'Conversation ID');
   const existing = await env.DB.prepare(`SELECT conversation_id,contact_id,channel_id,subject,status,
@@ -4056,6 +4139,7 @@ async function deleteConversation(env, workspaceId, conversationId, principal) {
     FROM conversations WHERE conversation_id=?1 AND workspace_id=?2`)
     .bind(id, workspaceId).first();
   if (!existing) throw httpError(404, 'Conversation not found.');
+  const mediaTargets = await listWhatsAppMediaTargets(env, workspaceId, { conversationId: id });
   await env.DB.batch([
     env.DB.prepare(`DELETE FROM external_api_requests WHERE workspace_id=?2 AND message_id IN
       (SELECT message_id FROM messages WHERE conversation_id=?1 AND workspace_id=?2)`).bind(id, workspaceId),
@@ -4067,16 +4151,20 @@ async function deleteConversation(env, workspaceId, conversationId, principal) {
     env.DB.prepare('DELETE FROM messages WHERE conversation_id=?1 AND workspace_id=?2').bind(id, workspaceId),
     env.DB.prepare('DELETE FROM conversations WHERE conversation_id=?1 AND workspace_id=?2').bind(id, workspaceId)
   ]);
+  const mediaCleanup = await deleteWhatsAppMediaTargets(env, mediaTargets);
   await audit(env, principal, 'delete', 'conversation', id, {
     contactId: existing.contact_id,
     channelId: existing.channel_id,
     subject: existing.subject,
     previousStatus: existing.status,
-    deletedMessages: Number(existing.message_count || 0)
+    deletedMessages: Number(existing.message_count || 0),
+    deletedMedia: mediaCleanup.deletedMedia,
+    failedMedia: mediaCleanup.failedMedia
   });
   return {
     ok: true, conversationId: id, contactId: existing.contact_id, deleted: true,
-    deletedMessages: Number(existing.message_count || 0)
+    deletedMessages: Number(existing.message_count || 0),
+    deletedMedia: mediaCleanup.deletedMedia
   };
 }
 
