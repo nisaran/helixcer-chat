@@ -23,3 +23,6 @@ android/.cxx/
 release/
 backups/
 
+
+# Temporary agent deploy artifacts
+.deploy/
