@@ -7062,18 +7062,30 @@
           traits: slimTraits,
         },
       },
-      messages: (Array.isArray(conversation?.messages) ? conversation.messages : []).map((message) => ({
-        id: message?.id || "",
-        channel_message_id: message?.channel_message_id || "",
-        timestamp: message?.timestamp || "",
-        direction: message?.direction || "",
-        content_type: message?.content_type || "",
-        text: message?.text || "",
-        media_url: message?.media_url || "",
-        media_file_name: message?.media_file_name || "",
-        status: message?.status || "",
-        reply_to: message?.reply_to || message?.raw?.reply_channel_message_id || "",
-      })),
+      messages: (Array.isArray(conversation?.messages) ? conversation.messages : []).map((message) => {
+        const contentType = String(message?.content_type || message?.raw?.message_content_type || "");
+        const slimMessage = {
+          id: message?.id || "",
+          channel_message_id: message?.channel_message_id || "",
+          timestamp: message?.timestamp || "",
+          direction: message?.direction || "",
+          content_type: contentType,
+          text: message?.text || "",
+          media_url: message?.media_url || "",
+          media_file_name: message?.media_file_name || "",
+          status: message?.status || "",
+          reply_to: message?.reply_to || message?.raw?.reply_channel_message_id || "",
+        };
+        // Template bodies live in raw.raw_template; without it the API can only store
+        // parameter values joined with middots (e.g. "Acme · 1200").
+        if (contentType.toLowerCase() === "template") {
+          const rawTemplate = message?.raw?.raw_template;
+          if (rawTemplate !== undefined && rawTemplate !== null && rawTemplate !== "") {
+            slimMessage.raw = { raw_template: rawTemplate };
+          }
+        }
+        return slimMessage;
+      }),
     };
   }
 

@@ -144,5 +144,8 @@ test('dashboard exposes Import Chat field mapping UI', async () => {
   assert.match(app, /import-chat-mapping-example/);
   assert.match(app, /formatImportFieldExample/);
   assert.match(app, /Don’t import|Don't import/);
+  assert.match(app, /slimInteraktConversation/);
+  assert.match(app, /raw_template/);
+  assert.match(app, /parameter values joined with middots/);
   assert.equal(INTERAKT_SOURCE, 'interakt');
 });
