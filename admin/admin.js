@@ -225,12 +225,43 @@ function renderClients() {
   });
 }
 
+function slugifyClientId(value) {
+  return String(value || '').trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
+}
+
+let createClientIdEdited = false;
+
+function syncCreateClientId(form) {
+  if (createClientIdEdited) return;
+  const slugInput = form.elements.slug;
+  if (!slugInput) return;
+  slugInput.value = slugifyClientId(form.elements.companyName.value);
+}
+
 $('newClient').addEventListener('click', () => {
-  $('createForm').reset();
+  const form = $('createForm');
+  form.reset();
+  createClientIdEdited = false;
+  syncCreateClientId(form);
   $('createFields').hidden = false;
   $('createResult').hidden = true;
   $('createSubmit').hidden = false;
   $('createDialog').showModal();
+});
+
+$('createForm').elements.companyName.addEventListener('input', event => {
+  syncCreateClientId(event.currentTarget.form);
+});
+
+$('createForm').elements.slug.addEventListener('input', () => {
+  createClientIdEdited = true;
+});
+
+$('createForm').elements.slug.addEventListener('blur', event => {
+  event.currentTarget.value = slugifyClientId(event.currentTarget.value);
 });
 
 $('createForm').addEventListener('submit', async event => {
@@ -240,6 +271,11 @@ $('createForm').addEventListener('submit', async event => {
   await withBusy(button, async () => {
     try {
       const values = Object.fromEntries(new FormData(form).entries());
+      values.slug = slugifyClientId(values.slug);
+      if (!values.slug) {
+        toast('Client ID is required.', true);
+        return;
+      }
       const result = await api('/api/platform/clients', { method: 'POST', body: values });
       $('createFields').hidden = true;
       $('createResult').hidden = false;
