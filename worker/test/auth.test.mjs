@@ -128,6 +128,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0013_flat_contact_platform_ids.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0014_unified_contact_conversations.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0015_saas_clients.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0016_internal_slug.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -758,7 +759,7 @@ test('single workspace profile is readable by members and writable only by admin
   const { database, DB } = await testDatabase();
   const env = envFor(DB);
   database.exec(await readFile(new URL('../migrations/0010_workspace_uuid.sql', import.meta.url), 'utf8'));
-  const migratedWorkspaceId = database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id;
+  const migratedWorkspaceId = database.prepare("SELECT workspace_id FROM workspaces WHERE kind='internal'").get().workspace_id;
   assert.match(migratedWorkspaceId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   const { sessionToken } = await performOwnerLogin(env);
   const headers = {
@@ -789,7 +790,7 @@ test('single workspace profile is readable by members and writable only by admin
     body: JSON.stringify({ workspaceId: crypto.randomUUID() })
   }), env);
   assert.equal(immutableId.status, 400);
-  assert.equal(database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id,
+  assert.equal(database.prepare("SELECT workspace_id FROM workspaces WHERE kind='internal'").get().workspace_id,
     migratedWorkspaceId);
   const update = await handleRequest(new Request('https://api.chat.helixcer.com/api/workspace', {
     method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' },
@@ -818,7 +819,7 @@ test('single workspace profile is readable by members and writable only by admin
   assert.equal(partialBody.item.displayName, 'Helixcer Operations');
   assert.equal(partialBody.item.gstin, '32ABCDE1234F1Z5');
   assert.equal(partialBody.item.workspaceId, migratedWorkspaceId);
-  assert.equal(database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id,
+  assert.equal(database.prepare("SELECT workspace_id FROM workspaces WHERE kind='internal'").get().workspace_id,
     migratedWorkspaceId);
 
   const bootstrap = await handleRequest(new Request('https://api.chat.helixcer.com/api/bootstrap', { headers }), env);

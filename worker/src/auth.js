@@ -552,7 +552,8 @@ async function resolveDefaultWorkspace(env) {
     ? await env.DB.prepare('SELECT workspace_id,name,slug FROM workspaces WHERE workspace_id=?1 LIMIT 1').bind(configured).first()
     : null;
   if (!workspace) {
-    workspace = await env.DB.prepare("SELECT workspace_id,name,slug FROM workspaces WHERE slug='default' LIMIT 1").first();
+    workspace = await env.DB.prepare(`SELECT workspace_id,name,slug FROM workspaces
+      WHERE kind='internal' ORDER BY created_at LIMIT 1`).first();
   }
   if (!workspace) {
     const result = await env.DB.prepare('SELECT workspace_id,name,slug FROM workspaces ORDER BY created_at,workspace_id LIMIT 2').all();

@@ -509,7 +509,7 @@ async function assertAnotherOwner(env, workspaceId) {
 
 async function internalWorkspace(env) {
   const workspace = await env.DB.prepare(`SELECT workspace_id,name,slug FROM workspaces
-    WHERE kind='internal' ORDER BY CASE WHEN slug='default' THEN 0 ELSE 1 END,created_at LIMIT 1`).first();
+    WHERE kind='internal' ORDER BY created_at,workspace_id LIMIT 1`).first();
   if (workspace) return workspace;
   const fallback = await env.DB.prepare(`SELECT workspace_id,name,slug FROM workspaces
     ORDER BY created_at LIMIT 1`).first();
