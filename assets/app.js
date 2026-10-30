@@ -6797,10 +6797,17 @@
       }
       if (top.phone) bump("customer.phone", "customer.phone", top.phone);
       if (top.name) bump("customer.name", "customer.name", top.name);
-      if (tags.length) bump("tags", "tags", tags.slice(0, 3).join(", "));
+      if (tags.length) {
+        const firstTag = tags.map((tag) => String(tag || "").trim()).find(Boolean);
+        if (firstTag) bump("tags", "tags", firstTag);
+      }
       Object.entries(traits).forEach(([key, value]) => {
         if (value === undefined || value === null || value === "") return;
-        bump(`traits.${key}`, `traits.${key}`, Array.isArray(value) ? value.slice(0, 3).join(", ") : value);
+        const sample = Array.isArray(value)
+          ? value.map((item) => String(item || "").trim()).find(Boolean)
+          : value;
+        if (sample === undefined || sample === null || sample === "") return;
+        bump(`traits.${key}`, `traits.${key}`, sample);
       });
     });
     return [...counts.values()].sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
@@ -6891,6 +6898,14 @@
     });
   }
 
+  function formatImportFieldExample(value) {
+    if (Array.isArray(value)) {
+      const first = value.map((item) => String(item || "").trim()).find(Boolean);
+      return first || "";
+    }
+    return String(value ?? "").trim();
+  }
+
   function renderImportChatMapping() {
     const host = $("importChatMapping");
     const list = $("importChatMappingList");
@@ -6910,10 +6925,19 @@
       title.textContent = field.label;
       const help = document.createElement("span");
       help.className = "subtle";
-      const bits = [`${field.count} chats`];
-      if (field.sample) bits.push(`e.g. ${field.sample}`);
-      help.textContent = bits.join(" · ");
+      help.textContent = `Found in ${field.count} chat${field.count === 1 ? "" : "s"}`;
       label.append(title, help);
+      const example = formatImportFieldExample(field.sample);
+      if (example) {
+        const exampleLine = document.createElement("div");
+        exampleLine.className = "import-chat-mapping-example";
+        const exampleLabel = document.createElement("span");
+        exampleLabel.textContent = "Example";
+        const exampleValue = document.createElement("code");
+        exampleValue.textContent = example;
+        exampleLine.append(exampleLabel, exampleValue);
+        label.append(exampleLine);
+      }
       const select = document.createElement("select");
       select.className = "text-field";
       select.dataset.importSource = field.path;

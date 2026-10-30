@@ -111,6 +111,8 @@ test('dashboard exposes Import Chat field mapping UI', async () => {
   assert.match(app, /sourceAssignments/);
   assert.match(app, /dataset\.importSource/);
   assert.match(app, /discoverInteraktContactFields/);
+  assert.match(app, /import-chat-mapping-example/);
+  assert.match(app, /formatImportFieldExample/);
   assert.match(app, /Don’t import|Don't import/);
   assert.equal(INTERAKT_SOURCE, 'interakt');
 });

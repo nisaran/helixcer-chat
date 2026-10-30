@@ -897,14 +897,46 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .import-chat-mapping-list { display: grid; gap: 10px; }
 .import-chat-mapping-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1.2fr) minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
+  grid-template-columns: minmax(220px, 1.35fr) minmax(0, 0.9fr);
+  gap: 12px;
+  align-items: start;
+  padding: 10px 0;
+  border-bottom: 1px solid #e7ebe8;
 }
+.import-chat-mapping-row:last-of-type { border-bottom: 0; }
 .import-chat-mapping-row strong { font-size: 12px; word-break: break-word; }
 .import-chat-mapping-row .subtle { display: block; margin-top: 2px; font-size: 10px; }
-.import-chat-mapping-row select { width: 100%; }
-.import-chat-mapping-meta { color: var(--muted); font-size: 10px; }
+.import-chat-mapping-example {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 7px;
+  min-width: 0;
+}
+.import-chat-mapping-example > span {
+  flex: 0 0 auto;
+  color: #84908d;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.import-chat-mapping-example > code {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #eef2ef;
+  color: var(--ink);
+  padding: 4px 8px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.import-chat-mapping-row select { width: 100%; margin-top: 2px; }
+.import-chat-mapping-meta { color: var(--muted); font-size: 10px; margin: 4px 0 0; }
 .import-chat-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
 .import-chat-stats div { display: grid; gap: 2px; }
 .import-chat-stats dt { color: var(--muted); font-size: 10px; font-weight: 650; }
