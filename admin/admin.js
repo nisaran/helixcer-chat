@@ -262,6 +262,7 @@ async function openClient(workspaceId) {
     const data = await api(`/api/platform/clients/${encodeURIComponent(workspaceId)}`);
     state.detail = data;
     renderDetail(data);
+    clearDetailError();
     $('deleteConfirm').value = '';
     $('inviteResult').hidden = true;
     $('inviteForm').reset();
@@ -393,12 +394,23 @@ async function patchMember(workspaceId, membershipId, body) {
       method: 'PATCH', body
     });
     toast(result.item?.status === 'disabled' ? 'Member disabled and signed out.' : 'Member updated.');
+    clearDetailError();
     await reloadDetail();
     await loadClients();
   } catch (error) {
-    handleError(error);
+    showDetailError(error.message);
     await reloadDetail();
   }
+}
+
+function showDetailError(message) {
+  const element = $('memberError');
+  element.textContent = message;
+  element.hidden = false;
+}
+
+function clearDetailError() {
+  $('memberError').hidden = true;
 }
 
 async function removeMember(workspaceId, member) {
@@ -406,10 +418,11 @@ async function removeMember(workspaceId, member) {
   try {
     await api(`/api/platform/clients/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(member.membershipId)}`, { method: 'DELETE' });
     toast('Member removed.');
+    clearDetailError();
     await reloadDetail();
     await loadClients();
   } catch (error) {
-    handleError(error);
+    showDetailError(error.message);
   }
 }
 
