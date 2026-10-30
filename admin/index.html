@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="helixcer-api-base" content="https://api.chat.helixcer.com">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.chat.helixcer.com; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
+  <title>Helixcer Admin</title>
+  <link rel="stylesheet" href="./admin.css">
+  <script src="./admin.js" defer></script>
+</head>
+<body>
+  <section class="gate" id="gate" hidden>
+    <div class="gate-card">
+      <div class="brand-mark">H</div>
+      <p class="eyebrow">Helixcer platform</p>
+      <h1>Client administration</h1>
+      <p class="copy">Sign in with the Helixcer owner Google account to manage client companies and workspace access.</p>
+      <p class="alert" id="gateAlert" hidden></p>
+      <a class="button button-primary button-block" id="signInLink" href="#">Continue with Google</a>
+    </div>
+  </section>
+
+  <div class="shell" id="shell" hidden>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark small">H</span><span>Helixcer <strong>Admin</strong></span></div>
+      <div class="top-actions">
+        <a class="link" id="inboxLink" href="https://chat.helixcer.com" target="_blank" rel="noreferrer">Open inbox</a>
+        <span class="who" id="meEmail"></span>
+        <button class="button button-quiet" type="button" id="signOut">Sign out</button>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Sections">
+      <button class="tab is-active" type="button" data-tab="clients">Clients</button>
+      <button class="tab" type="button" data-tab="overview">Overview</button>
+      <button class="tab" type="button" data-tab="admins">Platform admins</button>
+    </nav>
+
+    <main class="main">
+      <section data-panel="overview" hidden>
+        <div class="stats" id="stats"></div>
+        <section class="surface">
+          <div class="surface-head"><h2>Newest clients</h2></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Company</th><th>Owner</th><th>Status</th><th>Created</th></tr></thead>
+              <tbody id="recentRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section data-panel="clients">
+        <div class="toolbar">
+          <input class="input" id="search" type="search" placeholder="Search company, slug or owner email" autocomplete="off">
+          <select class="input select" id="statusFilter">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="suspended">Suspended</option>
+          </select>
+          <button class="button button-primary" type="button" id="newClient">New client</button>
+        </div>
+        <section class="surface">
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Company</th><th>Owner</th><th>Status</th><th class="num">Members</th><th class="num">Channels</th><th class="num">Chats</th><th>Last activity</th><th></th></tr></thead>
+              <tbody id="clientRows"></tbody>
+            </table>
+          </div>
+          <p class="empty" id="clientsEmpty" hidden>No client companies yet. Create the first one.</p>
+        </section>
+      </section>
+
+      <section data-panel="admins" hidden>
+        <section class="surface">
+          <div class="surface-head">
+            <div>
+              <h2>Platform admins</h2>
+              <p class="copy">The bootstrap owner always has access. Additional admins sign in with Google; they also need workspace access, so an invite link is issued for new addresses.</p>
+            </div>
+          </div>
+          <form class="inline-form" id="adminForm" autocomplete="off">
+            <label class="sr-only" for="adminEmail">Email</label>
+            <input class="input" id="adminEmail" name="email" type="email" required maxlength="254" placeholder="person@example.com">
+            <button class="button button-primary" type="submit">Add admin</button>
+          </form>
+          <div class="invite-box" id="adminInvite" hidden>
+            <p class="copy">This person has no Helixcer account yet. Send this invite link so they can sign in.</p>
+            <div class="copy-row"><input class="input" id="adminInviteUrl" readonly><button class="button button-secondary" type="button" data-copy="adminInviteUrl">Copy</button></div>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Email</th><th>Status</th><th>Access</th><th></th></tr></thead>
+              <tbody id="adminRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="modal" id="createDialog">
+    <form class="modal-card" id="createForm" autocomplete="off">
+      <div class="modal-head">
+        <div><p class="eyebrow">New client</p><h2>Create a client company</h2></div>
+        <button class="icon-button" type="button" data-close="createDialog" aria-label="Close">&times;</button>
+      </div>
+      <div id="createFields">
+        <div class="form-grid">
+          <label class="field">Company name<input class="input" name="companyName" required minlength="2" maxlength="120"></label>
+          <label class="field">Owner email<input class="input" name="ownerEmail" type="email" required maxlength="254" placeholder="owner@company.com"></label>
+          <label class="field">Owner name (optional)<input class="input" name="ownerName" maxlength="160"></label>
+          <label class="field">Internal notes (optional)<input class="input" name="notes" maxlength="2000"></label>
+        </div>
+        <p class="copy">The owner signs in with Google through a one-time invite link. You can copy it right after creating the company.</p>
+      </div>
+      <div id="createResult" hidden>
+        <p class="copy">Copy this sign-in link and send it to the owner. It expires in 7 days.</p>
+        <div class="copy-row"><input class="input" id="createInviteUrl" readonly><button class="button button-secondary" type="button" data-copy="createInviteUrl">Copy</button></div>
+      </div>
+      <div class="modal-actions">
+        <button class="button button-quiet" type="button" data-close="createDialog">Close</button>
+        <button class="button button-primary" type="submit" id="createSubmit">Create client</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal modal-wide" id="clientDialog">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div><p class="eyebrow" id="clientSlug">client</p><h2 id="clientTitle">Client</h2></div>
+        <button class="icon-button" type="button" data-close="clientDialog" aria-label="Close">&times;</button>
+      </div>
+      <div class="detail-grid">
+        <section class="panel">
+          <h3>Workspace profile</h3>
+          <form id="clientForm" autocomplete="off">
+            <div class="form-grid">
+              <label class="field">Company name<input class="input" name="name" required minlength="2" maxlength="120"></label>
+              <label class="field">Status<select class="input select" name="status"><option value="active">Active</option><option value="suspended">Suspended</option></select></label>
+              <label class="field">Registered name<input class="input" name="registeredName" maxlength="200"></label>
+              <label class="field">GSTIN<input class="input" name="gstin" maxlength="40"></label>
+              <label class="field">Address line 1<input class="input" name="addressLine1" maxlength="200"></label>
+              <label class="field">Address line 2<input class="input" name="addressLine2" maxlength="200"></label>
+              <label class="field">City<input class="input" name="city" maxlength="100"></label>
+              <label class="field">State<input class="input" name="state" maxlength="100"></label>
+              <label class="field">Postal code<input class="input" name="postalCode" maxlength="20"></label>
+              <label class="field">Country<input class="input" name="country" maxlength="100"></label>
+              <label class="field form-span">Tax details<textarea class="input" name="taxDetails" maxlength="1000" rows="2"></textarea></label>
+              <label class="field form-span">Internal notes<textarea class="input" name="notes" maxlength="2000" rows="2"></textarea></label>
+            </div>
+            <div class="panel-actions"><button class="button button-primary" type="submit">Save changes</button></div>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h3>Members</h3><span class="chip" id="clientStatusChip">active</span></div>
+          <ul class="member-list" id="memberRows"></ul>
+          <form class="inline-form" id="inviteForm" autocomplete="off">
+            <input class="input" name="email" type="email" required maxlength="254" placeholder="teammate@company.com">
+            <select class="input select" name="role"><option value="agent">Agent</option><option value="admin">Admin</option><option value="owner">Owner</option></select>
+            <button class="button button-secondary" type="submit">Invite</button>
+          </form>
+          <div class="invite-box" id="inviteResult" hidden>
+            <p class="copy">Copy this invite link and send it to the teammate. It expires in 7 days.</p>
+            <div class="copy-row"><input class="input" id="memberInviteUrl" readonly><button class="button button-secondary" type="button" data-copy="memberInviteUrl">Copy</button></div>
+          </div>
+          <div class="pending" id="pendingInvites"></div>
+          <div class="danger-zone">
+            <h3>Danger zone</h3>
+            <p class="copy">Permanently deletes this workspace with its members, channels, contacts, conversations and messages. This cannot be undone.</p>
+            <div class="danger-form">
+              <input class="input" id="deleteConfirm" placeholder="Type the slug to confirm" autocomplete="off">
+              <button class="button button-danger" type="button" id="deleteClient">Delete workspace</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+</body>
+</html>

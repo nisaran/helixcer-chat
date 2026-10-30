@@ -23,6 +23,23 @@ import {
   sendWorkspaceMobileConversationRead,
   sendWorkspaceNotifications
 } from './push.js';
+import {
+  addPlatformAdmin,
+  assertPlatformAdmin,
+  cancelWorkspaceInvitation,
+  createClientWorkspace,
+  deleteClientWorkspace,
+  getClientWorkspace,
+  inviteWorkspaceMember,
+  listClientWorkspaces,
+  listPlatformAdmins,
+  platformOverview,
+  platformProfile,
+  removePlatformAdmin,
+  removeWorkspaceMember,
+  updateClientWorkspace,
+  updateWorkspaceMember
+} from './platform.js';
 
 const API_VERSION = '2026-10-26-chat-media';
 const MAX_TEXT_LENGTH = 4096;
@@ -207,6 +224,7 @@ export class InboxHub {
         attachment.expiresAt <= new Date().toISOString()) return false;
     const active = await this.env.DB.prepare(`SELECT 1 FROM sessions s
       JOIN memberships m ON m.membership_id=?2 AND m.user_id=s.user_id AND m.workspace_id=s.workspace_id
+      JOIN workspaces w ON w.workspace_id=s.workspace_id AND w.status='active'
       WHERE s.session_id=?1 AND s.revoked_at IS NULL AND s.expires_at>?3 AND m.status='active'`)
       .bind(attachment.sessionId, attachment.membershipId, new Date().toISOString()).first();
     return Boolean(active);
@@ -287,6 +305,73 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return json({ ok: false, error: 'Origin not allowed.' }, 403);
     }
     const workspaceId = principal.workspace.workspaceId;
+    if (url.pathname.startsWith('/api/platform/')) {
+      await assertPlatformAdmin(env, principal);
+      if (request.method === 'GET' && url.pathname === '/api/platform/me') {
+        return withCors(json(await platformProfile(env, principal)), cors);
+      }
+      if (request.method === 'GET' && url.pathname === '/api/platform/overview') {
+        return withCors(json(await platformOverview(env)), cors);
+      }
+      if (url.pathname === '/api/platform/clients') {
+        if (request.method === 'GET') return withCors(json(await listClientWorkspaces(env, url)), cors);
+        if (request.method === 'POST') {
+          return withCors(json(await createClientWorkspace(env, principal, request, await readJson(request)), 201), cors);
+        }
+      }
+      const clientMatch = url.pathname.match(/^\/api\/platform\/clients\/([^/]+)$/);
+      if (clientMatch) {
+        const clientId = decodeURIComponent(clientMatch[1]);
+        if (request.method === 'GET') return withCors(json(await getClientWorkspace(env, clientId)), cors);
+        if (request.method === 'PATCH') {
+          const result = await updateClientWorkspace(env, principal, clientId, await readJson(request));
+          if (result.suspended) await disconnectRealtime(env, clientId, {});
+          return withCors(json(result), cors);
+        }
+        if (request.method === 'DELETE') {
+          const result = await deleteClientWorkspace(env, principal, clientId, await readJson(request));
+          await disconnectRealtime(env, clientId, {});
+          return withCors(json(result), cors);
+        }
+      }
+      const memberMatch = url.pathname.match(/^\/api\/platform\/clients\/([^/]+)\/members\/([^/]+)$/);
+      if (memberMatch) {
+        const clientId = decodeURIComponent(memberMatch[1]);
+        const membershipId = decodeURIComponent(memberMatch[2]);
+        if (request.method === 'PATCH') {
+          const result = await updateWorkspaceMember(env, principal, clientId, membershipId, await readJson(request));
+          if (result.item?.status === 'disabled') await disconnectRealtime(env, clientId, { membershipId });
+          return withCors(json(result), cors);
+        }
+        if (request.method === 'DELETE') {
+          const result = await removeWorkspaceMember(env, principal, clientId, membershipId);
+          await disconnectRealtime(env, clientId, { membershipId });
+          return withCors(json(result), cors);
+        }
+      }
+      const invitationsMatch = url.pathname.match(/^\/api\/platform\/clients\/([^/]+)\/invitations$/);
+      if (invitationsMatch && request.method === 'POST') {
+        const clientId = decodeURIComponent(invitationsMatch[1]);
+        return withCors(json(await inviteWorkspaceMember(env, principal, request, clientId, await readJson(request)), 201), cors);
+      }
+      const invitationMatch = url.pathname.match(/^\/api\/platform\/clients\/([^/]+)\/invitations\/([^/]+)$/);
+      if (invitationMatch && request.method === 'DELETE') {
+        const clientId = decodeURIComponent(invitationMatch[1]);
+        const invitationId = decodeURIComponent(invitationMatch[2]);
+        return withCors(json(await cancelWorkspaceInvitation(env, principal, clientId, invitationId)), cors);
+      }
+      if (url.pathname === '/api/platform/admins') {
+        if (request.method === 'GET') return withCors(json(await listPlatformAdmins(env, principal)), cors);
+        if (request.method === 'POST') {
+          return withCors(json(await addPlatformAdmin(env, principal, request, await readJson(request)), 201), cors);
+        }
+      }
+      const adminMatch = url.pathname.match(/^\/api\/platform\/admins\/([^/]+)$/);
+      if (adminMatch && request.method === 'DELETE') {
+        return withCors(json(await removePlatformAdmin(env, principal, decodeURIComponent(adminMatch[1]))), cors);
+      }
+      return withCors(json({ ok: false, error: 'API route not found.' }, 404), cors);
+    }
     if (url.pathname === '/api/me' && request.method === 'GET') {
       return withCors(json(principalView(principal)), cors);
     }

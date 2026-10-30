@@ -17,15 +17,16 @@ The backend uses Cloudflare Workers, D1, a scheduled D1 outbox, and a Durable Ob
 - External applications use revocable, hashed workspace API keys through the Helixcer Messaging API. The currently available WhatsApp template module writes sends to the inbox and outbox atomically; sensitive retry payloads are AES-GCM encrypted and removed after a terminal submission result.
 - Authenticated browser installations can register a VAPID Web Push subscription. Inbound provider webhooks schedule encrypted background alerts without delaying the provider response; expired browser endpoints are removed automatically.
 - The native Android app requests a short-lived, one-use server challenge and exchanges the nonce-bound Google ID token for a device-bound, revocable bearer session. When optional Firebase service-account secrets are configured, mobile installations can register FCM tokens and receive the same sender, preview, and conversation deep link as browser alerts.
+- Platform administration is gated by `BOOTSTRAP_OWNER_EMAIL` or an active `platform_admins` row. Its `/api/platform/*` routes provision client workspaces, issue owner invitations, edit workspace profiles, manage members and pending invitations, suspend or reactivate access, and permanently delete a client workspace after a typed-slug confirmation.
 
-The initial migration seeds one empty workspace, never an administrator. On the first successful Google login, an owner membership is created only if there are no memberships and the verified Google email exactly matches `BOOTSTRAP_OWNER_EMAIL`. Future users require an invitation.
+The initial migration seeds one empty workspace, never an administrator. On the first successful Google login, an owner membership is created only if there are no memberships and the verified Google email exactly matches `BOOTSTRAP_OWNER_EMAIL`. Future users require an invitation. `BOOTSTRAP_OWNER_EMAIL` is also the permanent platform administrator; additional platform administrators are added from the admin panel into `platform_admins`.
 
 ## Required configuration
 
 Public Worker variables in `wrangler.toml`:
 
 - `APP_ORIGIN`: dashboard origin used for safe post-login redirects.
-- `ALLOWED_ORIGINS`: exact comma-separated browser origins; wildcards are not accepted.
+- `ALLOWED_ORIGINS`: exact comma-separated browser origins; wildcards are not accepted. Include both the client dashboard and the admin panel, for example `https://chat.helixcer.com,https://admin.chat.helixcer.com`.
 - No workspace ID variable is required. The single workspace is resolved from D1 by its `default` slug (or as the only workspace), and its internal ID is a generated UUID.
 - `SESSION_TTL_SECONDS`: defaults to seven days and is capped at 30 days.
 - `RECOVERY_MODE`: leave `false`; set to `true` only for a short, supervised recovery window.
@@ -103,9 +104,34 @@ Migration `0012_contact_identities.sql` makes contacts independent from connecte
 
 Migration `0013_flat_contact_platform_ids.sql` adds the flat contact contract. Each master contact exposes at most one current ID for WhatsApp, Telegram, Instagram, Facebook, and email through `platformIds`. It deterministically selects a current identity from legacy duplicates but does not delete any historical identity, binding, conversation, or message. An ID with conversation history cannot be changed or removed. Export D1 before applying this migration.
 
-Deploy the Worker on its `workers.dev` hostname, then deploy the repository's `gateway/` Pages Function with an `API` service binding to this Worker. Associate the Pages project with `api.chat.helixcer.com` and, at the external DNS provider, point only the `api.chat` CNAME to `helixcer-chat-gateway.pages.dev`. Keep the GitHub Pages dashboard at `chat.helixcer.com` and list only the dashboard origin in `ALLOWED_ORIGINS`. The checked-in frontend uses the branded API hostname; browsers never call the `workers.dev` hostname directly because its host-only `SameSite=Lax` cookie would be cross-site.
+Migration `0015_saas_clients.sql` adds `status`, `kind`, and `notes` to workspaces, creates the platform administrator allowlist, and rebuilds `invitations` so a client workspace can be claimed by an invited `owner`. Existing workspaces remain `active` and are marked `internal`; only workspaces created from the admin panel are `client` and appear in its lists, counts, search, suspend, and delete actions. Apply this migration before deploying Worker code that references the new columns or table. Export D1 first.
+
+Deploy the Worker on its `workers.dev` hostname, then deploy the repository's `gateway/` Pages Function with an `API` service binding to this Worker. Associate the Pages project with `api.chat.helixcer.com` and, at the external DNS provider, point only the `api.chat` CNAME to `helixcer-chat-gateway.pages.dev`. Keep the GitHub Pages dashboard at `chat.helixcer.com` and list both the dashboard and admin origins in `ALLOWED_ORIGINS`. The checked-in frontend uses the branded API hostname; browsers never call the `workers.dev` hostname directly because its host-only `SameSite=Lax` cookie would be cross-site.
 
 The gateway holds no Google or channel secret. HTTP and WebSocket requests are passed to the Worker over Cloudflare's internal service binding. Deploy it from `gateway/` with `npx wrangler pages deploy` after the Worker is available.
+
+The `admin/` directory is a static single-page panel with its own CSP, deployed independently of the client dashboard:
+
+```sh
+npx wrangler pages project create helixcer-chat-admin
+npx wrangler pages deploy admin --project-name helixcer-chat-admin
+```
+
+Associate `admin.chat.helixcer.com` with the `helixcer-chat-admin` project and point the external DNS `admin.chat` CNAME at `helixcer-chat-admin.pages.dev`. The panel calls `https://api.chat.helixcer.com` directly, so no service binding is required. Because the panel and API are same-site, the existing host-only login cookie is accepted; every mutating request still requires an exact allowlisted `Origin`.
+
+## Platform administration API
+
+All routes below require a verified browser session whose email is `BOOTSTRAP_OWNER_EMAIL` or an active `platform_admins` row. Non-platform sessions receive `403`.
+
+- `GET /api/platform/me` — platform identity, bootstrap flag, and client sign-in URL.
+- `GET /api/platform/overview` — client, active/suspended, member, channel, conversation, and new-client counts plus recent clients.
+- `GET|POST /api/platform/clients` — list or create client workspaces. Creation returns a workspace-scoped owner invitation URL; when the owner email already has a Helixcer account, the owner membership is added immediately and the same link still binds their sign-in to this workspace.
+- `GET|PATCH|DELETE /api/platform/clients/:workspaceId` — read or update the profile and status, or permanently delete after `{confirmSlug}` matches. Deletion refuses the caller's own workspace and removes that client workspace's channels, contacts, conversations, messages, keys, memberships, sessions, invitations, and audit rows in one batch.
+- `POST /api/platform/clients/:workspaceId/invitations` — invite a member and return a workspace-scoped sign-in link; `DELETE /api/platform/clients/:workspaceId/invitations/:invitationId` cancels a pending one.
+- `PATCH|DELETE /api/platform/clients/:workspaceId/members/:membershipId` — change role/status or remove a member. The last active owner cannot be removed or demoted.
+- `GET|POST /api/platform/admins` and `DELETE /api/platform/admins/:adminId` — manage the platform administrator allowlist. The bootstrap email is always present and cannot be removed.
+
+Suspending a client workspace sets `workspaces.status='suspended'`, revokes its sessions, and disconnects its live sockets. Session authentication, Google login provisioning, and realtime revalidation all require an active workspace, so a suspended client cannot read or write data until reactivated. Deleting a client workspace is permanent; the admin panel requires typing the workspace slug first.
 
 ## Authentication and team API
 
@@ -220,7 +246,8 @@ The Worker enforces both per-client and global OAuth-start limits in a Durable O
 ```sh
 node --check worker/src/index.js
 node --check worker/src/auth.js
+node --check worker/src/platform.js
 node --test worker/test/*.test.mjs
 ```
 
-The tests cover migrations and legacy-row backfill, Google RSA/JWK verification and key rotation, OAuth state/nonce/PKCE and abuse limits, configured-owner bootstrap, hashed sessions, one-time email-bound invitations, role boundaries, last-owner protection, exact origins, realtime session revalidation, workspace-scoped data, API-key lifecycle, template validation and encryption, approved-template pagination and sanitization, contact profile updates and identity conflicts, idempotent external sends, rate limits, fast Meta status webhooks, and cross-key isolation.
+The tests cover migrations and legacy-row backfill, Google RSA/JWK verification and key rotation, OAuth state/nonce/PKCE and abuse limits, configured-owner bootstrap, hashed sessions, one-time email-bound invitations, role boundaries, last-owner protection, exact origins, realtime session revalidation, workspace-scoped data, API-key lifecycle, template validation and encryption, approved-template pagination and sanitization, contact profile updates and identity conflicts, idempotent external sends, rate limits, fast Meta status webhooks, cross-key isolation, platform administrator authorization, client workspace creation and owner invitations, profile updates, member and invitation management, suspension enforcement, and slug-confirmed tenant deletion.

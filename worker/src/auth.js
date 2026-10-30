@@ -140,7 +140,8 @@ export async function authenticateRequest(request, env) {
     FROM sessions s JOIN users u ON u.user_id=s.user_id
       JOIN memberships m ON m.user_id=s.user_id AND m.workspace_id=s.workspace_id
       JOIN workspaces w ON w.workspace_id=s.workspace_id
-    WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2 AND m.status='active'`)
+    WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2 AND m.status='active'
+      AND w.status='active'`)
     .bind(await hashToken(rawToken), new Date().toISOString()).first();
   if (!row) return null;
   const expectedSource = row.session_type === 'mobile' ? 'bearer' : 'cookie';
@@ -320,7 +321,7 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
   const row = await env.DB.prepare(`SELECT u.user_id,u.email,u.display_name,u.avatar_url,m.membership_id,m.role,m.status,
       w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
     FROM users u JOIN memberships m ON m.user_id=u.user_id JOIN workspaces w ON w.workspace_id=m.workspace_id
-    WHERE u.user_id=?1 AND m.status='active' AND (?2='' OR m.workspace_id=?2)
+    WHERE u.user_id=?1 AND m.status='active' AND w.status='active' AND (?2='' OR m.workspace_id=?2)
     ORDER BY CASE m.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END LIMIT 1`)
     .bind(user.user_id, selectedWorkspaceId).first();
   if (!row) {
@@ -328,6 +329,10 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
       await env.DB.prepare('DELETE FROM users WHERE user_id=?1 AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=?1)')
         .bind(user.user_id).run();
     }
+    const suspended = await env.DB.prepare(`SELECT 1 FROM memberships m
+      JOIN workspaces w ON w.workspace_id=m.workspace_id
+      WHERE m.user_id=?1 AND m.status='active' AND w.status='suspended'`).bind(user.user_id).first();
+    if (suspended) throw authError(403, 'This workspace has been suspended. Contact Helixcer support.');
     throw authError(403, 'Your account has not been invited to this workspace.');
   }
   return principalFromRow(row);
@@ -518,7 +523,7 @@ async function getGoogleJwks(url, fetchImpl, forceRefresh = false) {
   return body.keys;
 }
 
-async function auditAuthAction(env, principal, action, targetType, targetId, details) {
+export async function auditAuthAction(env, principal, action, targetType, targetId, details) {
   await env.DB.prepare(`INSERT INTO audit_log
       (audit_id,actor,action,target_type,target_id,details_json,timestamp,workspace_id,actor_user_id,actor_email)
     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?2)`)
@@ -747,7 +752,7 @@ function base64UrlDecode(value) {
   return Uint8Array.from(binary, character => character.charCodeAt(0));
 }
 
-function normalizeEmail(value) {
+export function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
 }
 

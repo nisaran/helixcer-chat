@@ -127,6 +127,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0012_contact_identities.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0013_flat_contact_platform_ids.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0014_unified_contact_conversations.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0015_saas_clients.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 

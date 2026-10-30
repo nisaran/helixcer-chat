@@ -6,7 +6,7 @@ preview_urls = false
 
 [vars]
 APP_NAME = "Helixcer Chat"
-ALLOWED_ORIGINS = "https://chat.helixcer.com"
+ALLOWED_ORIGINS = "https://chat.helixcer.com,https://admin.chat.helixcer.com"
 APP_ORIGIN = "https://chat.helixcer.com"
 SESSION_TTL_SECONDS = "604800"
 RECOVERY_MODE = "false"

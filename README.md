@@ -18,6 +18,7 @@ Helixcer Chat is a zero-monthly-cost omnichannel inbox designed for GitHub Pages
 - WhatsApp agents can attach supported images, videos, audio, and documents. Files are uploaded directly to Meta and are not copied into paid Helixcer object storage.
 - A Settings page controls browser notifications for new customer messages while the Helixcer dashboard is open.
 - Workspace API keys and a server-to-server Helixcer Messaging API. Its first available module sends WhatsApp templates and records each external send in the shared inbox before dispatching it to Meta.
+- A separate platform admin panel at `admin.chat.helixcer.com` for creating client workspaces, sending Google owner invitations, editing workspace profiles, managing members, suspending or reactivating workspaces, and permanently deleting them. Platform administrators are limited to `BOOTSTRAP_OWNER_EMAIL` and an explicit `platform_admins` allowlist.
 - Built-in API documentation for simple templates, variables, media headers, static and dynamic buttons, authentication, Flow, catalog, carousel, and future Meta-native components.
 - Supplied Helixcer artwork is used for dashboard branding and the browser icon. Google callback failures return to the branded sign-in screen with a safe, readable error instead of a raw Worker exception page.
 
@@ -27,8 +28,10 @@ Helixcer Chat is a zero-monthly-cost omnichannel inbox designed for GitHub Pages
 index.html                 GitHub Pages entry point
 api-docs.html              Browser-friendly Helixcer Developer API reference
 assets/                    Dashboard JavaScript, styles, and Helixcer brand assets
+admin/                     Platform admin panel (admin.chat.helixcer.com)
 docs/                      Markdown API reference
 worker/src/index.js        Cloudflare Worker API
+worker/src/platform.js     Multi-tenant platform administration API
 worker/migrations/         D1 schema
 worker/test/               Node tests
 gateway/                   Cloudflare Pages API gateway
@@ -82,19 +85,21 @@ The Worker setup is documented in [`worker/README.md`](worker/README.md). In sum
 
 1. Create the `helixcer-chat-db` D1 database and put its ID in `wrangler.toml`.
 2. Deploy `gateway/` as the `helixcer-chat-gateway` Pages project, associate `api.chat.helixcer.com`, and point only that external-DNS subdomain to `helixcer-chat-gateway.pages.dev`. The gateway calls the Worker over a service binding; this same-site hostname is required for the secure login cookie used by `chat.helixcer.com`.
-3. Create a Google Web OAuth client with the exact callback `https://api.chat.helixcer.com/auth/google/callback`.
-4. Configure Google OAuth secrets, set `BOOTSTRAP_OWNER_EMAIL` to the verified Google email that may claim the first Owner membership, and create one strong `CHANNEL_CREDENTIALS_KEY` Worker secret.
-5. Export the current D1 database, apply all migrations, deploy the Worker, and deploy the Pages gateway.
-6. Sign in with the configured owner email and verify the inbox, team roles, and realtime connection before publishing the updated GitHub Pages frontend.
-7. Add each WhatsApp, Telegram, or Instagram connection in the dashboard. The Worker encrypts its credentials in D1; do not create `WA_MAIN_*` or other per-channel Worker secrets.
-8. Save the channel, copy its callback and verify token, and configure them at the provider. Saving never calls Meta or another provider. WhatsApp starts placing correctly signed inbound webhook messages in the Inbox as soon as they arrive, without waiting for API/provider verification. Run the separate **Verify connection** action before relying on outbound replies. Managed Meta calls default to Graph API v26.0.
-9. Open **Developer API** from the sidebar and create a one-time workspace API key for each external backend or automation. Each request must include the read-only workspace ID in `X-Workspace-Id`; the API verifies that it matches the key. Each send selects the appropriate connection with `channelId`. The currently available external-send module is WhatsApp templates; use [`api-docs.html`](api-docs.html) for its request contract and examples.
+3. Deploy `admin/` as a separate Pages project named `helixcer-chat-admin` (`npx wrangler pages project create helixcer-chat-admin`, then `npx wrangler pages deploy admin --project-name helixcer-chat-admin`). Associate `admin.chat.helixcer.com` with that project and point the external DNS `admin.chat` CNAME at `helixcer-chat-admin.pages.dev`. The panel calls `api.chat.helixcer.com` directly and relies on the same-site login cookie.
+4. Create a Google Web OAuth client with the exact callback `https://api.chat.helixcer.com/auth/google/callback`.
+5. Configure Google OAuth secrets, set `BOOTSTRAP_OWNER_EMAIL` to the verified Google email that may claim the first Owner membership and the platform admin panel, and create one strong `CHANNEL_CREDENTIALS_KEY` Worker secret.
+6. Export the current D1 database, apply all migrations (including `0015_saas_clients.sql`), deploy the Worker, and deploy the Pages gateway and admin panel.
+7. Sign in at `admin.chat.helixcer.com`, create the first client workspace, and send its owner invitation. Verify the invited owner can sign in at `chat.helixcer.com` and reach only that workspace.
+8. Sign in with the configured owner email and verify the inbox, team roles, and realtime connection before publishing the updated GitHub Pages frontend.
+9. Add each WhatsApp, Telegram, or Instagram connection in the dashboard. The Worker encrypts its credentials in D1; do not create `WA_MAIN_*` or other per-channel Worker secrets.
+10. Save the channel, copy its callback and verify token, and configure them at the provider. Saving never calls Meta or another provider. WhatsApp starts placing correctly signed inbound webhook messages in the Inbox as soon as they arrive, without waiting for API/provider verification. Run the separate **Verify connection** action before relying on outbound replies. Managed Meta calls default to Graph API v26.0.
+11. Open **Developer API** from the sidebar and create a one-time workspace API key for each external backend or automation. Each request must include the read-only workspace ID in `X-Workspace-Id`; the API verifies that it matches the key. Each send selects the appropriate connection with `channelId`. The currently available external-send module is WhatsApp templates; use [`api-docs.html`](api-docs.html) for its request contract and examples.
 
 Never place Google credentials, provider tokens, signing secrets, the bootstrap owner email, or a recovery token in GitHub.
 
 The primary Owner is not hardcoded. The first matching, Google-verified identity can claim ownership only while the membership table is empty. After that one-time bootstrap, D1 memberships are authoritative and changing the environment value cannot replace the Owner. New people require an email-bound invitation.
 
-The current UI intentionally exposes one workspace and no billing. Business records, memberships, sessions, realtime hubs, and audit entries already carry `workspace_id`, so a future SaaS version can add workspace provisioning and switching without redesigning the inbox data model.
+Helixcer Chat is multi-tenant. Each client workspace has its own memberships, channels, contacts, conversations, messages, API keys, and realtime hub. The platform admin panel creates a client workspace and returns a Google sign-in invitation link for its owner; clients never receive a password, and their verified Google email must match the invitation. Suspending a workspace blocks new sign-ins and disconnects live sockets without deleting data. Permanent deletion requires typing the workspace slug and removes all of that workspace's business records in one database batch.
 
 ## Cost controls
 
@@ -102,5 +107,5 @@ The application is intended to remain on GitHub Pages and Cloudflare free plans.
 
 ## Safe rollout and rollback
 
-Before migration, export D1 and record the currently deployed Worker version plus the current GitHub Pages commit. Apply database migrations, then deploy and verify the Worker/custom domain before publishing the frontend; switch provider callbacks last. If application behavior regresses, restore the prior Worker version and Pages commit. Migration `0004` adds the encrypted credential vault and removes only the untouched, unreferenced `wa-main` placeholder. Migration `0005` adds hashed workspace API keys, encrypted temporary outbound payloads, and idempotency records without changing existing inbox rows. Migration `0012` separates master contacts, platform identities, and connected-channel bindings; it preserves ambiguous legacy routes for explicit review instead of guessing. Migration `0013` selects one current ID per supported platform without deleting duplicate historical identity rows or their routes. Restore the D1 export if a schema migration itself must be rolled back or if data was corrupted.
+Before migration, export D1 and record the currently deployed Worker version plus the current GitHub Pages commit. Apply database migrations, then deploy and verify the Worker/custom domain before publishing the frontend; switch provider callbacks last. If application behavior regresses, restore the prior Worker version and Pages commit. Migration `0004` adds the encrypted credential vault and removes only the untouched, unreferenced `wa-main` placeholder. Migration `0005` adds hashed workspace API keys, encrypted temporary outbound payloads, and idempotency records without changing existing inbox rows. Migration `0012` separates master contacts, platform identities, and connected-channel bindings; it preserves ambiguous legacy routes for explicit review instead of guessing. Migration `0013` selects one current ID per supported platform without deleting duplicate historical identity rows or their routes. Migration `0015` adds workspace `status`/`kind`/`notes`, the `platform_admins` table, and a rebuilt `invitations` table that also accepts the `owner` role; existing workspaces stay `active` and are marked `internal` so they are never listed as clients. Restore the D1 export if a schema migration itself must be rolled back or if data was corrupted.
 
