@@ -40,6 +40,7 @@
       conversationCount: 0,
       messageCount: 0,
       availableFields: [],
+      sourceAssignments: {},
       fieldMapping: { name: "", phone: "", company: "", tags: "" },
       importing: false,
     },
@@ -6816,6 +6817,32 @@
     };
   }
 
+  function sourceAssignmentsFromFieldMapping(fieldMapping) {
+    const assignments = {};
+    Object.entries(fieldMapping || {}).forEach(([target, path]) => {
+      if (path) assignments[path] = target;
+    });
+    return assignments;
+  }
+
+  function fieldMappingFromSourceAssignments(sourceAssignments) {
+    const mapping = { name: "", phone: "", company: "", tags: "" };
+    Object.entries(sourceAssignments || {}).forEach(([path, target]) => {
+      if (!target || !(target in mapping)) return;
+      mapping[target] = path;
+    });
+    return mapping;
+  }
+
+  function syncImportFieldMappingFromAssignments() {
+    state.importChat.fieldMapping = fieldMappingFromSourceAssignments(state.importChat.sourceAssignments);
+    const channels = whatsappImportChannels();
+    $("importChatSubmit").disabled = state.importChat.importing
+      || !channels.length
+      || !state.importChat.conversations.length
+      || !state.importChat.fieldMapping.phone;
+  }
+
   function renderImportChatPage() {
     const channelSelect = $("importChatChannel");
     const selected = channelSelect.value;
@@ -6872,46 +6899,63 @@
     list.innerHTML = "";
     if (!ready) return;
     const fields = state.importChat.availableFields;
-    IMPORT_CONTACT_TARGETS.forEach((target) => {
+    const assignedTargets = new Set(
+      Object.values(state.importChat.sourceAssignments || {}).filter(Boolean)
+    );
+    fields.forEach((field) => {
       const row = document.createElement("div");
       row.className = "import-chat-mapping-row";
       const label = document.createElement("div");
       const title = document.createElement("strong");
-      title.textContent = target.required ? `${target.label} *` : target.label;
+      title.textContent = field.label;
       const help = document.createElement("span");
       help.className = "subtle";
-      help.textContent = target.help;
+      const bits = [`${field.count} chats`];
+      if (field.sample) bits.push(`e.g. ${field.sample}`);
+      help.textContent = bits.join(" · ");
       label.append(title, help);
       const select = document.createElement("select");
       select.className = "text-field";
-      select.dataset.importTarget = target.key;
+      select.dataset.importSource = field.path;
       const skip = document.createElement("option");
       skip.value = "";
-      skip.textContent = target.required ? "Select a source field…" : "Don’t import";
+      skip.textContent = "Don’t import";
       select.append(skip);
-      fields.forEach((field) => {
+      IMPORT_CONTACT_TARGETS.forEach((target) => {
+        const current = state.importChat.sourceAssignments[field.path] || "";
+        const taken = assignedTargets.has(target.key) && current !== target.key;
         const option = document.createElement("option");
-        option.value = field.path;
-        option.textContent = `${field.label} · ${field.count}`;
-        if (field.sample) option.title = field.sample;
+        option.value = target.key;
+        option.textContent = target.required ? `${target.label} *` : target.label;
+        option.disabled = taken;
         select.append(option);
       });
-      select.value = state.importChat.fieldMapping[target.key] || "";
-      if (state.importChat.fieldMapping[target.key]
-          && ![...select.options].some((option) => option.value === state.importChat.fieldMapping[target.key])) {
-        select.value = "";
-      }
+      select.value = state.importChat.sourceAssignments[field.path] || "";
       select.disabled = state.importChat.importing;
       select.addEventListener("change", () => {
-        state.importChat.fieldMapping[target.key] = select.value;
-        const channels = whatsappImportChannels();
-        $("importChatSubmit").disabled = state.importChat.importing
-          || !channels.length
-          || !state.importChat.fieldMapping.phone;
+        const nextTarget = select.value;
+        if (nextTarget) {
+          Object.keys(state.importChat.sourceAssignments).forEach((path) => {
+            if (path !== field.path && state.importChat.sourceAssignments[path] === nextTarget) {
+              delete state.importChat.sourceAssignments[path];
+            }
+          });
+          state.importChat.sourceAssignments[field.path] = nextTarget;
+        } else {
+          delete state.importChat.sourceAssignments[field.path];
+        }
+        syncImportFieldMappingFromAssignments();
+        renderImportChatMapping();
       });
       row.append(label, select);
       list.append(row);
     });
+    const phoneHint = document.createElement("p");
+    phoneHint.className = "import-chat-mapping-meta";
+    phoneHint.textContent = state.importChat.fieldMapping.phone
+      ? `Phone mapped from ${state.importChat.fieldMapping.phone}`
+      : "Phone is required — map one uploaded phone field to Phone.";
+    list.append(phoneHint);
   }
 
   function setImportChatProgress(done, total, label) {
@@ -7042,6 +7086,7 @@
       state.importChat.conversationCount = 0;
       state.importChat.messageCount = 0;
       state.importChat.availableFields = [];
+      state.importChat.sourceAssignments = {};
       state.importChat.fieldMapping = { name: "", phone: "", company: "", tags: "" };
       $("importChatResult").hidden = true;
       renderImportChatPage();
@@ -7067,6 +7112,7 @@
       || conversations.reduce((total, item) => total + (Array.isArray(item.messages) ? item.messages.length : 0), 0);
     state.importChat.availableFields = availableFields;
     state.importChat.fieldMapping = defaultImportFieldMapping(availableFields);
+    state.importChat.sourceAssignments = sourceAssignmentsFromFieldMapping(state.importChat.fieldMapping);
     $("importChatResult").hidden = true;
     renderImportChatPage();
   }
@@ -8186,6 +8232,7 @@
         state.importChat.conversationCount = 0;
         state.importChat.messageCount = 0;
         state.importChat.availableFields = [];
+        state.importChat.sourceAssignments = {};
         state.importChat.fieldMapping = { name: "", phone: "", company: "", tags: "" };
         renderImportChatPage();
         showToast("File not ready", error.message, true);

@@ -897,13 +897,14 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .import-chat-mapping-list { display: grid; gap: 10px; }
 .import-chat-mapping-row {
   display: grid;
-  grid-template-columns: minmax(140px, 0.9fr) minmax(0, 1.3fr);
+  grid-template-columns: minmax(180px, 1.2fr) minmax(0, 1fr);
   gap: 10px;
   align-items: center;
 }
-.import-chat-mapping-row strong { font-size: 12px; }
+.import-chat-mapping-row strong { font-size: 12px; word-break: break-word; }
 .import-chat-mapping-row .subtle { display: block; margin-top: 2px; font-size: 10px; }
 .import-chat-mapping-row select { width: 100%; }
+.import-chat-mapping-meta { color: var(--muted); font-size: 10px; }
 .import-chat-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
 .import-chat-stats div { display: grid; gap: 2px; }
 .import-chat-stats dt { color: var(--muted); font-size: 10px; font-weight: 650; }
