@@ -373,6 +373,39 @@ test('deletes a client workspace permanently after slug confirmation', async () 
   assert.equal(internal.status, 404);
 });
 
+test('lists the internal workspace, allows managing it, but protects it from suspension and deletion', async () => {
+  const { DB, tokens } = await fixture();
+  const env = envFor(DB);
+  const list = await call(env, '/api/platform/clients', { token: tokens.owner });
+  assert.equal(list.status, 200);
+  const internal = list.payload.items.find(row => row.workspaceId === 'ws_default');
+  assert.ok(internal, 'internal workspace missing from client list');
+  assert.equal(internal.kind, 'internal');
+
+  const detail = await call(env, '/api/platform/clients/ws_default', { token: tokens.owner });
+  assert.equal(detail.status, 200);
+  assert.equal(detail.payload.item.kind, 'internal');
+  assert.ok(detail.payload.members.length >= 1);
+
+  const renamed = await call(env, '/api/platform/clients/ws_default', {
+    method: 'PATCH', token: tokens.owner, body: { companyName: 'Helixcer HQ' }
+  });
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.payload.item.name, 'Helixcer HQ');
+  assert.equal(DB.database.prepare(`SELECT name FROM workspaces WHERE workspace_id='ws_default'`).get().name, 'Helixcer HQ');
+
+  const suspended = await call(env, '/api/platform/clients/ws_default', {
+    method: 'PATCH', token: tokens.owner, body: { status: 'suspended' }
+  });
+  assert.equal(suspended.status, 400);
+
+  const invited = await call(env, '/api/platform/clients/ws_default/invitations', {
+    method: 'POST', token: tokens.owner, body: { email: 'hq-staff@example.com', role: 'agent' }
+  });
+  assert.equal(invited.status, 201);
+  assert.match(invited.payload.inviteUrl, /invite=/);
+});
+
 test('manages platform administrators and their workspace access', async () => {
   const { DB, tokens } = await fixture();
   const env = envFor(DB);

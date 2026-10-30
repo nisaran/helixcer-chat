@@ -183,6 +183,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .chip.is-suspended { background: var(--amber-soft); color: var(--amber); }
 .chip.is-pending { background: var(--brand-soft); color: var(--brand-deep); }
 .chip.is-muted { background: #eef1f7; color: var(--muted); }
+.chip.is-internal { background: var(--brand-soft); color: var(--brand-deep); }
 
 /* Buttons and inputs */
 .button {

@@ -74,7 +74,7 @@ export async function platformOverview(env) {
 }
 
 export async function listClientWorkspaces(env, url) {
-  const conditions = [`w.kind='client'`];
+  const conditions = [`w.kind IN ('internal','client')`];
   const params = [];
   const status = String(url.searchParams.get('status') || '');
   if (status === 'active' || status === 'suspended') {
@@ -96,8 +96,7 @@ export async function listClientWorkspaces(env, url) {
 }
 
 export async function getClientWorkspace(env, workspaceId) {
-  const row = await env.DB.prepare(`${CLIENT_SELECT} WHERE w.workspace_id=?1 AND w.kind='client'`)
-    .bind(workspaceId).first();
+  const row = await env.DB.prepare(`${CLIENT_SELECT} WHERE w.workspace_id=?1`).bind(workspaceId).first();
   if (!row) throw platformError(404, 'Client workspace not found.');
   const [members, invitations, messageCount] = await Promise.all([
     env.DB.prepare(`SELECT m.membership_id,m.user_id,m.role,m.status,m.created_at,u.email,u.display_name
@@ -165,8 +164,7 @@ export async function updateClientWorkspace(env, principal, workspaceId, payload
   const allowed = ['name', 'companyName', 'status', 'notes', 'registeredName', 'addressLine1', 'addressLine2',
     'city', 'state', 'postalCode', 'country', 'gstin', 'taxDetails'];
   rejectUnknown(payload, allowed);
-  const current = await env.DB.prepare(`${CLIENT_SELECT} WHERE w.workspace_id=?1 AND w.kind='client'`)
-    .bind(workspaceId).first();
+  const current = await env.DB.prepare(`${CLIENT_SELECT} WHERE w.workspace_id=?1`).bind(workspaceId).first();
   if (!current) throw platformError(404, 'Client workspace not found.');
 
   const name = payload.name === undefined && payload.companyName === undefined
@@ -174,6 +172,9 @@ export async function updateClientWorkspace(env, principal, workspaceId, payload
     : cleanText(payload.companyName ?? payload.name, 'Company name', 2, 120);
   const status = payload.status === undefined ? current.status : String(payload.status);
   if (!['active', 'suspended'].includes(status)) throw platformError(400, 'Status must be active or suspended.');
+  if (current.kind === 'internal' && status !== current.status) {
+    throw platformError(400, 'The internal workspace status cannot be changed.');
+  }
   const notes = payload.notes === undefined ? current.notes : optionalText(payload.notes, 'Notes', 2000);
   const profile = {
     registered_name: profileField(payload, 'registeredName', current.registered_name, 200),
@@ -191,7 +192,7 @@ export async function updateClientWorkspace(env, principal, workspaceId, payload
     env.DB.prepare(`UPDATE workspaces SET name=?2,status=?3,notes=?4,registered_name=?5,
         address_line1=?6,address_line2=?7,city=?8,state=?9,postal_code=?10,country=?11,gstin=?12,
         tax_details=?13,updated_at=?14
-      WHERE workspace_id=?1 AND kind='client'`)
+      WHERE workspace_id=?1`)
       .bind(workspaceId, name, status, notes, profile.registered_name, profile.address_line1,
         profile.address_line2, profile.city, profile.state, profile.postal_code, profile.country,
         profile.gstin, profile.tax_details, now)
@@ -239,7 +240,7 @@ export async function deleteClientWorkspace(env, principal, workspaceId, payload
 
 export async function inviteWorkspaceMember(env, principal, request, workspaceId, payload) {
   const workspace = await env.DB.prepare(`SELECT workspace_id,name FROM workspaces
-    WHERE workspace_id=?1 AND kind='client'`).bind(workspaceId).first();
+    WHERE workspace_id=?1 AND kind IN ('internal','client')`).bind(workspaceId).first();
   if (!workspace) throw platformError(404, 'Client workspace not found.');
   const email = normalizeEmail(payload?.email);
   if (!email || !email.includes('@') || email.length > 254) throw platformError(400, 'A valid email is required.');

@@ -193,6 +193,12 @@ function renderClients() {
     slug.className = 'sub';
     slug.textContent = `${item.slug} · joined ${when(item.createdAt)}`;
     company.append(slug);
+    if (item.kind === 'internal') {
+      const badge = document.createElement('span');
+      badge.className = 'chip is-internal';
+      badge.textContent = 'Internal';
+      company.append(badge);
+    }
     const owner = cell(item.owner.email || '—');
     if (item.owner.displayName) {
       const name = document.createElement('span');
@@ -274,12 +280,15 @@ async function reloadDetail() {
 
 function renderDetail(data) {
   const item = data.item;
+  const isInternal = item.kind === 'internal';
   $('clientTitle').textContent = item.name;
-  $('clientSlug').textContent = item.slug;
+  $('clientSlug').textContent = isInternal ? `${item.slug} · internal workspace` : item.slug;
   const chip = $('clientStatusChip');
   chip.textContent = item.status;
   chip.className = `chip${item.status === 'suspended' ? ' is-suspended' : ''}`;
   const form = $('clientForm');
+  form.querySelector('select[name="status"]').closest('.field').hidden = isInternal;
+  $('clientDialog').querySelector('.danger-zone').hidden = isInternal;
   form.name.value = item.name;
   form.status.value = item.status;
   form.registeredName.value = item.profile.registeredName;
