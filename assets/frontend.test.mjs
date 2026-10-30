@@ -831,15 +831,21 @@ test("attachment-only conversation previews use a human media type", () => {
   const start = app.indexOf("function attachmentPreviewLabel");
   const end = app.indexOf("function appendWhatsAppFormattedText", start);
   const helpers = Function(`${app.slice(start, end)}\nreturn { attachmentPreviewLabel, conversationMessagePreview };`)();
-  assert.equal(helpers.conversationMessagePreview({ messageType: "image", attachment: { type: "image" } }), "Image");
+  assert.equal(helpers.conversationMessagePreview({ messageType: "image", attachment: { type: "image" } }), "Photo");
   assert.equal(helpers.conversationMessagePreview({ messageType: "document", attachment: { mimeType: "application/pdf" } }), "Document");
   assert.equal(helpers.conversationMessagePreview({ messageType: "audio", attachment: { type: "voice" } }), "Audio");
   assert.equal(helpers.conversationMessagePreview({ messageType: "video", attachment: { type: "video" } }), "Video");
   assert.equal(helpers.conversationMessagePreview({ messageType: "video", attachment: { mimeType: "video\/mpeg" } }), "Video");
   assert.equal(helpers.conversationMessagePreview({ messageType: "file", attachment: { filename: "archive.bin" } }), "File");
-  assert.equal(helpers.conversationMessagePreview({ messageType: "image", text: "[WhatsApp image received]", attachment: { type: "image" } }), "Image");
+  assert.equal(helpers.conversationMessagePreview({ messageType: "image", text: "[WhatsApp image received]", attachment: { type: "image" } }), "Photo");
+  assert.equal(helpers.conversationMessagePreview({ messageType: "image", text: "[image: IMG-20261030-WA0015.jpg]", attachment: { type: "image", filename: "IMG-20261030-WA0015.jpg" } }), "Photo");
+  assert.equal(helpers.conversationMessagePreview({ text: "[video: clip.mp4]" }), "Video");
+  assert.equal(helpers.conversationMessagePreview({ text: "[document: invoice.pdf]" }), "Document");
   assert.match(app, /conversation\.lastMessage = conversationMessagePreview\(message\)/);
-  assert.match(app, /return channelPlainText\(lines\.join\("\\n"\)\.trim\(\), conversation\) \|\| attachmentPreviewLabel\(messageType\)/);
+  assert.match(app, /generatedMediaPreviewMatch\(text\)/);
+  assert.match(app, /message-media-spinner/);
+  assert.match(styles, /\.message-media-spinner\s*\{/);
+  assert.match(styles, /\.message-media-loading\s*\{/);
 });
 
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {

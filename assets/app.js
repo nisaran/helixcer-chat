@@ -2308,7 +2308,7 @@
     const type = String(attachment.type || message.messageType || "document");
     const filename = attachment.filename || `${capitalize(type)} attachment`;
     const url = messageAttachmentUrl(message);
-    const card = element("div", `message-attachment is-${type}`);
+    const card = element("div", `message-attachment is-${type}${url ? "" : " is-loading"}`);
     if (url && type === "image") {
       const link = document.createElement("button");
       link.type = "button";
@@ -2343,6 +2343,13 @@
       audio.controls = true;
       audio.preload = "metadata";
       card.append(audio);
+    } else if (!url) {
+      const loading = element("div", "message-media-loading");
+      loading.setAttribute("role", "status");
+      loading.setAttribute("aria-live", "polite");
+      loading.setAttribute("aria-label", "Loading media");
+      loading.append(element("span", "message-media-spinner"));
+      card.append(loading);
     }
     const info = element("div", "message-attachment-info");
     info.append(element("strong", "", filename));
@@ -2382,22 +2389,32 @@
   function attachmentPreviewLabel(messageType, attachment = {}) {
     const descriptor = [messageType, attachment?.type, attachment?.mimeType]
       .filter(Boolean).join(" ").toLocaleLowerCase();
-    if (/image|photo|picture/.test(descriptor)) return "Image";
+    if (/image|photo|picture/.test(descriptor)) return "Photo";
     if (/video/.test(descriptor)) return "Video";
     if (/audio|voice|ogg|mpeg/.test(descriptor)) return "Audio";
     if (/document|pdf|text|csv|word|sheet|presentation/.test(descriptor)) return "Document";
+    if (/sticker/.test(descriptor)) return "Sticker";
     if (/file|media|attachment/.test(descriptor) || Object.keys(attachment || {}).length) return "File";
     return "";
+  }
+
+  function generatedMediaPreviewMatch(text) {
+    const value = String(text || "").trim();
+    if (!value) return null;
+    const typed = value.match(/^\[(?:whatsapp|telegram|instagram|facebook)?\s*(image|photo|picture|document|file|audio|voice|video|media|attachment|sticker)\s*:\s*[^\]]*\]$/i)
+      || value.match(/^\[(?:whatsapp|telegram|instagram|facebook)?\s*(image|photo|picture|document|file|audio|voice|video|media|attachment|sticker)(?:\s+received)?\]$/i);
+    if (typed) return String(typed[1] || "file").trim().toLocaleLowerCase();
+    if (/^\[Attachment:[^\]]+\]$/i.test(value)) return "file";
+    return null;
   }
 
   function conversationMessagePreview(message) {
     if (!message) return "";
     const attachment = message.attachment && typeof message.attachment === "object" ? message.attachment : null;
     const text = String(attachment?.caption || message.text || "").trim();
-    const generatedAttachmentText = /^\[(?:whatsapp|telegram|instagram|facebook)?\s*(?:image|photo|document|file|audio|voice|video|media|attachment)(?:\s+received)?\]$/i.test(text)
-      || /^\[Attachment:[^\]]+\]$/i.test(text);
-    if (text && !generatedAttachmentText) return text;
-    return attachmentPreviewLabel(message.messageType, attachment || {});
+    const generatedType = generatedMediaPreviewMatch(text);
+    if (text && !generatedType) return text;
+    return attachmentPreviewLabel(message.messageType || generatedType, attachment || { type: generatedType || "" });
   }
 
   function appendWhatsAppFormattedText(host, value) {
@@ -2445,7 +2462,10 @@
     while (last >= 0 && !lines[last].trim()) last--;
     const isTemplate = String(messageType || "").trim().toLocaleLowerCase() === "template";
     if (isTemplate && last >= 0 && /^\s*Actions:\s*.+$/i.test(lines[last])) lines.splice(last, 1);
-    return channelPlainText(lines.join("\n").trim(), conversation) || attachmentPreviewLabel(messageType);
+    const text = channelPlainText(lines.join("\n").trim(), conversation);
+    const generatedType = generatedMediaPreviewMatch(text);
+    if (generatedType) return attachmentPreviewLabel(messageType || generatedType, { type: generatedType });
+    return text || attachmentPreviewLabel(messageType);
   }
 
   function templateMessagePresentation(message, value) {
