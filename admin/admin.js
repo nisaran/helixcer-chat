@@ -141,10 +141,10 @@ async function loadOverview() {
     (data.recent || []).forEach(item => {
       const row = document.createElement('tr');
       const company = cell(item.name, 'name');
-      const slug = document.createElement('span');
-      slug.className = 'sub';
-      slug.textContent = item.slug;
-      company.append(slug);
+      const identifier = document.createElement('span');
+      identifier.className = 'sub';
+      identifier.textContent = item.workspaceId;
+      company.append(identifier);
       const owner = cell(item.owner.email || '—');
       const status = document.createElement('td');
       status.append(statusChip(item.status));
@@ -189,10 +189,10 @@ function renderClients() {
   state.clients.forEach(item => {
     const row = document.createElement('tr');
     const company = cell(item.name, 'name');
-    const slug = document.createElement('span');
-    slug.className = 'sub';
-    slug.textContent = `${item.slug} · joined ${when(item.createdAt)}`;
-    company.append(slug);
+    const identifier = document.createElement('span');
+    identifier.className = 'sub';
+    identifier.textContent = item.workspaceId;
+    company.append(identifier);
     if (item.kind === 'internal') {
       const badge = document.createElement('span');
       badge.className = 'chip is-internal';
