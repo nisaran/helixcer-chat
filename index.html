@@ -595,6 +595,17 @@
           <label class="field-label form-span">Role<select class="text-field" name="role" id="inviteRole" required><option value="agent">Agent</option><option value="admin">Admin</option></select></label>
         </div>
         <div class="role-explainer" id="inviteRoleHelp">Agents can manage customer conversations but cannot change channels or team access.</div>
+        <div class="invite-channel-access" id="inviteChannelAccess">
+          <div class="invite-channel-access-head">
+            <div>
+              <strong>Messaging channels</strong>
+              <span class="subtle" id="inviteChannelHint">Choose which channels this agent can use to send and receive messages.</span>
+            </div>
+            <button class="secondary-button invite-channel-select-all" type="button" data-action="invite-select-all-channels" id="inviteSelectAllChannels">Select all</button>
+          </div>
+          <div class="invite-channel-options" id="inviteChannelOptions" role="group" aria-label="Messaging channels"></div>
+          <p class="field-hint" id="inviteChannelEmpty" hidden>No messaging channels are configured yet. Add a channel before inviting an agent.</p>
+        </div>
       </div>
       <div class="invite-result" id="inviteResult" hidden>
         <span class="success-mark" aria-hidden="true">✓</span>

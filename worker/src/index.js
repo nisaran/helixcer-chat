@@ -9,6 +9,7 @@ import {
   mobileAuthConfiguration,
   principalView,
   requireRole,
+  restrictedChannelIds,
   startGoogleOAuth,
   updateInvitation,
   updateMembership
@@ -414,12 +415,17 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return inboxHub(env, workspaceId).fetch('https://hub.internal/connect', { headers });
     }
     if (url.pathname === '/api/bootstrap' && request.method === 'GET') {
-      const [channels, conversations, contacts, tags, workspace] = await Promise.all([
+      const allowedChannels = restrictedChannelIds(principal);
+      const [channelsRaw, conversations, contacts, tags, workspace] = await Promise.all([
         listChannels(env, workspaceId, principal.membership.role !== 'agent'),
-        listConversations(env, workspaceId, url), listContacts(env, workspaceId, url),
+        listConversations(env, workspaceId, url, { allowedChannelIds: allowedChannels }),
+        listContacts(env, workspaceId, url),
         listWorkspaceTags(env, workspaceId),
         getWorkspaceProfile(env, workspaceId)
       ]);
+      const channels = allowedChannels
+        ? channelsRaw.filter(channel => allowedChannels.includes(channel.channelId))
+        : channelsRaw;
       return withCors(json({
         appName: env.APP_NAME || 'Helixcer Chat', channels, conversations, contacts, tags, workspace, me: principalView(principal),
         connectorTypes: [
@@ -484,7 +490,11 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json(await getChannelVerifyToken(env, workspaceId, channelId, principal)), cors);
     }
     if (url.pathname === '/api/conversations' && request.method === 'GET') {
-      return withCors(json({ items: await listConversations(env, workspaceId, url) }), cors);
+      return withCors(json({
+        items: await listConversations(env, workspaceId, url, {
+          allowedChannelIds: restrictedChannelIds(principal)
+        })
+      }), cors);
     }
     if (url.pathname === '/api/conversations' && request.method === 'POST') {
       const result = await openIdentityConversation(env, workspaceId, await readJson(request), principal);
@@ -492,11 +502,16 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json(result, 201), cors);
     }
     if (url.pathname === '/api/search/messages' && request.method === 'GET') {
-      return withCors(json({ items: await searchMessages(env, workspaceId, url) }), cors);
+      return withCors(json({
+        items: await searchMessages(env, workspaceId, url, {
+          allowedChannelIds: restrictedChannelIds(principal)
+        })
+      }), cors);
     }
     const conversationMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)$/);
     if (conversationMatch && request.method === 'PATCH') {
       const id = decodeURIComponent(conversationMatch[1]);
+      await assertConversationChannelAccess(env, workspaceId, id, principal);
       const payload = await readJson(request);
       const item = await updateConversation(env, workspaceId, id, payload, principal);
       await broadcast(env, workspaceId, { type: 'conversation.updated', conversationId: id, conversation: item });
@@ -515,6 +530,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     const messagesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/messages$/);
     if (messagesMatch && request.method === 'GET') {
       const id = decodeURIComponent(messagesMatch[1]);
+      await assertConversationChannelAccess(env, workspaceId, id, principal);
       const [items, replyWindow] = await Promise.all([
         listMessages(env, workspaceId, id, url),
         getConversationReplyWindow(env, workspaceId, id)
@@ -533,11 +549,12 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     const messageAttachmentMatch = url.pathname.match(/^\/api\/messages\/([^/]+)\/attachment$/);
     if (messageAttachmentMatch && request.method === 'GET') {
       const messageId = decodeURIComponent(messageAttachmentMatch[1]);
-      return withCors(await streamMessageAttachment(env, workspaceId, messageId, request, url), cors);
+      return withCors(await streamMessageAttachment(env, workspaceId, messageId, request, url, principal), cors);
     }
     const conversationTemplatesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/templates$/);
     if (conversationTemplatesMatch && request.method === 'GET') {
       const id = decodeURIComponent(conversationTemplatesMatch[1]);
+      await assertConversationChannelAccess(env, workspaceId, id, principal);
       return withCors(json({ items: await listConversationTemplates(env, workspaceId, id, {
         forceRefresh: url.searchParams.get('refresh') === '1',
         channelId: url.searchParams.get('channelId') || '',
@@ -557,6 +574,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     const templateMediaMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/template-media$/);
     if (templateMediaMatch && request.method === 'POST') {
       const id = decodeURIComponent(templateMediaMatch[1]);
+      await assertConversationChannelAccess(env, workspaceId, id, principal);
       return withCors(json(await uploadConversationTemplateMedia(env, workspaceId, id, request), 201), cors);
     }
     const attachmentMessageMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/attachments$/);
@@ -2440,12 +2458,14 @@ function base64UrlDecode(value) {
   return Uint8Array.from(atob(padded), character => character.charCodeAt(0));
 }
 
-async function listConversations(env, workspaceId, url) {
+async function listConversations(env, workspaceId, url, options = {}) {
   const limit = clampInt(url.searchParams.get('limit'), 1, 100, 50);
   const status = url.searchParams.get('status') || '';
   const channelId = url.searchParams.get('channelId') || '';
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
   const cursor = url.searchParams.get('cursor') || '';
+  const allowedChannelIds = Array.isArray(options.allowedChannelIds) ? options.allowedChannelIds : null;
+  if (allowedChannelIds && channelId && !allowedChannelIds.includes(channelId)) return [];
   const result = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.identity_id,c.status,c.assigned_to,
       c.subject,c.last_message_at,c.unread_count,c.tags_json,ch.name AS channel_name,ch.connector_type,ch.provider_type,
       COALESCE(b.scoped_profile_id,CASE WHEN c.identity_id='' THEN (SELECT legacy.channel_profile_id FROM channel_identities legacy
@@ -2475,10 +2495,40 @@ async function listConversations(env, workspaceId, url) {
             AND (route_binding.scoped_profile_id LIKE '%'||?4||'%'
               OR route_identity.profile_id LIKE '%'||?4||'%')))
       AND (?5='' OR c.last_message_at<?5)
-    ORDER BY c.last_message_at DESC LIMIT ?6`).bind(workspaceId, status, channelId, q, cursor, limit).all();
+      AND (?7=0 OR c.channel_id IN (SELECT value FROM json_each(?8)))
+    ORDER BY c.last_message_at DESC LIMIT ?6`)
+    .bind(workspaceId, status, channelId, q, cursor, limit,
+      allowedChannelIds ? 1 : 0, JSON.stringify(allowedChannelIds || [])).all();
   const items = result.results.map(conversationListItem);
   const routes = await conversationRouteOptionsByContact(env, workspaceId);
-  return items.map(item => withConversationRoutes(item, routes.get(item.contactId) || []));
+  return items.map(item => {
+    const next = withConversationRoutes(item, routes.get(item.contactId) || []);
+    if (!allowedChannelIds) return next;
+    return {
+      ...next,
+      routes: (Array.isArray(next.routes) ? next.routes : [])
+        .filter(route => allowedChannelIds.includes(route.channelId))
+    };
+  });
+}
+
+function assertPrincipalChannelAccess(principal, channelId) {
+  const allowed = restrictedChannelIds(principal);
+  if (allowed && !allowed.includes(channelId)) {
+    throw httpError(403, 'You do not have access to this messaging channel.');
+  }
+}
+
+async function assertConversationChannelAccess(env, workspaceId, conversationId, principal) {
+  const allowed = restrictedChannelIds(principal);
+  if (!allowed) return null;
+  const row = await env.DB.prepare(`SELECT channel_id FROM conversations
+    WHERE conversation_id=?1 AND workspace_id=?2`).bind(conversationId, workspaceId).first();
+  if (!row) throw httpError(404, 'Conversation not found.');
+  if (!allowed.includes(row.channel_id)) {
+    throw httpError(403, 'You do not have access to this conversation.');
+  }
+  return row.channel_id;
 }
 
 /**
@@ -2486,10 +2536,11 @@ async function listConversations(env, workspaceId, url) {
  * contains only the latest message for each conversation, so clients use this
  * bounded endpoint when an operator enters an inbox search query.
  */
-export async function searchMessages(env, workspaceId, url) {
+export async function searchMessages(env, workspaceId, url, options = {}) {
   const query = (url.searchParams.get('q') || '').trim().slice(0, 100);
   if (!query) return [];
   const limit = clampInt(url.searchParams.get('limit'), 1, 100, 50);
+  const allowedChannelIds = Array.isArray(options.allowedChannelIds) ? options.allowedChannelIds : null;
   const result = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.identity_id,m.text,m.message_type,m.direction,m.timestamp,
       c.contact_id,c.status AS conversation_status,c.assigned_to,c.unread_count,
       ct.display_name,ct.company,ch.channel_id,
@@ -2509,8 +2560,9 @@ export async function searchMessages(env, workspaceId, url) {
         OR instr(lower(COALESCE(ct.display_name,'')),lower(?2))>0
         OR instr(lower(COALESCE(ct.company,'')),lower(?2))>0
         OR instr(lower(COALESCE(b.scoped_profile_id,ci.profile_id,'')),lower(?2))>0)
+      AND (?4=0 OR m.channel_id IN (SELECT value FROM json_each(?5)))
     ORDER BY m.timestamp DESC,m.message_id DESC LIMIT ?3`)
-    .bind(workspaceId, query, limit).all();
+    .bind(workspaceId, query, limit, allowedChannelIds ? 1 : 0, JSON.stringify(allowedChannelIds || [])).all();
   return (result.results || []).map(row => ({
     messageId: row.message_id,
     conversationId: row.conversation_id,
@@ -3512,6 +3564,7 @@ async function openIdentityConversation(env, workspaceId, payload, principal) {
   if (!channel || platformForChannel(channel) !== identity.platform) {
     throw httpError(400, 'The selected channel is not compatible with this identity.');
   }
+  assertPrincipalChannelAccess(principal, channelId);
   await assertChannelReadyForConversation(env, workspaceId, channel);
   const currentBinding = await env.DB.prepare(`SELECT binding_id FROM channel_identity_bindings
     WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 AND active=1 LIMIT 1`)
@@ -4054,6 +4107,7 @@ async function createContact(env, workspaceId, payload, principal) {
     const channelId = cleanId(payload.channelId, 'Channel ID');
     const channel = await getChannel(env, channelId, '', workspaceId);
     if (!channel) throw httpError(400, 'Unknown or disabled channel.');
+    assertPrincipalChannelAccess(principal, channelId);
     await assertChannelReadyForConversation(env, workspaceId, channel);
     identityInputs.push({
       platform: platformForChannel(channel),
@@ -4111,7 +4165,9 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
   if (!isPlainObject(payload)) throw httpError(400, 'Message payload must be an object.');
   rejectUnknownKeys(payload, new Set(['text', 'replyToMessageId', 'channelId', 'identityId', 'contactIdentityId']), 'message request');
   const text = cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH);
+  await assertConversationChannelAccess(env, workspaceId, conversationId, principal);
   const row = await conversationDeliveryTarget(env, workspaceId, conversationId, payload);
+  assertPrincipalChannelAccess(principal, row.channel_id);
   if (!row.enabled) throw httpError(409, 'The selected channel is disabled.');
   const connectorType = row.connectorType;
   assertFreeformReplyAllowed(connectorType, row.last_inbound_at);
@@ -4773,7 +4829,9 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   if (!isPlainObject(payload)) throw httpError(400, 'Template payload must be an object.');
   rejectUnknownKeys(payload, new Set(['name', 'language', 'components', 'previewText', 'mediaPreview',
     'channelId', 'identityId', 'contactIdentityId']), 'template request');
+  await assertConversationChannelAccess(env, workspaceId, conversationId, principal);
   const target = await conversationDeliveryTarget(env, workspaceId, conversationId, payload);
+  assertPrincipalChannelAccess(principal, target.channel_id);
   if (target.connectorType !== 'whatsapp_cloud') throw httpError(409, 'Templates are available only for WhatsApp conversations.');
   if (!target.enabled) throw httpError(409, 'The WhatsApp channel is disabled.');
   const template = validateWhatsAppTemplate({
@@ -4879,10 +4937,12 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   }
   let form;
   try { form = await request.formData(); } catch { throw httpError(400, 'Multipart attachment data is invalid.'); }
+  await assertConversationChannelAccess(env, workspaceId, conversationId, principal);
   const target = await conversationDeliveryTarget(env, workspaceId, conversationId, {
     channelId: form.get('channelId'), identityId: form.get('identityId') || form.get('contactIdentityId'),
     replyToMessageId: form.get('replyToMessageId')
   });
+  assertPrincipalChannelAccess(principal, target.channel_id);
   if (!['whatsapp_cloud', 'telegram'].includes(target.connectorType)) {
     throw httpError(409, 'Attachments are currently available for WhatsApp and Telegram conversations.');
   }
@@ -5096,12 +5156,13 @@ async function uploadConversationTemplateMedia(env, workspaceId, conversationId,
   };
 }
 
-async function streamMessageAttachment(env, workspaceId, messageId, request, url) {
+async function streamMessageAttachment(env, workspaceId, messageId, request, url, principal = null) {
   const row = await env.DB.prepare(`SELECT m.message_id,m.message_type,m.payload_json,m.channel_id,c.connector_type,c.provider_type,
       c.config_json,c.secret_key,c.workspace_id
     FROM messages m JOIN channels c ON c.channel_id=m.channel_id AND c.workspace_id=m.workspace_id
     WHERE m.message_id=?1 AND m.workspace_id=?2`).bind(messageId, workspaceId).first();
   if (!row) throw httpError(404, 'Attachment not found.');
+  if (principal) assertPrincipalChannelAccess(principal, row.channel_id);
   const attachment = safeJsonParse(row.payload_json, {})?.attachment;
   const attachmentType = String(row.message_type || '') === 'template'
     ? String(attachment?.type || '') : String(row.message_type || '');
