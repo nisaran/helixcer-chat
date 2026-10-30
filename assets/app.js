@@ -2302,40 +2302,74 @@
     } catch { return ""; }
   }
 
+  function mediaLoadingIndicator(label = "Loading media") {
+    const loading = element("div", "message-media-loading");
+    loading.setAttribute("role", "status");
+    loading.setAttribute("aria-live", "polite");
+    loading.setAttribute("aria-label", label);
+    loading.append(element("span", "message-media-spinner"));
+    return loading;
+  }
+
+  function isAwaitingMediaPreview(message) {
+    if (message?.direction !== "outbound") return false;
+    return ["pending", "queued", "retrying"].includes(String(message.status || "").toLowerCase());
+  }
+
   function renderMessageAttachment(message) {
     const attachment = message?.attachment;
     if (!attachment) return null;
     const type = String(attachment.type || message.messageType || "document");
     const filename = attachment.filename || `${capitalize(type)} attachment`;
     const url = messageAttachmentUrl(message);
-    const card = element("div", `message-attachment is-${type}${url ? "" : " is-loading"}`);
-    if (url && type === "image") {
+    const awaitingPreview = isAwaitingMediaPreview(message);
+    const card = element("div", `message-attachment is-${type}${(!url || awaitingPreview) ? " is-loading" : ""}`);
+    if (url && type === "image" && !awaitingPreview) {
+      const frame = element("div", "message-media-frame");
+      const loading = mediaLoadingIndicator(`Loading ${filename}`);
       const link = document.createElement("button");
       link.type = "button";
       link.className = "message-media-link";
       link.dataset.action = "preview-attachment";
       link.dataset.messageId = message.messageId;
       link.setAttribute("aria-label", `Preview ${filename}`);
+      link.hidden = true;
       const image = document.createElement("img");
       image.className = "message-media-preview";
       if (attachment.external === true) image.referrerPolicy = "no-referrer";
       else image.crossOrigin = "use-credentials";
-      image.src = url;
       image.alt = filename;
-      image.loading = "lazy";
       image.decoding = "async";
+      const reveal = () => {
+        loading.remove();
+        link.hidden = false;
+      };
+      image.addEventListener("load", reveal, { once: true });
+      image.addEventListener("error", reveal, { once: true });
+      image.src = url;
       link.append(image);
-      card.append(link);
-    } else if (url && type === "video") {
+      frame.append(loading, link);
+      card.append(frame);
+    } else if (url && type === "video" && !awaitingPreview) {
+      const frame = element("div", "message-media-frame");
+      const loading = mediaLoadingIndicator(`Loading ${filename}`);
       const video = document.createElement("video");
       video.className = "message-media-preview";
+      video.hidden = true;
       if (attachment.external === true) video.referrerPolicy = "no-referrer";
       else video.crossOrigin = "use-credentials";
-      video.src = url;
       video.controls = true;
       video.preload = "metadata";
-      card.append(video);
-    } else if (url && type === "audio") {
+      const reveal = () => {
+        loading.remove();
+        video.hidden = false;
+      };
+      video.addEventListener("loadeddata", reveal, { once: true });
+      video.addEventListener("error", reveal, { once: true });
+      video.src = url;
+      frame.append(loading, video);
+      card.append(frame);
+    } else if (url && type === "audio" && !awaitingPreview) {
       const audio = document.createElement("audio");
       if (attachment.external === true) audio.referrerPolicy = "no-referrer";
       else audio.crossOrigin = "use-credentials";
@@ -2343,13 +2377,8 @@
       audio.controls = true;
       audio.preload = "metadata";
       card.append(audio);
-    } else if (!url) {
-      const loading = element("div", "message-media-loading");
-      loading.setAttribute("role", "status");
-      loading.setAttribute("aria-live", "polite");
-      loading.setAttribute("aria-label", "Loading media");
-      loading.append(element("span", "message-media-spinner"));
-      card.append(loading);
+    } else if (!url || awaitingPreview) {
+      card.append(mediaLoadingIndicator(awaitingPreview ? "Media is uploading" : "Loading media"));
     }
     const info = element("div", "message-attachment-info");
     info.append(element("strong", "", filename));

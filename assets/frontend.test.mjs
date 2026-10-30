@@ -844,8 +844,12 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /conversation\.lastMessage = conversationMessagePreview\(message\)/);
   assert.match(app, /generatedMediaPreviewMatch\(text\)/);
   assert.match(app, /message-media-spinner/);
+  assert.match(app, /function isAwaitingMediaPreview\(message\)/);
+  assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
+  assert.match(html, /assets\/app\.js\?v=20261030-media-spin/);
+  assert.match(html, /assets\/styles\.css\?v=20261030-media-spin/);
 });
 
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {
