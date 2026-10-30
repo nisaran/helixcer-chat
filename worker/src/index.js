@@ -45,6 +45,7 @@ import {
   INTERAKT_SOURCE,
   extractInteraktCustomer,
   mapInteraktMessage,
+  normalizeFieldMapping,
   validateInteraktBatch
 } from './imports/interakt.js';
 
@@ -6091,11 +6092,13 @@ async function seedDemo(env, workspaceId, principal) {
 
 async function importChatHistory(env, workspaceId, principal, payload) {
   if (!isPlainObject(payload)) throw httpError(400, 'Import payload must be a JSON object.');
-  rejectUnknownKeys(payload, new Set(['source', 'channelId', 'conversations']), 'import request');
+  rejectUnknownKeys(payload, new Set(['source', 'channelId', 'conversations', 'fieldMapping']), 'import request');
   const source = String(payload.source || '').trim().toLowerCase();
   if (source !== INTERAKT_SOURCE) {
     throw httpError(400, 'Unsupported import source. Choose Interakt for now.');
   }
+  const fieldMapping = normalizeFieldMapping(payload.fieldMapping);
+  if (!fieldMapping.phone) throw httpError(400, 'Map a phone field before importing.');
   const channelId = cleanId(payload.channelId, 'Channel ID');
   const channel = await getChannel(env, channelId, '', workspaceId);
   if (!channel) throw httpError(404, 'Channel not found.');
@@ -6108,6 +6111,7 @@ async function importChatHistory(env, workspaceId, principal, payload) {
   const summary = {
     source: INTERAKT_SOURCE,
     channelId,
+    fieldMapping,
     contactsCreated: 0,
     contactsReused: 0,
     conversationsCreated: 0,
@@ -6118,7 +6122,7 @@ async function importChatHistory(env, workspaceId, principal, payload) {
   };
   for (const conversation of conversations) {
     try {
-      const result = await importInteraktConversation(env, workspaceId, channel, conversation);
+      const result = await importInteraktConversation(env, workspaceId, channel, conversation, fieldMapping);
       summary.contactsCreated += result.contactsCreated;
       summary.contactsReused += result.contactsReused;
       summary.conversationsCreated += result.conversationsCreated;
@@ -6126,7 +6130,7 @@ async function importChatHistory(env, workspaceId, principal, payload) {
       summary.messagesImported += result.messagesImported;
       summary.messagesSkipped += result.messagesSkipped;
     } catch (error) {
-      const customer = extractInteraktCustomer(conversation);
+      const customer = extractInteraktCustomer(conversation, fieldMapping);
       summary.failed.push({
         externalId: customer.externalId || '',
         phone: customer.phone || '',
@@ -6138,6 +6142,7 @@ async function importChatHistory(env, workspaceId, principal, payload) {
   await audit(env, principal, 'import_chat', 'channel', channelId, {
     source: INTERAKT_SOURCE,
     conversations: conversations.length,
+    fieldMapping,
     messagesImported: summary.messagesImported,
     messagesSkipped: summary.messagesSkipped,
     failed: summary.failed.length
@@ -6145,8 +6150,8 @@ async function importChatHistory(env, workspaceId, principal, payload) {
   return { ok: true, ...summary };
 }
 
-async function importInteraktConversation(env, workspaceId, channel, conversation) {
-  const customer = extractInteraktCustomer(conversation);
+async function importInteraktConversation(env, workspaceId, channel, conversation, fieldMapping) {
+  const customer = extractInteraktCustomer(conversation, fieldMapping);
   if (!customer.phone) throw httpError(400, 'Conversation is missing a WhatsApp phone number.');
   let profileId;
   try {
@@ -6155,6 +6160,8 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
     throw httpError(400, error.message || 'Invalid WhatsApp phone number.');
   }
   const displayName = String(customer.displayName || profileId).slice(0, 120);
+  const company = String(customer.company || '').slice(0, 160);
+  const tags = Array.isArray(customer.tags) ? customer.tags.slice(0, 20) : [];
   const now = new Date().toISOString();
   const result = {
     contactsCreated: 0, contactsReused: 0,
@@ -6162,14 +6169,16 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
     messagesImported: 0, messagesSkipped: 0
   };
 
-  let identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+  let identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name,
+      c.company AS contact_company,c.tags_json AS contact_tags_json
     FROM channel_identity_bindings b
     JOIN contact_identities ci ON ci.identity_id=b.identity_id AND ci.workspace_id=b.workspace_id
     JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
     WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
     .bind(workspaceId, channel.channelId, profileId).first();
   if (!identity) {
-    identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+    identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name,
+        c.company AS contact_company,c.tags_json AS contact_tags_json
       FROM contact_identities ci
       JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
       WHERE ci.workspace_id=?1 AND ci.platform='whatsapp' AND ci.profile_id=?2
@@ -6186,19 +6195,27 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
   }
   if (!identity) {
     const contactId = crypto.randomUUID();
-    await env.DB.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
-      VALUES (?1,?2,?3,?3,?4)`).bind(contactId, displayName, now, workspaceId).run();
+    await env.DB.prepare(`INSERT INTO contacts
+        (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,?3,?4,?5,?5,?6)`)
+      .bind(contactId, displayName, company, JSON.stringify(tags), now, workspaceId).run();
     const created = await ensureContactIdentity(env, workspaceId, contactId, {
       platform: 'whatsapp', profileId, channelId: channel.channelId, scopedProfileId: profileId,
       phoneNumber: profileId, displayName, isPrimary: true
     }, now);
     identity = { identity_id: created.identityId, contact_id: contactId, contact_display_name: displayName };
     result.contactsCreated += 1;
-  } else if (displayName && displayName !== profileId
-      && (!identity.contact_display_name || identity.contact_display_name === profileId)) {
-    await env.DB.prepare(`UPDATE contacts SET display_name=?3,updated_at=?4
+  } else {
+    const nextName = (displayName && displayName !== profileId
+      && (!identity.contact_display_name || identity.contact_display_name === profileId))
+      ? displayName : (identity.contact_display_name || displayName);
+    const nextCompany = company && !String(identity.contact_company || '').trim()
+      ? company : String(identity.contact_company || '');
+    const existingTags = storedContactTags(identity.contact_tags_json);
+    const nextTags = tags.length && !existingTags.length ? tags : existingTags;
+    await env.DB.prepare(`UPDATE contacts SET display_name=?3,company=?4,tags_json=?5,updated_at=?6
       WHERE workspace_id=?1 AND contact_id=?2`)
-      .bind(workspaceId, identity.contact_id, displayName, now).run();
+      .bind(workspaceId, identity.contact_id, nextName, nextCompany, JSON.stringify(nextTags), now).run();
   }
 
   const existingConversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
@@ -6365,8 +6382,12 @@ function whatsappInboundReply(message) {
 
 export {
   INTERAKT_SOURCE,
+  CONTACT_TARGET_FIELDS,
+  defaultInteraktFieldMapping,
+  discoverInteraktContactFields,
   extractInteraktCustomer,
-  mapInteraktMessage
+  mapInteraktMessage,
+  normalizeFieldMapping
 } from './imports/interakt.js';
 
 export function normalizeWhatsAppRecipient(value) {

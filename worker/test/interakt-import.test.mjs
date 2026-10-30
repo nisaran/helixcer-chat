@@ -2,30 +2,67 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  CONTACT_TARGET_FIELDS,
+  defaultInteraktFieldMapping,
+  discoverInteraktContactFields,
   extractInteraktCustomer,
   mapInteraktMessage,
   INTERAKT_SOURCE
 } from '../src/imports/interakt.js';
 
-test('extracts Interakt customer phone and name from raw_chat', () => {
-  const customer = extractInteraktCustomer({
-    id: 'chat-1',
-    status: 'closed',
-    customer: { name: '', phone: '' },
-    raw_chat: {
-      customer_id: {
-        phone_number: '9876543210',
-        country_code: '91',
-        channel_phone_number: '919876543210',
-        traits: { name: 'Asha Rao' }
-      }
-    },
-    messages: []
+const sampleConversations = [{
+  id: 'chat-1',
+  status: 'closed',
+  customer: { name: '', phone: '' },
+  raw_chat: {
+    customer_id: {
+      phone_number: '9876543210',
+      country_code: '91',
+      channel_phone_number: '919876543210',
+      tags: ['vip', 'repeat'],
+      traits: { name: 'Asha Rao', Company: 'Helixcer', email: 'asha@example.com' }
+    }
+  },
+  messages: []
+}];
+
+test('discovers Interakt contact fields and suggests defaults', () => {
+  const fields = discoverInteraktContactFields(sampleConversations);
+  const paths = fields.map(field => field.path);
+  assert.ok(paths.includes('channel_phone_number'));
+  assert.ok(paths.includes('traits.name'));
+  assert.ok(paths.includes('traits.Company'));
+  assert.ok(paths.includes('tags'));
+  const mapping = defaultInteraktFieldMapping(fields);
+  assert.equal(mapping.name, 'traits.name');
+  assert.equal(mapping.phone, 'channel_phone_number');
+  assert.equal(mapping.company, 'traits.Company');
+  assert.equal(mapping.tags, '');
+  assert.deepEqual(CONTACT_TARGET_FIELDS.map(field => field.key), ['name', 'phone', 'company', 'tags']);
+});
+
+test('extracts mapped Interakt customer fields only', () => {
+  const customer = extractInteraktCustomer(sampleConversations[0], {
+    name: 'traits.name',
+    phone: 'channel_phone_number',
+    company: 'traits.Company',
+    tags: ''
   });
   assert.equal(customer.externalId, 'chat-1');
   assert.equal(customer.phone, '919876543210');
   assert.equal(customer.displayName, 'Asha Rao');
-  assert.equal(customer.status, 'closed');
+  assert.equal(customer.company, 'Helixcer');
+  assert.deepEqual(customer.tags, []);
+
+  const withTags = extractInteraktCustomer(sampleConversations[0], {
+    name: 'traits.name',
+    phone: 'phone_number_with_country_code',
+    company: '',
+    tags: 'tags'
+  });
+  assert.equal(withTags.phone, '919876543210');
+  assert.equal(withTags.company, '');
+  assert.deepEqual(withTags.tags, ['vip', 'repeat']);
 });
 
 test('maps Interakt template and media messages', () => {
@@ -62,14 +99,15 @@ test('maps Interakt template and media messages', () => {
   assert.equal(image.status, 'delivered');
 });
 
-test('dashboard exposes Import Chat under channel data', async () => {
+test('dashboard exposes Import Chat field mapping UI', async () => {
   const html = await readFile(new URL('../../index.html', import.meta.url), 'utf8');
   const app = await readFile(new URL('../../assets/app.js', import.meta.url), 'utf8');
   assert.match(html, /data-route="import-chat"/);
-  assert.match(html, /Import Chat/);
-  assert.match(html, /id="importChatSource"/);
-  assert.match(html, /value="interakt"/);
+  assert.match(html, /id="importChatMapping"/);
+  assert.match(html, /Map contact fields/);
   assert.match(app, /\/api\/channel-data\/import-chat/);
-  assert.match(app, /chunkInteraktConversations/);
+  assert.match(app, /fieldMapping/);
+  assert.match(app, /discoverInteraktContactFields/);
+  assert.match(app, /Don’t import|Don't import/);
   assert.equal(INTERAKT_SOURCE, 'interakt');
 });

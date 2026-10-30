@@ -39,6 +39,8 @@
       conversations: [],
       conversationCount: 0,
       messageCount: 0,
+      availableFields: [],
+      fieldMapping: { name: "", phone: "", company: "", tags: "" },
       importing: false,
     },
     pendingConversationId: null,
@@ -6762,6 +6764,58 @@
       .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }));
   }
 
+  const IMPORT_CONTACT_TARGETS = [
+    { key: "name", label: "Name", help: "Contact display name", required: false },
+    { key: "phone", label: "Phone", help: "WhatsApp number with country code", required: true },
+    { key: "company", label: "Company", help: "Optional company name", required: false },
+    { key: "tags", label: "Tags", help: "Optional tags (only if useful values exist)", required: false },
+  ];
+
+  function discoverInteraktContactFields(conversations) {
+    const counts = new Map();
+    const bump = (path, label, sample = "") => {
+      const current = counts.get(path) || { path, label, count: 0, sample: "" };
+      current.count += 1;
+      if (!current.sample && sample) current.sample = String(sample).slice(0, 80);
+      counts.set(path, current);
+    };
+    (conversations || []).forEach((conversation) => {
+      const top = conversation?.customer && typeof conversation.customer === "object" ? conversation.customer : {};
+      const raw = conversation?.raw_chat?.customer_id && typeof conversation.raw_chat.customer_id === "object"
+        ? conversation.raw_chat.customer_id : {};
+      const traits = raw.traits && typeof raw.traits === "object" ? raw.traits : {};
+      const tags = Array.isArray(raw.tags) ? raw.tags : [];
+      if (raw.channel_phone_number) bump("channel_phone_number", "channel_phone_number (with country code)", raw.channel_phone_number);
+      if (raw.channel_account_identifier) bump("channel_account_identifier", "channel_account_identifier", raw.channel_account_identifier);
+      if (raw.phone_number) {
+        bump("phone_number", "phone_number (local)", raw.phone_number);
+        if (raw.country_code) {
+          bump("phone_number_with_country_code", "phone_number + country_code",
+            `${raw.country_code}${String(raw.phone_number).replace(/\D/g, "")}`);
+        }
+      }
+      if (top.phone) bump("customer.phone", "customer.phone", top.phone);
+      if (top.name) bump("customer.name", "customer.name", top.name);
+      if (tags.length) bump("tags", "tags", tags.slice(0, 3).join(", "));
+      Object.entries(traits).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === "") return;
+        bump(`traits.${key}`, `traits.${key}`, Array.isArray(value) ? value.slice(0, 3).join(", ") : value);
+      });
+    });
+    return [...counts.values()].sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
+  }
+
+  function defaultImportFieldMapping(availableFields) {
+    const paths = new Set(availableFields.map((field) => field.path));
+    const pick = (...candidates) => candidates.find((path) => paths.has(path)) || "";
+    return {
+      name: pick("traits.name", "traits.Name", "traits.full_name", "customer.name", "traits.User Name"),
+      phone: pick("channel_phone_number", "phone_number_with_country_code", "channel_account_identifier", "customer.phone"),
+      company: pick("traits.Company", "traits.company", "traits.company_name"),
+      tags: "",
+    };
+  }
+
   function renderImportChatPage() {
     const channelSelect = $("importChatChannel");
     const selected = channelSelect.value;
@@ -6779,8 +6833,10 @@
     });
     if (selected && channels.some((channel) => channel.channelId === selected)) channelSelect.value = selected;
     $("importChatSource").value = state.importChat.source || "interakt";
-    $("importChatSubmit").disabled = state.importChat.importing || !channels.length;
+    const canImport = channels.length && state.importChat.conversations.length && state.importChat.fieldMapping.phone;
+    $("importChatSubmit").disabled = state.importChat.importing || !canImport;
     renderImportChatPreview();
+    renderImportChatMapping();
   }
 
   function renderImportChatPreview() {
@@ -6805,6 +6861,56 @@
       dd.textContent = value;
       item.append(dt, dd);
       stats.append(item);
+    });
+  }
+
+  function renderImportChatMapping() {
+    const host = $("importChatMapping");
+    const list = $("importChatMappingList");
+    const ready = state.importChat.conversations.length > 0;
+    host.hidden = !ready;
+    list.innerHTML = "";
+    if (!ready) return;
+    const fields = state.importChat.availableFields;
+    IMPORT_CONTACT_TARGETS.forEach((target) => {
+      const row = document.createElement("div");
+      row.className = "import-chat-mapping-row";
+      const label = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = target.required ? `${target.label} *` : target.label;
+      const help = document.createElement("span");
+      help.className = "subtle";
+      help.textContent = target.help;
+      label.append(title, help);
+      const select = document.createElement("select");
+      select.className = "text-field";
+      select.dataset.importTarget = target.key;
+      const skip = document.createElement("option");
+      skip.value = "";
+      skip.textContent = target.required ? "Select a source field…" : "Don’t import";
+      select.append(skip);
+      fields.forEach((field) => {
+        const option = document.createElement("option");
+        option.value = field.path;
+        option.textContent = `${field.label} · ${field.count}`;
+        if (field.sample) option.title = field.sample;
+        select.append(option);
+      });
+      select.value = state.importChat.fieldMapping[target.key] || "";
+      if (state.importChat.fieldMapping[target.key]
+          && ![...select.options].some((option) => option.value === state.importChat.fieldMapping[target.key])) {
+        select.value = "";
+      }
+      select.disabled = state.importChat.importing;
+      select.addEventListener("change", () => {
+        state.importChat.fieldMapping[target.key] = select.value;
+        const channels = whatsappImportChannels();
+        $("importChatSubmit").disabled = state.importChat.importing
+          || !channels.length
+          || !state.importChat.fieldMapping.phone;
+      });
+      row.append(label, select);
+      list.append(row);
     });
   }
 
@@ -6853,11 +6959,21 @@
     }
   }
 
-  function slimInteraktConversation(conversation) {
+  function slimInteraktConversation(conversation, fieldMapping = state.importChat.fieldMapping) {
     const customer = conversation?.raw_chat?.customer_id && typeof conversation.raw_chat.customer_id === "object"
       ? conversation.raw_chat.customer_id
       : {};
     const traits = customer.traits && typeof customer.traits === "object" ? customer.traits : {};
+    const mappedPaths = new Set(Object.values(fieldMapping || {}).filter(Boolean));
+    const slimTraits = {};
+    Object.entries(traits).forEach(([key, value]) => {
+      if (mappedPaths.has(`traits.${key}`)) slimTraits[key] = value;
+    });
+    // Keep common fallbacks so remapping still works if the user changes selects mid-session.
+    ["name", "Name", "full_name", "Company", "company", "company_name", "User Name"].forEach((key) => {
+      if (traits[key] !== undefined && traits[key] !== null && traits[key] !== "") slimTraits[key] = traits[key];
+    });
+    const includeTags = mappedPaths.has("tags");
     return {
       id: conversation?.id || conversation?.raw_chat?.id || "",
       status: conversation?.status || conversation?.raw_chat?.chat_status || "",
@@ -6873,9 +6989,8 @@
           country_code: customer.country_code || "",
           channel_phone_number: customer.channel_phone_number || "",
           channel_account_identifier: customer.channel_account_identifier || "",
-          traits: {
-            name: traits.name || traits.Name || traits.full_name || "",
-          },
+          tags: includeTags && Array.isArray(customer.tags) ? customer.tags.slice(0, 20) : [],
+          traits: slimTraits,
         },
       },
       messages: (Array.isArray(conversation?.messages) ? conversation.messages : []).map((message) => ({
@@ -6926,8 +7041,10 @@
       state.importChat.conversations = [];
       state.importChat.conversationCount = 0;
       state.importChat.messageCount = 0;
+      state.importChat.availableFields = [];
+      state.importChat.fieldMapping = { name: "", phone: "", company: "", tags: "" };
       $("importChatResult").hidden = true;
-      renderImportChatPreview();
+      renderImportChatPage();
       return;
     }
     const source = $("importChatSource").value || "interakt";
@@ -6941,14 +7058,17 @@
     if (data.source && String(data.source).toLowerCase() !== "interakt") {
       throw new Error("This file does not look like an Interakt export.");
     }
+    const availableFields = discoverInteraktContactFields(conversations);
     state.importChat.source = "interakt";
     state.importChat.fileName = file.name || "export.json";
     state.importChat.conversations = conversations;
     state.importChat.conversationCount = Number(data.conversation_count) || conversations.length;
     state.importChat.messageCount = Number(data.message_count)
       || conversations.reduce((total, item) => total + (Array.isArray(item.messages) ? item.messages.length : 0), 0);
+    state.importChat.availableFields = availableFields;
+    state.importChat.fieldMapping = defaultImportFieldMapping(availableFields);
     $("importChatResult").hidden = true;
-    renderImportChatPreview();
+    renderImportChatPage();
   }
 
   async function runImportChat(event) {
@@ -6960,12 +7080,17 @@
     }
     const channelId = $("importChatChannel").value;
     const source = $("importChatSource").value || "interakt";
+    const fieldMapping = { ...state.importChat.fieldMapping };
     if (!channelId) {
       showToast("Choose a channel", "Select the WhatsApp channel that should receive this history.", true);
       return;
     }
     if (!state.importChat.conversations.length) {
       showToast("Choose a file", "Upload an Interakt JSON export first.", true);
+      return;
+    }
+    if (!fieldMapping.phone) {
+      showToast("Map phone first", "Phone with country code is required to import WhatsApp chats.", true);
       return;
     }
     const batches = chunkInteraktConversations(state.importChat.conversations);
@@ -6982,6 +7107,7 @@
         const result = await state.api.importChat({
           source,
           channelId,
+          fieldMapping,
           conversations: [batches[index]],
         });
         summary.messagesImported += Number(result.messagesImported || 0);
@@ -8059,7 +8185,9 @@
         state.importChat.conversations = [];
         state.importChat.conversationCount = 0;
         state.importChat.messageCount = 0;
-        renderImportChatPreview();
+        state.importChat.availableFields = [];
+        state.importChat.fieldMapping = { name: "", phone: "", company: "", tags: "" };
+        renderImportChatPage();
         showToast("File not ready", error.message, true);
       }
     });

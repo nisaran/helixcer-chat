@@ -885,13 +885,25 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .import-chat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .import-chat-grid .form-span { grid-column: 1 / -1; }
 .import-chat-file { padding-top: 9px; padding-bottom: 9px; }
-.import-chat-preview, .import-chat-result {
+.import-chat-preview, .import-chat-result, .import-chat-mapping {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #f8faf9;
   padding: 14px 16px;
 }
 .import-chat-preview-title { margin: 0 0 10px; font-size: 12px; font-weight: 750; }
+.import-chat-mapping-head { margin-bottom: 12px; }
+.import-chat-mapping-head .subtle { margin: 0; line-height: 1.5; }
+.import-chat-mapping-list { display: grid; gap: 10px; }
+.import-chat-mapping-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.9fr) minmax(0, 1.3fr);
+  gap: 10px;
+  align-items: center;
+}
+.import-chat-mapping-row strong { font-size: 12px; }
+.import-chat-mapping-row .subtle { display: block; margin-top: 2px; font-size: 10px; }
+.import-chat-mapping-row select { width: 100%; }
 .import-chat-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
 .import-chat-stats div { display: grid; gap: 2px; }
 .import-chat-stats dt { color: var(--muted); font-size: 10px; font-weight: 650; }
@@ -923,7 +935,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 }
 .import-chat-actions .subtle { margin: 0; max-width: 420px; line-height: 1.5; }
 @media (max-width: 720px) {
-  .import-chat-grid, .import-chat-stats { grid-template-columns: 1fr; }
+  .import-chat-grid, .import-chat-stats, .import-chat-mapping-row { grid-template-columns: 1fr; }
   .import-chat-actions { align-items: stretch; flex-direction: column-reverse; }
 }
 
