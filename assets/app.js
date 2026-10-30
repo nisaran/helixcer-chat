@@ -7011,6 +7011,7 @@
     detail.className = "subtle";
     detail.textContent = [
       `${summary.messagesImported || 0} messages imported`,
+      `${summary.messagesUpdated || 0} templates refreshed`,
       `${summary.messagesSkipped || 0} skipped`,
       `${summary.contactsCreated || 0} contacts created`,
       `${summary.conversationsCreated || 0} conversations created`,
@@ -7168,7 +7169,7 @@
     $("importChatSubmit").disabled = true;
     $("importChatResult").hidden = true;
     const summary = {
-      messagesImported: 0, messagesSkipped: 0, contactsCreated: 0, contactsReused: 0,
+      messagesImported: 0, messagesUpdated: 0, messagesSkipped: 0, contactsCreated: 0, contactsReused: 0,
       conversationsCreated: 0, conversationsReused: 0, failed: [],
     };
     try {
@@ -7181,6 +7182,7 @@
           conversations: [batches[index]],
         });
         summary.messagesImported += Number(result.messagesImported || 0);
+        summary.messagesUpdated += Number(result.messagesUpdated || 0);
         summary.messagesSkipped += Number(result.messagesSkipped || 0);
         summary.contactsCreated += Number(result.contactsCreated || 0);
         summary.contactsReused += Number(result.contactsReused || 0);
@@ -7190,7 +7192,10 @@
       }
       setImportChatProgress(batches.length, batches.length, "Import complete");
       showImportChatResult(summary);
-      showToast("Chat import complete", `${summary.messagesImported} messages imported.`);
+      const updatedNote = summary.messagesUpdated
+        ? ` (${summary.messagesUpdated} templates refreshed)`
+        : "";
+      showToast("Chat import complete", `${summary.messagesImported} messages imported${updatedNote}.`);
       await loadAll({ preserveSelection: true });
     } catch (error) {
       showToast("Import failed", error.message, true);

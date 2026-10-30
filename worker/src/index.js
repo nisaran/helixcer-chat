@@ -6117,6 +6117,7 @@ async function importChatHistory(env, workspaceId, principal, payload) {
     conversationsCreated: 0,
     conversationsReused: 0,
     messagesImported: 0,
+    messagesUpdated: 0,
     messagesSkipped: 0,
     failed: []
   };
@@ -6128,6 +6129,7 @@ async function importChatHistory(env, workspaceId, principal, payload) {
       summary.conversationsCreated += result.conversationsCreated;
       summary.conversationsReused += result.conversationsReused;
       summary.messagesImported += result.messagesImported;
+      summary.messagesUpdated += result.messagesUpdated;
       summary.messagesSkipped += result.messagesSkipped;
     } catch (error) {
       const customer = extractInteraktCustomer(conversation, fieldMapping);
@@ -6144,6 +6146,7 @@ async function importChatHistory(env, workspaceId, principal, payload) {
     conversations: conversations.length,
     fieldMapping,
     messagesImported: summary.messagesImported,
+    messagesUpdated: summary.messagesUpdated,
     messagesSkipped: summary.messagesSkipped,
     failed: summary.failed.length
   });
@@ -6166,7 +6169,7 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
   const result = {
     contactsCreated: 0, contactsReused: 0,
     conversationsCreated: 0, conversationsReused: 0,
-    messagesImported: 0, messagesSkipped: 0
+    messagesImported: 0, messagesUpdated: 0, messagesSkipped: 0
   };
 
   let identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name,
@@ -6241,21 +6244,13 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
       result.messagesSkipped += 1;
       continue;
     }
-    if (mapped.providerMessageId) {
-      const existing = await env.DB.prepare(`SELECT message_id FROM messages
-        WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3 LIMIT 1`)
-        .bind(workspaceId, channel.channelId, mapped.providerMessageId).first();
-      if (existing) {
-        result.messagesSkipped += 1;
-        continue;
-      }
-    }
     const timestamp = normalizeTimestamp(mapped.timestamp, now);
     if (!latestTimestamp || timestamp > latestTimestamp) latestTimestamp = timestamp;
     const payload = {
       source: INTERAKT_SOURCE,
       externalId: mapped.externalId,
       contentType: mapped.contentType,
+      ...(mapped.template ? { template: mapped.template } : {}),
       ...(mapped.replyTo ? { reply: { channelMessageId: mapped.replyTo } } : {}),
       ...(mapped.mediaUrl ? {
         attachment: {
@@ -6265,6 +6260,32 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
         }
       } : {})
     };
+    const text = String(mapped.text || '').slice(0, MAX_TEXT_LENGTH);
+    const payloadJson = truncateJson(payload);
+    if (mapped.providerMessageId) {
+      const existing = await env.DB.prepare(`SELECT message_id, message_type, text, payload_json FROM messages
+        WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3 LIMIT 1`)
+        .bind(workspaceId, channel.channelId, mapped.providerMessageId).first();
+      if (existing) {
+        // Re-import refreshes Interakt template bodies that were previously stored as
+        // parameter-only middot strings (e.g. "Acme · 1200") without the full copy.
+        const shouldRefreshTemplate = mapped.messageType === 'template'
+          && (existing.message_type === 'template' || String(existing.payload_json || '').includes('"interakt"'))
+          && text
+          && text !== String(existing.text || '');
+        if (shouldRefreshTemplate) {
+          pendingStatements.push(env.DB.prepare(`UPDATE messages
+              SET message_type=?2, text=?3, payload_json=?4, status=?5
+            WHERE workspace_id=?6 AND message_id=?1`)
+            .bind(existing.message_id, mapped.messageType, text, payloadJson, mapped.status, workspaceId));
+          result.messagesUpdated += 1;
+          if (pendingStatements.length >= 40) await flush();
+          continue;
+        }
+        result.messagesSkipped += 1;
+        continue;
+      }
+    }
     const messageId = crypto.randomUUID();
     pendingStatements.push(env.DB.prepare(`INSERT INTO messages
         (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
@@ -6272,8 +6293,8 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)`)
       .bind(
         messageId, conversationId, identity.contact_id, channel.channelId, identity.identity_id,
-        mapped.direction, mapped.messageType, String(mapped.text || '').slice(0, MAX_TEXT_LENGTH),
-        mapped.providerMessageId, mapped.status, timestamp, truncateJson(payload), workspaceId
+        mapped.direction, mapped.messageType, text,
+        mapped.providerMessageId, mapped.status, timestamp, payloadJson, workspaceId
       ));
     result.messagesImported += 1;
     if (pendingStatements.length >= 40) await flush();

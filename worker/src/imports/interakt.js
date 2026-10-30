@@ -180,7 +180,8 @@ export function mapInteraktMessage(message) {
     : 'outbound';
   const contentType = String(message?.content_type || message?.raw?.message_content_type || 'Text');
   const messageType = CONTENT_TYPE_MAP[contentType] || 'text';
-  const text = interaktMessageText(message);
+  const presentation = messageType === 'template' ? interaktTemplatePresentation(message) : null;
+  const text = presentation?.text || interaktMessageText(message);
   const providerMessageId = String(message?.channel_message_id || '').trim();
   const externalId = String(message?.id || '').trim();
   const mediaUrl = String(message?.media_url || message?.raw?.media_url || '').trim();
@@ -203,11 +204,14 @@ export function mapInteraktMessage(message) {
     mediaUrl,
     mediaFileName,
     replyTo,
-    contentType
+    contentType,
+    ...(presentation?.template ? { template: presentation.template } : {})
   };
 }
 
 export function interaktMessageText(message) {
+  const presentation = interaktTemplatePresentation(message);
+  if (presentation?.text) return presentation.text;
   const raw = String(message?.text || message?.raw?.message || '').trim();
   if (!raw) return mediaFallbackText(message);
   if (raw.startsWith('[') || raw.startsWith('{')) {
@@ -222,20 +226,189 @@ export function interaktMessageText(message) {
   return raw;
 }
 
+/** Render Interakt template history using embedded raw_template + send components. */
+export function interaktTemplatePresentation(message) {
+  const definition = parseInteraktRawTemplate(message?.raw?.raw_template);
+  const components = parseTemplateComponents(message?.text || message?.raw?.message);
+  if (!definition && !components) return null;
+
+  const parts = [];
+  const buttons = [];
+  if (definition) {
+    const headerFormat = String(definition.header_format || '').trim().toUpperCase();
+    const headerParameters = componentParameters(components, 'header');
+    const bodyParameters = componentParameters(components, 'body');
+
+    const headerTemplate = typeof definition.header === 'string' ? definition.header.trim() : '';
+    if (headerTemplate) {
+      const headerText = replaceTemplateVariables(headerTemplate, headerParameters);
+      if (headerText) parts.push(headerText);
+    } else if (headerFormat === 'DOCUMENT' || headerFormat === 'IMAGE' || headerFormat === 'VIDEO') {
+      const mediaLine = templateMediaPreview(headerParameters[0], headerFormat);
+      if (mediaLine) parts.push(mediaLine);
+    } else if (headerFormat === 'TEXT' && headerParameters.length) {
+      const headerValue = templateParameterPreview(headerParameters[0]);
+      if (headerValue) parts.push(headerValue);
+    }
+
+    const bodyTemplate = String(definition.body || '').trim();
+    if (bodyTemplate) {
+      const bodyText = replaceTemplateVariables(bodyTemplate, bodyParameters);
+      if (bodyText) parts.push(bodyText);
+    } else {
+      const fallback = templateParametersText(components);
+      if (fallback) parts.push(fallback);
+    }
+
+    const footer = String(definition.footer || '').trim();
+    if (footer) parts.push(footer);
+
+    for (const button of parseInteraktButtons(definition.buttons)) {
+      buttons.push(button);
+    }
+  } else {
+    const fallback = templateParametersText(components);
+    if (fallback) parts.push(fallback);
+  }
+
+  if (buttons.length) {
+    parts.push(`Actions: ${buttons.map(button => button.text).join(', ')}`);
+  }
+
+  const text = parts.filter(Boolean).join('\n').trim();
+  if (!text && !definition) return null;
+
+  const name = String(definition?.name || '').trim();
+  const language = String(definition?.language || '').trim();
+  const category = String(definition?.category || '').trim();
+  const templateId = String(definition?.wa_template_id || definition?.id || '').trim();
+  const template = name && language
+    ? {
+      name,
+      language: { code: language },
+      ...(templateId ? { templateId } : {}),
+      ...(category ? { category } : {}),
+      ...(buttons.length ? { buttons } : {})
+    }
+    : null;
+
+  return {
+    text: text || (name ? `Template: ${name}${language ? ` (${language})` : ''}` : ''),
+    template
+  };
+}
+
+function parseInteraktRawTemplate(value) {
+  if (!value) return null;
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (!raw.startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseTemplateComponents(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object' && Array.isArray(value.components)) return value.components;
+  const raw = String(value || '').trim();
+  if (!raw || (!raw.startsWith('[') && !raw.startsWith('{'))) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.components)) return parsed.components;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function componentParameters(components, type) {
+  if (!Array.isArray(components)) return [];
+  const match = components.find(component => String(component?.type || '').toLowerCase() === type);
+  return Array.isArray(match?.parameters) ? match.parameters : [];
+}
+
+function parseInteraktButtons(value) {
+  let buttons = value;
+  if (typeof buttons === 'string') {
+    const raw = buttons.trim();
+    if (!raw || raw === '{}' || raw === '[]') return [];
+    try {
+      buttons = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(buttons)) return [];
+  const out = [];
+  for (const button of buttons) {
+    if (!button || typeof button !== 'object') continue;
+    const type = String(button.type || '').trim().toLowerCase();
+    const text = String(button.text || '').trim().slice(0, 100);
+    if (!text) continue;
+    const normalized = type === 'url' || type === 'phone_number' || type === 'quick_reply'
+      || type === 'copy_code' || type === 'catalog' || type === 'mpm' || type === 'flow' || type === 'otp'
+      ? type
+      : (type === 'phone number' ? 'phone_number' : (type ? type : 'quick_reply'));
+    out.push({ type: normalized, text });
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+function replaceTemplateVariables(text, parameters) {
+  const values = (Array.isArray(parameters) ? parameters : []).map(templateParameterPreview);
+  let fallbackIndex = 0;
+  return String(text || '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, rawKey) => {
+    const key = String(rawKey || '').trim();
+    let value;
+    if (/^\d+$/.test(key)) value = values[Number(key) - 1];
+    if (value === undefined) value = values[fallbackIndex++];
+    return value === undefined || value === '' ? match : value;
+  });
+}
+
+function templateParameterPreview(parameter) {
+  if (!parameter || typeof parameter !== 'object') return '';
+  const type = String(parameter.type || '').toLowerCase();
+  if (type === 'text') return String(parameter.text || '').trim();
+  if (type === 'document') return String(parameter.document?.filename || parameter.document?.link || 'Document').trim();
+  if (type === 'image') return 'Image';
+  if (type === 'video') return 'Video';
+  if (type === 'currency' && parameter.currency) {
+    return String(parameter.currency.fallback_value || parameter.currency.code || '').trim();
+  }
+  if (type === 'date_time' && parameter.date_time) {
+    return String(parameter.date_time.fallback_value || '').trim();
+  }
+  if (type === 'payload') return String(parameter.payload || '').trim();
+  return '';
+}
+
+function templateMediaPreview(parameter, format) {
+  const type = String(parameter?.type || format || '').toLowerCase();
+  if (type === 'document' || format === 'DOCUMENT') {
+    const filename = String(parameter?.document?.filename || '').trim();
+    return filename || 'Document';
+  }
+  if (type === 'image' || format === 'IMAGE') return 'Image';
+  if (type === 'video' || format === 'VIDEO') return 'Video';
+  return templateParameterPreview(parameter);
+}
+
 function templateParametersText(value) {
   const parts = [];
   const components = Array.isArray(value) ? value : (Array.isArray(value?.components) ? value.components : null);
   if (!components) return '';
   for (const component of components) {
     for (const parameter of component?.parameters || []) {
-      if (parameter?.type === 'text' && parameter.text) parts.push(String(parameter.text));
-      else if (parameter?.type === 'document' && parameter.document?.filename) {
-        parts.push(String(parameter.document.filename));
-      } else if (parameter?.type === 'image' && parameter.image?.link) {
-        parts.push('Image');
-      } else if (parameter?.type === 'video' && parameter.video?.link) {
-        parts.push('Video');
-      }
+      const preview = templateParameterPreview(parameter);
+      if (preview) parts.push(preview);
     }
   }
   return parts.join(' · ');

@@ -73,12 +73,42 @@ test('maps Interakt template and media messages', () => {
     content_type: 'Template',
     text: JSON.stringify([{ type: 'body', parameters: [{ type: 'text', text: 'Helixcer' }] }]),
     status: 'Read',
-    timestamp: '2026-01-01T00:00:00+0000'
+    timestamp: '2026-01-01T00:00:00+0000',
+    raw: {
+      raw_template: {
+        name: 'payment_reminder_no_amt',
+        language: 'en',
+        category: 'UTILITY',
+        wa_template_id: '1101022894926797',
+        body: 'Hi {{1}},\n\nJust a quick reminder about the payment due.',
+        footer: 'Thanks & Regards, Helixcer',
+        buttons: '[{"type":"URL","text":"Pay now","url":"https://example.com/{{1}}"}]'
+      }
+    }
   });
   assert.equal(template.messageType, 'template');
-  assert.equal(template.text, 'Helixcer');
+  assert.equal(
+    template.text,
+    'Hi Helixcer,\n\nJust a quick reminder about the payment due.\nThanks & Regards, Helixcer\nActions: Pay now'
+  );
+  assert.equal(template.template?.name, 'payment_reminder_no_amt');
+  assert.equal(template.template?.language?.code, 'en');
+  assert.deepEqual(template.template?.buttons, [{ type: 'url', text: 'Pay now' }]);
   assert.equal(template.status, 'read');
   assert.equal(template.direction, 'outbound');
+
+  const paramsOnly = mapInteraktMessage({
+    id: 'm1b',
+    channel_message_id: 'wamid.1b',
+    direction: 'outbound',
+    content_type: 'Template',
+    text: JSON.stringify([
+      { type: 'body', parameters: [{ type: 'text', text: 'Acme' }, { type: 'text', text: '1200' }] }
+    ]),
+    status: 'Read',
+    timestamp: '2026-01-01T00:00:00+0000'
+  });
+  assert.equal(paramsOnly.text, 'Acme · 1200');
 
   const image = mapInteraktMessage({
     id: 'm2',
