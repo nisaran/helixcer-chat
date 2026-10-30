@@ -1603,20 +1603,30 @@ test('Instagram verification uses /me and exposes sanitized credential errors', 
   }), env);
   assert.equal((await createInstagram('ig-valid', '17841400000000001', 'valid-instagram-access-token-123456')).status, 201);
   assert.equal((await createInstagram('ig-invalid', '17841400000000002', 'invalid-instagram-access-token-123')).status, 201);
+  assert.equal((await createInstagram('ig-mismatch', '17841400000000003', 'mismatch-instagram-access-token-123456')).status, 201);
   const originalFetch = globalThis.fetch;
   const providerCalls = [];
-  globalThis.fetch = async (input, init = {}) => {
+  globalThis.fetch = async (input) => {
     const url = new URL(String(input));
     providerCalls.push(url);
     if (url.pathname !== '/v26.0/me') return new Response('{}', { status: 404 });
     if (url.searchParams.get('fields') !== 'user_id,username') return new Response('{}', { status: 400 });
-    const authorization = new Headers(init.headers).get('Authorization') || '';
-    if (authorization.includes('invalid-instagram')) {
+    const accessToken = url.searchParams.get('access_token') || '';
+    if (!accessToken) return new Response(JSON.stringify({ error: { message: 'Missing access token.' } }), {
+      status: 400, headers: { 'Content-Type': 'application/json' }
+    });
+    if (accessToken.includes('invalid-instagram')) {
       return new Response(JSON.stringify({ error: { message: 'Invalid OAuth access token.' } }), {
         status: 401, headers: { 'Content-Type': 'application/json' }
       });
     }
-    return new Response(JSON.stringify({ user_id: '17841400000000001', username: 'helixcer' }), {
+    if (accessToken.includes('mismatch-instagram')) {
+      // Meta's documented /me shape nests the profile under data[].
+      return new Response(JSON.stringify({ data: [{ user_id: '17841499999999999', username: 'other' }] }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return new Response(JSON.stringify({ data: [{ user_id: '17841400000000001', username: 'helixcer' }] }), {
       status: 200, headers: { 'Content-Type': 'application/json' }
     });
   };
@@ -1627,14 +1637,23 @@ test('Instagram verification uses /me and exposes sanitized credential errors', 
     assert.equal(verified.status, 200);
     assert.equal(providerCalls[0].origin, 'https://graph.instagram.com');
     assert.equal(providerCalls[0].pathname, '/v26.0/me');
+    assert.equal(providerCalls[0].searchParams.get('access_token'), 'valid-instagram-access-token-123456');
     assert.equal(database.prepare("SELECT json_extract(config_json,'$.verifiedProviderId') AS id FROM channels WHERE channel_id='ig-valid'").get().id,
       '17841400000000001');
+    assert.equal(database.prepare("SELECT json_extract(config_json,'$.verifiedUsername') AS username FROM channels WHERE channel_id='ig-valid'").get().username,
+      'helixcer');
 
     const rejected = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/ig-invalid/verify', {
       method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
     }), env);
     assert.equal(rejected.status, 422);
     assert.match((await rejected.json()).error, /Invalid OAuth access token/);
+
+    const mismatched = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/ig-mismatch/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(mismatched.status, 422);
+    assert.match((await mismatched.json()).error, /Meta returned Instagram account 17841499999999999/);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();

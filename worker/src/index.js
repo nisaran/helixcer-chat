@@ -1994,18 +1994,37 @@ async function verifyInstagramChannel(env, channel) {
   const version = metaApiVersion(channel.config?.apiVersion);
   const endpoint = new URL(`https://graph.instagram.com/${encodeURIComponent(version)}/me`);
   endpoint.searchParams.set('fields', 'user_id,username');
-  const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${credentials.accessToken}` } });
+  // Instagram Login docs pass access_token as a query param; Bearer alone is not reliable here.
+  endpoint.searchParams.set('access_token', credentials.accessToken);
+  const response = await fetch(endpoint);
   const data = safeJsonParse(await response.text(), {});
   if (!response.ok) throw httpError(422, `Meta could not verify this Instagram account: ${providerError(data, response.status)}`);
-  if (String(data.user_id || '') !== accountId) throw httpError(422, 'Meta returned a different Instagram account.');
+  const profile = instagramMeProfile(data);
+  if (!profile.userId) {
+    throw httpError(422, 'Meta did not return an Instagram professional account ID. Use an Instagram User access token from Instagram API setup with Instagram login, then paste the user_id value into Instagram account ID.');
+  }
+  if (profile.userId !== accountId) {
+    throw httpError(422, `Meta returned Instagram account ${profile.userId}, but this channel is configured for ${accountId}. Use the Instagram professional account ID (user_id), not the app-scoped id.`);
+  }
   const now = new Date().toISOString();
   const config = await updateChannelRuntimeConfig(env, channel, {
     apiVersion: version, credentialsVerifiedAt: now, verifiedProviderId: accountId,
-    verifiedName: String(data.username || ''), verifiedUsername: String(data.username || '')
+    verifiedName: profile.username, verifiedUsername: profile.username
   });
   return { ok: true, channelId: channel.channelId, health: config.webhookVerifiedAt ? 'connected' : 'webhook_required',
     verifiedName: config.verifiedName, verifiedUsername: config.verifiedUsername,
     credentialsVerifiedAt: now, webhookVerifiedAt: config.webhookVerifiedAt || '' };
+}
+
+function instagramMeProfile(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { userId: '', username: '' };
+  const row = Array.isArray(payload.data) ? payload.data[0] : payload;
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return { userId: '', username: '' };
+  // user_id is the Instagram professional account ID used in webhooks; id is only app-scoped.
+  return {
+    userId: String(row.user_id || '').trim(),
+    username: String(row.username || '').trim()
+  };
 }
 
 async function updateChannelRuntimeConfig(env, channel, patch) {
