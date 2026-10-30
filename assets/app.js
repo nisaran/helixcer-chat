@@ -311,6 +311,7 @@
         status: "pending",
         createdAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + 7 * 86400_000).toISOString(),
+        allowedChannelIds: payload.role === "agent" ? asItems(payload.allowedChannelIds).map(String) : [],
       };
       this.data.team.invitations.unshift(invitation);
       return { ok: true, invitation: clone(invitation), inviteUrl: `${location.origin}${location.pathname}?invite=${suffix}` };
@@ -1199,6 +1200,7 @@
       membershipId: String(membership.membershipId || membership.id || ""),
       role: ["owner", "admin", "agent"].includes(membership.role) ? membership.role : "agent",
       status: membership.status || "active",
+      allowedChannelIds: normalizeAllowedChannelIds(membership.allowedChannelIds ?? membership.allowed_channel_ids),
       workspace: source.workspace || { workspaceId: "default", name: DEFAULT_WORKSPACE, slug: "helixcer" },
     };
   }
@@ -4600,6 +4602,19 @@
     return item;
   }
 
+  function normalizeAllowedChannelIds(raw) {
+    if (Array.isArray(raw)) return [...new Set(raw.map((item) => String(item || "").trim()).filter(Boolean))];
+    if (typeof raw === "string" && raw.trim()) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return normalizeAllowedChannelIds(parsed);
+      } catch {
+        return raw.split(",").map((item) => item.trim()).filter(Boolean);
+      }
+    }
+    return [];
+  }
+
   function normalizeMember(raw) {
     return {
       ...raw,
@@ -4611,6 +4626,7 @@
       role: ["owner", "admin", "agent"].includes(raw.role) ? raw.role : "agent",
       status: raw.status || "active",
       createdAt: raw.createdAt || new Date().toISOString(),
+      allowedChannelIds: normalizeAllowedChannelIds(raw.allowedChannelIds ?? raw.allowed_channel_ids),
     };
   }
 
@@ -4623,6 +4639,7 @@
       status: raw.status || "pending",
       createdAt: raw.createdAt || new Date().toISOString(),
       expiresAt: raw.expiresAt || "",
+      allowedChannelIds: normalizeAllowedChannelIds(raw.allowedChannelIds ?? raw.allowed_channel_ids),
     };
   }
 
@@ -4823,6 +4840,9 @@
       avatar.style.color = palette[1];
       const copy = document.createElement("div");
       copy.append(element("strong", "", member.displayName), element("span", "", member.email));
+      if (member.role === "agent") {
+        copy.append(element("span", "subtle", agentChannelAccessLabel(member.allowedChannelIds)));
+      }
       identity.append(avatar, copy);
       memberCell.append(identity);
       row.append(memberCell);
@@ -4875,7 +4895,13 @@
     invitations.forEach((invitation) => {
       const item = element("div", "invitation-item");
       const copy = document.createElement("div");
-      copy.append(element("strong", "", invitation.email), element("span", "", `${capitalize(invitation.role)} · waiting for sign-in`));
+      const channelSummary = invitation.role === "agent"
+        ? agentChannelAccessLabel(invitation.allowedChannelIds)
+        : "All channels";
+      copy.append(
+        element("strong", "", invitation.email),
+        element("span", "", `${capitalize(invitation.role)} · waiting for sign-in · ${channelSummary}`)
+      );
       const time = document.createElement("time");
       time.dateTime = invitation.expiresAt;
       time.textContent = invitation.expiresAt ? `Expires ${relativeTime(invitation.expiresAt)}` : "Pending";
@@ -4894,17 +4920,83 @@
     $("inviteResult").hidden = true;
     $("inviteSubmit").hidden = false;
     applyPermissions();
+    renderInviteChannelOptions(state.channels.map((channel) => channel.channelId));
     updateInviteRoleHelp();
     $("inviteDialog").showModal();
+  }
+
+  function agentChannelAccessLabel(channelIds) {
+    const ids = normalizeAllowedChannelIds(channelIds);
+    if (!ids.length) return "All channels";
+    if (ids.length === 1) {
+      const channel = state.channels.find((item) => item.channelId === ids[0]);
+      return channel?.name || "1 channel";
+    }
+    return `${ids.length} channels`;
+  }
+
+  function renderInviteChannelOptions(selectedIds = null) {
+    const host = $("inviteChannelOptions");
+    const empty = $("inviteChannelEmpty");
+    const selectAll = $("inviteSelectAllChannels");
+    if (!host || !empty || !selectAll) return;
+    const selected = selectedIds === null
+      ? new Set(selectedInviteChannelIds())
+      : new Set(normalizeAllowedChannelIds(selectedIds));
+    host.replaceChildren();
+    const channels = asItems(state.channels).slice().sort((left, right) =>
+      String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }));
+    empty.hidden = channels.length > 0;
+    selectAll.disabled = channels.length === 0;
+    channels.forEach((channel) => {
+      const option = element("label", "invite-channel-option");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.name = "allowedChannelIds";
+      checkbox.value = channel.channelId;
+      checkbox.checked = selected.has(channel.channelId);
+      const copy = document.createElement("span");
+      copy.append(document.createTextNode(channel.name || channel.channelId));
+      const meta = document.createElement("small");
+      meta.textContent = channelStyles[channel.connectorType]?.label || channel.connectorType || "Channel";
+      copy.append(meta);
+      option.append(checkbox, copy);
+      host.append(option);
+    });
+    updateInviteSelectAllLabel();
+  }
+
+  function selectedInviteChannelIds() {
+    return [...document.querySelectorAll('#inviteChannelOptions input[type="checkbox"]:checked')]
+      .map((input) => input.value)
+      .filter(Boolean);
+  }
+
+  function updateInviteSelectAllLabel() {
+    const selectAll = $("inviteSelectAllChannels");
+    const boxes = [...document.querySelectorAll('#inviteChannelOptions input[type="checkbox"]')];
+    if (!selectAll) return;
+    const allSelected = boxes.length > 0 && boxes.every((input) => input.checked);
+    selectAll.textContent = allSelected ? "Clear all" : "Select all";
+  }
+
+  function toggleInviteSelectAllChannels() {
+    const boxes = [...document.querySelectorAll('#inviteChannelOptions input[type="checkbox"]')];
+    if (!boxes.length) return;
+    const allSelected = boxes.every((input) => input.checked);
+    boxes.forEach((input) => { input.checked = !allSelected; });
+    updateInviteSelectAllLabel();
   }
 
   function updateInviteRoleHelp() {
     const role = $("inviteRole").value;
     const descriptions = {
-      admin: "Admins can manage channels, contacts, conversations, and team members.",
-      agent: "Agents can manage customer conversations but cannot change channels or team access.",
+      admin: "Admins can manage channels, contacts, conversations, and team members. They have access to every messaging channel.",
+      agent: "Agents can manage customer conversations on the channels you select below, but cannot change channels or team access.",
     };
     $("inviteRoleHelp").textContent = descriptions[role] || descriptions.agent;
+    const channelAccess = $("inviteChannelAccess");
+    if (channelAccess) channelAccess.hidden = role !== "agent";
   }
 
   async function inviteMember(form) {
@@ -4915,9 +5007,19 @@
       form.elements.email.reportValidity();
       return;
     }
+    const allowedChannelIds = role === "agent" ? selectedInviteChannelIds() : [];
+    if (role === "agent" && !allowedChannelIds.length) {
+      showToast("Choose messaging channels", "Select at least one channel this agent can use, or select all.", true);
+      return;
+    }
     $("inviteSubmit").disabled = true;
     try {
-      const result = await state.api.inviteMember({ email, role, return_to: location.origin });
+      const result = await state.api.inviteMember({
+        email,
+        role,
+        ...(role === "agent" ? { allowedChannelIds } : {}),
+        return_to: location.origin,
+      });
       $("inviteFields").hidden = true;
       $("inviteResult").hidden = false;
       $("inviteSubmit").hidden = true;
@@ -7441,6 +7543,7 @@
           },
           "open-invite": openInviteDialog,
           "close-invite": () => $("inviteDialog").close(),
+          "invite-select-all-channels": toggleInviteSelectAllChannels,
           "copy-invite-link": copyInviteLink,
           "open-api-key": openApiKeyDialog,
           "close-api-key": closeApiKeyDialog,
@@ -7734,6 +7837,9 @@
       if (state.confirmationResolve) finishConfirmation(false, { close: false });
     });
     $("inviteRole").addEventListener("change", updateInviteRoleHelp);
+    $("inviteChannelOptions")?.addEventListener("change", (event) => {
+      if (event.target?.matches?.('input[type="checkbox"]')) updateInviteSelectAllLabel();
+    });
     $("teamTableBody").addEventListener("change", (event) => {
       const select = event.target.closest("[data-member-role]");
       if (select) changeMemberRole(select.dataset.memberRole, select.value, select);

@@ -129,6 +129,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0014_unified_contact_conversations.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0015_saas_clients.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0016_internal_slug.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0017_agent_channel_access.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -3830,5 +3831,131 @@ test('unified conversation defaults to the newest exact inbound route when bindi
   assert.equal(conversation.defaultRoute.lastInboundAt, newerInbound);
   assert.equal(conversation.routeOptions.find(route => route.channelId === 'stale-binding-a').lastInboundAt,
     olderInbound);
+  database.close();
+});
+
+test('agent invitations store channel access and restrict messaging to selected channels', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const { principal: owner, sessionToken: ownerSession } = await performOwnerLogin(env);
+  const ownerHeaders = {
+    Cookie: `__Host-helixcer_session=${encodeURIComponent(ownerSession)}`,
+    Origin: 'https://chat.helixcer.com',
+    'Content-Type': 'application/json'
+  };
+
+  for (const [channelId, name] of [['wa-sales', 'Sales WhatsApp'], ['wa-service', 'Service WhatsApp']]) {
+    const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({
+        name, connectorType: 'web_chat', channelId, secretKey: `${channelId}-secret`
+      })
+    }), env);
+    assert.equal(created.status, 201);
+  }
+
+  const deniedEmpty = await createInvitation(
+    new Request('https://api.chat.helixcer.com/api/team/invitations'), env, owner,
+    { email: 'scoped-agent@example.com', role: 'agent', allowedChannelIds: [], return_to: 'https://chat.helixcer.com/team' }
+  ).then(() => null, error => error);
+  assert.equal(deniedEmpty?.status, 400);
+
+  const created = await createInvitation(
+    new Request('https://api.chat.helixcer.com/api/team/invitations'), env, owner,
+    {
+      email: 'scoped-agent@example.com', role: 'agent', allowedChannelIds: ['wa-sales'],
+      return_to: 'https://chat.helixcer.com/team'
+    }
+  );
+  assert.deepEqual(created.invitation.allowedChannelIds, ['wa-sales']);
+  assert.equal(
+    database.prepare('SELECT allowed_channel_ids_json FROM invitations WHERE invitation_id=?')
+      .get(created.invitation.invitationId).allowed_channel_ids_json,
+    JSON.stringify(['wa-sales'])
+  );
+
+  const token = new URL(created.inviteUrl).searchParams.get('invite');
+  const accepted = await performGoogleLogin(env, {
+    email: 'scoped-agent@example.com', subject: 'scoped-agent-google-sub', invite: token,
+    returnTo: 'https://chat.helixcer.com/team'
+  });
+  assert.equal(accepted.principal.membership.role, 'agent');
+  assert.deepEqual(accepted.principal.membership.allowedChannelIds, ['wa-sales']);
+  assert.equal(
+    database.prepare(`SELECT allowed_channel_ids_json FROM memberships WHERE membership_id=?`)
+      .get(accepted.principal.membership.membershipId).allowed_channel_ids_json,
+    JSON.stringify(['wa-sales'])
+  );
+
+  const now = new Date().toISOString();
+  database.prepare(`INSERT INTO contacts (contact_id,display_name,attributes_json,created_at,updated_at,workspace_id)
+    VALUES ('ct-sales','Sales Contact','{}',?,?, 'ws_default')`).run(now, now);
+  database.prepare(`INSERT INTO contacts (contact_id,display_name,attributes_json,created_at,updated_at,workspace_id)
+    VALUES ('ct-service','Service Contact','{}',?,?, 'ws_default')`).run(now, now);
+  database.prepare(`INSERT INTO conversations
+      (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+    VALUES ('cv-sales','ct-sales','wa-sales','open','Sales thread',?,1,?,?, 'ws_default')`).run(now, now, now);
+  database.prepare(`INSERT INTO conversations
+      (conversation_id,contact_id,channel_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+    VALUES ('cv-service','ct-service','wa-service','open','Service thread',?,1,?,?, 'ws_default')`).run(now, now, now);
+  database.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
+    VALUES ('msg-sales','cv-sales','ct-sales','wa-sales','inbound','text','Hello sales','received',?,'ws_default')`).run(now);
+  database.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,direction,message_type,text,status,timestamp,workspace_id)
+    VALUES ('msg-service','cv-service','ct-service','wa-service','inbound','text','Hello service','received',?,'ws_default')`).run(now);
+
+  const agentHeaders = {
+    Cookie: `__Host-helixcer_session=${encodeURIComponent(accepted.sessionToken)}`,
+    Origin: 'https://chat.helixcer.com',
+    'Content-Type': 'application/json'
+  };
+  const bootstrap = await handleRequest(new Request('https://api.chat.helixcer.com/api/bootstrap', {
+    headers: agentHeaders
+  }), env);
+  assert.equal(bootstrap.status, 200);
+  const bootstrapBody = await bootstrap.json();
+  assert.deepEqual(bootstrapBody.channels.map(item => item.channelId), ['wa-sales']);
+  assert.deepEqual(bootstrapBody.conversations.map(item => item.conversationId).sort(), ['cv-sales']);
+  assert.deepEqual(bootstrapBody.me.membership.allowedChannelIds, ['wa-sales']);
+
+  const allowedRead = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/cv-sales/messages', {
+    headers: agentHeaders
+  }), env);
+  assert.equal(allowedRead.status, 200);
+  assert.equal((await allowedRead.json()).items.length, 1);
+
+  const deniedSend = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/cv-service/messages', {
+    method: 'POST',
+    headers: agentHeaders,
+    body: JSON.stringify({ text: 'Reply on service' })
+  }), env);
+  assert.equal(deniedSend.status, 403);
+
+  const deniedRead = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/cv-service/messages', {
+    headers: agentHeaders
+  }), env);
+  assert.equal(deniedRead.status, 403);
+
+  const adminInvite = await createInvitation(
+    new Request('https://api.chat.helixcer.com/api/team/invitations'), env, owner,
+    { email: 'full-admin@example.com', role: 'admin', return_to: 'https://chat.helixcer.com/team' }
+  );
+  assert.deepEqual(adminInvite.invitation.allowedChannelIds, []);
+  const adminToken = new URL(adminInvite.inviteUrl).searchParams.get('invite');
+  const adminAccepted = await performGoogleLogin(env, {
+    email: 'full-admin@example.com', subject: 'full-admin-google-sub', invite: adminToken,
+    returnTo: 'https://chat.helixcer.com/team'
+  });
+  const adminBootstrap = await handleRequest(new Request('https://api.chat.helixcer.com/api/bootstrap', {
+    headers: {
+      Cookie: `__Host-helixcer_session=${encodeURIComponent(adminAccepted.sessionToken)}`,
+      Origin: 'https://chat.helixcer.com'
+    }
+  }), env);
+  const adminBody = await adminBootstrap.json();
+  assert.deepEqual(adminBody.channels.map(item => item.channelId).sort(), ['wa-sales', 'wa-service']);
+  assert.equal(adminBody.conversations.length, 2);
   database.close();
 });

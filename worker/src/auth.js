@@ -136,7 +136,8 @@ export async function authenticateRequest(request, env) {
   if (!rawToken) return null;
   const row = await env.DB.prepare(`SELECT s.session_id,s.expires_at,s.session_type,s.device_id,
       u.user_id,u.email,u.display_name,u.avatar_url,
-      m.membership_id,m.role,m.status,w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
+      m.membership_id,m.role,m.status,m.allowed_channel_ids_json,
+      w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
     FROM sessions s JOIN users u ON u.user_id=s.user_id
       JOIN memberships m ON m.user_id=s.user_id AND m.workspace_id=s.workspace_id
       JOIN workspaces w ON w.workspace_id=s.workspace_id
@@ -295,13 +296,14 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
   if (invite) {
     const [membershipResult, invitationResult] = await env.DB.batch([
       env.DB.prepare(`INSERT INTO memberships
-          (membership_id,workspace_id,user_id,role,status,invited_by_user_id,created_at,updated_at)
-        SELECT ?1,i.workspace_id,?2,i.role,'active',i.invited_by_user_id,?3,?3
+          (membership_id,workspace_id,user_id,role,status,invited_by_user_id,created_at,updated_at,allowed_channel_ids_json)
+        SELECT ?1,i.workspace_id,?2,i.role,'active',i.invited_by_user_id,?3,?3,i.allowed_channel_ids_json
         FROM invitations i
         WHERE i.invitation_id=?4 AND i.token_hash=?5 AND lower(i.email)=?6
           AND i.status='pending' AND i.expires_at>?3
         ON CONFLICT(workspace_id,user_id) DO UPDATE SET role=excluded.role,status='active',
-          invited_by_user_id=excluded.invited_by_user_id,updated_at=excluded.updated_at`)
+          invited_by_user_id=excluded.invited_by_user_id,updated_at=excluded.updated_at,
+          allowed_channel_ids_json=excluded.allowed_channel_ids_json`)
         .bind(crypto.randomUUID(), user.user_id, now, invite.invitation_id, invitationTokenHash, email),
       env.DB.prepare(`UPDATE invitations SET status='accepted',accepted_at=?4,updated_at=?4
         WHERE invitation_id=?1 AND token_hash=?2 AND lower(email)=?3
@@ -319,7 +321,7 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
   }
 
   const row = await env.DB.prepare(`SELECT u.user_id,u.email,u.display_name,u.avatar_url,m.membership_id,m.role,m.status,
-      w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
+      m.allowed_channel_ids_json,w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
     FROM users u JOIN memberships m ON m.user_id=u.user_id JOIN workspaces w ON w.workspace_id=m.workspace_id
     WHERE u.user_id=?1 AND m.status='active' AND w.status='active' AND (?2='' OR m.workspace_id=?2)
     ORDER BY CASE m.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END LIMIT 1`)
@@ -357,11 +359,12 @@ async function createSession(env, principal, options = {}) {
 export async function listTeam(env, principal) {
   requireRole(principal, 'admin');
   const [members, invitations] = await Promise.all([
-    env.DB.prepare(`SELECT m.membership_id,m.user_id,m.role,m.status,m.created_at,u.email,u.display_name,u.avatar_url
+    env.DB.prepare(`SELECT m.membership_id,m.user_id,m.role,m.status,m.created_at,m.allowed_channel_ids_json,
+        u.email,u.display_name,u.avatar_url
       FROM memberships m JOIN users u ON u.user_id=m.user_id
       WHERE m.workspace_id=?1 ORDER BY CASE m.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END,u.display_name`)
       .bind(principal.workspace.workspaceId).all(),
-    env.DB.prepare(`SELECT invitation_id,email,role,status,expires_at,created_at FROM invitations
+    env.DB.prepare(`SELECT invitation_id,email,role,status,expires_at,created_at,allowed_channel_ids_json FROM invitations
       WHERE workspace_id=?1 AND status='pending' ORDER BY created_at DESC`).bind(principal.workspace.workspaceId).all()
   ]);
   return {
@@ -377,6 +380,10 @@ export async function createInvitation(request, env, principal, payload) {
   const role = String(payload.role || 'agent');
   if (!['admin', 'agent'].includes(role)) throw authError(400, 'Invitation role must be admin or agent.');
   if (principal.membership.role === 'admin' && role !== 'agent') throw authError(403, 'Only an owner can invite an administrator.');
+  const allowedChannelIds = await resolveAllowedChannelIds(env, principal.workspace.workspaceId, role, payload, {
+    // Chat UI always sends a selection. Omitting the field keeps legacy/API invites unrestricted.
+    required: false
+  });
   const existing = await env.DB.prepare(`SELECT m.membership_id FROM memberships m JOIN users u ON u.user_id=m.user_id
     WHERE m.workspace_id=?1 AND lower(u.email)=?2 AND m.status='active'`).bind(principal.workspace.workspaceId, email).first();
   if (existing) throw authError(409, 'This user is already a workspace member.');
@@ -384,28 +391,36 @@ export async function createInvitation(request, env, principal, payload) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const invitationId = crypto.randomUUID();
+  const allowedJson = JSON.stringify(allowedChannelIds);
   await env.DB.batch([
     env.DB.prepare(`UPDATE invitations SET status='cancelled',updated_at=?3
       WHERE workspace_id=?1 AND lower(email)=?2 AND status='pending'`).bind(principal.workspace.workspaceId, email, now.toISOString()),
     env.DB.prepare(`INSERT INTO invitations
-        (invitation_id,workspace_id,email,role,token_hash,status,invited_by_user_id,expires_at,created_at,updated_at)
-      VALUES (?1,?2,?3,?4,?5,'pending',?6,?7,?8,?8)`)
-      .bind(invitationId, principal.workspace.workspaceId, email, role, await hashToken(token), principal.user.userId || null, expiresAt, now.toISOString())
+        (invitation_id,workspace_id,email,role,token_hash,status,invited_by_user_id,expires_at,created_at,updated_at,allowed_channel_ids_json)
+      VALUES (?1,?2,?3,?4,?5,'pending',?6,?7,?8,?8,?9)`)
+      .bind(invitationId, principal.workspace.workspaceId, email, role, await hashToken(token),
+        principal.user.userId || null, expiresAt, now.toISOString(), allowedJson)
   ]);
-  await auditAuthAction(env, principal, 'invite', 'invitation', invitationId, { email, role });
+  await auditAuthAction(env, principal, 'invite', 'invitation', invitationId, {
+    email, role, allowedChannelIds
+  });
   const loginUrl = new URL('/auth/google/start', request.url);
   loginUrl.searchParams.set('return_to', validateReturnTo(payload.returnTo || payload.return_to || '/', env));
   loginUrl.searchParams.set('invite', token);
   return {
     ok: true,
-    invitation: { invitationId, email, role, status: 'pending', expiresAt, createdAt: now.toISOString() },
+    invitation: {
+      invitationId, email, role, status: 'pending', expiresAt, createdAt: now.toISOString(),
+      allowedChannelIds
+    },
     inviteUrl: loginUrl.toString()
   };
 }
 
 export async function updateMembership(env, principal, membershipId, payload) {
   requireRole(principal, 'admin');
-  const target = await env.DB.prepare(`SELECT m.membership_id,m.user_id,m.role,m.status,m.created_at,u.email,u.display_name,u.avatar_url
+  const target = await env.DB.prepare(`SELECT m.membership_id,m.user_id,m.role,m.status,m.created_at,m.allowed_channel_ids_json,
+      u.email,u.display_name,u.avatar_url
     FROM memberships m JOIN users u ON u.user_id=m.user_id WHERE m.membership_id=?1 AND m.workspace_id=?2`)
     .bind(membershipId, principal.workspace.workspaceId).first();
   if (!target) throw authError(404, 'Team member not found.');
@@ -422,12 +437,21 @@ export async function updateMembership(env, principal, membershipId, payload) {
       WHERE workspace_id=?1 AND role='owner' AND status='active'`).bind(principal.workspace.workspaceId).first();
     if (Number(owners?.count || 0) <= 1) throw authError(409, 'The workspace must retain at least one active owner.');
   }
+  let nextAllowedJson = target.allowed_channel_ids_json || '[]';
+  if (nextRole !== 'agent') {
+    nextAllowedJson = '[]';
+  } else if (payload.allowedChannelIds !== undefined || payload.allowed_channel_ids !== undefined) {
+    const allowedChannelIds = await resolveAllowedChannelIds(env, principal.workspace.workspaceId, nextRole, payload, {
+      required: true
+    });
+    nextAllowedJson = JSON.stringify(allowedChannelIds);
+  }
   const now = new Date().toISOString();
-  const changed = await env.DB.prepare(`UPDATE memberships SET role=?3,status=?4,updated_at=?5
+  const changed = await env.DB.prepare(`UPDATE memberships SET role=?3,status=?4,allowed_channel_ids_json=?5,updated_at=?6
     WHERE membership_id=?1 AND workspace_id=?2 AND (
       role!='owner' OR (?3='owner' AND ?4='active') OR
       (SELECT count(*) FROM memberships WHERE workspace_id=?2 AND role='owner' AND status='active')>1
-    )`).bind(membershipId, principal.workspace.workspaceId, nextRole, nextStatus, now).run();
+    )`).bind(membershipId, principal.workspace.workspaceId, nextRole, nextStatus, nextAllowedJson, now).run();
   if (!changed.meta?.changes) throw authError(409, 'The workspace must retain at least one active owner.');
   if (nextStatus === 'disabled') {
     await env.DB.prepare('UPDATE sessions SET revoked_at=?3 WHERE user_id=?1 AND workspace_id=?2 AND revoked_at IS NULL')
@@ -435,9 +459,10 @@ export async function updateMembership(env, principal, membershipId, payload) {
   }
   await auditAuthAction(env, principal, 'update', 'membership', membershipId, {
     targetEmail: target.email, previousRole: target.role, role: nextRole,
-    previousStatus: target.status, status: nextStatus
+    previousStatus: target.status, status: nextStatus,
+    allowedChannelIds: parseAllowedChannelIds(nextAllowedJson)
   });
-  const updated = { ...target, role: nextRole, status: nextStatus };
+  const updated = { ...target, role: nextRole, status: nextStatus, allowed_channel_ids_json: nextAllowedJson };
   return { ok: true, item: memberView(updated) };
 }
 
@@ -460,12 +485,62 @@ export function requireRole(principal, minimumRole) {
   return principal;
 }
 
+/**
+ * Returns the channel IDs an agent may use, or null when access is unrestricted
+ * (owners, admins, and legacy agents with an empty allow-list).
+ */
+export function restrictedChannelIds(principal) {
+  if (!principal?.membership || principal.membership.role !== 'agent') return null;
+  const ids = Array.isArray(principal.membership.allowedChannelIds)
+    ? principal.membership.allowedChannelIds
+    : parseAllowedChannelIds(principal.membership.allowedChannelIdsJson);
+  return ids.length ? ids : null;
+}
+
+export function parseAllowedChannelIds(value) {
+  let parsed = value;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch { return []; }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return [...new Set(parsed.map(item => String(item || '').trim()).filter(Boolean))];
+}
+
+export async function resolveAllowedChannelIds(env, workspaceId, role, payload = {}, options = {}) {
+  if (role !== 'agent') return [];
+  const raw = payload.allowedChannelIds ?? payload.allowed_channel_ids;
+  if (raw === undefined || raw === null) {
+    if (options.required) throw authError(400, 'Select at least one messaging channel for this agent.');
+    return [];
+  }
+  if (!Array.isArray(raw)) throw authError(400, 'allowedChannelIds must be an array of channel IDs.');
+  const ids = parseAllowedChannelIds(raw);
+  if (!ids.length) throw authError(400, 'Select at least one messaging channel for this agent.');
+  if (ids.length > 200) throw authError(400, 'Too many messaging channels were selected.');
+  for (const id of ids) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(id)) {
+      throw authError(400, 'One or more selected channel IDs are invalid.');
+    }
+  }
+  const result = await env.DB.prepare('SELECT channel_id FROM channels WHERE workspace_id=?1')
+    .bind(workspaceId).all();
+  const known = new Set((result.results || []).map(row => row.channel_id));
+  const missing = ids.filter(id => !known.has(id));
+  if (missing.length) throw authError(400, 'One or more selected channels were not found in this workspace.');
+  return ids;
+}
+
 export function principalView(principal) {
   return {
     authenticated: true,
     user: principal.user,
     workspace: principal.workspace,
-    membership: principal.membership
+    membership: {
+      ...principal.membership,
+      allowedChannelIds: Array.isArray(principal.membership?.allowedChannelIds)
+        ? principal.membership.allowedChannelIds
+        : []
+    }
   };
 }
 
@@ -564,12 +639,16 @@ async function resolveDefaultWorkspace(env) {
 }
 
 function principalFromRow(row, authType = 'session') {
+  const allowedChannelIds = parseAllowedChannelIds(row.allowed_channel_ids_json);
   return {
     authType, sessionId: row.session_id || '', sessionExpiresAt: row.expires_at || '',
     deviceId: row.device_id || '',
     user: { userId: row.user_id, email: row.email, displayName: row.display_name, avatarUrl: row.avatar_url },
     workspace: { workspaceId: row.workspace_id, name: row.workspace_name, slug: row.workspace_slug },
-    membership: { membershipId: row.membership_id, role: row.role, status: row.status }
+    membership: {
+      membershipId: row.membership_id, role: row.role, status: row.status,
+      allowedChannelIds
+    }
   };
 }
 
@@ -577,14 +656,16 @@ function memberView(row) {
   return {
     membershipId: row.membership_id, userId: row.user_id, email: row.email,
     displayName: row.display_name, avatarUrl: row.avatar_url, role: row.role,
-    status: row.status, createdAt: row.created_at
+    status: row.status, createdAt: row.created_at,
+    allowedChannelIds: parseAllowedChannelIds(row.allowed_channel_ids_json)
   };
 }
 
 function invitationView(row) {
   return {
     invitationId: row.invitation_id, email: row.email, role: row.role,
-    status: row.status, expiresAt: row.expires_at, createdAt: row.created_at
+    status: row.status, expiresAt: row.expires_at, createdAt: row.created_at,
+    allowedChannelIds: parseAllowedChannelIds(row.allowed_channel_ids_json)
   };
 }
 

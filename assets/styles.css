@@ -1064,6 +1064,18 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .invite-result .field-label { justify-self: stretch; text-align: left; }
 .invite-result .inline-field { justify-self: stretch; width: 100%; }
 .role-explainer { border-radius: 10px; background: #f5f6f3; color: var(--muted); margin-top: 12px; padding: 10px 11px; font-size: 10px; line-height: 1.5; }
+.invite-channel-access { margin-top: 14px; }
+.invite-channel-access-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.invite-channel-access-head strong { display: block; color: #24302e; font-size: 11px; }
+.invite-channel-access-head .subtle { display: block; margin-top: 3px; font-size: 10px; line-height: 1.45; }
+.invite-channel-select-all { flex: 0 0 auto; min-height: 30px; padding: 0 10px; font-size: 10px; }
+.invite-channel-options { display: grid; gap: 6px; max-height: 180px; overflow: auto; padding-right: 2px; }
+.invite-channel-option { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; background: #fbfcfb; color: #3f4b49; padding: 8px 10px; font-size: 10px; cursor: pointer; }
+.invite-channel-option:hover { border-color: color-mix(in srgb, var(--brand) 35%, var(--line)); }
+.invite-channel-option input { width: 14px; height: 14px; accent-color: var(--brand); margin: 0; flex: 0 0 auto; }
+.invite-channel-option span { min-width: 0; }
+.invite-channel-option small { display: block; color: var(--muted); margin-top: 2px; font-size: 9px; }
+.invite-channel-access .field-hint { margin-top: 8px; }
 .text-field { width: 100%; min-height: 42px; border: 1px solid var(--line-strong); border-radius: 10px; background: white; color: var(--ink); padding: 9px 11px; outline: 0; }
 .text-field:focus { border-color: #b8a5f3; box-shadow: 0 0 0 3px rgba(109,59,234,.09); }
 .field-help { margin: 7px 0 0; color: var(--muted); font-size: 10px; }

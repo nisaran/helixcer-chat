@@ -61,10 +61,11 @@ test('message search is bounded and explicitly scoped to the authenticated works
     new URL('https://api.chat.helixcer.com/api/search/messages?q=invoice&limit=500')
   );
 
-  assert.deepEqual(bindings, ['workspace-a', 'invoice', 100]);
+  assert.deepEqual(bindings, ['workspace-a', 'invoice', 100, 0, '[]']);
   assert.match(sql, /WHERE m\.workspace_id=\?1/);
   assert.match(sql, /ct\.workspace_id=m\.workspace_id/);
   assert.match(sql, /ch\.workspace_id=m\.workspace_id/);
+  assert.match(sql, /json_each\(\?5\)/);
   assert.deepEqual(items, [{
     messageId: 'message-1', conversationId: 'conversation-1', contactId: 'contact-1',
     contactIdentityId: '', identityId: '',

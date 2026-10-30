@@ -54,6 +54,12 @@ test("role-aware single-workspace UI includes team management and no billing sur
   assert.match(html, /data-route="developer" data-admin-only/);
   assert.match(html, /id="teamTableBody"/);
   assert.match(html, /id="inviteForm"/);
+  assert.match(html, /id="inviteChannelAccess"/);
+  assert.match(html, /id="inviteChannelOptions"/);
+  assert.match(html, /data-action="invite-select-all-channels"/);
+  assert.match(app, /allowedChannelIds/);
+  assert.match(app, /renderInviteChannelOptions/);
+  assert.match(app, /selectedInviteChannelIds/);
   assert.doesNotMatch(html, /id="inviteRole"[^>]*>[\s\S]*?<option value="owner"/);
   assert.doesNotMatch(html, /data-route="billing"/i);
 });
@@ -929,7 +935,8 @@ test("Developer API keys are managed by admins and shown only once", () => {
   assert.match(app, /`\/api\/developer\/api-keys\/\$\{encodeURIComponent\(apiKeyId\)\}`/);
   assert.match(app, /developer: "Developer API"/);
   assert.doesNotMatch(html, /Allowed WhatsApp connections|apiKeyChannelOptions/);
-  assert.doesNotMatch(app, /allowedChannelIds|renderApiKeyChannelOptions/);
+  assert.doesNotMatch(app, /renderApiKeyChannelOptions/);
+  assert.doesNotMatch(app, /createDeveloperApiKey[\s\S]{0,800}allowedChannelIds/);
   const developerRoute = html.match(/<section class="route content-route" id="developerRoute"[\s\S]*?<\/section>\s*<section class="route content-route" id="teamRoute"/)?.[0] || "";
   const apiKeyDialog = html.match(/<dialog class="modal" id="apiKeyDialog"[\s\S]*?<\/dialog>/)?.[0] || "";
   assert.doesNotMatch(developerRoute, /WhatsApp/i);
