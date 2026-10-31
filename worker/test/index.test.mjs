@@ -71,6 +71,31 @@ test('conversation route options stay scoped for inbox bootstrap', async () => {
   assert.match(routeOptions, /widespread 500\/504s|bootstrap 500\/504/);
 });
 
+test('bootstrap loads large imported conversation and contact catalogues', async () => {
+  const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(index, /BOOTSTRAP_CONVERSATION_LIMIT = 1000/);
+  assert.match(index, /BOOTSTRAP_CONTACT_LIMIT = 2000/);
+  assert.match(index, /MAX_CONVERSATION_LIST_LIMIT = 2000/);
+  assert.match(index, /MAX_CONTACT_LIST_LIMIT = 2000/);
+  const bootstrap = index.slice(index.indexOf("url.pathname === '/api/bootstrap'"),
+    index.indexOf("url.pathname === '/api/workspace'"));
+  assert.match(bootstrap, /withSearchParams\(url,/);
+  assert.match(bootstrap, /BOOTSTRAP_CONVERSATION_LIMIT/);
+  assert.match(bootstrap, /BOOTSTRAP_CONTACT_LIMIT/);
+  assert.match(bootstrap, /listConversations\(env, workspaceId, bootstrapUrl/);
+  assert.match(bootstrap, /listContacts\(env, workspaceId, bootstrapUrl\)/);
+});
+
+test('contact identity hydration stays under D1 bind limits', async () => {
+  const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const hydrate = index.slice(index.indexOf('async function contactIdentityRows'),
+    index.indexOf('async function hydrateContactViews'));
+  assert.match(hydrate, /json_each\(\?2\)/);
+  assert.match(hydrate, /JSON\.stringify\(ids\)/);
+  assert.doesNotMatch(hydrate, /IN \(\$\{placeholders\}\)/);
+  assert.doesNotMatch(hydrate, /\.bind\(workspaceId, \.\.\.ids\)/);
+});
+
 test('send and delivery status updates never replace message payload_json', async () => {
   const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
   const markMessageSent = index.slice(index.indexOf('async function markMessageSent'),

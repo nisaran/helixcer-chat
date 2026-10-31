@@ -58,6 +58,10 @@ const MAX_IMPORT_JSON_BODY = 1_500_000;
 const MAX_EXTERNAL_JSON_BODY = 131072;
 const MAX_CREDENTIAL_LENGTH = 4096;
 const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAX_CONVERSATION_LIST_LIMIT = 2000;
+const MAX_CONTACT_LIST_LIMIT = 2000;
+const BOOTSTRAP_CONVERSATION_LIMIT = 1000;
+const BOOTSTRAP_CONTACT_LIMIT = 2000;
 const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024;
 const MAX_ATTACHMENT_CAPTION_LENGTH = 1024;
 const WHATSAPP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -424,10 +428,17 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/bootstrap' && request.method === 'GET') {
       const allowedChannels = restrictedChannelIds(principal);
+      // Inbox/contacts bootstrap must cover full imported workspaces (Interakt
+      // imports land hundreds of conversations). Dedicated list endpoints keep
+      // smaller page defaults for incremental fetches.
+      const bootstrapUrl = withSearchParams(url, {
+        limit: url.searchParams.get('limit') || String(BOOTSTRAP_CONVERSATION_LIMIT),
+        contactLimit: url.searchParams.get('contactLimit') || String(BOOTSTRAP_CONTACT_LIMIT)
+      });
       const [channelsRaw, conversations, contacts, tags, workspace] = await Promise.all([
         listChannels(env, workspaceId, principal.membership.role !== 'agent'),
-        listConversations(env, workspaceId, url, { allowedChannelIds: allowedChannels }),
-        listContacts(env, workspaceId, url),
+        listConversations(env, workspaceId, bootstrapUrl, { allowedChannelIds: allowedChannels }),
+        listContacts(env, workspaceId, bootstrapUrl),
         listWorkspaceTags(env, workspaceId),
         getWorkspaceProfile(env, workspaceId)
       ]);
@@ -2503,7 +2514,7 @@ function base64UrlDecode(value) {
 }
 
 async function listConversations(env, workspaceId, url, options = {}) {
-  const limit = clampInt(url.searchParams.get('limit'), 1, 100, 50);
+  const limit = clampInt(url.searchParams.get('limit'), 1, MAX_CONVERSATION_LIST_LIMIT, 50);
   const status = url.searchParams.get('status') || '';
   const channelId = url.searchParams.get('channelId') || '';
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
@@ -2785,7 +2796,7 @@ export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Dat
 }
 
 async function listContacts(env, workspaceId, url) {
-  const limit = clampInt(url.searchParams.get('contactLimit'), 1, 200, 100);
+  const limit = clampInt(url.searchParams.get('contactLimit'), 1, MAX_CONTACT_LIST_LIMIT, 100);
   const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
   const result = await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
       (SELECT MAX(last_message_at) FROM conversations cv
@@ -3112,8 +3123,12 @@ async function prevalidateContactIdentityBatch(env, workspaceId, contactId, valu
 
 async function contactIdentityRows(env, workspaceId, contactIds = []) {
   if (!contactIds.length) return [];
-  const ids = [...new Set(contactIds.map(String))].slice(0, 200);
-  const placeholders = ids.map((_, index) => `?${index + 2}`).join(',');
+  // D1 allows at most 100 bound variables. Bootstrap may hydrate thousands of
+  // contacts, so pass ids through a single json_each(?) param instead of one
+  // placeholder per contact (that path 500'd /api/bootstrap after large imports).
+  const ids = [...new Set(contactIds.map(id => String(id || '').trim()).filter(Boolean))]
+    .slice(0, MAX_CONTACT_LIST_LIMIT);
+  if (!ids.length) return [];
   const result = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,ci.platform,ci.profile_id,ci.username,
       ci.phone_number,ci.display_name,ci.metadata_json,ci.created_at,ci.updated_at,
       b.binding_id,b.channel_id,b.scoped_profile_id,b.metadata_json AS binding_metadata_json,
@@ -3129,11 +3144,11 @@ async function contactIdentityRows(env, workspaceId, contactIds = []) {
     LEFT JOIN channels ch ON ch.workspace_id=ci.workspace_id AND ch.channel_id=b.channel_id
     LEFT JOIN conversations cv ON cv.workspace_id=ci.workspace_id AND cv.identity_id=ci.identity_id
       AND cv.channel_id=b.channel_id
-    WHERE ci.workspace_id=?1 AND ci.contact_id IN (${placeholders})
+    WHERE ci.workspace_id=?1 AND ci.contact_id IN (SELECT value FROM json_each(?2))
       AND (ci.platform NOT IN ('whatsapp','telegram','instagram','facebook','email')
         OR flat.identity_id IS NOT NULL)
     ORDER BY ci.created_at,ci.identity_id,b.last_seen_at DESC,b.created_at DESC`)
-    .bind(workspaceId, ...ids).all();
+    .bind(workspaceId, JSON.stringify(ids)).all();
   return result.results || [];
 }
 
@@ -7058,6 +7073,15 @@ function cleanMetaIdentifier(value, label) {
 function clampInt(value, min, max, fallback) {
   const number = Number.parseInt(value, 10);
   return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+}
+
+function withSearchParams(url, overrides = {}) {
+  const next = new URL(url);
+  for (const [key, value] of Object.entries(overrides || {})) {
+    if (value == null || value === '') next.searchParams.delete(key);
+    else next.searchParams.set(key, String(value));
+  }
+  return next;
 }
 
 function secretPrefix(value) {
