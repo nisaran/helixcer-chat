@@ -59,6 +59,18 @@ test('outbound sender labels are internal metadata only', () => {
   }), 'Emergency recovery');
 });
 
+test('conversation route options stay scoped for inbox bootstrap', async () => {
+  const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const listConversations = index.slice(index.indexOf('async function listConversations'),
+    index.indexOf('function assertPrincipalChannelAccess'));
+  assert.match(listConversations, /conversationRouteOptionsByContact\(env, workspaceId, \{ contactIds \}\)/);
+  const routeOptions = index.slice(index.indexOf('async function conversationRouteOptionsByContact'),
+    index.indexOf('async function listConversationRouteOptions'));
+  assert.match(routeOptions, /json_each\(\?3\)/);
+  assert.match(routeOptions, /refreshFromMessages/);
+  assert.match(routeOptions, /widespread 500\/504s|bootstrap 500\/504/);
+});
+
 test('send and delivery status updates never replace message payload_json', async () => {
   const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
   const markMessageSent = index.slice(index.indexOf('async function markMessageSent'),

@@ -2544,7 +2544,8 @@ async function listConversations(env, workspaceId, url, options = {}) {
     .bind(workspaceId, status, channelId, q, cursor, limit,
       allowedChannelIds ? 1 : 0, JSON.stringify(allowedChannelIds || [])).all();
   const items = result.results.map(conversationListItem);
-  const routes = await conversationRouteOptionsByContact(env, workspaceId);
+  const contactIds = [...new Set(items.map(item => item.contactId).filter(Boolean))];
+  const routes = await conversationRouteOptionsByContact(env, workspaceId, { contactIds });
   return items.map(item => {
     const next = withConversationRoutes(item, routes.get(item.contactId) || []);
     if (!allowedChannelIds) return next;
@@ -2665,26 +2666,35 @@ async function getConversationItem(env, workspaceId, conversationId) {
   return withConversationRoutes(item, routes);
 }
 
-async function conversationRouteOptionsByContact(env, workspaceId) {
+async function conversationRouteOptionsByContact(env, workspaceId, options = {}) {
+  // Scope to contactIds when provided (inbox pages / single-contact lookups).
+  // Unscoped full-workspace scans must not run correlated MAX(timestamp)
+  // message subqueries — that path caused /api/bootstrap 500/504 storms.
+  const contactIds = Array.isArray(options.contactIds)
+    ? [...new Set(options.contactIds.map(id => String(id || '').trim()).filter(Boolean))]
+    : null;
+  if (contactIds && !contactIds.length) return new Map();
+  const refreshFromMessages = Boolean(contactIds);
   const result = await env.DB.prepare(`SELECT ci.contact_id,b.identity_id,b.channel_id,
       b.scoped_profile_id,
-      COALESCE((SELECT MAX(inbound.timestamp) FROM messages inbound
+      ${refreshFromMessages ? `COALESCE((SELECT MAX(inbound.timestamp) FROM messages inbound
         WHERE inbound.workspace_id=b.workspace_id AND inbound.contact_id=ci.contact_id
           AND inbound.channel_id=b.channel_id AND inbound.identity_id=b.identity_id
-          AND inbound.direction='inbound'),b.last_inbound_at) AS last_inbound_at,
-      COALESCE((SELECT MAX(outbound.timestamp) FROM messages outbound
+          AND inbound.direction='inbound'),b.last_inbound_at)` : 'b.last_inbound_at'} AS last_inbound_at,
+      ${refreshFromMessages ? `COALESCE((SELECT MAX(outbound.timestamp) FROM messages outbound
         WHERE outbound.workspace_id=b.workspace_id AND outbound.contact_id=ci.contact_id
           AND outbound.channel_id=b.channel_id AND outbound.identity_id=b.identity_id
-          AND outbound.direction='outbound'),b.last_outbound_at) AS last_outbound_at,
+          AND outbound.direction='outbound'),b.last_outbound_at)` : 'b.last_outbound_at'} AS last_outbound_at,
       ch.name AS channel_name,ch.connector_type,ch.provider_type,ch.enabled
     FROM channel_identity_bindings b
     JOIN contact_identities ci ON ci.workspace_id=b.workspace_id AND ci.identity_id=b.identity_id
     JOIN channels ch ON ch.workspace_id=b.workspace_id AND ch.channel_id=b.channel_id
     WHERE b.workspace_id=?1 AND b.active=1
+      AND (?2=0 OR ci.contact_id IN (SELECT value FROM json_each(?3)))
     ORDER BY ci.contact_id,
       CASE WHEN b.last_inbound_at='' THEN 1 ELSE 0 END,b.last_inbound_at DESC,
       b.last_seen_at DESC,ch.name COLLATE NOCASE,b.channel_id`)
-    .bind(workspaceId).all();
+    .bind(workspaceId, contactIds ? 1 : 0, JSON.stringify(contactIds || [])).all();
   const grouped = new Map();
   for (const row of result.results || []) {
     const connectorType = logicalConnectorType(row);
@@ -2708,7 +2718,9 @@ async function conversationRouteOptionsByContact(env, workspaceId) {
 }
 
 async function listConversationRouteOptions(env, workspaceId, contactId) {
-  const grouped = await conversationRouteOptionsByContact(env, workspaceId);
+  const grouped = await conversationRouteOptionsByContact(env, workspaceId, {
+    contactIds: contactId ? [contactId] : []
+  });
   return grouped.get(contactId) || [];
 }
 
