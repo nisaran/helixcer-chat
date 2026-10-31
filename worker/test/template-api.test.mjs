@@ -58,7 +58,7 @@ async function fixture() {
     '0007_conversation_uniqueness.sql', '0008_push_subscriptions.sql', '0009_workspace_profile.sql',
     '0011_mobile_push_devices.sql', '0012_contact_identities.sql', '0013_flat_contact_platform_ids.sql',
     '0014_unified_contact_conversations.sql', '0015_saas_clients.sql', '0016_internal_slug.sql',
-    '0017_agent_channel_access.sql']) {
+    '0017_agent_channel_access.sql', '0019_outbound_sender.sql']) {
     database.exec(await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));
   }
   const now = new Date().toISOString();
@@ -351,8 +351,11 @@ test('external template API stores and broadcasts the rendered template and medi
     assert.equal(response.status, 202);
     const accepted = await response.json();
     const expectedText = 'Hello Asha, invoice INV-1001 is ready.\nAccounts team\nActions: View invoice';
-    const row = database.prepare('SELECT text,payload_json FROM messages WHERE message_id=?').get(accepted.messageId);
+    const row = database.prepare('SELECT text,payload_json,sender_login,sender_name FROM messages WHERE message_id=?')
+      .get(accepted.messageId);
     assert.equal(row.text, expectedText);
+    assert.equal(row.sender_login, 'API');
+    assert.equal(row.sender_name, 'API');
     const stored = JSON.parse(row.payload_json);
     assert.equal(stored.senderName, 'API');
     assert.deepEqual(stored.template, {

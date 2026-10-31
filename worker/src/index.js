@@ -966,7 +966,8 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   const messageId = crypto.randomUUID();
   const externalRequestId = crypto.randomUUID();
   const presentation = await externalTemplateInboxPresentation(env, channel, input.template, input.previewText);
-  const senderName = outboundSenderLabel(principal);
+  const sender = outboundSenderAttribution(principal);
+  const senderName = sender.name;
   const preview = presentation.text;
   const storedPayload = { ...presentation.storedPayload, senderName };
   const encryptedPayload = await encryptOutboundPayload({ template: input.template }, env.CHANNEL_CREDENTIALS_KEY,
@@ -991,10 +992,10 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
         .bind(identity.contactId, principal.workspaceId, identity.identityId, input.contact.displayName, now)
     ] : []),
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
-        status,timestamp,payload_json,workspace_id)
-      VALUES (?1,?2,?3,?4,?5,'outbound','template',?6,'pending',?7,?8,?9)`)
+        status,timestamp,payload_json,workspace_id,sender_login,sender_name)
+      VALUES (?1,?2,?3,?4,?5,'outbound','template',?6,'pending',?7,?8,?9,?10,?11)`)
       .bind(messageId, identity.conversationId, identity.contactId, channel.channelId, identity.identityId, preview, now,
-        JSON.stringify(storedPayload), principal.workspaceId),
+        JSON.stringify(storedPayload), principal.workspaceId, sender.login, sender.name),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, principal.workspaceId, encryptedPayload, now),
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
@@ -1267,14 +1268,24 @@ function cleanOptionalText(value, label, maximum) {
   return text;
 }
 
+function outboundSenderAttribution(principal) {
+  if (principal?.apiKeyId) return { login: 'API', name: 'API' };
+  const email = String(principal?.user?.email || '').trim().slice(0, 254);
+  const displayName = String(principal?.user?.displayName || '').trim().slice(0, 120);
+  if (email && email !== 'emergency-recovery') {
+    return { login: email, name: displayName || email.slice(0, 120) };
+  }
+  if (principal?.authType === 'recovery' || displayName === 'Emergency recovery') {
+    return { login: 'emergency-recovery', name: displayName || 'Emergency recovery' };
+  }
+  if (principal?.user || principal?.authType) {
+    return { login: email || 'agent', name: displayName || 'Agent' };
+  }
+  return { login: 'API', name: 'API' };
+}
+
 function outboundSenderLabel(principal) {
-  if (principal?.apiKeyId) return 'API';
-  const displayName = String(principal?.user?.displayName || '').trim();
-  if (displayName) return displayName.slice(0, 120);
-  const email = String(principal?.user?.email || '').trim();
-  if (email && email !== 'emergency-recovery') return email.slice(0, 120);
-  if (principal?.user || principal?.authType) return 'Agent';
-  return 'API';
+  return outboundSenderAttribution(principal).name;
 }
 
 function cleanPreviewText(value, maximum) {
@@ -3970,7 +3981,7 @@ async function listMessages(env, workspaceId, conversationId, url) {
   const before = url.searchParams.get('before') || '';
   if (!await env.DB.prepare('SELECT 1 FROM conversations WHERE conversation_id=?1 AND workspace_id=?2').bind(conversationId, workspaceId).first()) throw httpError(404, 'Conversation not found.');
   const result = await env.DB.prepare(`SELECT m.message_id,m.identity_id,m.direction,m.text,m.message_type,m.status,m.timestamp,
-      m.channel_id,m.provider_message_id,m.error,m.payload_json,
+      m.channel_id,m.provider_message_id,m.error,m.payload_json,m.sender_login,m.sender_name,
       COALESCE(NULLIF(m.route_channel_name,''),ch.name) AS channel_name,
       COALESCE(NULLIF(m.route_connector_type,''),NULLIF(ch.provider_type,''),ch.connector_type) AS connector_type,
       '' AS provider_type,
@@ -3986,7 +3997,8 @@ async function listMessages(env, workspaceId, conversationId, url) {
   return result.results.reverse().map(row => {
     const payload = safeJsonParse(row.payload_json, {});
     const template = row.message_type === 'template' ? templateMessageView(payload) : null;
-    const senderName = messageSenderNameView(payload, row.direction);
+    const senderName = messageSenderNameView(row, payload);
+    const senderLogin = messageSenderLoginView(row, payload);
     return {
       messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
       contactIdentityId: row.identity_id || '', identityId: row.identity_id || '',
@@ -3995,6 +4007,7 @@ async function listMessages(env, workspaceId, conversationId, url) {
       channelProfileId: row.channel_profile_id || '',
       channelMessageId: row.provider_message_id, error: row.error,
       ...(senderName ? { senderName } : {}),
+      ...(senderLogin ? { senderLogin } : {}),
       attachment: messageAttachmentView(row.message_type, payload, row.message_id),
       ...(template ? { template } : {}),
       ...((() => {
@@ -4006,10 +4019,20 @@ async function listMessages(env, workspaceId, conversationId, url) {
   });
 }
 
-function messageSenderNameView(payload, direction) {
-  if (direction !== 'outbound') return '';
-  const name = String(payload?.senderName || '').trim();
-  return name ? name.slice(0, 120) : '';
+function messageSenderNameView(row, payload) {
+  if (row?.direction !== 'outbound') return '';
+  const fromColumn = String(row?.sender_name || '').trim();
+  if (fromColumn) return fromColumn.slice(0, 120);
+  const fromPayload = String(payload?.senderName || '').trim();
+  return fromPayload ? fromPayload.slice(0, 120) : '';
+}
+
+function messageSenderLoginView(row, payload) {
+  if (row?.direction !== 'outbound') return '';
+  const fromColumn = String(row?.sender_login || '').trim();
+  if (fromColumn) return fromColumn.slice(0, 254);
+  const name = messageSenderNameView(row, payload);
+  return name === 'API' ? 'API' : '';
 }
 
 function messageStatusHistoryView(payload) {
@@ -4301,7 +4324,8 @@ async function createContact(env, workspaceId, payload, principal) {
 async function createOutboundMessage(env, workspaceId, conversationId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Message payload must be an object.');
   rejectUnknownKeys(payload, new Set(['text', 'replyToMessageId', 'channelId', 'identityId', 'contactIdentityId']), 'message request');
-  const senderName = outboundSenderLabel(principal);
+  const sender = outboundSenderAttribution(principal);
+  const senderName = sender.name;
   const text = cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH);
   await assertConversationChannelAccess(env, workspaceId, conversationId, principal);
   const row = await conversationDeliveryTarget(env, workspaceId, conversationId, payload);
@@ -4318,9 +4342,9 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
     ...(reply ? { reply } : {})
   };
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,payload_json,workspace_id)
-      VALUES (?1,?2,?3,?4,?5,'outbound','text',?6,'pending',?7,?8,?9)`).bind(messageId, conversationId, row.contact_id,
-        row.channel_id, row.identity_id || '', text, now, JSON.stringify(storedPayload), workspaceId),
+    env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,payload_json,workspace_id,sender_login,sender_name)
+      VALUES (?1,?2,?3,?4,?5,'outbound','text',?6,'pending',?7,?8,?9,?10,?11)`).bind(messageId, conversationId, row.contact_id,
+        row.channel_id, row.identity_id || '', text, now, JSON.stringify(storedPayload), workspaceId, sender.login, sender.name),
     env.DB.prepare(`UPDATE conversations SET channel_id=?3,identity_id=?4,last_message_at=?5,updated_at=?5
       WHERE conversation_id=?1 AND workspace_id=?2`).bind(conversationId, workspaceId, row.channel_id, row.identity_id, now)
   ]);
@@ -4331,7 +4355,7 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
   return { message: {
     messageId, conversationId, channelId: row.channel_id, contactIdentityId: row.identity_id || '',
     identityId: row.identity_id || '', direction: 'outbound', messageType: 'text',
-    text, status: 'pending', timestamp: now, reply: reply || null, senderName,
+    text, status: 'pending', timestamp: now, reply: reply || null, senderName, senderLogin: sender.login,
     connectorType, channelName: row.channel_name || '', channelProfileId: row.channel_profile_id || ''
   } };
 }
@@ -4989,7 +5013,8 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   if (mediaPreview && !requestedAttachment) throw httpError(400, 'Media preview metadata requires a template media header.');
   const presentation = await externalTemplateInboxPresentation(env, target.channel, template, requestedPreview,
     mediaPreview, MAX_TEMPLATE_PREVIEW_LENGTH);
-  const senderName = outboundSenderLabel(principal);
+  const sender = outboundSenderAttribution(principal);
+  const senderName = sender.name;
   const previewText = presentation.text;
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
@@ -4997,10 +5022,10 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   const encryptedPayload = await encryptOutboundPayload({ template }, env.CHANNEL_CREDENTIALS_KEY, workspaceId, messageId);
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
-        status,timestamp,payload_json,workspace_id)
-      VALUES (?1,?2,?3,?4,?5,'outbound','template',?6,'pending',?7,?8,?9)`)
+        status,timestamp,payload_json,workspace_id,sender_login,sender_name)
+      VALUES (?1,?2,?3,?4,?5,'outbound','template',?6,'pending',?7,?8,?9,?10,?11)`)
       .bind(messageId, conversationId, target.contact_id, target.channel_id, target.identity_id, previewText, now,
-        JSON.stringify(storedPayload), workspaceId),
+        JSON.stringify(storedPayload), workspaceId, sender.login, sender.name),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, workspaceId, encryptedPayload, now),
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
@@ -5097,7 +5122,8 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   if (target.connectorType === 'whatsapp_cloud' && attachment.type === 'audio' && attachment.caption) {
     throw httpError(400, 'WhatsApp audio messages do not support captions. Remove the text or send it as a separate message.');
   }
-  const senderName = outboundSenderLabel(principal);
+  const sender = outboundSenderAttribution(principal);
+  const senderName = sender.name;
   const reply = await resolveReplyTarget(env, workspaceId, conversationId, target.channel_id,
     target.connectorType, form.get('replyToMessageId'));
   const now = new Date().toISOString();
@@ -5110,10 +5136,10 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
     let safeAttachment = { ...attachment };
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
-          provider_message_id,status,timestamp,payload_json,workspace_id)
-        VALUES (?1,?2,?3,?4,?5,'outbound',?6,?7,'','pending',?8,?9,?10)`)
+          provider_message_id,status,timestamp,payload_json,workspace_id,sender_login,sender_name)
+        VALUES (?1,?2,?3,?4,?5,'outbound',?6,?7,'','pending',?8,?9,?10,?11,?12)`)
         .bind(messageId, conversationId, target.contact_id, target.channel_id, target.identity_id, attachment.type, preview, now,
-          JSON.stringify(attachmentPayload(safeAttachment)), workspaceId),
+          JSON.stringify(attachmentPayload(safeAttachment)), workspaceId, sender.login, sender.name),
       env.DB.prepare(`UPDATE conversations SET channel_id=?3,identity_id=?4,last_message_at=?5,updated_at=?5
         WHERE conversation_id=?1 AND workspace_id=?2`)
         .bind(conversationId, workspaceId, target.channel_id, target.identity_id, now)
@@ -5166,10 +5192,10 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
     env.CHANNEL_CREDENTIALS_KEY, workspaceId, messageId);
   const safeAttachment = { ...attachment, providerMediaId };
   const statements = [env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
-      provider_message_id,status,timestamp,payload_json,workspace_id)
-    VALUES (?1,?2,?3,?4,?5,'outbound',?6,?7,'','pending',?8,?9,?10)`)
+      provider_message_id,status,timestamp,payload_json,workspace_id,sender_login,sender_name)
+    VALUES (?1,?2,?3,?4,?5,'outbound',?6,?7,'','pending',?8,?9,?10,?11,?12)`)
     .bind(messageId, conversationId, target.contact_id, target.channel_id, target.identity_id, attachment.type, preview,
-      now, JSON.stringify(attachmentPayload(safeAttachment)), workspaceId),
+      now, JSON.stringify(attachmentPayload(safeAttachment)), workspaceId, sender.login, sender.name),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, workspaceId, encryptedPayload, now),
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
@@ -6490,7 +6516,7 @@ export {
   normalizeFieldMapping
 } from './imports/interakt.js';
 
-export { outboundSenderLabel };
+export { outboundSenderAttribution, outboundSenderLabel };
 
 export function normalizeWhatsAppRecipient(value) {
   const input = String(value || '').trim();

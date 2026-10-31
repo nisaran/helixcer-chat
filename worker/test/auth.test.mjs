@@ -130,6 +130,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0015_saas_clients.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0016_internal_slug.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0017_agent_channel_access.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0019_outbound_sender.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -2393,11 +2394,12 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     const plainItem = (await plainResponse.json()).item;
     assert.equal(plainItem.senderName, 'Emergency recovery');
     await Promise.all(plainPending.splice(0));
-    const plainStored = JSON.parse(database.prepare('SELECT payload_json,status,provider_message_id FROM messages WHERE message_id=?')
-      .get(plainItem.messageId).payload_json);
-    assert.equal(plainStored.senderName, 'Emergency recovery');
-    const plainRow = database.prepare('SELECT status,provider_message_id FROM messages WHERE message_id=?')
-      .get(plainItem.messageId);
+    const plainRow = database.prepare(
+      'SELECT status,provider_message_id,payload_json,sender_login,sender_name FROM messages WHERE message_id=?'
+    ).get(plainItem.messageId);
+    assert.equal(plainRow.sender_login, 'emergency-recovery');
+    assert.equal(plainRow.sender_name, 'Emergency recovery');
+    assert.equal(JSON.parse(plainRow.payload_json).senderName, 'Emergency recovery');
     assert.equal(plainRow.status, 'submitted');
     assert.match(plainRow.provider_message_id, /^wamid\.dashboard-/);
 
@@ -2420,9 +2422,12 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     }), env, ctx);
     assert.equal(statusResponse.status, 200);
     assert.deepEqual(await statusResponse.json(), { ok: true, received: 0, statuses: 1 });
-    const afterStatus = database.prepare('SELECT status,payload_json FROM messages WHERE message_id=?')
-      .get(plainItem.messageId);
+    const afterStatus = database.prepare(
+      'SELECT status,payload_json,sender_login,sender_name FROM messages WHERE message_id=?'
+    ).get(plainItem.messageId);
     assert.equal(afterStatus.status, 'delivered');
+    assert.equal(afterStatus.sender_login, 'emergency-recovery');
+    assert.equal(afterStatus.sender_name, 'Emergency recovery');
     assert.equal(JSON.parse(afterStatus.payload_json).senderName, 'Emergency recovery');
     const listedPlain = (await (await handleRequest(new Request(
       'https://api.chat.helixcer.com/api/conversations/conversation-dashboard/messages', {
@@ -2430,6 +2435,7 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
       }), env)).json()).items.find(item => item.messageId === plainItem.messageId);
     assert.equal(listedPlain.status, 'delivered');
     assert.equal(listedPlain.senderName, 'Emergency recovery');
+    assert.equal(listedPlain.senderLogin, 'emergency-recovery');
 
     const protectedTemplateMedia = await handleRequest(new Request(`https://api.chat.helixcer.com${templateMessage.attachment.url}`, {
       headers: { Authorization: 'Bearer recovery-secret' }

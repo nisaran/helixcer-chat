@@ -19,6 +19,7 @@ import {
   normalizeTelegram,
   normalizeWhatsApp,
   normalizeWhatsAppRecipient,
+  outboundSenderAttribution,
   outboundSenderLabel,
   resolveTemplate,
   sanitizeWhatsAppTemplateDefinition,
@@ -30,15 +31,28 @@ import {
 } from '../src/index.js';
 
 test('outbound sender labels are internal metadata only', () => {
+  assert.deepEqual(outboundSenderAttribution({ apiKeyId: 'key-1' }), { login: 'API', name: 'API' });
   assert.equal(outboundSenderLabel({ apiKeyId: 'key-1' }), 'API');
+  assert.deepEqual(outboundSenderAttribution({
+    user: { displayName: 'Nisar Admin', email: 'nisar@example.com' },
+    membership: { role: 'admin' }
+  }), { login: 'nisar@example.com', name: 'Nisar Admin' });
   assert.equal(outboundSenderLabel({
     user: { displayName: 'Nisar Admin', email: 'nisar@example.com' },
     membership: { role: 'admin' }
   }), 'Nisar Admin');
+  assert.deepEqual(outboundSenderAttribution({
+    user: { displayName: 'Agent One', email: 'agent@example.com' },
+    membership: { role: 'agent' }
+  }), { login: 'agent@example.com', name: 'Agent One' });
   assert.equal(outboundSenderLabel({
     user: { displayName: 'Agent One', email: 'agent@example.com' },
     membership: { role: 'agent' }
   }), 'Agent One');
+  assert.deepEqual(outboundSenderAttribution({
+    authType: 'recovery',
+    user: { displayName: 'Emergency recovery', email: 'emergency-recovery' }
+  }), { login: 'emergency-recovery', name: 'Emergency recovery' });
   assert.equal(outboundSenderLabel({
     authType: 'recovery',
     user: { displayName: 'Emergency recovery', email: 'emergency-recovery' }
