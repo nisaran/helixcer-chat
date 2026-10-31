@@ -3112,8 +3112,12 @@ async function prevalidateContactIdentityBatch(env, workspaceId, contactId, valu
 
 async function contactIdentityRows(env, workspaceId, contactIds = []) {
   if (!contactIds.length) return [];
-  const ids = [...new Set(contactIds.map(String))].slice(0, 200);
-  const placeholders = ids.map((_, index) => `?${index + 2}`).join(',');
+  // D1 allows at most 100 bound variables. Bootstrap hydrates up to 200
+  // contacts, so pass ids through a single json_each(?) param instead of
+  // expanding one placeholder per contact (that path 500'd /api/bootstrap
+  // after large Interakt imports).
+  const ids = [...new Set(contactIds.map(id => String(id || '').trim()).filter(Boolean))].slice(0, 200);
+  if (!ids.length) return [];
   const result = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,ci.platform,ci.profile_id,ci.username,
       ci.phone_number,ci.display_name,ci.metadata_json,ci.created_at,ci.updated_at,
       b.binding_id,b.channel_id,b.scoped_profile_id,b.metadata_json AS binding_metadata_json,
@@ -3129,11 +3133,11 @@ async function contactIdentityRows(env, workspaceId, contactIds = []) {
     LEFT JOIN channels ch ON ch.workspace_id=ci.workspace_id AND ch.channel_id=b.channel_id
     LEFT JOIN conversations cv ON cv.workspace_id=ci.workspace_id AND cv.identity_id=ci.identity_id
       AND cv.channel_id=b.channel_id
-    WHERE ci.workspace_id=?1 AND ci.contact_id IN (${placeholders})
+    WHERE ci.workspace_id=?1 AND ci.contact_id IN (SELECT value FROM json_each(?2))
       AND (ci.platform NOT IN ('whatsapp','telegram','instagram','facebook','email')
         OR flat.identity_id IS NOT NULL)
     ORDER BY ci.created_at,ci.identity_id,b.last_seen_at DESC,b.created_at DESC`)
-    .bind(workspaceId, ...ids).all();
+    .bind(workspaceId, JSON.stringify(ids)).all();
   return result.results || [];
 }
 

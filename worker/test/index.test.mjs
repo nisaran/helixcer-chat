@@ -71,6 +71,16 @@ test('conversation route options stay scoped for inbox bootstrap', async () => {
   assert.match(routeOptions, /widespread 500\/504s|bootstrap 500\/504/);
 });
 
+test('contact identity hydration stays under D1 bind limits', async () => {
+  const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const hydrate = index.slice(index.indexOf('async function contactIdentityRows'),
+    index.indexOf('async function hydrateContactViews'));
+  assert.match(hydrate, /json_each\(\?2\)/);
+  assert.match(hydrate, /JSON\.stringify\(ids\)/);
+  assert.doesNotMatch(hydrate, /IN \(\$\{placeholders\}\)/);
+  assert.doesNotMatch(hydrate, /\.bind\(workspaceId, \.\.\.ids\)/);
+});
+
 test('send and delivery status updates never replace message payload_json', async () => {
   const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
   const markMessageSent = index.slice(index.indexOf('async function markMessageSent'),
