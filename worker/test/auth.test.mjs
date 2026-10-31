@@ -1919,8 +1919,9 @@ test('Telegram bot identity is reserved before webhook registration', async () =
       const webpFixture = filename === 'preview.webp';
       const failureFixture = filename === 'provider-failure.pdf';
       assert.ok(['telegram.pdf', 'preview.webp', 'delivered-once.pdf', 'provider-failure.pdf'].includes(filename));
-      assert.equal(init.body.get('caption'), retryFixture ? 'Delivered once'
-        : failureFixture ? 'Provider failure' : webpFixture ? null : 'Telegram file');
+      assert.equal(init.body.get('caption'), retryFixture ? 'Delivered once\n\n— Emergency recovery'
+        : failureFixture ? 'Provider failure\n\n— Emergency recovery'
+          : webpFixture ? '— Emergency recovery' : 'Telegram file\n\n— Emergency recovery');
       assert.equal(init.body.get('reply_parameters'), filename === 'telegram.pdf' ? JSON.stringify({ message_id: 52 }) : null);
       if (failureFixture) {
         return new Response(JSON.stringify({ ok: false, description: 'Bad Gateway' }), {
@@ -1989,7 +1990,9 @@ test('Telegram bot identity is reserved before webhook registration', async () =
     assert.equal(telegramReplyResponse.status, 202);
     const telegramReplyItem = (await telegramReplyResponse.json()).item;
     await Promise.all(telegramReplyPending);
-    assert.deepEqual(telegramReplyBodies, [{ chat_id: '778899', text: 'Confirmed', reply_parameters: { message_id: 52 } }]);
+    assert.deepEqual(telegramReplyBodies, [{
+      chat_id: '778899', text: 'Confirmed\n\n— Emergency recovery', reply_parameters: { message_id: 52 }
+    }]);
     const savedTelegramReply = JSON.parse(database.prepare('SELECT payload_json FROM messages WHERE message_id=?')
       .get(telegramReplyItem.messageId).payload_json);
     assert.equal(savedTelegramReply.reply.messageId, 'telegram-inbound-52');
@@ -2219,7 +2222,8 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal(templateResponse.status, 202);
     const templateItem = (await templateResponse.json()).item;
     assert.equal(templateItem.messageType, 'template');
-    assert.equal(templateItem.text, 'Order update\nHi Asha\nTrack order');
+    assert.equal(templateItem.text, 'Order update\nHi Asha\nTrack order\n\n— Emergency recovery');
+    assert.equal(templateItem.senderName, 'Emergency recovery');
     assert.deepEqual(templateItem.template.buttons, [{ type: 'quick_reply', text: 'Continue' }]);
     assert.equal(templateItem.attachment.filename, 'template-header.pdf');
     assert.equal(templateItem.attachment.type, 'document');
@@ -2346,7 +2350,7 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal(patchedItem.subject, 'Asha');
     assert.equal(patchedItem.connectorType, 'whatsapp_cloud');
     assert.equal(patchedItem.channelProfileId, '919999999999');
-    assert.equal(patchedItem.lastMessage, 'Replying to your message');
+    assert.equal(patchedItem.lastMessage, 'Replying to your message\n\n— Emergency recovery');
     const conversationEvent = broadcasts.filter(event => event.type === 'conversation.updated' &&
       event.conversationId === 'conversation-dashboard').at(-1);
     assert.ok(conversationEvent);
@@ -2363,7 +2367,8 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal(templateMessage.attachment.filename, 'template-header.pdf');
     assert.equal(templateMessage.attachment.available, true);
     assert.match(templateMessage.attachment.url, /\/api\/messages\/.+\/attachment$/);
-    assert.equal(documentMessage.attachment.caption, 'Your invoice');
+    assert.equal(documentMessage.attachment.caption, 'Your invoice\n\n— Emergency recovery');
+    assert.equal(documentMessage.senderName, 'Emergency recovery');
     assert.equal(documentMessage.attachment.available, true);
     assert.match(documentMessage.attachment.url, /\/api\/messages\/.+\/attachment$/);
     assert.equal(documentMessage.channelMessageId, 'wamid.dashboard-2');
@@ -2466,7 +2471,8 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal(allowedTemplate.status, 202);
     const allowedTemplateItem = (await allowedTemplate.clone().json()).item;
     assert.equal(allowedTemplateItem.status, 'pending');
-    assert.equal(allowedTemplateItem.text.length, 5000);
+    assert.equal(allowedTemplateItem.text, `${'A'.repeat(5000)}\n\n— Emergency recovery`);
+    assert.equal(allowedTemplateItem.senderName, 'Emergency recovery');
     assert.equal(allowedTemplateItem.attachment.type, 'image');
     assert.equal(allowedTemplateItem.attachment.external, true);
     assert.equal(allowedTemplateItem.attachment.url, 'https://cdn.example.com/banner.jpg');
@@ -3836,7 +3842,7 @@ test('unified-thread retries dispatch through the message route, not the convers
   assert.equal(resolvedItem.channelProfileId, 'recipient-message');
   assert.deepEqual(resolvedRequests, [{
     url: 'https://provider.example/message',
-    body: { to: 'recipient-message', text: 'Resolve the latest message route' }
+    body: { to: 'recipient-message', text: 'Resolve the latest message route\n\n— Emergency recovery' }
   }]);
   assert.equal(database.prepare(`SELECT channel_id FROM conversations
     WHERE conversation_id='conversation-unified-route'`).get().channel_id, 'route-message');

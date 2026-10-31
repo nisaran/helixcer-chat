@@ -966,7 +966,9 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   const messageId = crypto.randomUUID();
   const externalRequestId = crypto.randomUUID();
   const presentation = await externalTemplateInboxPresentation(env, channel, input.template, input.previewText);
-  const preview = presentation.text;
+  const senderName = outboundSenderLabel(principal);
+  const preview = withOutboundSenderAttribution(presentation.text, principal, MAX_TEXT_LENGTH);
+  const storedPayload = { ...presentation.storedPayload, senderName };
   const encryptedPayload = await encryptOutboundPayload({ template: input.template }, env.CHANNEL_CREDENTIALS_KEY,
     principal.workspaceId, messageId);
   // Prepare everything that can fail without writing application state before
@@ -992,7 +994,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
         status,timestamp,payload_json,workspace_id)
       VALUES (?1,?2,?3,?4,?5,'outbound','template',?6,'pending',?7,?8,?9)`)
       .bind(messageId, identity.conversationId, identity.contactId, channel.channelId, identity.identityId, preview, now,
-        JSON.stringify(presentation.storedPayload), principal.workspaceId),
+        JSON.stringify(storedPayload), principal.workspaceId),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, principal.workspaceId, encryptedPayload, now),
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
@@ -1022,12 +1024,12 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   await auditApiKey(env, principal, 'send_template', 'message', messageId, {
     channelId: channel.channelId, templateName: input.template.name
   });
-  const realtimeAttachment = messageAttachmentView('template', presentation.storedPayload, messageId);
+  const realtimeAttachment = messageAttachmentView('template', storedPayload, messageId);
   const realtimeMessage = {
     messageId, conversationId: identity.conversationId, channelId: channel.channelId,
     direction: 'outbound', messageType: 'template', text: preview, status: 'pending', timestamp: now,
-    channelMessageId: '', error: '', reply: null,
-    template: templateMessageView(presentation.storedPayload),
+    channelMessageId: '', error: '', reply: null, senderName,
+    template: templateMessageView(storedPayload),
     ...(realtimeAttachment ? { attachment: realtimeAttachment } : {})
   };
   const realtimeConversation = await getConversationItem(env, principal.workspaceId, identity.conversationId);
@@ -1263,6 +1265,32 @@ function cleanOptionalText(value, label, maximum) {
   if (text.length > maximum) throw httpError(400, `${label} is too long.`);
   if (/[\u0000-\u001f\u007f]/.test(text)) throw httpError(400, `${label} contains invalid characters.`);
   return text;
+}
+
+function outboundSenderLabel(principal) {
+  if (principal?.apiKeyId) return 'API';
+  const displayName = String(principal?.user?.displayName || '').trim();
+  if (displayName) return displayName.slice(0, 120);
+  const email = String(principal?.user?.email || '').trim();
+  if (email && email !== 'emergency-recovery') return email.slice(0, 120);
+  if (principal?.user || principal?.authType) return 'Agent';
+  return 'API';
+}
+
+function withOutboundSenderAttribution(text, principal, maximum) {
+  const label = outboundSenderLabel(principal);
+  const suffix = `\n\n— ${label}`;
+  const body = String(text || '');
+  if (!body) {
+    const bare = `— ${label}`;
+    return bare.length <= maximum ? bare : bare.slice(0, maximum);
+  }
+  if (body === `— ${label}` || body.endsWith(suffix) || body.endsWith(`\n— ${label}`)) {
+    return body.slice(0, maximum);
+  }
+  const maxBody = Math.max(0, maximum - suffix.length);
+  const trimmed = body.length > maxBody ? body.slice(0, maxBody).trimEnd() : body;
+  return `${trimmed}${suffix}`;
 }
 
 function cleanPreviewText(value, maximum) {
@@ -3974,6 +4002,7 @@ async function listMessages(env, workspaceId, conversationId, url) {
   return result.results.reverse().map(row => {
     const payload = safeJsonParse(row.payload_json, {});
     const template = row.message_type === 'template' ? templateMessageView(payload) : null;
+    const senderName = messageSenderNameView(payload, row.direction);
     return {
       messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
       contactIdentityId: row.identity_id || '', identityId: row.identity_id || '',
@@ -3981,6 +4010,7 @@ async function listMessages(env, workspaceId, conversationId, url) {
       connectorType: logicalConnectorType(row), channelName: row.channel_name || '',
       channelProfileId: row.channel_profile_id || '',
       channelMessageId: row.provider_message_id, error: row.error,
+      ...(senderName ? { senderName } : {}),
       attachment: messageAttachmentView(row.message_type, payload, row.message_id),
       ...(template ? { template } : {}),
       ...((() => {
@@ -3990,6 +4020,12 @@ async function listMessages(env, workspaceId, conversationId, url) {
       reply: messageReplyView(payload)
     };
   });
+}
+
+function messageSenderNameView(payload, direction) {
+  if (direction !== 'outbound') return '';
+  const name = String(payload?.senderName || '').trim();
+  return name ? name.slice(0, 120) : '';
 }
 
 function messageStatusHistoryView(payload) {
@@ -4281,7 +4317,9 @@ async function createContact(env, workspaceId, payload, principal) {
 async function createOutboundMessage(env, workspaceId, conversationId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Message payload must be an object.');
   rejectUnknownKeys(payload, new Set(['text', 'replyToMessageId', 'channelId', 'identityId', 'contactIdentityId']), 'message request');
-  const text = cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH);
+  const senderName = outboundSenderLabel(principal);
+  const text = withOutboundSenderAttribution(
+    cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH), principal, MAX_TEXT_LENGTH);
   await assertConversationChannelAccess(env, workspaceId, conversationId, principal);
   const row = await conversationDeliveryTarget(env, workspaceId, conversationId, payload);
   assertPrincipalChannelAccess(principal, row.channel_id);
@@ -4292,21 +4330,25 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
     connectorType, payload.replyToMessageId);
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
+  const storedPayload = {
+    senderName,
+    ...(reply ? { reply } : {})
+  };
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,payload_json,workspace_id)
       VALUES (?1,?2,?3,?4,?5,'outbound','text',?6,'pending',?7,?8,?9)`).bind(messageId, conversationId, row.contact_id,
-        row.channel_id, row.identity_id || '', text, now, reply ? JSON.stringify({ reply }) : '{}', workspaceId),
+        row.channel_id, row.identity_id || '', text, now, JSON.stringify(storedPayload), workspaceId),
     env.DB.prepare(`UPDATE conversations SET channel_id=?3,identity_id=?4,last_message_at=?5,updated_at=?5
       WHERE conversation_id=?1 AND workspace_id=?2`).bind(conversationId, workspaceId, row.channel_id, row.identity_id, now)
   ]);
   if (row.identity_id) await touchIdentityBinding(env, workspaceId, row.identity_id, row.channel_id, 'outbound', conversationId, now);
   await audit(env, principal, 'send_message', 'conversation', conversationId, {
-    channelId: row.channel_id, messageId, ...(reply ? { replyToMessageId: reply.messageId } : {})
+    channelId: row.channel_id, messageId, senderName, ...(reply ? { replyToMessageId: reply.messageId } : {})
   });
   return { message: {
     messageId, conversationId, channelId: row.channel_id, contactIdentityId: row.identity_id || '',
     identityId: row.identity_id || '', direction: 'outbound', messageType: 'text',
-    text, status: 'pending', timestamp: now, reply: reply || null,
+    text, status: 'pending', timestamp: now, reply: reply || null, senderName,
     connectorType, channelName: row.channel_name || '', channelProfileId: row.channel_profile_id || ''
   } };
 }
@@ -4964,10 +5006,11 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   if (mediaPreview && !requestedAttachment) throw httpError(400, 'Media preview metadata requires a template media header.');
   const presentation = await externalTemplateInboxPresentation(env, target.channel, template, requestedPreview,
     mediaPreview, MAX_TEMPLATE_PREVIEW_LENGTH);
-  const previewText = presentation.text;
+  const senderName = outboundSenderLabel(principal);
+  const previewText = withOutboundSenderAttribution(presentation.text, principal, MAX_TEMPLATE_PREVIEW_LENGTH);
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
-  const storedPayload = presentation.storedPayload;
+  const storedPayload = { ...presentation.storedPayload, senderName };
   const encryptedPayload = await encryptOutboundPayload({ template }, env.CHANNEL_CREDENTIALS_KEY, workspaceId, messageId);
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
@@ -4986,12 +5029,12 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   ]);
   await touchIdentityBinding(env, workspaceId, target.identity_id, target.channel_id, 'outbound', conversationId, now);
   await audit(env, principal, 'send_template', 'conversation', conversationId, {
-    channelId: target.channel_id, messageId, templateName: template.name
+    channelId: target.channel_id, messageId, templateName: template.name, senderName
   });
   return { message: {
     messageId, conversationId, channelId: target.channel_id, contactIdentityId: target.identity_id,
     identityId: target.identity_id, direction: 'outbound', messageType: 'template',
-    text: previewText, status: 'pending', timestamp: now,
+    text: previewText, status: 'pending', timestamp: now, senderName,
     template: templateMessageView(storedPayload),
     attachment: messageAttachmentView('template', storedPayload, messageId),
     connectorType: target.connectorType, channelName: target.channel_name || '',
@@ -5071,11 +5114,19 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   if (target.connectorType === 'whatsapp_cloud' && attachment.type === 'audio' && attachment.caption) {
     throw httpError(400, 'WhatsApp audio messages do not support captions. Remove the text or send it as a separate message.');
   }
+  const senderName = outboundSenderLabel(principal);
+  const supportsCaption = !(target.connectorType === 'whatsapp_cloud' && attachment.type === 'audio');
+  if (supportsCaption) {
+    attachment.caption = withOutboundSenderAttribution(attachment.caption, principal, MAX_ATTACHMENT_CAPTION_LENGTH);
+  }
   const reply = await resolveReplyTarget(env, workspaceId, conversationId, target.channel_id,
     target.connectorType, form.get('replyToMessageId'));
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
   const preview = attachment.caption || `[${attachment.type}: ${attachment.filename}]`;
+  const attachmentPayload = (safeAttachment) => ({
+    attachment: safeAttachment, senderName, ...(reply ? { reply } : {})
+  });
   if (target.connectorType === 'telegram') {
     let safeAttachment = { ...attachment };
     await env.DB.batch([
@@ -5083,7 +5134,7 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
           provider_message_id,status,timestamp,payload_json,workspace_id)
         VALUES (?1,?2,?3,?4,?5,'outbound',?6,?7,'','pending',?8,?9,?10)`)
         .bind(messageId, conversationId, target.contact_id, target.channel_id, target.identity_id, attachment.type, preview, now,
-          JSON.stringify({ attachment: safeAttachment, ...(reply ? { reply } : {}) }), workspaceId),
+          JSON.stringify(attachmentPayload(safeAttachment)), workspaceId),
       env.DB.prepare(`UPDATE conversations SET channel_id=?3,identity_id=?4,last_message_at=?5,updated_at=?5
         WHERE conversation_id=?1 AND workspace_id=?2`)
         .bind(conversationId, workspaceId, target.channel_id, target.identity_id, now)
@@ -5094,7 +5145,7 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
       sent = await sendTelegramMedia(env, target.channel, target.channel_profile_id, file, attachment,
         reply?.channelMessageId || '');
       safeAttachment = { ...attachment, providerFileId: sent.providerFileId };
-      await persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, safeAttachment, reply);
+      await persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, safeAttachment, reply, senderName);
     } catch (error) {
       const failure = cleanError(error);
       let failurePersisted = false;
@@ -5110,22 +5161,23 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
       if (!failurePersisted) throw error;
       await auditAttachmentBestEffort(env, principal, conversationId, {
         channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType,
-        size: attachment.size, status: 'failed'
+        size: attachment.size, status: 'failed', senderName
       });
       return { message: {
         messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
-        text: preview, status: 'failed', error: failure, timestamp: now, channelMessageId: '',
-        attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null,
+        text: preview, status: 'failed', error: failure, timestamp: now, channelMessageId: '', senderName,
+        attachment: messageAttachmentView(attachment.type, attachmentPayload(safeAttachment), messageId), reply: reply || null,
         connectorType: target.connectorType, channelName: target.channel_name || '', channelProfileId: target.channel_profile_id || ''
       } };
     }
     await auditAttachmentBestEffort(env, principal, conversationId, {
-      channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType, size: attachment.size
+      channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType, size: attachment.size,
+      senderName
     });
     return { message: {
       messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
-      text: preview, status: sent.status, timestamp: now, channelMessageId: sent.providerMessageId,
-      attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null,
+      text: preview, status: sent.status, timestamp: now, channelMessageId: sent.providerMessageId, senderName,
+      attachment: messageAttachmentView(attachment.type, attachmentPayload(safeAttachment), messageId), reply: reply || null,
       connectorType: target.connectorType, channelName: target.channel_name || '', channelProfileId: target.channel_profile_id || ''
     } };
   }
@@ -5138,7 +5190,7 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
       provider_message_id,status,timestamp,payload_json,workspace_id)
     VALUES (?1,?2,?3,?4,?5,'outbound',?6,?7,'','pending',?8,?9,?10)`)
     .bind(messageId, conversationId, target.contact_id, target.channel_id, target.identity_id, attachment.type, preview,
-      now, JSON.stringify({ attachment: safeAttachment, ...(reply ? { reply } : {}) }), workspaceId),
+      now, JSON.stringify(attachmentPayload(safeAttachment)), workspaceId),
     env.DB.prepare(`INSERT INTO outbound_payloads (message_id,workspace_id,encrypted_payload,created_at,updated_at)
       VALUES (?1,?2,?3,?4,?4)`).bind(messageId, workspaceId, encryptedPayload, now),
     env.DB.prepare(`INSERT INTO outbox (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
@@ -5151,23 +5203,28 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   await env.DB.batch(statements);
   await touchIdentityBinding(env, workspaceId, target.identity_id, target.channel_id, 'outbound', conversationId, now);
   await auditAttachmentBestEffort(env, principal, conversationId, {
-    channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType, size: attachment.size
+    channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType, size: attachment.size,
+    senderName
   });
   return { message: {
     messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
-    text: preview, status: 'pending', timestamp: now, channelMessageId: '',
-    attachment: messageAttachmentView(attachment.type, { attachment: safeAttachment }, messageId), reply: reply || null,
+    text: preview, status: 'pending', timestamp: now, channelMessageId: '', senderName,
+    attachment: messageAttachmentView(attachment.type, attachmentPayload(safeAttachment), messageId), reply: reply || null,
     connectorType: target.connectorType, channelName: target.channel_name || '', channelProfileId: target.channel_profile_id || ''
   } };
 }
 
-async function persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, attachment, reply = null) {
+async function persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, attachment, reply = null, senderName = '') {
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await env.DB.prepare(`UPDATE messages SET provider_message_id=?2,status=?3,payload_json=?4,error=''
         WHERE message_id=?1 AND workspace_id=?5`).bind(messageId, sent.providerMessageId, sent.status,
-          JSON.stringify({ attachment, ...(reply ? { reply } : {}) }), workspaceId).run();
+          JSON.stringify({
+            attachment,
+            ...(senderName ? { senderName } : {}),
+            ...(reply ? { reply } : {})
+          }), workspaceId).run();
       return true;
     } catch (error) {
       lastError = error;
@@ -6469,6 +6526,8 @@ export {
   mapInteraktMessage,
   normalizeFieldMapping
 } from './imports/interakt.js';
+
+export { outboundSenderLabel, withOutboundSenderAttribution };
 
 export function normalizeWhatsAppRecipient(value) {
   const input = String(value || '').trim();

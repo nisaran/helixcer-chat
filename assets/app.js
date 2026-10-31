@@ -363,15 +363,19 @@
 
     async sendMessage(conversationId, text, replyToMessageId = "", route = {}) {
       const replyTarget = (this.data.messages[conversationId] || []).find((message) => message.messageId === replyToMessageId);
+      const senderName = String(this.data.me?.displayName || this.data.me?.email || "You").trim() || "You";
+      const attributedText = String(text || "").trim()
+        ? `${String(text).trim()}\n\n— ${senderName}`
+        : `— ${senderName}`;
       const item = {
         messageId: `demo-${Date.now()}`,
         channelMessageId: `demo-channel-${Date.now()}`,
         direction: "outbound",
         messageType: "text",
-        text,
+        text: attributedText,
         timestamp: new Date().toISOString(),
         status: "sent",
-        senderName: "You",
+        senderName,
         channelId: String(route.channelId || ""),
         identityId: String(route.identityId || ""),
         connectorType: String(route.connectorType || ""),
@@ -2668,6 +2672,13 @@
     const presentation = templateMessagePresentation(message, visibleText);
     const route = messageRoute(message, conversation) || defaultConversationRoute(conversation);
     if (presentation.text) bubble.append(appendChannelFormattedText(element("p", "message-text"), presentation.text, route || conversation));
+    if (message.direction === "outbound") {
+      const outboundSender = String(message.senderName || "").trim();
+      const textAlreadySigned = outboundSender && String(presentation.text || "").trimEnd().endsWith(`— ${outboundSender}`);
+      if (outboundSender && !textAlreadySigned) {
+        bubble.append(element("p", "message-sender is-outbound-sender", outboundSender));
+      }
+    }
     const templateActions = renderTemplateMessageActions(presentation.buttons);
     const foot = element("div", "message-foot");
     foot.append(element("time", "", formatClock(message.timestamp)));
