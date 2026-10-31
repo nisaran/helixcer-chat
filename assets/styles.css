@@ -514,6 +514,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .delivery-status.is-delivered { color: #397468; }
 .delivery-status.is-read { color: var(--blue); }
 .message-sender { margin: 0 0 4px; color: var(--brand); font-size: 10px; font-weight: 750; }
+.message-row.is-outbound .message-sender.is-outbound-sender { margin: 6px 0 0; color: var(--chat-meta); font-weight: 650; text-align: right; }
 .message-failed { color: #b33326; }
 .message-error {
   margin: 6px 0 0;

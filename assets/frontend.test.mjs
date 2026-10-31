@@ -86,7 +86,7 @@ test("single workspace profile stores organisation, address, and GST details", (
   assert.match(app, /if \(data\.workspace\)[\s\S]*?state\.workspaceProfileLoaded = true/);
   assert.match(app, /const editable = admin && state\.workspaceProfileLoaded/);
   assert.match(html, /Only workspace owners and admins can edit these details/);
-  assert.match(app, /\["inbox", "contacts", "channels", "whatsapp-templates", "developer", "team", "workspace", "settings"\]/);
+  assert.match(app, /\["inbox", "contacts", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"\]/);
   assert.match(styles, /\.workspace-form-grid \{[^}]*grid-template-columns: repeat\(2/);
   assert.match(styles, /\.workspace-profile-form \.text-field\[readonly\]/);
   assert.doesNotMatch(`${html}\n${app}`, /createWorkspace|deleteWorkspace|workspaceSwitcher/i);
@@ -137,9 +137,9 @@ test("Channel navigation is collapsed by default and nests the WhatsApp template
   assert.match(channelNav, /data-route="whatsapp-templates"[\s\S]*?>WhatsApp Templates<\/span>/);
   assert.match(html, /id="whatsappTemplatesRoute" data-route-panel="whatsapp-templates"/);
   assert.match(app, /"whatsapp-templates": "WhatsApp Templates"/);
-  assert.match(app, /\["channels", "whatsapp-templates", "developer", "team"\]/);
+  assert.match(app, /\["channels", "whatsapp-templates", "import-chat", "developer", "team"\]/);
   assert.match(app, /if \(channelSectionActive\)[\s\S]*?channelNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
-  assert.match(app, /if \(route === "whatsapp-templates"\)[\s\S]*?channelDataNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
+  assert.match(app, /if \(route === "whatsapp-templates" \|\| route === "import-chat"\)[\s\S]*?channelDataNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
   assert.match(styles, /\.nav-submenu/);
 });
 
@@ -848,8 +848,10 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261030-delete-media/);
-  assert.match(html, /assets\/styles\.css\?v=20261030-delete-media/);
+  assert.match(html, /assets\/app\.js\?v=20261031-sender-attribution/);
+  assert.match(html, /assets\/styles\.css\?v=20261031-sender-attribution/);
+  assert.match(app, /is-outbound-sender/);
+  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender/);
 });
 
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {
