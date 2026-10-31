@@ -1288,6 +1288,13 @@ function outboundSenderLabel(principal) {
   return outboundSenderAttribution(principal).name;
 }
 
+/** Fixed attribution for history imports (Interakt now; Wati/AiSensy later). */
+function importSourceSenderAttribution(source) {
+  const normalized = String(source || '').trim().toLowerCase();
+  if (normalized === INTERAKT_SOURCE) return { login: 'Interakt', name: 'Interakt' };
+  return { login: '', name: '' };
+}
+
 function cleanPreviewText(value, maximum) {
   if (typeof value !== 'string') throw httpError(400, 'Preview text must be text.');
   const text = value.replace(/\r\n?/g, '\n').replace(/\t/g, ' ').trim();
@@ -4032,7 +4039,9 @@ function messageSenderLoginView(row, payload) {
   const fromColumn = String(row?.sender_login || '').trim();
   if (fromColumn) return fromColumn.slice(0, 254);
   const name = messageSenderNameView(row, payload);
-  return name === 'API' ? 'API' : '';
+  if (name === 'API') return 'API';
+  if (name === 'Interakt') return 'Interakt';
+  return '';
 }
 
 function messageStatusHistoryView(payload) {
@@ -6281,7 +6290,7 @@ async function importChatHistory(env, workspaceId, principal, payload) {
 async function findExistingInteraktMessage(env, workspaceId, channelId, mapped) {
   if (mapped.providerMessageId) {
     const byProvider = await env.DB.prepare(`SELECT message_id, message_type, text, payload_json, error, status,
-        provider_message_id
+        provider_message_id, sender_login, sender_name
       FROM messages
       WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3
       LIMIT 1`)
@@ -6291,7 +6300,7 @@ async function findExistingInteraktMessage(env, workspaceId, channelId, mapped) 
   if (mapped.externalId) {
     // Secondary key for older rows / missing channel ids: Interakt message UUID in payload.
     return env.DB.prepare(`SELECT message_id, message_type, text, payload_json, error, status,
-        provider_message_id
+        provider_message_id, sender_login, sender_name
       FROM messages
       WHERE workspace_id=?1 AND channel_id=?2
         AND json_extract(payload_json, '$.source') = ?3
@@ -6398,10 +6407,14 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
     const attachmentType = ['image', 'video', 'audio', 'document'].includes(mapped.attachmentType)
       ? mapped.attachmentType
       : (['image', 'video', 'audio', 'document'].includes(mapped.messageType) ? mapped.messageType : '');
+    const importSender = mapped.direction === 'outbound'
+      ? importSourceSenderAttribution(INTERAKT_SOURCE)
+      : { login: '', name: '' };
     const payload = {
       source: INTERAKT_SOURCE,
       externalId: mapped.externalId,
       contentType: mapped.contentType,
+      ...(importSender.name ? { senderName: importSender.name } : {}),
       ...(mapped.template ? { template: mapped.template } : {}),
       ...(mapped.replyTo ? { reply: { channelMessageId: mapped.replyTo } } : {}),
       ...(mapped.statusHistory && Object.keys(mapped.statusHistory).length
@@ -6435,17 +6448,24 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
         && mapped.providerMessageId !== String(existing.provider_message_id || '');
       const shouldRefreshStatusHistory = Boolean(mapped.statusHistory && Object.keys(mapped.statusHistory).length)
         && !/"statusHistory"\s*:/.test(existingPayload);
-      if (shouldRefreshTemplate || shouldRefreshError || shouldRefreshProviderId || shouldRefreshStatusHistory) {
+      const shouldRefreshSender = Boolean(importSender.login && importSender.name)
+        && (String(existing.sender_login || '').trim() !== importSender.login
+          || String(existing.sender_name || '').trim() !== importSender.name);
+      if (shouldRefreshTemplate || shouldRefreshError || shouldRefreshProviderId
+        || shouldRefreshStatusHistory || shouldRefreshSender) {
         pendingStatements.push(env.DB.prepare(`UPDATE messages
             SET message_type=?2, text=?3, payload_json=?4, status=?5, error=?6,
                 provider_message_id=CASE
                   WHEN ?8<>'' THEN ?8
                   ELSE provider_message_id
-                END
+                END,
+                sender_login=CASE WHEN ?9<>'' THEN ?9 ELSE sender_login END,
+                sender_name=CASE WHEN ?10<>'' THEN ?10 ELSE sender_name END
           WHERE workspace_id=?7 AND message_id=?1`)
           .bind(
             existing.message_id, mapped.messageType, text, payloadJson, mapped.status,
-            errorText, workspaceId, mapped.providerMessageId || ''
+            errorText, workspaceId, mapped.providerMessageId || '',
+            importSender.login, importSender.name
           ));
         result.messagesUpdated += 1;
         if (pendingStatements.length >= 40) await flush();
@@ -6457,13 +6477,13 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
     const messageId = crypto.randomUUID();
     pendingStatements.push(env.DB.prepare(`INSERT INTO messages
         (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
-         provider_message_id,status,error,timestamp,payload_json,workspace_id)
-      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)`)
+         provider_message_id,status,error,timestamp,payload_json,workspace_id,sender_login,sender_name)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)`)
       .bind(
         messageId, conversationId, identity.contact_id, channel.channelId, identity.identity_id,
         mapped.direction, mapped.messageType, text,
         mapped.providerMessageId, mapped.status, String(mapped.error || '').slice(0, 500),
-        timestamp, payloadJson, workspaceId
+        timestamp, payloadJson, workspaceId, importSender.login, importSender.name
       ));
     result.messagesImported += 1;
     if (pendingStatements.length >= 40) await flush();

@@ -271,6 +271,15 @@ test('worker import dedupes by provider and Interakt external ids', async () => 
   assert.match(index, /never insert a second copy/);
 });
 
+test('Interakt import attributes outbound messages as Interakt sender', async () => {
+  const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(index, /function importSourceSenderAttribution/);
+  assert.match(index, /login: 'Interakt', name: 'Interakt'/);
+  assert.match(index, /importSourceSenderAttribution\(INTERAKT_SOURCE\)/);
+  assert.match(index, /sender_login,sender_name\)/);
+  assert.match(index, /shouldRefreshSender/);
+});
+
 test('maps a stable provider id for Interakt messages without channel ids', () => {
   const mapped = mapInteraktMessage({
     id: 'ext-42',
