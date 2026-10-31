@@ -507,9 +507,15 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(styles, /\.composer-route-button\s*\{[^}]*height:\s*34px/);
   assert.match(app, /function unifiedConversations\(\)/);
   assert.match(app, /const key = conversation\.contactId \|\| `conversation:/);
-  assert.match(app, /routeMeta\.append\(providerLogo\(route\.connectorType, "message-route-logo"\)\)/);
-  assert.match(app, /routeMeta\.append\(element\("span", "", route\.channelName \|\| "Channel"\)\)/);
+  assert.match(app, /function createMessageRouteMeta\(/);
+  assert.match(app, /providerLogo\(route\.connectorType, "message-route-logo"\)/);
+  assert.match(app, /element\("span", "message-route-channel", route\.channelName \|\| "Channel"\)/);
+  assert.match(app, /element\("span", "message-route-dot", "·"\)/);
+  assert.match(app, /footMain\.append\(createMessageRouteMeta\(route, message\.timestamp\)\)/);
+  assert.match(styles, /\.message-route-logo\s*\{[^}]*width:\s*10px/);
+  assert.match(styles, /\.message-foot-main\s*\{/);
   const messageRowBody = app.slice(app.indexOf("function createMessageRow"), app.indexOf("function messageThreadNearBottom"));
+  assert.doesNotMatch(messageRowBody, /stack\.append\(routeMeta\)/);
   assert.doesNotMatch(messageRowBody, /route\.channelProfileId/);
   const composerRouteBody = app.slice(app.indexOf("function renderComposerRouteControl"), app.indexOf("function renderComposerState"));
   assert.match(composerRouteBody, /name\.textContent = selectedRoute\?\.channelName \|\| ""/);
@@ -548,7 +554,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /id="contactPrevPage"/);
   assert.match(html, /id="contactNextPage"/);
   assert.match(html, /id="contactPageLabel"/);
-  assert.match(html, /app\.js\?v=20261031-scroll-only/);
+  assert.match(html, /app\.js\?v=20261031-msg-meta/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -888,16 +894,17 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261031-scroll-only/);
-  assert.match(html, /assets\/styles\.css\?v=20261031-scroll-only/);
+  assert.match(html, /assets\/app\.js\?v=20261031-msg-meta/);
+  assert.match(html, /assets\/styles\.css\?v=20261031-msg-meta/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
-  // Inbound customer names must not render on the bubble; only outbound sender_name below.
+  // Inbound customer names must not render on the bubble; only outbound sender_name in the foot.
   assert.doesNotMatch(app, /direction === "inbound" && message\.senderName/);
-  assert.match(app, /bubble\.append\(element\("p", "message-sender is-outbound-sender", outboundSender\)\)/);
+  assert.match(app, /footMain\.append\(element\("p", "message-sender is-outbound-sender", outboundSender\)\)/);
   assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender/);
-  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*color: var\(--blue\)/);
-  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*font-size: 9px/);
+  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*color: var\(--chat-meta\)/);
+  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*font-weight: 400/);
+  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*text-align: left/);
   assert.doesNotMatch(styles, /^\.message-sender \{/m);
 });
 

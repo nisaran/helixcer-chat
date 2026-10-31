@@ -2232,6 +2232,7 @@
   function syncMessageStatusInfoButton(row, message) {
     const foot = row?.querySelector(".message-foot");
     if (!foot) return;
+    const statusHost = foot.querySelector(".message-foot-status") || foot;
     let info = foot.querySelector(".message-status-info");
     const entries = messageStatusHistoryEntries(message);
     if (!entries.length) {
@@ -2244,9 +2245,9 @@
       info.type = "button";
       info.dataset.action = "toggle-message-status-history";
       info.dataset.messageId = message.messageId;
-      const status = foot.querySelector(".delivery-status, .message-failed");
-      if (status) foot.insertBefore(info, status);
-      else foot.append(info);
+      const status = statusHost.querySelector(".delivery-status, .message-failed");
+      if (status) statusHost.insertBefore(info, status);
+      else statusHost.append(info);
     }
     info.dataset.messageId = message.messageId;
     info.setAttribute("aria-label", "Message status history");
@@ -3135,6 +3136,19 @@
     return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot"].includes(connectorType);
   }
 
+  function createMessageRouteMeta(route, timestamp) {
+    const meta = element("div", "message-route-meta");
+    if (route) {
+      meta.append(providerLogo(route.connectorType, "message-route-logo"));
+      meta.append(element("span", "message-route-channel", route.channelName || "Channel"));
+      const dot = element("span", "message-route-dot", "·");
+      dot.setAttribute("aria-hidden", "true");
+      meta.append(dot);
+    }
+    meta.append(element("time", "", formatClock(timestamp)));
+    return meta;
+  }
+
   function createMessageRow(message, conversation) {
     const row = element("div", `message-row${message.direction === "outbound" ? " is-outbound" : ""}`);
     row.dataset.messageId = message.messageId;
@@ -3143,7 +3157,7 @@
     const stack = element("div", "message-stack");
     const bubble = element("div", "message-bubble");
     // Outbound agent/API name comes only from messages.sender_name (API: senderName)
-    // and is rendered below the timestamp — never above the bubble or inside body text.
+    // and sits in the bubble foot with route + clock — never above the bubble or in body text.
     const outboundSender = message.direction === "outbound" ? String(message.senderName || "").trim() : "";
     const quoted = renderQuotedReply(message.reply, conversation);
     if (quoted) bubble.append(quoted);
@@ -3157,8 +3171,14 @@
     if (presentation.text) bubble.append(appendChannelFormattedText(element("p", "message-text"), presentation.text, route || conversation));
     const templateActions = renderTemplateMessageActions(presentation.buttons);
     const foot = element("div", "message-foot");
-    foot.append(element("time", "", formatClock(message.timestamp)));
+    const footMain = element("div", "message-foot-main");
+    footMain.append(createMessageRouteMeta(route, message.timestamp));
+    if (outboundSender) {
+      footMain.append(element("p", "message-sender is-outbound-sender", outboundSender));
+    }
+    foot.append(footMain);
     if (message.direction === "outbound") {
+      const statusCluster = element("div", "message-foot-status");
       const delivery = outboundDeliveryStatus(message.status);
       const status = element("span", delivery.className, delivery.label);
       const errorText = String(message.error || "").trim();
@@ -3177,26 +3197,18 @@
         info.setAttribute("aria-haspopup", "dialog");
         info.setAttribute("aria-expanded", "false");
         info.title = "Status history";
-        foot.append(info);
+        statusCluster.append(info);
       }
-      foot.append(status);
+      statusCluster.append(status);
+      foot.append(statusCluster);
     }
     bubble.append(foot);
-    if (outboundSender) {
-      bubble.append(element("p", "message-sender is-outbound-sender", outboundSender));
-    }
     const errorText = String(message.error || "").trim();
     if (errorText && ["failed", "error"].includes(String(message.status || "").toLocaleLowerCase())) {
       bubble.append(element("p", "message-error", errorText));
     }
     if (templateActions) bubble.append(templateActions);
     stack.append(bubble);
-    if (route) {
-      const routeMeta = element("div", "message-route-meta");
-      routeMeta.append(providerLogo(route.connectorType, "message-route-logo"));
-      routeMeta.append(element("span", "", route.channelName || "Channel"));
-      stack.append(routeMeta);
-    }
     row.append(stack);
     if (canReplyToMessage(conversation, message)) {
       const replyButton = element("button", "message-reply-button", "↩");
