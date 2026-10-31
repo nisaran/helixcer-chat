@@ -712,8 +712,11 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .tag { border: 1px solid #dfdfd7; border-radius: 999px; background: #f7f6f1; color: #626d6a; padding: 4px 8px; font-size: 10px; font-weight: 650; }
 
 .content-route { overflow-y: auto; padding: clamp(22px, 4vw, 46px); }
+.contacts-route { padding-top: 12px; }
 .route-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; max-width: 1180px; margin: 0 auto 24px; }
+.contacts-heading { align-items: center; margin-bottom: 12px; }
 .route-heading h2 { margin: 0; font-family: var(--font-sans); font-size: clamp(28px, 4vw, 36px); font-weight: 730; line-height: 1.05; letter-spacing: -1px; }
+.contacts-heading h2 { font-size: clamp(18px, 2.4vw, 22px); font-weight: 700; letter-spacing: -.4px; }
 .route-heading p:last-child { margin: 7px 0 0; color: var(--muted); }
 .primary-button, .secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 39px; border-radius: 10px; padding: 8px 14px; font-size: 12px; font-weight: 700; }
 .primary-button { border: 1px solid var(--brand); background: var(--brand); color: white; box-shadow: 0 5px 14px rgba(81,36,189,.16); }
@@ -726,21 +729,29 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .surface { max-width: 1180px; margin: 0 auto; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: white; box-shadow: var(--shadow-sm); }
 .surface-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); padding: 13px 16px; }
 .compact-search { width: min(360px, 75%); margin: 0; }
+.contact-toolbar-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px 14px; }
+.contact-pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.contact-page-size select {
+  min-height: 30px; border: 1px solid var(--line-strong); border-radius: 8px; background: white;
+  color: #596461; padding: 4px 8px; font: inherit; font-size: 11px; font-weight: 650;
+}
+.contact-page-buttons { display: flex; align-items: center; gap: 6px; }
+.contact-page-buttons .compact-button { min-height: 30px; padding: 4px 10px; font-size: 11px; }
 .contact-table-wrap { overflow-x: auto; }
 .contact-table { width: 100%; min-width: 680px; border-collapse: collapse; }
-.contact-table th { color: var(--muted); padding: 11px 17px; text-align: left; font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
-.contact-table td { border-top: 1px solid #eff1ee; padding: 15px 17px; color: #56605e; font-size: 12px; }
+.contact-table th { color: var(--muted); padding: 8px 14px; text-align: left; font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.contact-table td { border-top: 1px solid #eff1ee; padding: 7px 14px; color: #56605e; font-size: 12px; }
 .contact-table tbody tr { cursor: pointer; outline: 0; transition: background .12s ease, box-shadow .12s ease; -webkit-tap-highlight-color: transparent; }
 .contact-table tbody tr:hover { background: #fafbf9; }
 .contact-table tbody tr:active { background: #edf0ed; }
 .contact-table tbody tr:focus-visible { box-shadow: inset 0 0 0 2px rgba(109,59,234,.32); }
 .contact-table tbody tr.is-selected { background: #f7f4ff; box-shadow: inset 3px 0 var(--brand); }
-.contact-cell { display: flex; align-items: center; gap: 10px; color: var(--ink); }
-.contact-cell .avatar { width: 34px; height: 34px; flex-basis: 34px; border-radius: 11px; }
+.contact-cell { display: grid; gap: 1px; color: var(--ink); min-width: 0; }
 .contact-cell strong, .contact-cell span { display: block; }
+.contact-cell strong { font-size: 12px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contact-cell span { color: var(--muted); font-size: 10px; }
 .contact-count-copy { color: var(--muted); font-size: 10px; }
-.status-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; background: var(--green-soft); color: var(--green); padding: 4px 8px; font-size: 10px; font-weight: 750; }
+.status-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; background: var(--green-soft); color: var(--green); padding: 2px 7px; font-size: 10px; font-weight: 750; }
 .status-chip::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status-chip.is-inactive { background: #f0f1ef; color: #737d7a; }
 
@@ -1402,7 +1413,10 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .send-hint { display: none; }
   .details-panel { position: fixed; z-index: 45; top: 0; bottom: 0; width: min(330px, 92vw); }
   .content-route { padding: 22px 14px; }
+  .contacts-route { padding-top: 10px; }
   .route-heading { align-items: flex-start; }
+  .contact-toolbar-meta { width: 100%; justify-content: space-between; }
+  .contact-pagination { width: 100%; justify-content: space-between; }
   .route-heading-actions { align-items: stretch; flex-direction: column-reverse; }
   .route-heading-actions > * { width: 100%; }
   .route-heading .primary-button { padding-inline: 10px; }

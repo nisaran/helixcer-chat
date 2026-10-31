@@ -519,7 +519,16 @@ test("the unified inbox is person-first while route identity stays on messages a
   const contactsEnd = app.indexOf("function contactPlatformRoutes", contactsStart);
   const renderContactsBody = app.slice(contactsStart, contactsEnd);
   assert.match(renderContactsBody, /messaging ID/);
-  assert.doesNotMatch(renderContactsBody, /providerLogo|providerLogoPaths|provider-(?:whatsapp|telegram|instagram)\.svg/);
+  assert.match(renderContactsBody, /Closed" : "Open"/);
+  assert.doesNotMatch(renderContactsBody, /Inactive" : "Active"|providerLogo|providerLogoPaths|provider-(?:whatsapp|telegram|instagram)\.svg/);
+  assert.doesNotMatch(renderContactsBody, /avatarPalettes|element\("span", "avatar"/);
+  assert.match(renderContactsBody, /contactPageSizeValue|contactPrevPage|contactNextPage/);
+  assert.match(html, /id="contactPageSize"/);
+  assert.match(html, /id="contactPrevPage"/);
+  assert.match(html, /id="contactNextPage"/);
+  assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
+  assert.match(styles, /\.contacts-heading h2/);
+  assert.match(styles, /\.contact-pagination/);
 });
 
 test("conversation routes drive replies, templates, media, and every outbound API request", () => {
@@ -651,7 +660,7 @@ test("contacts use one flat ID per platform and open the exact saved channel rou
 test("conversation and contact lists provide compact press feedback and breathing room", () => {
   assert.match(styles, /\.conversation-item\s*\{[^}]*min-height:\s*72px[^}]*padding:\s*15px 14px/s);
   assert.match(styles, /\.conversation-item:active\s*\{[^}]*background:\s*#edf0ed/s);
-  assert.match(styles, /\.contact-table td\s*\{[^}]*padding:\s*15px 17px/s);
+  assert.match(styles, /\.contact-table td\s*\{[^}]*padding:\s*7px 14px/s);
   assert.match(styles, /\.contact-table tbody tr:active\s*\{[^}]*background:\s*#edf0ed/s);
 });
 
