@@ -364,14 +364,12 @@
     async sendMessage(conversationId, text, replyToMessageId = "", route = {}) {
       const replyTarget = (this.data.messages[conversationId] || []).find((message) => message.messageId === replyToMessageId);
       const senderName = String(this.data.me?.displayName || this.data.me?.email || "You").trim() || "You";
-      const body = String(text || "").trim();
-      const attributedText = body ? `${body}\n\n${senderName}` : senderName;
       const item = {
         messageId: `demo-${Date.now()}`,
         channelMessageId: `demo-channel-${Date.now()}`,
         direction: "outbound",
         messageType: "text",
-        text: attributedText,
+        text,
         timestamp: new Date().toISOString(),
         status: "sent",
         senderName,

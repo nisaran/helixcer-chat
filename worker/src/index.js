@@ -967,7 +967,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   const externalRequestId = crypto.randomUUID();
   const presentation = await externalTemplateInboxPresentation(env, channel, input.template, input.previewText);
   const senderName = outboundSenderLabel(principal);
-  const preview = withOutboundSenderAttribution(presentation.text, principal, MAX_TEXT_LENGTH);
+  const preview = presentation.text;
   const storedPayload = { ...presentation.storedPayload, senderName };
   const encryptedPayload = await encryptOutboundPayload({ template: input.template }, env.CHANNEL_CREDENTIALS_KEY,
     principal.workspaceId, messageId);
@@ -1275,20 +1275,6 @@ function outboundSenderLabel(principal) {
   if (email && email !== 'emergency-recovery') return email.slice(0, 120);
   if (principal?.user || principal?.authType) return 'Agent';
   return 'API';
-}
-
-function withOutboundSenderAttribution(text, principal, maximum) {
-  const label = outboundSenderLabel(principal);
-  const suffix = `\n\n${label}`;
-  const body = String(text || '');
-  if (!body) return label.length <= maximum ? label : label.slice(0, maximum);
-  if (body === label || body === `— ${label}` || body.endsWith(suffix) ||
-      body.endsWith(`\n\n— ${label}`) || body.endsWith(`\n— ${label}`)) {
-    return body.slice(0, maximum);
-  }
-  const maxBody = Math.max(0, maximum - suffix.length);
-  const trimmed = body.length > maxBody ? body.slice(0, maxBody).trimEnd() : body;
-  return `${trimmed}${suffix}`;
 }
 
 function cleanPreviewText(value, maximum) {
@@ -4316,8 +4302,7 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
   if (!isPlainObject(payload)) throw httpError(400, 'Message payload must be an object.');
   rejectUnknownKeys(payload, new Set(['text', 'replyToMessageId', 'channelId', 'identityId', 'contactIdentityId']), 'message request');
   const senderName = outboundSenderLabel(principal);
-  const text = withOutboundSenderAttribution(
-    cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH), principal, MAX_TEXT_LENGTH);
+  const text = cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH);
   await assertConversationChannelAccess(env, workspaceId, conversationId, principal);
   const row = await conversationDeliveryTarget(env, workspaceId, conversationId, payload);
   assertPrincipalChannelAccess(principal, row.channel_id);
@@ -5005,7 +4990,7 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   const presentation = await externalTemplateInboxPresentation(env, target.channel, template, requestedPreview,
     mediaPreview, MAX_TEMPLATE_PREVIEW_LENGTH);
   const senderName = outboundSenderLabel(principal);
-  const previewText = withOutboundSenderAttribution(presentation.text, principal, MAX_TEMPLATE_PREVIEW_LENGTH);
+  const previewText = presentation.text;
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
   const storedPayload = { ...presentation.storedPayload, senderName };
@@ -5113,10 +5098,6 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
     throw httpError(400, 'WhatsApp audio messages do not support captions. Remove the text or send it as a separate message.');
   }
   const senderName = outboundSenderLabel(principal);
-  const supportsCaption = !(target.connectorType === 'whatsapp_cloud' && attachment.type === 'audio');
-  if (supportsCaption) {
-    attachment.caption = withOutboundSenderAttribution(attachment.caption, principal, MAX_ATTACHMENT_CAPTION_LENGTH);
-  }
   const reply = await resolveReplyTarget(env, workspaceId, conversationId, target.channel_id,
     target.connectorType, form.get('replyToMessageId'));
   const now = new Date().toISOString();
@@ -6525,7 +6506,7 @@ export {
   normalizeFieldMapping
 } from './imports/interakt.js';
 
-export { outboundSenderLabel, withOutboundSenderAttribution };
+export { outboundSenderLabel };
 
 export function normalizeWhatsAppRecipient(value) {
   const input = String(value || '').trim();
