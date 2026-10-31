@@ -1011,12 +1011,21 @@ test("destructive workspace actions use one in-app confirmation dialog", () => {
 test("Developer API documentation is channel-organized and keeps the send contract complete", () => {
   assert.match(apiDocs, /<h1>Connect your apps to the Helixcer inbox\.<\/h1>/);
   assert.doesNotMatch(apiDocs, /<h1>[^<]*WhatsApp/i);
-  assert.match(apiDocs, /<p class="nav-label">Channels<\/p>[\s\S]*?<p class="nav-channel">WhatsApp<\/p>[\s\S]*?<a href="#send">Template messages<\/a>/);
+  assert.match(apiDocs, /<p class="nav-label">Channels<\/p>[\s\S]*?<p class="nav-channel">WhatsApp<\/p>[\s\S]*?<a href="#send">Template messages<\/a>[\s\S]*?<a href="#templates">List templates<\/a>[\s\S]*?<a href="#template">Fetch template<\/a>/);
   const sendSection = apiDocs.match(/<section id="send">[\s\S]*?<\/section>/)?.[0] || "";
   assert.match(sendSection, /<h2>Send a template message<\/h2>/);
   assert.match(sendSection, /POST<\/span><code>https:\/\/api\.chat\.helixcer\.com\/api\/v1\/whatsapp\/template-messages<\/code>/);
   assert.match(apiDocs, /X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0/);
-  assert.match(sendSection, /<code>contact\.displayName<\/code>[\s\S]*?Name used to save or update to the contact list/);
+  assert.match(sendSection, /<code>contact<\/code>[\s\S]*?Omitted fields keep their existing values/);
+  assert.match(sendSection, /<code>contact\.name<\/code>/);
+  assert.match(sendSection, /<code>contact\.company<\/code>/);
+  assert.match(sendSection, /<code>contact\.tags<\/code>/);
+  const listSection = apiDocs.match(/<section id="templates">[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(listSection, /<h2>List all templates<\/h2>/);
+  assert.match(listSection, /GET<\/span><code>https:\/\/api\.chat\.helixcer\.com\/api\/v1\/whatsapp\/templates\?channelId=/);
+  const fetchSection = apiDocs.match(/<section id="template">[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(fetchSection, /<h2>Fetch template<\/h2>/);
+  assert.match(fetchSection, /GET<\/span><code>https:\/\/api\.chat\.helixcer\.com\/api\/v1\/whatsapp\/templates\/order_confirmation\?channelId=/);
   assert.doesNotMatch(apiDocs, /Idempotency-Key|id="idempotency"|href="#idempotency"/i);
   assert.match(apiDocs, /"status": true/);
   assert.match(apiDocs, /"messageStatus": "pending"/);

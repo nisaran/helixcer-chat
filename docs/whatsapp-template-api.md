@@ -18,6 +18,8 @@ Send approved WhatsApp templates from your server while keeping every outbound m
 |---|---|
 | Base URL | `https://api.chat.helixcer.com` |
 | Send a template | `POST /api/v1/whatsapp/template-messages` |
+| List templates | `GET /api/v1/whatsapp/templates?channelId=...` |
+| Fetch template | `GET /api/v1/whatsapp/templates/{templateName}?channelId=...` |
 | Read message status | `GET /api/v1/messages/{messageId}` |
 | Authentication | `Authorization: Bearer hxc_live_...` |
 | Workspace | `X-Workspace-Id: YOUR_WORKSPACE_ID` |
@@ -54,7 +56,9 @@ Content-Type: application/json
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
   "to": "919999999999",
   "contact": {
-    "displayName": "Asha"
+    "name": "Asha",
+    "company": "Acme Retail",
+    "tags": ["VIP", "Orders"]
   },
   "clientReference": "order-1001",
   "previewText": "Order ORD-1001 confirmed",
@@ -82,7 +86,10 @@ Content-Type: application/json
 |---|---:|---|
 | `channelId` | Yes | Helixcer ID of the saved WhatsApp channel that sends the message. |
 | `to` | Yes | Recipient's WhatsApp number in international format, using digits only. Example: `919999999999`. |
-| `contact.displayName` | No | Name used to save or update to the contact list |
+| `contact` | No | Optional contact fields to save or update on the recipient. Include only the fields you want to change. Omitted fields keep their existing values and are never cleared to null. |
+| `contact.name` | No | Contact display name. Alias: `displayName`. When both are sent they must match. |
+| `contact.company` | No | Company or organization stored on the contact. |
+| `contact.tags` | No | Array of tag strings. When provided, replaces the contact's current tags. |
 | `clientReference` | No | Your order, ticket, campaign, or transaction identifier. It is stored with and returned on the message for reconciliation. |
 | `previewText` | No | Optional inbox-text override. When omitted, Helixcer renders the approved Meta template with the supplied variables, media, footer, and action labels. This does not change the WhatsApp payload. |
 | `template` | Yes | Meta-native template object. `name` and `language.code` are required; `components` is included when the approved template expects parameters. |
@@ -100,7 +107,7 @@ curl --request POST \
   --data '{
     "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
     "to": "919999999999",
-    "contact": { "displayName": "Asha" },
+    "contact": { "name": "Asha", "company": "Acme Retail", "tags": ["VIP", "Orders"] },
     "clientReference": "order-1001",
     "previewText": "Order ORD-1001 confirmed",
     "template": {
@@ -117,6 +124,84 @@ curl --request POST \
       ]
     }
   }'
+```
+
+## List all templates
+
+```http
+GET https://api.chat.helixcer.com/api/v1/whatsapp/templates?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4
+Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
+X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
+```
+
+| Field | Required | Description |
+|---|---:|---|
+| `channelId` | Yes | Helixcer ID of the WhatsApp channel whose WABA templates should be listed. Query parameter. |
+| `refresh` | No | Set to `1` to bypass Helixcer's short template cache and reload from Meta. |
+
+```json
+{
+  "status": true,
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "items": [
+    {
+      "templateId": "123456789012345",
+      "name": "order_confirmation",
+      "language": { "code": "en_US" },
+      "status": "APPROVED",
+      "category": "UTILITY",
+      "components": [
+        { "type": "body", "text": "Hello {{1}}, order {{2}} is confirmed." }
+      ],
+      "variables": [
+        { "component": "body", "componentIndex": 0, "parameterIndex": 0, "key": "1", "kind": "text", "example": "" },
+        { "component": "body", "componentIndex": 0, "parameterIndex": 1, "key": "2", "kind": "text", "example": "" }
+      ]
+    }
+  ],
+  "truncated": false,
+  "requestId": "96fe6806-a769-451e-918a-034b33d06dc1"
+}
+```
+
+## Fetch template
+
+```http
+GET https://api.chat.helixcer.com/api/v1/whatsapp/templates/order_confirmation?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4&language=en_US
+Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
+X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
+```
+
+| Field | Required | Description |
+|---|---:|---|
+| Template name | Yes | Path segment. Meta template name using lowercase letters, numbers, and underscores only. |
+| `channelId` | Yes | Helixcer ID of the WhatsApp channel. Query parameter. |
+| `language` | No | Optional language filter such as `en_US`. When omitted, all language variants for the name are returned. |
+
+```json
+{
+  "status": true,
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "name": "order_confirmation",
+  "language": "en_US",
+  "items": [
+    {
+      "templateId": "123456789012345",
+      "name": "order_confirmation",
+      "language": { "code": "en_US" },
+      "status": "APPROVED",
+      "category": "UTILITY",
+      "components": [
+        { "type": "body", "text": "Hello {{1}}, order {{2}} is confirmed." }
+      ],
+      "variables": [
+        { "component": "body", "componentIndex": 0, "parameterIndex": 0, "key": "1", "kind": "text", "example": "" },
+        { "component": "body", "componentIndex": 0, "parameterIndex": 1, "key": "2", "kind": "text", "example": "" }
+      ]
+    }
+  ],
+  "requestId": "f2baa47a-97e6-47c8-a200-7a235cad5d92"
+}
 ```
 
 ## Template examples

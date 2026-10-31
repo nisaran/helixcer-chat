@@ -349,7 +349,7 @@ test('validates Meta-native template variants without allowing provider envelope
   const normalized = validateWhatsAppTemplateRequest({
     channelId: 'wa-sales',
     to: '+91 98765 43210',
-    contact: { displayName: 'Asha' },
+    contact: { name: 'Asha', company: 'Acme', tags: ['VIP'] },
     clientReference: 'order-1001',
     template: {
       name: 'order_update',
@@ -363,6 +363,7 @@ test('validates Meta-native template variants without allowing provider envelope
     }
   });
   assert.equal(normalized.to, '919876543210');
+  assert.deepEqual(normalized.contact, { displayName: 'Asha', company: 'Acme', tags: ['VIP'] });
   assert.equal(normalized.template.components[0].parameters[0].image.link, 'https://cdn.example.com/order.jpg');
   const provider = buildWhatsAppTemplatePayload(normalized.to, normalized.template, 'message-1');
   assert.equal(provider.messaging_product, 'whatsapp');
@@ -372,6 +373,10 @@ test('validates Meta-native template variants without allowing provider envelope
   assert.equal(provider.template.components[2].sub_type, 'url');
   assert.throws(() => validateWhatsAppTemplateRequest({ ...normalized, messaging_product: 'other' }), /Unsupported request field/);
   assert.throws(() => validateWhatsAppTemplateRequest({ ...normalized, template: { ...normalized.template, name: 'Bad Name' } }), /Template name/);
+  assert.throws(() => validateWhatsAppTemplateRequest({
+    ...normalized,
+    contact: { name: 'Asha', displayName: 'Different' }
+  }), /must match/);
   assert.throws(() => validateWhatsAppTemplateRequest({
     ...normalized,
     template: { ...normalized.template, components: [{ type: 'header', parameters: [{ type: 'image', image: { link: 'http://localhost/private' } }] }] }

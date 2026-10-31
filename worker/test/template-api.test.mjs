@@ -261,7 +261,7 @@ test('external template API accepts requests without an Idempotency-Key', async 
   }
 });
 
-test('external template API updates a saved contact name only when displayName is supplied', async () => {
+test('external template API updates contact fields only when supplied and keeps omitted values', async () => {
   const { database, env } = await fixture();
   const token = `hxc_live_contact1.${'c'.repeat(43)}`;
   await insertKey(database, token, 'key-contact-name', 'hxc_live_contact1');
@@ -283,18 +283,32 @@ test('external template API updates a saved contact name only when displayName i
       await Promise.all(waits);
     };
 
-    await send({ ...baseBody, contact: { displayName: 'Original name' } });
+    await send({ ...baseBody, contact: { name: 'Original name', company: 'Acme', tags: ['VIP'] } });
     const contactId = database.prepare('SELECT contact_id FROM contacts').get().contact_id;
-    assert.equal(database.prepare('SELECT display_name FROM contacts WHERE contact_id=?').get(contactId).display_name, 'Original name');
+    let contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?').get(contactId);
+    assert.equal(contact.display_name, 'Original name');
+    assert.equal(contact.company, 'Acme');
+    assert.deepEqual(JSON.parse(contact.tags_json), ['VIP']);
     assert.equal(database.prepare('SELECT display_name FROM channel_identities WHERE contact_id=?').get(contactId).display_name, 'Original name');
 
     await send({ ...baseBody, contact: { displayName: 'Updated contact name' } });
-    assert.equal(database.prepare('SELECT display_name FROM contacts WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
+    contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?').get(contactId);
+    assert.equal(contact.display_name, 'Updated contact name');
+    assert.equal(contact.company, 'Acme');
+    assert.deepEqual(JSON.parse(contact.tags_json), ['VIP']);
     assert.equal(database.prepare('SELECT display_name FROM channel_identities WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
 
+    await send({ ...baseBody, contact: { company: 'Helixcer', tags: ['Retail', 'Orders'] } });
+    contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?').get(contactId);
+    assert.equal(contact.display_name, 'Updated contact name');
+    assert.equal(contact.company, 'Helixcer');
+    assert.deepEqual(JSON.parse(contact.tags_json), ['Retail', 'Orders']);
+
     await send(baseBody);
-    assert.equal(database.prepare('SELECT display_name FROM contacts WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
-    assert.equal(database.prepare('SELECT display_name FROM channel_identities WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
+    contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?').get(contactId);
+    assert.equal(contact.display_name, 'Updated contact name');
+    assert.equal(contact.company, 'Helixcer');
+    assert.deepEqual(JSON.parse(contact.tags_json), ['Retail', 'Orders']);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();
@@ -660,6 +674,97 @@ test('API key management reveals a secret once, stores only its hash, lists meta
     assert.equal(Object.hasOwn(rejectedBody, 'ok'), false);
     assert.equal(rejectedBody.error.code, 'invalid_api_key');
   } finally {
+    database.close();
+  }
+});
+
+test('external WhatsApp API lists and fetches templates by channel', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_templates1.${'t'.repeat(43)}`;
+  await insertKey(database, token, 'key-templates', 'hxc_live_templates1');
+  const config = JSON.parse(database.prepare("SELECT config_json FROM channels WHERE channel_id='wa-sales'").get().config_json);
+  config.wabaId = '2053926168641345';
+  database.prepare("UPDATE channels SET config_json=? WHERE channel_id='wa-sales'").run(JSON.stringify(config));
+  const originalFetch = globalThis.fetch;
+  const providerPaths = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    providerPaths.push(`${url.pathname}?${url.searchParams.toString()}`);
+    assert.equal(init.headers.Authorization, 'Bearer EAAtest-access-token-123456789');
+    if (url.pathname.endsWith('/message_templates') && !url.searchParams.get('name')) {
+      return new Response(JSON.stringify({ data: [
+        {
+          id: 'tmpl-hello', name: 'hello_world', language: 'en_US', status: 'APPROVED', category: 'UTILITY',
+          components: [{ type: 'BODY', text: 'Hello world' }]
+        },
+        {
+          id: 'tmpl-order-en', name: 'order_confirmation', language: 'en_US', status: 'APPROVED', category: 'UTILITY',
+          components: [{ type: 'BODY', text: 'Hello {{1}}, order {{2}} is confirmed.' }]
+        },
+        {
+          id: 'tmpl-order-hi', name: 'order_confirmation', language: 'hi', status: 'PENDING', category: 'UTILITY',
+          components: [{ type: 'BODY', text: 'नमस्ते {{1}}' }]
+        }
+      ] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.pathname.endsWith('/message_templates') && url.searchParams.get('name') === 'order_confirmation') {
+      return new Response(JSON.stringify({ data: [
+        {
+          id: 'tmpl-order-en', name: 'order_confirmation', language: 'en_US', status: 'APPROVED', category: 'UTILITY',
+          components: [{ type: 'BODY', text: 'Hello {{1}}, order {{2}} is confirmed.' }]
+        },
+        {
+          id: 'tmpl-order-hi', name: 'order_confirmation', language: 'hi', status: 'PENDING', category: 'UTILITY',
+          components: [{ type: 'BODY', text: 'नमस्ते {{1}}' }]
+        }
+      ] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.pathname.endsWith('/message_templates') && url.searchParams.get('name') === 'missing_template') {
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    throw new Error(`Unexpected provider request: ${url.pathname}`);
+  };
+  try {
+    const listResponse = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/v1/whatsapp/templates?channelId=wa-sales&refresh=1',
+      { headers: { Authorization: `Bearer ${token}`, 'X-Workspace-Id': 'ws_default' } }
+    ), env);
+    assert.equal(listResponse.status, 200);
+    const listed = await listResponse.json();
+    assert.equal(listed.status, true);
+    assert.equal(listed.channelId, 'wa-sales');
+    assert.equal(listed.truncated, false);
+    assert.equal(listed.items.length, 3);
+    assert.equal(listed.items[0].name, 'hello_world');
+    assert.equal(listed.items[1].name, 'order_confirmation');
+    assert.equal(listed.items[1].language.code, 'en_US');
+    assert.equal(listed.items[1].variables.length, 2);
+
+    const fetchResponse = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/v1/whatsapp/templates/order_confirmation?channelId=wa-sales&language=en_US',
+      { headers: { Authorization: `Bearer ${token}`, 'X-Workspace-Id': 'ws_default' } }
+    ), env);
+    assert.equal(fetchResponse.status, 200);
+    const fetched = await fetchResponse.json();
+    assert.equal(fetched.status, true);
+    assert.equal(fetched.name, 'order_confirmation');
+    assert.equal(fetched.language, 'en_US');
+    assert.equal(fetched.items.length, 1);
+    assert.equal(fetched.items[0].templateId, 'tmpl-order-en');
+    assert.equal(fetched.items[0].status, 'APPROVED');
+
+    const missing = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/v1/whatsapp/templates/missing_template?channelId=wa-sales',
+      { headers: { Authorization: `Bearer ${token}`, 'X-Workspace-Id': 'ws_default' } }
+    ), env);
+    assert.equal(missing.status, 404);
+    const missingBody = await missing.json();
+    assert.equal(missingBody.status, false);
+    assert.equal(missingBody.error.code, 'template_not_found');
+
+    assert.equal(providerPaths.some(path => path.includes('name=order_confirmation')), true);
+  } finally {
+    globalThis.fetch = originalFetch;
     database.close();
   }
 });

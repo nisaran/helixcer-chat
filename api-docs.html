@@ -77,7 +77,7 @@
         <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li></ul>
         <p class="nav-label">Channels</p>
         <p class="nav-channel">WhatsApp</p>
-        <ul class="nav-list nav-sublist"><li><a href="#send">Template messages</a></li><li><a href="#examples">Template examples</a></li><li><a href="#advanced">Advanced templates</a></li><li><a href="#meta">Meta references</a></li></ul>
+        <ul class="nav-list nav-sublist"><li><a href="#send">Template messages</a></li><li><a href="#templates">List templates</a></li><li><a href="#template">Fetch template</a></li><li><a href="#examples">Template examples</a></li><li><a href="#advanced">Advanced templates</a></li><li><a href="#meta">Meta references</a></li></ul>
         <p class="nav-label">Operations</p>
         <ul class="nav-list"><li><a href="#responses">Responses</a></li><li><a href="#status">Message status</a></li><li><a href="#webhooks">Chatbox &amp; webhooks</a></li><li><a href="#errors">Errors</a></li><li><a href="#security">Security checklist</a></li></ul>
       </nav>
@@ -112,7 +112,7 @@
   --data '{
     "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
     "to": "919999999999",
-    "contact": { "displayName": "Asha" },
+    "contact": { "name": "Asha", "company": "Acme Retail", "tags": ["VIP"] },
     "clientReference": "customer-4082",
     "template": {
       "name": "hello_world",
@@ -144,7 +144,11 @@ Content-Type: application/json</code></pre></div>
         <div class="code-card" style="margin:22px 0"><div class="code-head"><span>JSON request body</span><button class="copy" type="button">Copy</button></div><pre><code>{
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
   "to": "919999999999",
-  "contact": { "displayName": "Asha" },
+  "contact": {
+    "name": "Asha",
+    "company": "Acme Retail",
+    "tags": ["VIP", "Orders"]
+  },
   "clientReference": "order-1001",
   "previewText": "Order ORD-1001 confirmed",
   "template": {
@@ -166,13 +170,96 @@ Content-Type: application/json</code></pre></div>
           <tbody>
             <tr><td><code>channelId</code></td><td class="yes">Yes</td><td>Helixcer ID of the saved WhatsApp channel that sends the message.</td></tr>
             <tr><td><code>to</code></td><td class="yes">Yes</td><td>Recipient's WhatsApp number in international digits-only format, for example <code>919999999999</code>.</td></tr>
-            <tr><td><code>contact.displayName</code></td><td>No</td><td>Name used to save or update to the contact list</td></tr>
+            <tr><td><code>contact</code></td><td>No</td><td>Optional contact fields to save or update on the recipient. Include only the fields you want to change. Omitted fields keep their existing values and are never cleared to null.</td></tr>
+            <tr><td><code>contact.name</code></td><td>No</td><td>Contact display name. Alias: <code>displayName</code>. When both are sent they must match.</td></tr>
+            <tr><td><code>contact.company</code></td><td>No</td><td>Company or organization stored on the contact.</td></tr>
+            <tr><td><code>contact.tags</code></td><td>No</td><td>Array of tag strings. When provided, replaces the contact's current tags.</td></tr>
             <tr><td><code>clientReference</code></td><td>No</td><td>Your order, ticket, campaign, or transaction ID. It is stored with and returned on the message.</td></tr>
             <tr><td><code>previewText</code></td><td>No</td><td>Optional inbox-text override. When omitted, Helixcer renders the approved Meta template with the supplied variables, media, footer, and action labels.</td></tr>
             <tr><td><code>template</code></td><td class="yes">Yes</td><td>Meta-native template object. <code>name</code> and <code>language.code</code> are required; add <code>components</code> when expected.</td></tr>
           </tbody>
         </table></div>
         <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p><strong>Do not send connection credentials.</strong> Meta access token, WABA ID, phone-number ID, Graph version, <code>messaging_product</code>, and <code>recipient_type</code> belong to the selected Helixcer channel.</p></div>
+      </section>
+
+      <section id="templates">
+        <p class="eyebrow">WhatsApp</p><h2>List all templates</h2>
+        <p class="intro">Return the message templates stored on the selected WhatsApp Business Account, including name, language, status, category, components, and variables.</p>
+        <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/templates?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4</code></div>
+        <div class="table-wrap" style="margin:22px 0"><table>
+          <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>channelId</code></td><td class="yes">Yes</td><td>Helixcer ID of the WhatsApp channel whose WABA templates should be listed. Query parameter.</td></tr>
+            <tr><td><code>refresh</code></td><td>No</td><td>Set to <code>1</code> to bypass Helixcer's short template cache and reload from Meta.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="code-card"><div class="code-head"><span>cURL · list templates</span><button class="copy" type="button">Copy</button></div><pre><code>curl --request GET \
+  --url 'https://api.chat.helixcer.com/api/v1/whatsapp/templates?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4' \
+  --header 'Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY' \
+  --header 'X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0'</code></pre></div>
+        <div class="code-card" style="margin-top:18px"><div class="code-head"><span>200 · template list</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "status": true,
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "items": [
+    {
+      "templateId": "123456789012345",
+      "name": "order_confirmation",
+      "language": { "code": "en_US" },
+      "status": "APPROVED",
+      "category": "UTILITY",
+      "components": [
+        { "type": "body", "text": "Hello {{1}}, order {{2}} is confirmed." }
+      ],
+      "variables": [
+        { "component": "body", "componentIndex": 0, "parameterIndex": 0, "key": "1", "kind": "text", "example": "" },
+        { "component": "body", "componentIndex": 0, "parameterIndex": 1, "key": "2", "kind": "text", "example": "" }
+      ]
+    }
+  ],
+  "truncated": false,
+  "requestId": "96fe6806-a769-451e-918a-034b33d06dc1"
+}</code></pre></div>
+      </section>
+
+      <section id="template">
+        <p class="eyebrow">WhatsApp</p><h2>Fetch template</h2>
+        <p class="intro">Fetch one template by Meta template name for a WhatsApp channel. When the template exists in multiple languages, every matching variant is returned unless you filter with <code class="plain">language</code>.</p>
+        <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/templates/order_confirmation?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4</code></div>
+        <div class="table-wrap" style="margin:22px 0"><table>
+          <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>template name</code></td><td class="yes">Yes</td><td>Path segment. Meta template name using lowercase letters, numbers, and underscores only.</td></tr>
+            <tr><td><code>channelId</code></td><td class="yes">Yes</td><td>Helixcer ID of the WhatsApp channel. Query parameter.</td></tr>
+            <tr><td><code>language</code></td><td>No</td><td>Optional language filter such as <code>en_US</code>. When omitted, all language variants for the name are returned.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="code-card"><div class="code-head"><span>cURL · fetch template</span><button class="copy" type="button">Copy</button></div><pre><code>curl --request GET \
+  --url 'https://api.chat.helixcer.com/api/v1/whatsapp/templates/order_confirmation?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4&amp;language=en_US' \
+  --header 'Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY' \
+  --header 'X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0'</code></pre></div>
+        <div class="code-card" style="margin-top:18px"><div class="code-head"><span>200 · template</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "status": true,
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "name": "order_confirmation",
+  "language": "en_US",
+  "items": [
+    {
+      "templateId": "123456789012345",
+      "name": "order_confirmation",
+      "language": { "code": "en_US" },
+      "status": "APPROVED",
+      "category": "UTILITY",
+      "components": [
+        { "type": "body", "text": "Hello {{1}}, order {{2}} is confirmed." }
+      ],
+      "variables": [
+        { "component": "body", "componentIndex": 0, "parameterIndex": 0, "key": "1", "kind": "text", "example": "" },
+        { "component": "body", "componentIndex": 0, "parameterIndex": 1, "key": "2", "kind": "text", "example": "" }
+      ]
+    }
+  ],
+  "requestId": "f2baa47a-97e6-47c8-a200-7a235cad5d92"
+}</code></pre></div>
       </section>
 
       <section id="examples">

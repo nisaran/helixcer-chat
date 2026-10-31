@@ -847,6 +847,20 @@ async function handleExternalApi(request, env, ctx, url) {
       response.headers.set('X-Request-Id', requestId);
       return response;
     }
+    if (url.pathname === '/api/v1/whatsapp/templates' && request.method === 'GET') {
+      requireApiScope(apiPrincipal, 'whatsapp:template:send');
+      const response = await listExternalWhatsAppTemplates(env, url, apiPrincipal, requestId);
+      response.headers.set('X-Request-Id', requestId);
+      return response;
+    }
+    const templateMatch = url.pathname.match(/^\/api\/v1\/whatsapp\/templates\/([^/]+)$/);
+    if (templateMatch && request.method === 'GET') {
+      requireApiScope(apiPrincipal, 'whatsapp:template:send');
+      const response = await fetchExternalWhatsAppTemplate(env, url, apiPrincipal, requestId,
+        decodeURIComponent(templateMatch[1]));
+      response.headers.set('X-Request-Id', requestId);
+      return response;
+    }
     const statusMatch = url.pathname.match(/^\/api\/v1\/messages\/([^/]+)$/);
     if (statusMatch && request.method === 'GET') {
       requireApiScope(apiPrincipal, 'messages:read');
@@ -979,18 +993,10 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
     input.contact?.displayName || '', now);
   const expiresAt = new Date(Date.now() + EXTERNAL_API_IDEMPOTENCY_DAYS * 86400000).toISOString();
   const firstRetryAt = new Date(Date.now() + 30000).toISOString();
+  const contactUpdates = await externalContactUpdateStatements(env, principal.workspaceId, channel,
+    identity, input.contact, now);
   const statements = [
-    ...(input.contact?.displayName ? [
-      env.DB.prepare(`UPDATE contacts SET display_name=?3,updated_at=?4
-        WHERE contact_id=?1 AND workspace_id=?2`)
-        .bind(identity.contactId, principal.workspaceId, input.contact.displayName, now),
-      env.DB.prepare(`UPDATE channel_identities SET display_name=?4
-        WHERE contact_id=?1 AND workspace_id=?2 AND channel_id=?3`)
-        .bind(identity.contactId, principal.workspaceId, channel.channelId, input.contact.displayName),
-      env.DB.prepare(`UPDATE contact_identities SET display_name=?4,updated_at=?5
-        WHERE contact_id=?1 AND workspace_id=?2 AND identity_id=?3`)
-        .bind(identity.contactId, principal.workspaceId, identity.identityId, input.contact.displayName, now)
-    ] : []),
+    ...contactUpdates,
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
         status,timestamp,payload_json,workspace_id,sender_login,sender_name)
       VALUES (?1,?2,?3,?4,?5,'outbound','template',?6,'pending',?7,?8,?9,?10,?11)`)
@@ -1149,17 +1155,170 @@ export function validateWhatsAppTemplateRequest(payload) {
   rejectUnknownKeys(payload, new Set(['channelId', 'to', 'contact', 'template', 'clientReference', 'previewText']), 'request');
   const channelId = cleanId(payload.channelId, 'Channel ID');
   const to = normalizeWhatsAppRecipient(payload.to);
-  let contact = null;
-  if (payload.contact !== undefined && payload.contact !== null) {
-    if (!isPlainObject(payload.contact)) throw httpError(400, 'Contact must be an object.');
-    rejectUnknownKeys(payload.contact, new Set(['displayName']), 'contact');
-    const displayName = cleanRequired(payload.contact.displayName, 'Contact display name', 120);
-    contact = { displayName };
-  }
+  const contact = validateExternalTemplateContact(payload.contact);
   const clientReference = payload.clientReference === undefined ? '' : cleanOptionalText(payload.clientReference, 'Client reference', 200);
   const previewText = payload.previewText === undefined ? '' : cleanOptionalText(payload.previewText, 'Preview text', MAX_TEXT_LENGTH);
   const template = validateWhatsAppTemplate(payload.template);
   return { channelId, to, contact, template, clientReference, previewText };
+}
+
+export function validateExternalTemplateContact(value) {
+  if (value === undefined || value === null) return null;
+  if (!isPlainObject(value)) throw httpError(400, 'Contact must be an object.');
+  rejectUnknownKeys(value, new Set(['displayName', 'name', 'company', 'tags']), 'contact');
+  if (!Object.keys(value).length) throw httpError(400, 'Provide at least one contact field.');
+  if (value.displayName !== undefined && value.name !== undefined &&
+      String(value.displayName).trim() !== String(value.name).trim()) {
+    throw httpError(400, 'Display name and name must match when both are supplied.');
+  }
+  const contact = {};
+  const suppliedName = value.displayName === undefined ? value.name : value.displayName;
+  if (suppliedName !== undefined) {
+    if (typeof suppliedName !== 'string') throw httpError(400, 'Contact name must be text.');
+    contact.displayName = cleanRequired(suppliedName, 'Contact name', 120);
+  }
+  if (value.company !== undefined) {
+    contact.company = cleanOptionalText(value.company, 'Company', 160);
+  }
+  if (value.tags !== undefined) {
+    contact.tags = validateContactTags(value.tags);
+  }
+  return contact;
+}
+
+async function externalContactUpdateStatements(env, workspaceId, channel, identity, contact, now) {
+  if (!contact) return [];
+  const existing = await env.DB.prepare(`SELECT display_name,company,tags_json FROM contacts
+    WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, identity.contactId).first();
+  if (!existing) return [];
+  const displayName = contact.displayName !== undefined ? contact.displayName : String(existing.display_name || '');
+  const company = contact.company !== undefined ? contact.company : String(existing.company || '');
+  const tags = contact.tags !== undefined ? contact.tags : storedContactTags(existing.tags_json);
+  const statements = [
+    env.DB.prepare(`UPDATE contacts SET display_name=?3,company=?4,tags_json=?5,updated_at=?6
+      WHERE contact_id=?1 AND workspace_id=?2`)
+      .bind(identity.contactId, workspaceId, displayName, company, JSON.stringify(tags), now)
+  ];
+  if (contact.displayName !== undefined) {
+    statements.push(
+      env.DB.prepare(`UPDATE channel_identities SET display_name=?4
+        WHERE contact_id=?1 AND workspace_id=?2 AND channel_id=?3`)
+        .bind(identity.contactId, workspaceId, channel.channelId, displayName),
+      env.DB.prepare(`UPDATE contact_identities SET display_name=?4,updated_at=?5
+        WHERE contact_id=?1 AND workspace_id=?2 AND identity_id=?3`)
+        .bind(identity.contactId, workspaceId, identity.identityId, displayName, now)
+    );
+  }
+  if (contact.displayName !== undefined || contact.tags !== undefined) {
+    statements.push(
+      env.DB.prepare(`UPDATE conversations SET
+          subject=CASE WHEN ?4=1 THEN ?5 ELSE subject END,
+          tags_json=CASE WHEN ?6=1 THEN ?7 ELSE tags_json END,
+          updated_at=?8
+        WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3`)
+        .bind(workspaceId, identity.contactId, channel.channelId,
+          contact.displayName !== undefined ? 1 : 0, displayName,
+          contact.tags !== undefined ? 1 : 0, JSON.stringify(tags), now)
+    );
+  }
+  return statements;
+}
+
+async function resolveExternalWhatsAppChannel(env, principal, channelId) {
+  const channel = await getChannel(env, channelId, 'whatsapp_cloud', principal.workspaceId);
+  if (!channel) throw apiError(404, 'channel_not_found', 'WhatsApp channel not found.');
+  if (!channel.config?.phoneNumberId) {
+    throw apiError(409, 'channel_not_ready', 'The WhatsApp channel is missing its Phone Number ID.');
+  }
+  const accessToken = await env.DB.prepare(`SELECT 1 FROM channel_credentials
+    WHERE workspace_id=?1 AND channel_id=?2 AND credential_key='accessToken'`)
+    .bind(principal.workspaceId, channel.channelId).first();
+  if (!accessToken) throw apiError(409, 'channel_not_ready', 'The WhatsApp channel is missing its access token.');
+  if (!/^\d{5,40}$/.test(String(channel.config?.wabaId || '').trim())) {
+    throw apiError(409, 'channel_not_ready', 'The WhatsApp channel is missing its WhatsApp Business Account ID.');
+  }
+  return channel;
+}
+
+function externalTemplateView(template) {
+  return {
+    templateId: template.templateId,
+    name: template.name,
+    language: template.language,
+    status: template.status,
+    category: template.category,
+    components: template.components,
+    variables: template.variables
+  };
+}
+
+async function listExternalWhatsAppTemplates(env, url, principal, requestId) {
+  const channelId = cleanId(url.searchParams.get('channelId'), 'Channel ID');
+  const channel = await resolveExternalWhatsAppChannel(env, principal, channelId);
+  let result;
+  try {
+    result = await listWhatsAppChannelTemplates(env, channel, {
+      approvedOnly: false,
+      includeMetadata: true,
+      forceRefresh: url.searchParams.get('refresh') === '1'
+    });
+  } catch (error) {
+    throw mapExternalTemplateLookupError(error);
+  }
+  await auditApiKey(env, principal, 'list_templates', 'channel', channel.channelId, {
+    count: result.items.length, truncated: Boolean(result.truncated)
+  });
+  return json({
+    status: true,
+    channelId: channel.channelId,
+    items: result.items.map(externalTemplateView),
+    truncated: Boolean(result.truncated),
+    requestId
+  });
+}
+
+async function fetchExternalWhatsAppTemplate(env, url, principal, requestId, templateName) {
+  const channelId = cleanId(url.searchParams.get('channelId'), 'Channel ID');
+  const name = cleanRequired(templateName, 'Template name', 512);
+  if (!/^[a-z0-9_]+$/.test(name)) {
+    throw apiError(400, 'invalid_template_name', 'Template name may contain only lowercase letters, numbers, and underscores.');
+  }
+  let language = '';
+  if (url.searchParams.get('language') !== null) {
+    language = cleanRequired(url.searchParams.get('language'), 'Template language code', 35);
+    if (!/^[A-Za-z]{2,3}(?:_[A-Za-z0-9]{2,8})?$/.test(language)) {
+      throw apiError(400, 'invalid_template_language', 'Template language code is invalid.');
+    }
+  }
+  const channel = await resolveExternalWhatsAppChannel(env, principal, channelId);
+  let items;
+  try {
+    items = await listWhatsAppTemplatesByName(env, channel, name);
+  } catch (error) {
+    throw mapExternalTemplateLookupError(error);
+  }
+  if (language) items = items.filter(item => item.language.code === language);
+  if (!items.length) throw apiError(404, 'template_not_found', 'Template not found for this WhatsApp channel.');
+  await auditApiKey(env, principal, 'fetch_template', 'channel', channel.channelId, {
+    templateName: name, language, count: items.length
+  });
+  return json({
+    status: true,
+    channelId: channel.channelId,
+    name,
+    ...(language ? { language } : {}),
+    items: items.map(externalTemplateView),
+    requestId
+  });
+}
+
+function mapExternalTemplateLookupError(error) {
+  const status = Number(error?.status) || 500;
+  if (status === 409) return apiError(409, 'channel_not_ready', cleanError(error));
+  if (status === 422) return apiError(422, 'provider_rejected', cleanError(error));
+  if (status === 502) return apiError(502, 'provider_unavailable', cleanError(error));
+  if (status >= 400 && status < 500) return apiError(status, error?.code || 'invalid_request', cleanError(error));
+  return error;
 }
 
 export function validateWhatsAppTemplate(value) {
@@ -4699,7 +4858,7 @@ async function writeWhatsAppTemplateCache(request, value) {
   }
 }
 
-async function findWhatsAppChannelTemplate(env, channel, name, languageCode) {
+async function listWhatsAppTemplatesByName(env, channel, name) {
   const wabaId = String(channel.config?.wabaId || '').trim();
   if (!/^\d{5,40}$/.test(wabaId)) throw httpError(409, 'The WhatsApp Business Account ID is not configured.');
   const credentials = await readChannelCredentials(env, channel);
@@ -4720,11 +4879,24 @@ async function findWhatsAppChannelTemplate(env, channel, name, languageCode) {
     throw httpError(422, `Meta could not load the WhatsApp template: ${detail}`);
   }
   if (!Array.isArray(data.data)) throw httpError(502, 'Meta returned an invalid WhatsApp template response.');
+  const items = [];
+  const seen = new Set();
   for (const value of data.data) {
     const template = sanitizeWhatsAppTemplateDefinition(value);
-    if (template?.status === 'APPROVED' && template.name === name && template.language.code === languageCode) return template;
+    if (!template || template.name !== name) continue;
+    const key = `${template.name}\n${template.language.code}\n${template.status}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(template);
   }
-  return null;
+  items.sort((left, right) => left.language.code.localeCompare(right.language.code) ||
+    left.status.localeCompare(right.status));
+  return items;
+}
+
+async function findWhatsAppChannelTemplate(env, channel, name, languageCode) {
+  const items = await listWhatsAppTemplatesByName(env, channel, name);
+  return items.find(template => template.status === 'APPROVED' && template.language.code === languageCode) || null;
 }
 
 export function sanitizeWhatsAppTemplateDefinition(value) {
