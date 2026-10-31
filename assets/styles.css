@@ -982,7 +982,6 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   color: #a43f2b;
 }
 .import-chat-result .import-chat-stats { margin-top: 4px; }
-.import-chat-result ul { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .import-chat-action-buttons { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .import-chat-actions {
   display: flex;

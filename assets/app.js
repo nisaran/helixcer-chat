@@ -7086,15 +7086,6 @@
       stats.append(item);
     });
     host.append(title, status, stats);
-    if (failed.length) {
-      const list = document.createElement("ul");
-      failed.slice(0, 8).forEach((item) => {
-        const row = document.createElement("li");
-        row.textContent = `${item.phone || item.externalId || "Conversation"}: ${item.error || "Failed"}`;
-        list.append(row);
-      });
-      host.append(list);
-    }
   }
 
   function cancelImportChat() {
