@@ -850,13 +850,17 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261031-sender-columns/);
-  assert.match(html, /assets\/styles\.css\?v=20261031-sender-columns/);
+  assert.match(html, /assets\/app\.js\?v=20261031-sender-below-only/);
+  assert.match(html, /assets\/styles\.css\?v=20261031-sender-below-only/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
+  // Inbound customer names must not render on the bubble; only outbound sender_name below.
+  assert.doesNotMatch(app, /direction === "inbound" && message\.senderName/);
+  assert.match(app, /bubble\.append\(element\("p", "message-sender is-outbound-sender", outboundSender\)\)/);
   assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender/);
   assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*color: var\(--blue\)/);
   assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*font-size: 9px/);
+  assert.doesNotMatch(styles, /^\.message-sender \{/m);
 });
 
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {

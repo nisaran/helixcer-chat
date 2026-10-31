@@ -2672,12 +2672,13 @@
     if (canReplyToMessage(conversation, message)) row.dataset.replyable = "true";
     const stack = element("div", "message-stack");
     const bubble = element("div", "message-bubble");
-    if (message.direction === "inbound" && message.senderName) bubble.append(element("p", "message-sender", message.senderName));
+    // Outbound agent/API name comes only from messages.sender_name (API: senderName)
+    // and is rendered below the timestamp — never above the bubble or inside body text.
+    const outboundSender = message.direction === "outbound" ? String(message.senderName || "").trim() : "";
     const quoted = renderQuotedReply(message.reply, conversation);
     if (quoted) bubble.append(quoted);
     const attachment = renderMessageAttachment(message);
     if (attachment) bubble.append(attachment);
-    const outboundSender = message.direction === "outbound" ? String(message.senderName || "").trim() : "";
     const visibleText = message.attachment
       ? String(message.attachment.caption || (!/^\[[^\]]+\]$/.test(message.text || "") ? message.text || "" : ""))
       : messageDisplayText(message);

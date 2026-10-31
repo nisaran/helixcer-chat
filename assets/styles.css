@@ -513,7 +513,6 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .delivery-status.is-sent, .delivery-status.is-pending { color: #7b8582; }
 .delivery-status.is-delivered { color: #397468; }
 .delivery-status.is-read { color: var(--blue); }
-.message-sender { margin: 0 0 4px; color: var(--brand); font-size: 10px; font-weight: 750; }
 .message-row.is-outbound .message-sender.is-outbound-sender {
   margin: 3px 0 0;
   color: var(--blue);
