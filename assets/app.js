@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261031-paging-ux2";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261031-scroll-only";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -24,7 +24,6 @@
     conversationsLoadError: "",
     conversationSearchRequestId: 0,
     conversationSearchActive: false,
-    conversationScrollArmed: false,
     conversationObserverPaused: false,
     contactPage: 1,
     contactTotal: 0,
@@ -2314,7 +2313,6 @@
     state.loading = true;
     state.conversationsLoadingMore = false;
     state.conversationsSearching = false;
-    state.conversationScrollArmed = false;
     state.conversationObserverPaused = false;
     state.contactsLoadingMore = false;
     renderConversationList();
@@ -2589,8 +2587,10 @@
           : "No conversations in this view.";
       }
       host.append(empty);
-      // Never mix search/empty status with the load-more control.
-      if (!state.conversationsSearching && state.conversationsLoadError && state.conversationNextCursor) {
+      // Keep paging when filters hide the current page but more server pages remain.
+      if (!state.conversationsSearching
+        && state.conversationNextCursor
+        && (state.conversationsLoadError || !state.search.trim())) {
         appendConversationLoadSentinel(host);
       }
       return;
@@ -2639,23 +2639,21 @@
       retry.type = "button";
       retry.dataset.action = "load-more-conversations";
       sentinel.append(retry, element("span", "subtle", state.conversationsLoadError));
-    } else if (state.conversationsLoadingMore) {
-      sentinel.append(element("span", "subtle", "Loading more…"));
-    } else if (state.conversationNextCursor) {
-      const button = element("button", "secondary-button compact-button", "Load more");
-      button.type = "button";
-      button.dataset.action = "load-more-conversations";
-      sentinel.append(button);
-      const probe = element("div", "conversation-load-sentinel");
-      probe.setAttribute("aria-hidden", "true");
-      sentinel.append(probe);
       host.append(sentinel);
-      // Only auto-fetch after the user has scrolled the list; otherwise the
-      // sentinel is in view on first paint and immediately loads page 2+.
-      if (state.conversationScrollArmed) observeConversationListSentinel(probe);
       return;
     }
+    if (state.conversationsLoadingMore) {
+      sentinel.append(element("span", "subtle", "Loading more…"));
+      host.append(sentinel);
+      return;
+    }
+    if (!state.conversationNextCursor) return;
+    const probe = element("div", "conversation-load-sentinel");
+    probe.setAttribute("aria-hidden", "true");
+    sentinel.append(probe);
     host.append(sentinel);
+    observeConversationListSentinel(probe);
+    queueConversationListFill();
   }
 
   function disconnectConversationListObserver() {
@@ -2663,15 +2661,15 @@
     state.conversationListObserver = null;
   }
 
-  function armConversationInfiniteScroll() {
-    state.conversationObserverPaused = false;
-    const probe = $("conversationList")?.querySelector(".conversation-load-sentinel");
-    if (state.conversationScrollArmed) {
-      if (probe && !state.conversationListObserver) observeConversationListSentinel(probe);
-      return;
-    }
-    state.conversationScrollArmed = true;
-    if (probe) observeConversationListSentinel(probe);
+  function queueConversationListFill() {
+    window.requestAnimationFrame(() => {
+      const root = $("conversationList");
+      if (!root || state.conversationObserverPaused) return;
+      if (!state.conversationNextCursor) return;
+      if (state.loading || state.conversationsSearching || state.conversationsLoadingMore) return;
+      // Short / filtered lists may not scroll; keep fetching until the pane can scroll.
+      if (root.scrollHeight <= root.clientHeight + 4) loadMoreConversations();
+    });
   }
 
   function observeConversationListSentinel(probe) {
@@ -2679,10 +2677,10 @@
     const root = $("conversationList");
     if (!root || !probe || typeof IntersectionObserver !== "function") return;
     state.conversationListObserver = new IntersectionObserver((entries) => {
-      if (!state.conversationScrollArmed || state.conversationObserverPaused) return;
+      if (state.conversationObserverPaused) return;
       if (state.loading || state.conversationsSearching || state.conversationsLoadingMore) return;
       if (entries.some((entry) => entry.isIntersecting)) loadMoreConversations();
-    }, { root, rootMargin: "40px 0px" });
+    }, { root, rootMargin: "80px 0px" });
     state.conversationListObserver.observe(probe);
   }
 
@@ -2716,7 +2714,6 @@
     state.conversationsSearching = true;
     state.conversationsLoadingMore = false;
     state.conversationsLoadError = "";
-    state.conversationScrollArmed = false;
     state.conversationObserverPaused = false;
     if (reset) applyConversationPageMeta("");
     renderConversationList();
@@ -9059,7 +9056,11 @@
       if (item) selectConversation(item.dataset.conversationId);
     });
     $("conversationList").addEventListener("scroll", () => {
-      armConversationInfiniteScroll();
+      // Resume auto-load after a tab-focus pause once the user scrolls again.
+      if (state.conversationObserverPaused) {
+        state.conversationObserverPaused = false;
+        queueConversationListFill();
+      }
     }, { passive: true });
 
     let replySwipe = null;
