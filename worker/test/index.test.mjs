@@ -46,20 +46,24 @@ test('outbound sender attribution uses the logged-in name or API', () => {
   }), 'Emergency recovery');
   assert.equal(
     withOutboundSenderAttribution('Hello there', { user: { displayName: 'Nisar' } }, 4096),
-    'Hello there\n\n— Nisar'
+    'Hello there\n\nNisar'
   );
   assert.equal(
     withOutboundSenderAttribution('Caption', { apiKeyId: 'key-1' }, 1024),
-    'Caption\n\n— API'
+    'Caption\n\nAPI'
   );
   assert.equal(
     withOutboundSenderAttribution('', { user: { displayName: 'Nisar' } }, 1024),
-    '— Nisar'
+    'Nisar'
   );
   const longBody = 'x'.repeat(100);
   const attributed = withOutboundSenderAttribution(longBody, { user: { displayName: 'Nisar' } }, 50);
   assert.ok(attributed.length <= 50);
-  assert.ok(attributed.endsWith('— Nisar'));
+  assert.ok(attributed.endsWith('Nisar'));
+  assert.equal(
+    withOutboundSenderAttribution('Hello\n\nNisar', { user: { displayName: 'Nisar' } }, 4096),
+    'Hello\n\nNisar'
+  );
   assert.equal(
     withOutboundSenderAttribution('Hello\n\n— Nisar', { user: { displayName: 'Nisar' } }, 4096),
     'Hello\n\n— Nisar'
