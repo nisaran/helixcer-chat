@@ -1069,8 +1069,9 @@ test("Import Chat preserves Interakt delivered and read timestamps", () => {
   assert.match(app, /normalizeMessageStatusHistory/);
   assert.match(app, /messageStatusHistoryTitle/);
   assert.match(app, /messageStatusHistoryEntries/);
-  assert.match(app, /\["Seen at", history\.readAt\]/);
-  assert.match(app, /\["Delivered at", history\.deliveredAt\]/);
+  assert.match(app, /\["Seen", history\.readAt\]/);
+  assert.match(app, /\["Delivered", history\.deliveredAt\]/);
+  assert.match(app, /\$\{entry\.label\}:/);
 });
 
 test("outbound messages expose a status-history info popup with exact local timestamps", () => {
@@ -1081,8 +1082,11 @@ test("outbound messages expose a status-history info popup with exact local time
   assert.match(app, /message-status-menu-label/);
   assert.match(app, /message-status-menu-time/);
   assert.match(styles, /\.message-status-info/);
-  assert.match(styles, /\.message-status-menu-label/);
-  assert.match(styles, /\.message-status-menu-time/);
+  assert.match(styles, /\.message-status-menu-label[^}]*font-weight:\s*750/s);
+  assert.match(styles, /\.message-status-menu-time[^}]*font-weight:\s*400/s);
+  assert.match(styles, /\.message-status-menu-label[^}]*font-size:\s*10px/s);
+  assert.match(styles, /\.message-status-menu-time[^}]*font-size:\s*10px/s);
+  assert.match(styles, /\.message-status-menu-title[^}]*font-size:\s*8px/s);
   const start = app.indexOf("function formatStatusHistoryTime");
   const end = app.indexOf("function formatCalendarDate", start);
   const formatStatusHistoryTime = Function(`${app.slice(start, end)}\nreturn formatStatusHistoryTime;`)();
@@ -1102,8 +1106,8 @@ test("outbound messages expose a status-history info popup with exact local time
     },
   });
   assert.deepEqual(rows.map((row) => [row.label, row.when]), [
-    ["Sent at", formatStatusHistoryTime("2026-10-31T07:16:53.000Z")],
-    ["Delivered at", formatStatusHistoryTime("2026-10-31T07:16:54.000Z")],
+    ["Sent", formatStatusHistoryTime("2026-10-31T07:16:53.000Z")],
+    ["Delivered", formatStatusHistoryTime("2026-10-31T07:16:54.000Z")],
   ]);
-  assert.equal(rows.some((row) => row.label === "Seen at"), false);
+  assert.equal(rows.some((row) => row.label === "Seen"), false);
 });

@@ -1898,10 +1898,10 @@
     if (!history) return [];
     // Only include statuses that have a real timestamp — never blank rows.
     return [
-      ["Sent at", history.sentAt],
-      ["Delivered at", history.deliveredAt],
-      ["Seen at", history.readAt],
-      ["Failed at", history.failedAt],
+      ["Sent", history.sentAt],
+      ["Delivered", history.deliveredAt],
+      ["Seen", history.readAt],
+      ["Failed", history.failedAt],
     ].flatMap(([label, value]) => {
       const when = formatStatusHistoryTime(value);
       return when ? [{ label, when }] : [];
@@ -1910,7 +1910,7 @@
 
   function messageStatusHistoryTitle(message) {
     return messageStatusHistoryEntries(message)
-      .map((entry) => `${entry.label}\n${entry.when}`)
+      .map((entry) => `${entry.label}: ${entry.when}`)
       .join("\n");
   }
 
@@ -8227,8 +8227,9 @@
     const list = element("div", "message-status-menu-list");
     entries.forEach((entry) => {
       const row = element("div", "message-status-menu-row");
-      row.append(element("span", "message-status-menu-label", entry.label));
-      row.append(element("span", "message-status-menu-time", entry.when));
+      const label = element("span", "message-status-menu-label", `${entry.label}:`);
+      const time = element("span", "message-status-menu-time", entry.when);
+      row.append(label, document.createTextNode(" "), time);
       list.append(row);
     });
     menu.append(list);
