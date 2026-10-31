@@ -226,17 +226,66 @@ export function mapInteraktMessage(message) {
   };
 }
 
+/** Common WhatsApp / Interakt failure codes when the export only stores a code. */
+const PROVIDER_ERROR_LABELS = Object.freeze({
+  10: 'Permission denied',
+  100: 'Invalid parameter',
+  368: 'Temporarily blocked for policies',
+  1013: 'Recipient is not a valid WhatsApp user',
+  1014: 'Media URL request failed',
+  2001: 'Template does not exist',
+  130472: "User's phone number is part of an experiment",
+  131026: 'Message undeliverable',
+  131047: 'More than 24 hours since the customer last replied',
+  131049: 'Not delivered to maintain healthy ecosystem engagement',
+  131053: 'Media download failed',
+  132001: 'Template does not exist',
+  WA400: 'Invalid parameter'
+});
+
+/** Turn Interakt/Meta JSON blobs into a short human-readable reason. */
+export function normalizeInteraktFailureReason(value) {
+  if (value == null) return '';
+  if (typeof value === 'object') {
+    const nested = value?.error && typeof value.error === 'object' ? value.error : value;
+    const details = nested?.error_data?.details || nested?.details || '';
+    const message = nested?.message || nested?.error_user_msg || nested?.title || '';
+    const parts = [String(message || '').trim(), String(details || '').trim()].filter(Boolean);
+    if (parts.length) return parts.join(' — ').slice(0, 500);
+    try { return JSON.stringify(value).slice(0, 500); } catch { return ''; }
+  }
+  const text = String(value).trim();
+  if (!text) return '';
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try {
+      return normalizeInteraktFailureReason(JSON.parse(text)) || text.slice(0, 500);
+    } catch {
+      return text.slice(0, 500);
+    }
+  }
+  return text.slice(0, 500);
+}
+
+export function providerErrorLabel(code) {
+  const key = String(code || '').trim();
+  if (!key) return '';
+  if (PROVIDER_ERROR_LABELS[key]) return PROVIDER_ERROR_LABELS[key];
+  const numeric = key.replace(/^#/, '');
+  return PROVIDER_ERROR_LABELS[numeric] || '';
+}
+
 /** Build a compact provider error string for failed Interakt sends. */
 export function interaktMessageError(message, status = '') {
   const normalizedStatus = String(status || mapInteraktStatus(message?.status, 'outbound') || '').toLowerCase();
   const raw = message?.raw && typeof message.raw === 'object' ? message.raw : {};
-  const reason = String(
+  let reason = normalizeInteraktFailureReason(
     message?.error
     || message?.failure_reason
     || raw.channel_failure_reason
     || raw.failure_reason
+    || raw.error
     || ''
-  ).trim();
+  );
   const code = String(
     message?.error_code
     || message?.channel_error_code
@@ -244,6 +293,7 @@ export function interaktMessageError(message, status = '') {
     || raw.error_code
     || ''
   ).trim();
+  if (!reason && code) reason = providerErrorLabel(code);
   if (!reason && !code) return '';
   if (normalizedStatus && normalizedStatus !== 'failed' && normalizedStatus !== 'error') {
     // Keep unexpected non-failed errors if Interakt still provided a reason.

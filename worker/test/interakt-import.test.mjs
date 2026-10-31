@@ -174,7 +174,27 @@ test('maps Interakt template and media messages', () => {
   );
   assert.equal(
     interaktMessageError({ raw: { channel_error_code: '100' } }, 'failed'),
-    'Provider error 100'
+    'Invalid parameter (100)'
+  );
+  assert.equal(
+    interaktMessageError({
+      status: 'Failed',
+      raw: {
+        channel_error_code: 'WA400',
+        channel_failure_reason: JSON.stringify({
+          error: {
+            message: '(#100) Invalid parameter',
+            code: 100,
+            error_data: { details: 'Parameter Invalid' }
+          }
+        })
+      }
+    }),
+    '(#100) Invalid parameter — Parameter Invalid (WA400)'
+  );
+  assert.equal(
+    interaktMessageError({ raw: { channel_error_code: '368' } }, 'failed'),
+    'Temporarily blocked for policies (368)'
   );
 
   const image = mapInteraktMessage({
