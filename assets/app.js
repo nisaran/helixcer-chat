@@ -15,6 +15,8 @@
     filters: new Set(["open"]),
     search: "",
     contactSearch: "",
+    contactPage: 1,
+    contactPageSize: 100,
     channels: [],
     contacts: [],
     conversations: [],
@@ -3758,10 +3760,39 @@
     return values.sort((a, b) => b - a)[0]?.toISOString() || "";
   }
 
-  function renderContacts() {
+  function contactPageSizeValue() {
+    return state.contactPageSize === "all" ? Number.POSITIVE_INFINITY : Math.max(1, Number(state.contactPageSize) || 100);
+  }
+
+  function filteredContacts() {
     const search = state.contactSearch.trim().toLocaleLowerCase();
-    const contacts = state.contacts.filter((contact) => contactSearchText(contact).includes(search));
+    return state.contacts.filter((contact) => contactSearchText(contact).includes(search));
+  }
+
+  function renderContacts() {
+    const contacts = filteredContacts();
+    const pageSize = contactPageSizeValue();
+    const totalPages = pageSize === Number.POSITIVE_INFINITY ? 1 : Math.max(1, Math.ceil(contacts.length / pageSize));
+    if (state.contactPage > totalPages) state.contactPage = totalPages;
+    if (state.contactPage < 1) state.contactPage = 1;
+    const start = pageSize === Number.POSITIVE_INFINITY ? 0 : (state.contactPage - 1) * pageSize;
+    const pageContacts = pageSize === Number.POSITIVE_INFINITY ? contacts : contacts.slice(start, start + pageSize);
+    const end = contacts.length ? start + pageContacts.length : 0;
     $("contactCount").textContent = `${contacts.length} contact${contacts.length === 1 ? "" : "s"}`;
+    const pagination = $("contactPagination");
+    const pageLabel = $("contactPageLabel");
+    const prevButton = $("contactPrevPage");
+    const nextButton = $("contactNextPage");
+    if (pagination) {
+      pagination.hidden = false;
+      if (pageLabel) {
+        pageLabel.textContent = contacts.length
+          ? `${start + 1}–${end} of ${contacts.length}`
+          : `0 of 0`;
+      }
+      if (prevButton) prevButton.disabled = state.contactPage <= 1 || !contacts.length;
+      if (nextButton) nextButton.disabled = state.contactPage >= totalPages || !contacts.length;
+    }
     const tbody = $("contactTableBody");
     tbody.replaceChildren();
     if (!contacts.length) {
@@ -3774,7 +3805,7 @@
       tbody.append(row);
       return;
     }
-    contacts.forEach((contact, index) => {
+    pageContacts.forEach((contact) => {
       const row = document.createElement("tr");
       row.dataset.contactId = contact.contactId;
       row.tabIndex = 0;
@@ -3782,17 +3813,11 @@
       row.setAttribute("aria-label", `View and edit ${contact.displayName}`);
       const identityCell = document.createElement("td");
       const identity = element("div", "contact-cell");
-      const avatar = element("span", "avatar", initials(contact.displayName));
-      const palette = avatarPalettes[index % avatarPalettes.length];
-      avatar.style.background = palette[0];
-      avatar.style.color = palette[1];
-      const copy = document.createElement("div");
       const count = contact.identities.length;
-      copy.append(
+      identity.append(
         element("strong", "", contact.displayName),
         element("span", "contact-count-copy", `${count} messaging ID${count === 1 ? "" : "s"}`),
       );
-      identity.append(avatar, copy);
       identityCell.append(identity);
       row.append(identityCell);
 
@@ -3807,7 +3832,8 @@
       const lastActive = contactLastActive(contact);
       row.append(tableCell(lastActive ? relativeTime(lastActive) : "—"));
       const statusCell = document.createElement("td");
-      statusCell.append(element("span", `status-chip${contact.status === "inactive" ? " is-inactive" : ""}`, contact.status === "inactive" ? "Inactive" : "Active"));
+      const closed = contact.status === "inactive";
+      statusCell.append(element("span", `status-chip${closed ? " is-inactive" : ""}`, closed ? "Closed" : "Open"));
       row.append(statusCell);
       tbody.append(row);
     });
@@ -8618,7 +8644,26 @@
     });
 
     $("conversationSearch").addEventListener("input", (event) => { state.search = event.target.value; renderConversationList(); });
-    $("contactSearch").addEventListener("input", (event) => { state.contactSearch = event.target.value; renderContacts(); });
+    $("contactSearch").addEventListener("input", (event) => {
+      state.contactSearch = event.target.value;
+      state.contactPage = 1;
+      renderContacts();
+    });
+    $("contactPageSize").addEventListener("change", (event) => {
+      const value = event.target.value;
+      state.contactPageSize = value === "all" ? "all" : Number(value) || 100;
+      state.contactPage = 1;
+      renderContacts();
+    });
+    $("contactPrevPage").addEventListener("click", () => {
+      if (state.contactPage <= 1) return;
+      state.contactPage -= 1;
+      renderContacts();
+    });
+    $("contactNextPage").addEventListener("click", () => {
+      state.contactPage += 1;
+      renderContacts();
+    });
     $("whatsappTemplateSearch").addEventListener("input", (event) => {
       state.whatsappTemplateSearch = event.target.value;
       renderWhatsAppTemplateResults();

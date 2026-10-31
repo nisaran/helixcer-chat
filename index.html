@@ -341,9 +341,9 @@
         </div>
       </section>
 
-      <section class="route content-route" id="contactsRoute" data-route-panel="contacts" aria-labelledby="contactsTitle" hidden>
-        <div class="route-heading">
-          <div><p class="eyebrow">Audience</p><h2 id="contactsTitle">Contacts</h2><p>One person record with one ID for each messaging platform.</p></div>
+      <section class="route content-route contacts-route" id="contactsRoute" data-route-panel="contacts" aria-labelledby="contactsTitle" hidden>
+        <div class="route-heading contacts-heading">
+          <div><h2 id="contactsTitle">Contacts</h2></div>
           <div class="route-heading-actions">
             <button class="secondary-button" type="button" data-action="export-contacts">Export contacts</button>
             <button class="primary-button" type="button" data-action="new-contact"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add contact</button>
@@ -357,7 +357,25 @@
                 <label class="sr-only" for="contactSearch">Search contacts</label>
                 <input id="contactSearch" type="search" placeholder="Search contacts…">
               </div>
-              <span class="subtle" id="contactCount">0 contacts</span>
+              <div class="contact-toolbar-meta">
+                <span class="subtle" id="contactCount">0 contacts</span>
+                <div class="contact-pagination" id="contactPagination" hidden>
+                  <label class="contact-page-size">
+                    <span class="sr-only">Rows per page</span>
+                    <select id="contactPageSize" aria-label="Rows per page">
+                      <option value="100" selected>100</option>
+                      <option value="500">500</option>
+                      <option value="1000">1000</option>
+                      <option value="all">All</option>
+                    </select>
+                  </label>
+                  <span class="subtle" id="contactPageLabel">1–0 of 0</span>
+                  <div class="contact-page-buttons">
+                    <button class="secondary-button compact-button" type="button" id="contactPrevPage" aria-label="Previous page" disabled>Prev</button>
+                    <button class="secondary-button compact-button" type="button" id="contactNextPage" aria-label="Next page" disabled>Next</button>
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="contact-table-wrap">
               <table class="contact-table">
