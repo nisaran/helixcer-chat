@@ -1069,9 +1069,8 @@ test("Import Chat preserves Interakt delivered and read timestamps", () => {
   assert.match(app, /normalizeMessageStatusHistory/);
   assert.match(app, /messageStatusHistoryTitle/);
   assert.match(app, /messageStatusHistoryEntries/);
-  assert.match(app, /\["Seen", history\.readAt\]/);
-  assert.match(app, /\["Delivered", history\.deliveredAt\]/);
-  assert.match(app, /\$\{label\}: \$\{when\}/);
+  assert.match(app, /\["Seen at", history\.readAt\]/);
+  assert.match(app, /\["Delivered at", history\.deliveredAt\]/);
 });
 
 test("outbound messages expose a status-history info popup with exact local timestamps", () => {
@@ -1079,32 +1078,32 @@ test("outbound messages expose a status-history info popup with exact local time
   assert.match(app, /toggle-message-status-history/);
   assert.match(app, /function formatStatusHistoryTime/);
   assert.match(app, /function toggleMessageStatusHistory/);
-  assert.match(app, /message-status-menu-line/);
+  assert.match(app, /message-status-menu-label/);
+  assert.match(app, /message-status-menu-time/);
   assert.match(styles, /\.message-status-info/);
-  assert.match(styles, /\.message-status-menu-line/);
-  assert.doesNotMatch(app, /Sent at/);
+  assert.match(styles, /\.message-status-menu-label/);
+  assert.match(styles, /\.message-status-menu-time/);
   const start = app.indexOf("function formatStatusHistoryTime");
   const end = app.indexOf("function formatCalendarDate", start);
   const formatStatusHistoryTime = Function(`${app.slice(start, end)}\nreturn formatStatusHistoryTime;`)();
   assert.equal(formatStatusHistoryTime(new Date(2026, 9, 21, 13, 30, 45)), "21-Oct-2026 · 01:30:45 pm");
   assert.equal(formatStatusHistoryTime(new Date(2026, 0, 5, 0, 5, 9)), "05-Jan-2026 · 12:05:09 am");
-  const entryStart = app.indexOf("function messageStatusHistoryEntries");
-  const entryEnd = app.indexOf("function messageStatusHistoryTitle", entryStart);
+  const entryEnd = app.indexOf("function messageStatusHistoryTitle");
   const resolveStart = app.indexOf("function resolveMessageStatusHistory");
   const normalizeStart = app.indexOf("function normalizeMessageStatusHistory");
   const normalizeEnd = app.indexOf("function resolveMessageStatusHistory", normalizeStart);
   const { entriesFor } = Function(`${app.slice(normalizeStart, normalizeEnd)}\n${app.slice(resolveStart, entryEnd)}\n${app.slice(start, end)}\nreturn { entriesFor: messageStatusHistoryEntries };`)();
   const rows = entriesFor({
-    status: "read",
-    timestamp: "2026-10-31T06:49:28.000Z",
+    status: "delivered",
+    timestamp: "2026-10-31T07:16:53.000Z",
     statusHistory: {
-      sentAt: "2026-10-31T06:49:28.000Z",
-      readAt: "2026-10-31T06:49:28.000Z",
+      sentAt: "2026-10-31T07:16:53.000Z",
+      deliveredAt: "2026-10-31T07:16:54.000Z",
     },
   });
-  assert.deepEqual(rows.map((row) => row.line), [
-    `Sent: ${formatStatusHistoryTime("2026-10-31T06:49:28.000Z")}`,
-    `Seen: ${formatStatusHistoryTime("2026-10-31T06:49:28.000Z")}`,
+  assert.deepEqual(rows.map((row) => [row.label, row.when]), [
+    ["Sent at", formatStatusHistoryTime("2026-10-31T07:16:53.000Z")],
+    ["Delivered at", formatStatusHistoryTime("2026-10-31T07:16:54.000Z")],
   ]);
-  assert.equal(rows.some((row) => row.label === "Delivered"), false);
+  assert.equal(rows.some((row) => row.label === "Seen at"), false);
 });
