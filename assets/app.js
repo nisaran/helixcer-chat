@@ -254,6 +254,59 @@
         ["wa-sales", "demo_whatsapp_verify_token"],
         ["instagram-main", "demo_instagram_verify_token"],
       ]);
+      // Pad the demo catalogue so inbox infinite scroll and contacts load-more
+      // are exercisable without a live workspace.
+      const now = Date.now();
+      const agoMinutes = (minutes) => new Date(now - minutes * 60_000).toISOString();
+      const channels = this.data.channels;
+      for (let index = this.data.contacts.length; index < CONTACT_PAGE_SIZE + 25; index += 1) {
+        const n = index + 1;
+        const channel = channels[index % channels.length];
+        const contactId = `ct-demo-${n}`;
+        this.data.contacts.push({
+          contactId,
+          displayName: `Demo Contact ${n}`,
+          company: n % 3 === 0 ? `Company ${n}` : "",
+          channelId: channel.channelId,
+          channelProfileId: `demo-${n}`,
+          phone: n % 2 === 0 ? `+91 90000 ${String(n).padStart(4, "0")}` : "—",
+          email: `demo${n}@example.com`,
+          tags: n % 4 === 0 ? ["Imported"] : ["Demo"],
+          lastMessageAt: agoMinutes(n * 7),
+          identities: [{
+            identityId: `identity-demo-${n}`,
+            platform: connectorPlatform(channel.connectorType),
+            profileId: `demo-${n}`,
+            isPrimary: true,
+            bindings: [{ channelId: channel.channelId, channelName: channel.name }],
+          }],
+        });
+      }
+      for (let index = this.data.conversations.length; index < CONVERSATION_PAGE_SIZE + 15; index += 1) {
+        const n = index + 1;
+        const contact = this.data.contacts[Math.min(index, this.data.contacts.length - 1)];
+        const channel = channels[index % channels.length];
+        const conversationId = `cv-demo-${n}`;
+        this.data.conversations.push({
+          conversationId,
+          contactId: contact.contactId,
+          subject: contact.displayName,
+          channelId: channel.channelId,
+          status: n % 11 === 0 ? "closed" : "open",
+          assignedTo: n % 5 === 0 ? "Unassigned" : "Nisar",
+          unreadCount: n % 7 === 0 ? 1 : 0,
+          lastMessage: `Demo thread message ${n}`,
+          lastMessageAt: agoMinutes(n * 9),
+        });
+        this.data.messages[conversationId] = [{
+          messageId: `msg-demo-${n}`,
+          direction: "inbound",
+          text: `Demo thread message ${n}`,
+          timestamp: agoMinutes(n * 9),
+          status: "received",
+          senderName: contact.displayName,
+        }];
+      }
     }
 
     async bootstrap() {
