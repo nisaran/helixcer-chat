@@ -848,10 +848,13 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261031-sender-attribution/);
-  assert.match(html, /assets\/styles\.css\?v=20261031-sender-attribution/);
+  assert.match(html, /assets\/app\.js\?v=20261031-sender-below-time/);
+  assert.match(html, /assets\/styles\.css\?v=20261031-sender-below-time/);
+  assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender/);
+  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*color: var\(--blue\)/);
+  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*font-size: 9px/);
 });
 
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {

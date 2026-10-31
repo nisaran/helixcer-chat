@@ -1279,13 +1279,11 @@ function outboundSenderLabel(principal) {
 
 function withOutboundSenderAttribution(text, principal, maximum) {
   const label = outboundSenderLabel(principal);
-  const suffix = `\n\n— ${label}`;
+  const suffix = `\n\n${label}`;
   const body = String(text || '');
-  if (!body) {
-    const bare = `— ${label}`;
-    return bare.length <= maximum ? bare : bare.slice(0, maximum);
-  }
-  if (body === `— ${label}` || body.endsWith(suffix) || body.endsWith(`\n— ${label}`)) {
+  if (!body) return label.length <= maximum ? label : label.slice(0, maximum);
+  if (body === label || body === `— ${label}` || body.endsWith(suffix) ||
+      body.endsWith(`\n\n— ${label}`) || body.endsWith(`\n— ${label}`)) {
     return body.slice(0, maximum);
   }
   const maxBody = Math.max(0, maximum - suffix.length);

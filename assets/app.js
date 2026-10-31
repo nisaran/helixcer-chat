@@ -364,9 +364,8 @@
     async sendMessage(conversationId, text, replyToMessageId = "", route = {}) {
       const replyTarget = (this.data.messages[conversationId] || []).find((message) => message.messageId === replyToMessageId);
       const senderName = String(this.data.me?.displayName || this.data.me?.email || "You").trim() || "You";
-      const attributedText = String(text || "").trim()
-        ? `${String(text).trim()}\n\n— ${senderName}`
-        : `— ${senderName}`;
+      const body = String(text || "").trim();
+      const attributedText = body ? `${body}\n\n${senderName}` : senderName;
       const item = {
         messageId: `demo-${Date.now()}`,
         channelMessageId: `demo-channel-${Date.now()}`,
@@ -2625,6 +2624,18 @@
       .filter(Boolean).join(". ");
   }
 
+  function stripOutboundSenderAttribution(text, senderName) {
+    const name = String(senderName || "").trim();
+    let value = String(text || "");
+    if (!name || !value) return value;
+    const suffixes = [`\n\n— ${name}`, `\n— ${name}`, `\n\n${name}`, `\n${name}`];
+    for (const suffix of suffixes) {
+      if (value.endsWith(suffix)) return value.slice(0, -suffix.length).trimEnd();
+    }
+    if (value === name || value === `— ${name}`) return "";
+    return value;
+  }
+
   function replyAuthor(reply, conversation = selectedConversation()) {
     if (reply?.direction === "outbound") return "You";
     if (reply?.direction === "inbound") return conversation?.subject || "Customer";
@@ -2666,19 +2677,13 @@
     if (quoted) bubble.append(quoted);
     const attachment = renderMessageAttachment(message);
     if (attachment) bubble.append(attachment);
+    const outboundSender = message.direction === "outbound" ? String(message.senderName || "").trim() : "";
     const visibleText = message.attachment
       ? String(message.attachment.caption || (!/^\[[^\]]+\]$/.test(message.text || "") ? message.text || "" : ""))
       : messageDisplayText(message);
-    const presentation = templateMessagePresentation(message, visibleText);
+    const presentation = templateMessagePresentation(message, stripOutboundSenderAttribution(visibleText, outboundSender));
     const route = messageRoute(message, conversation) || defaultConversationRoute(conversation);
     if (presentation.text) bubble.append(appendChannelFormattedText(element("p", "message-text"), presentation.text, route || conversation));
-    if (message.direction === "outbound") {
-      const outboundSender = String(message.senderName || "").trim();
-      const textAlreadySigned = outboundSender && String(presentation.text || "").trimEnd().endsWith(`— ${outboundSender}`);
-      if (outboundSender && !textAlreadySigned) {
-        bubble.append(element("p", "message-sender is-outbound-sender", outboundSender));
-      }
-    }
     const templateActions = renderTemplateMessageActions(presentation.buttons);
     const foot = element("div", "message-foot");
     foot.append(element("time", "", formatClock(message.timestamp)));
@@ -2694,6 +2699,9 @@
       foot.append(status);
     }
     bubble.append(foot);
+    if (outboundSender) {
+      bubble.append(element("p", "message-sender is-outbound-sender", outboundSender));
+    }
     const errorText = String(message.error || "").trim();
     if (errorText && ["failed", "error"].includes(String(message.status || "").toLocaleLowerCase())) {
       bubble.append(element("p", "message-error", errorText));
