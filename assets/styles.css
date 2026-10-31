@@ -515,6 +515,17 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .delivery-status.is-read { color: var(--blue); }
 .message-sender { margin: 0 0 4px; color: var(--brand); font-size: 10px; font-weight: 750; }
 .message-failed { color: #b33326; }
+.message-error {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(179, 51, 38, 0.1);
+  color: #8f2a20;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .message-attachment { display: grid; gap: 8px; min-width: min(260px, 58vw); margin: -4px -6px 8px; overflow: hidden; border: 1px solid rgba(102,113,109,.12); border-radius: 11px; background: var(--chat-attachment-incoming); }
 .message-row.is-outbound .message-attachment { background: var(--chat-attachment-outgoing); }
 .message-media-link { display: block; width: 100%; border: 0; background: transparent; padding: 0; text-align: inherit; line-height: 0; cursor: zoom-in; }

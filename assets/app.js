@@ -1843,6 +1843,7 @@
       connectorType: String(raw.connectorType || raw.route?.connectorType || ""),
       channelName: String(raw.channelName || raw.route?.channelName || ""),
       channelProfileId: String(raw.channelProfileId || raw.profileId || raw.route?.channelProfileId || ""),
+      error: String(raw.error || ""),
       template,
       reply,
     };
@@ -2631,11 +2632,18 @@
     if (message.direction === "outbound") {
       const delivery = outboundDeliveryStatus(message.status);
       const status = element("span", delivery.className, delivery.label);
-      status.title = `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`;
+      const errorText = String(message.error || "").trim();
+      status.title = errorText
+        ? `Failed: ${errorText}`
+        : `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`;
       status.setAttribute("aria-label", status.title);
       foot.append(status);
     }
     bubble.append(foot);
+    const errorText = String(message.error || "").trim();
+    if (errorText && ["failed", "error"].includes(String(message.status || "").toLocaleLowerCase())) {
+      bubble.append(element("p", "message-error", errorText));
+    }
     if (templateActions) bubble.append(templateActions);
     stack.append(bubble);
     if (route) {
@@ -7076,14 +7084,27 @@
           status: message?.status || "",
           reply_to: message?.reply_to || message?.raw?.reply_channel_message_id || "",
         };
+        const rawPatch = {};
         // Template bodies live in raw.raw_template; without it the API can only store
         // parameter values joined with middots (e.g. "Acme · 1200").
         if (contentType.toLowerCase() === "template") {
           const rawTemplate = message?.raw?.raw_template;
           if (rawTemplate !== undefined && rawTemplate !== null && rawTemplate !== "") {
-            slimMessage.raw = { raw_template: rawTemplate };
+            rawPatch.raw_template = rawTemplate;
           }
         }
+        const errorCode = message?.raw?.channel_error_code ?? message?.channel_error_code;
+        const failureReason = message?.raw?.channel_failure_reason
+          || message?.channel_failure_reason
+          || message?.failure_reason
+          || "";
+        if (errorCode !== undefined && errorCode !== null && String(errorCode).trim() !== "") {
+          rawPatch.channel_error_code = errorCode;
+        }
+        if (String(failureReason).trim()) {
+          rawPatch.channel_failure_reason = String(failureReason).trim();
+        }
+        if (Object.keys(rawPatch).length) slimMessage.raw = rawPatch;
         return slimMessage;
       }),
     };

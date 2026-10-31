@@ -6,6 +6,7 @@ import {
   defaultInteraktFieldMapping,
   discoverInteraktContactFields,
   extractInteraktCustomer,
+  interaktMessageError,
   mapInteraktMessage,
   INTERAKT_SOURCE
 } from '../src/imports/interakt.js';
@@ -148,6 +149,34 @@ test('maps Interakt template and media messages', () => {
   assert.equal(withDocument.mediaUrl, 'https://www.helixcer.com/_files/ugd/ticket.pdf');
   assert.equal(withDocument.attachment?.type, 'document');
 
+  const failed = mapInteraktMessage({
+    id: 'm1d',
+    channel_message_id: 'wamid.1d',
+    direction: 'outbound',
+    content_type: 'Template',
+    text: JSON.stringify([{ type: 'body', parameters: [{ type: 'text', text: 'Acme' }] }]),
+    status: 'Failed',
+    timestamp: '2026-01-01T00:00:00+0000',
+    raw: {
+      channel_error_code: '2001',
+      channel_failure_reason: 'template_name (demo_template) does not exist in en',
+      raw_template: {
+        name: 'demo_template',
+        language: 'en',
+        body: 'Hello {{1}}'
+      }
+    }
+  });
+  assert.equal(failed.status, 'failed');
+  assert.equal(
+    failed.error,
+    'template_name (demo_template) does not exist in en (2001)'
+  );
+  assert.equal(
+    interaktMessageError({ raw: { channel_error_code: '100' } }, 'failed'),
+    'Provider error 100'
+  );
+
   const image = mapInteraktMessage({
     id: 'm2',
     channel_message_id: 'wamid.2',
@@ -185,5 +214,7 @@ test('dashboard exposes Import Chat field mapping UI', async () => {
   assert.match(app, /slimInteraktConversation/);
   assert.match(app, /raw_template/);
   assert.match(app, /parameter values joined with middots/);
+  assert.match(app, /channel_failure_reason/);
+  assert.match(app, /message-error/);
   assert.equal(INTERAKT_SOURCE, 'interakt');
 });

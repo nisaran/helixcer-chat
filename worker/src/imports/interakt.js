@@ -203,6 +203,7 @@ export function mapInteraktMessage(message) {
   ).trim();
   const status = mapInteraktStatus(message?.status, direction);
   const timestamp = String(message?.timestamp || message?.raw?.created_at_utc || '').trim();
+  const error = interaktMessageError(message, status);
   return {
     externalId,
     providerMessageId,
@@ -210,6 +211,7 @@ export function mapInteraktMessage(message) {
     messageType,
     text,
     status,
+    error,
     timestamp,
     mediaUrl,
     mediaFileName,
@@ -219,6 +221,34 @@ export function mapInteraktMessage(message) {
     ...(presentation?.template ? { template: presentation.template } : {}),
     ...(templateAttachment && !topMediaUrl ? { attachment: templateAttachment } : {})
   };
+}
+
+/** Build a compact provider error string for failed Interakt sends. */
+export function interaktMessageError(message, status = '') {
+  const normalizedStatus = String(status || mapInteraktStatus(message?.status, 'outbound') || '').toLowerCase();
+  const raw = message?.raw && typeof message.raw === 'object' ? message.raw : {};
+  const reason = String(
+    message?.error
+    || message?.failure_reason
+    || raw.channel_failure_reason
+    || raw.failure_reason
+    || ''
+  ).trim();
+  const code = String(
+    message?.error_code
+    || message?.channel_error_code
+    || raw.channel_error_code
+    || raw.error_code
+    || ''
+  ).trim();
+  if (!reason && !code) return '';
+  if (normalizedStatus && normalizedStatus !== 'failed' && normalizedStatus !== 'error') {
+    // Keep unexpected non-failed errors if Interakt still provided a reason.
+    if (!reason) return '';
+  }
+  if (reason && code && !reason.includes(code)) return `${reason} (${code})`.slice(0, 500);
+  if (reason) return reason.slice(0, 500);
+  return `Provider error ${code}`.slice(0, 500);
 }
 
 export function interaktMessageText(message) {

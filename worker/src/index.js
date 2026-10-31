@@ -6266,7 +6266,7 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
     const text = String(mapped.text || '').slice(0, MAX_TEXT_LENGTH);
     const payloadJson = truncateJson(payload);
     if (mapped.providerMessageId) {
-      const existing = await env.DB.prepare(`SELECT message_id, message_type, text, payload_json FROM messages
+      const existing = await env.DB.prepare(`SELECT message_id, message_type, text, payload_json, error, status FROM messages
         WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3 LIMIT 1`)
         .bind(workspaceId, channel.channelId, mapped.providerMessageId).first();
       if (existing) {
@@ -6279,11 +6279,17 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
           && (existing.message_type === 'template' || existingPayload.includes('"interakt"'))
           && text
           && (text !== String(existing.text || '') || refreshAttachment);
-        if (shouldRefreshTemplate) {
+        const errorText = String(mapped.error || '').slice(0, 500);
+        const shouldRefreshError = Boolean(errorText)
+          && errorText !== String(existing.error || '');
+        if (shouldRefreshTemplate || shouldRefreshError) {
           pendingStatements.push(env.DB.prepare(`UPDATE messages
-              SET message_type=?2, text=?3, payload_json=?4, status=?5
-            WHERE workspace_id=?6 AND message_id=?1`)
-            .bind(existing.message_id, mapped.messageType, text, payloadJson, mapped.status, workspaceId));
+              SET message_type=?2, text=?3, payload_json=?4, status=?5, error=?6
+            WHERE workspace_id=?7 AND message_id=?1`)
+            .bind(
+              existing.message_id, mapped.messageType, text, payloadJson, mapped.status,
+              errorText, workspaceId
+            ));
           result.messagesUpdated += 1;
           if (pendingStatements.length >= 40) await flush();
           continue;
@@ -6295,12 +6301,13 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
     const messageId = crypto.randomUUID();
     pendingStatements.push(env.DB.prepare(`INSERT INTO messages
         (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
-         provider_message_id,status,timestamp,payload_json,workspace_id)
-      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)`)
+         provider_message_id,status,error,timestamp,payload_json,workspace_id)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)`)
       .bind(
         messageId, conversationId, identity.contact_id, channel.channelId, identity.identity_id,
         mapped.direction, mapped.messageType, text,
-        mapped.providerMessageId, mapped.status, timestamp, payloadJson, workspaceId
+        mapped.providerMessageId, mapped.status, String(mapped.error || '').slice(0, 500),
+        timestamp, payloadJson, workspaceId
       ));
     result.messagesImported += 1;
     if (pendingStatements.length >= 40) await flush();
