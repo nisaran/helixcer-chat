@@ -521,8 +521,10 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(renderConversationsBody, /conversation-time/);
   assert.match(renderConversationsBody, /unread-badge/);
   assert.match(renderConversationsBody, /loadMoreConversations|conversationNextCursor|conversation-load-more/);
+  assert.match(app, /refreshInboxCatalogue/);
   assert.match(app, /listConversations\(\{[\s\S]*?cursor/);
   assert.match(app, /IntersectionObserver/);
+  assert.match(app, /CONVERSATION_PAGE_SIZE = 100/);
   const contactsStart = app.indexOf("function renderContacts()");
   const contactsEnd = app.indexOf("function contactPlatformRoutes", contactsStart);
   const renderContactsBody = app.slice(contactsStart, contactsEnd);
@@ -530,15 +532,17 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(renderContactsBody, /Closed" : "Open"/);
   assert.doesNotMatch(renderContactsBody, /Inactive" : "Active"|providerLogo|providerLogoPaths|provider-(?:whatsapp|telegram|instagram)\.svg/);
   assert.doesNotMatch(renderContactsBody, /avatarPalettes|element\("span", "avatar"/);
-  assert.match(renderContactsBody, /loadMoreContacts|contactNextCursor|contactLoadMore/);
-  assert.match(app, /listContacts\(\{[\s\S]*?cursor/);
+  assert.match(renderContactsBody, /contactPageLabel|Page \$\{state\.contactPage\}/);
+  assert.match(app, /loadContactsPage/);
   assert.match(app, /refreshContactsCatalogue/);
-  assert.match(html, /id="contactLoadMore"/);
-  assert.match(html, /id="contactLoadMoreButton"/);
-  assert.doesNotMatch(html, /id="contactPageSize"|id="contactPrevPage"|id="contactNextPage"/);
+  assert.match(app, /CONTACT_PAGE_SIZE = 100/);
+  assert.match(html, /id="contactPrevPage"/);
+  assert.match(html, /id="contactNextPage"/);
+  assert.match(html, /id="contactPageLabel"/);
+  assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
-  assert.match(styles, /\.contact-load-more/);
+  assert.match(styles, /\.contact-pagination/);
   assert.match(styles, /\.conversation-load-more/);
 });
 
