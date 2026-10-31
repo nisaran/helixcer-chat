@@ -26,11 +26,10 @@ import {
   timingSafeEqual,
   validateWhatsAppTemplateRequest,
   whatsappReplyWindowState,
-  withOutboundSenderAttribution,
   verifyMetaSignature
 } from '../src/index.js';
 
-test('outbound sender attribution uses the logged-in name or API', () => {
+test('outbound sender labels are internal metadata only', () => {
   assert.equal(outboundSenderLabel({ apiKeyId: 'key-1' }), 'API');
   assert.equal(outboundSenderLabel({
     user: { displayName: 'Nisar Admin', email: 'nisar@example.com' },
@@ -44,30 +43,6 @@ test('outbound sender attribution uses the logged-in name or API', () => {
     authType: 'recovery',
     user: { displayName: 'Emergency recovery', email: 'emergency-recovery' }
   }), 'Emergency recovery');
-  assert.equal(
-    withOutboundSenderAttribution('Hello there', { user: { displayName: 'Nisar' } }, 4096),
-    'Hello there\n\nNisar'
-  );
-  assert.equal(
-    withOutboundSenderAttribution('Caption', { apiKeyId: 'key-1' }, 1024),
-    'Caption\n\nAPI'
-  );
-  assert.equal(
-    withOutboundSenderAttribution('', { user: { displayName: 'Nisar' } }, 1024),
-    'Nisar'
-  );
-  const longBody = 'x'.repeat(100);
-  const attributed = withOutboundSenderAttribution(longBody, { user: { displayName: 'Nisar' } }, 50);
-  assert.ok(attributed.length <= 50);
-  assert.ok(attributed.endsWith('Nisar'));
-  assert.equal(
-    withOutboundSenderAttribution('Hello\n\nNisar', { user: { displayName: 'Nisar' } }, 4096),
-    'Hello\n\nNisar'
-  );
-  assert.equal(
-    withOutboundSenderAttribution('Hello\n\n— Nisar', { user: { displayName: 'Nisar' } }, 4096),
-    'Hello\n\n— Nisar'
-  );
 });
 
 test('message search is bounded and explicitly scoped to the authenticated workspace', async () => {

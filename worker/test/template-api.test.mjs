@@ -350,7 +350,7 @@ test('external template API stores and broadcasts the rendered template and medi
     }), env, { waitUntil(promise) { waits.push(promise); } });
     assert.equal(response.status, 202);
     const accepted = await response.json();
-    const expectedText = 'Hello Asha, invoice INV-1001 is ready.\nAccounts team\nActions: View invoice\n\nAPI';
+    const expectedText = 'Hello Asha, invoice INV-1001 is ready.\nAccounts team\nActions: View invoice';
     const row = database.prepare('SELECT text,payload_json FROM messages WHERE message_id=?').get(accepted.messageId);
     assert.equal(row.text, expectedText);
     const stored = JSON.parse(row.payload_json);
@@ -438,7 +438,7 @@ test('external template API persists once, dispatches, replays safely, and scope
       channelId: 'wa-sales',
       direction: 'outbound',
       messageType: 'template',
-      text: 'Template: order_update (en_US)\n\nAPI',
+      text: 'Template: order_update (en_US)',
       status: 'pending',
       timestamp: accepted.createdAt,
       channelMessageId: '',
@@ -452,7 +452,7 @@ test('external template API persists once, dispatches, replays safely, and scope
     assert.equal(createdEvent.conversation.contactId, accepted.contactId);
     assert.equal(createdEvent.conversation.channelId, 'wa-sales');
     assert.equal(createdEvent.conversation.subject, 'Asha');
-    assert.equal(createdEvent.conversation.lastMessage, 'Template: order_update (en_US)\n\nAPI');
+    assert.equal(createdEvent.conversation.lastMessage, 'Template: order_update (en_US)');
     assert.equal(createdEvent.conversation.unreadCount, 0);
     assert.equal(database.prepare('SELECT count(*) AS count FROM messages').get().count, 1);
     assert.equal(database.prepare('SELECT count(*) AS count FROM external_api_requests').get().count, 1);
