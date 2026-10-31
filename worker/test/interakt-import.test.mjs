@@ -280,6 +280,27 @@ test('Interakt import attributes outbound messages as Interakt sender', async ()
   assert.match(index, /shouldRefreshSender/);
 });
 
+test('Interakt import maps delivery times into payload statusHistory', async () => {
+  const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(index, /function normalizeStoredStatusHistory/);
+  assert.match(index, /function mergeImportedStatusHistory/);
+  assert.match(index, /importedStatusHistory/);
+  assert.match(index, /statusHistoryMerge\.changed/);
+  assert.match(index, /statusHistory: importedStatusHistory|statusHistory: statusHistoryMerge\.merged/);
+  const history = interaktStatusHistory({
+    status: 'Read',
+    timestamp: '2024-11-09T10:01:22+0000',
+    raw: {
+      created_at_utc: '2024-11-09T10:01:22+0000',
+      delivered_at_utc: '2024-11-09T10:01:25+0000',
+      seen_at_utc: '2024-11-09T12:28:52+0000'
+    }
+  });
+  assert.equal(history.sentAt, '2024-11-09T10:01:22+0000');
+  assert.equal(history.deliveredAt, '2024-11-09T10:01:25+0000');
+  assert.equal(history.readAt, '2024-11-09T12:28:52+0000');
+});
+
 test('maps a stable provider id for Interakt messages without channel ids', () => {
   const mapped = mapInteraktMessage({
     id: 'ext-42',

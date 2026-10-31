@@ -6173,6 +6173,41 @@ async function persistMessageStatusHistory(env, row, status, at) {
   return history;
 }
 
+/** Normalize Interakt/live statusHistory timestamps into the shared payload shape. */
+function normalizeStoredStatusHistory(history) {
+  if (!isPlainObject(history)) return null;
+  const next = {};
+  for (const key of ['sentAt', 'deliveredAt', 'readAt', 'failedAt', 'updatedAt']) {
+    const value = normalizeTimestamp(history[key], '');
+    if (value) next[key] = value;
+  }
+  return Object.keys(next).length ? next : null;
+}
+
+/**
+ * Fill missing statusHistory keys from an import source (Interakt) without
+ * overwriting times already recorded by live WhatsApp webhooks.
+ */
+function mergeImportedStatusHistory(existingPayload, incomingHistory) {
+  const incoming = normalizeStoredStatusHistory(incomingHistory);
+  const current = isPlainObject(existingPayload?.statusHistory)
+    ? { ...existingPayload.statusHistory }
+    : {};
+  if (!incoming) {
+    const history = messageStatusHistoryView({ statusHistory: current });
+    return { history, changed: false, merged: history || null };
+  }
+  let changed = false;
+  for (const [key, value] of Object.entries(incoming)) {
+    if (!String(current[key] || '').trim()) {
+      current[key] = value;
+      changed = true;
+    }
+  }
+  const history = messageStatusHistoryView({ statusHistory: current });
+  return { history, changed, merged: history || null };
+}
+
 async function broadcastMessageStatusChanges(env, workspaceId, changes) {
   const unique = new Map();
   for (const change of changes || []) {
@@ -6410,6 +6445,7 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
     const importSender = mapped.direction === 'outbound'
       ? importSourceSenderAttribution(INTERAKT_SOURCE)
       : { login: '', name: '' };
+    const importedStatusHistory = normalizeStoredStatusHistory(mapped.statusHistory);
     const payload = {
       source: INTERAKT_SOURCE,
       externalId: mapped.externalId,
@@ -6417,9 +6453,7 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
       ...(importSender.name ? { senderName: importSender.name } : {}),
       ...(mapped.template ? { template: mapped.template } : {}),
       ...(mapped.replyTo ? { reply: { channelMessageId: mapped.replyTo } } : {}),
-      ...(mapped.statusHistory && Object.keys(mapped.statusHistory).length
-        ? { statusHistory: mapped.statusHistory }
-        : {}),
+      ...(importedStatusHistory ? { statusHistory: importedStatusHistory } : {}),
       ...(mapped.mediaUrl && attachmentType ? {
         attachment: {
           type: attachmentType,
@@ -6429,11 +6463,11 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
       } : {})
     };
     const text = String(mapped.text || '').slice(0, MAX_TEXT_LENGTH);
-    const payloadJson = truncateJson(payload);
     const existing = await findExistingInteraktMessage(env, workspaceId, channel.channelId, mapped);
     if (existing) {
       // Same Interakt/WhatsApp message already stored — never insert a second copy.
       // Refresh template body / attachment / failure reason when the re-import improves them.
+      const existingParsed = safeJsonParse(existing.payload_json, {});
       const existingPayload = String(existing.payload_json || '');
       const refreshAttachment = Boolean(payload.attachment)
         && !/"attachment"\s*:/.test(existingPayload);
@@ -6446,13 +6480,23 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
         && errorText !== String(existing.error || '');
       const shouldRefreshProviderId = Boolean(mapped.providerMessageId)
         && mapped.providerMessageId !== String(existing.provider_message_id || '');
-      const shouldRefreshStatusHistory = Boolean(mapped.statusHistory && Object.keys(mapped.statusHistory).length)
-        && !/"statusHistory"\s*:/.test(existingPayload);
+      const statusHistoryMerge = mergeImportedStatusHistory(existingParsed, mapped.statusHistory);
+      const shouldRefreshStatusHistory = statusHistoryMerge.changed;
       const shouldRefreshSender = Boolean(importSender.login && importSender.name)
         && (String(existing.sender_login || '').trim() !== importSender.login
           || String(existing.sender_name || '').trim() !== importSender.name);
       if (shouldRefreshTemplate || shouldRefreshError || shouldRefreshProviderId
         || shouldRefreshStatusHistory || shouldRefreshSender) {
+        const nextPayload = { ...payload };
+        if (statusHistoryMerge.merged) nextPayload.statusHistory = statusHistoryMerge.merged;
+        else delete nextPayload.statusHistory;
+        // Keep non-import presentation keys (e.g. live attachment metadata) when present.
+        if (isPlainObject(existingParsed.attachment) && !nextPayload.attachment) {
+          nextPayload.attachment = existingParsed.attachment;
+        }
+        if (isPlainObject(existingParsed.reply) && !nextPayload.reply) {
+          nextPayload.reply = existingParsed.reply;
+        }
         pendingStatements.push(env.DB.prepare(`UPDATE messages
             SET message_type=?2, text=?3, payload_json=?4, status=?5, error=?6,
                 provider_message_id=CASE
@@ -6463,7 +6507,7 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
                 sender_name=CASE WHEN ?10<>'' THEN ?10 ELSE sender_name END
           WHERE workspace_id=?7 AND message_id=?1`)
           .bind(
-            existing.message_id, mapped.messageType, text, payloadJson, mapped.status,
+            existing.message_id, mapped.messageType, text, truncateJson(nextPayload), mapped.status,
             errorText, workspaceId, mapped.providerMessageId || '',
             importSender.login, importSender.name
           ));
@@ -6483,7 +6527,7 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
         messageId, conversationId, identity.contact_id, channel.channelId, identity.identity_id,
         mapped.direction, mapped.messageType, text,
         mapped.providerMessageId, mapped.status, String(mapped.error || '').slice(0, 500),
-        timestamp, payloadJson, workspaceId, importSender.login, importSender.name
+        timestamp, truncateJson(payload), workspaceId, importSender.login, importSender.name
       ));
     result.messagesImported += 1;
     if (pendingStatements.length >= 40) await flush();
