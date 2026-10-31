@@ -508,12 +508,16 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(app, /function unifiedConversations\(\)/);
   assert.match(app, /const key = conversation\.contactId \|\| `conversation:/);
   assert.match(app, /function createMessageFootMain\(/);
+  assert.match(app, /function createMessageRouteMeta\(/);
   assert.match(app, /providerLogo\(route\.connectorType, "message-route-logo"\)/);
   assert.match(app, /element\("span", "message-route-channel", route\.channelName \|\| "Channel"\)/);
   assert.match(app, /element\("span", "message-route-dot", "·"\)/);
-  assert.match(app, /foot\.append\(createMessageFootMain\(route, message\.timestamp, outboundSender\)\)/);
+  assert.match(app, /createMessageFootMain\(route, message\.timestamp, outboundSender, statusCluster\)/);
+  assert.match(app, /element\("div", "message-route-row"\)/);
   assert.match(app, /main\.append\(element\("time", "", formatClock\(timestamp\)\)\)/);
   assert.match(styles, /\.message-route-logo\s*\{[^}]*width:\s*10px/);
+  assert.match(styles, /\.message-route-row\s*\{/);
+  assert.match(styles, /\.message-foot-status\s*\{[^}]*margin-left:\s*auto/);
   assert.match(styles, /\.message-foot-main\s*\{/);
   assert.match(styles, /\.message-foot-main > time\s*\{/);
   const messageRowBody = app.slice(app.indexOf("function createMessageRow"), app.indexOf("function messageThreadNearBottom"));
@@ -556,7 +560,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /id="contactPrevPage"/);
   assert.match(html, /id="contactNextPage"/);
   assert.match(html, /id="contactPageLabel"/);
-  assert.match(html, /app\.js\?v=20261031-msg-draft/);
+  assert.match(html, /app\.js\?v=20261031-status-line/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -896,8 +900,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261031-msg-draft/);
-  assert.match(html, /assets\/styles\.css\?v=20261031-msg-draft/);
+  assert.match(html, /assets\/app\.js\?v=20261031-status-line/);
+  assert.match(html, /assets\/styles\.css\?v=20261031-status-line/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   // Inbound customer names must not render on the bubble; only outbound sender_name on the route line.

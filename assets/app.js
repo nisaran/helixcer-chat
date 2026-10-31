@@ -3182,12 +3182,10 @@
     return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot"].includes(connectorType);
   }
 
-  function createMessageFootMain(route, timestamp, outboundSender = "") {
-    const main = element("div", "message-foot-main");
-    main.append(element("time", "", formatClock(timestamp)));
+  function createMessageRouteMeta(route, outboundSender = "") {
     const hasRoute = Boolean(route);
     const sender = String(outboundSender || "").trim();
-    if (!hasRoute && !sender) return main;
+    if (!hasRoute && !sender) return null;
     const meta = element("div", "message-route-meta");
     if (hasRoute) {
       meta.append(providerLogo(route.connectorType, "message-route-logo"));
@@ -3201,7 +3199,44 @@
       }
       meta.append(element("span", "message-sender is-outbound-sender", sender));
     }
-    main.append(meta);
+    return meta;
+  }
+
+  function createOutboundStatusCluster(message) {
+    const statusCluster = element("div", "message-foot-status");
+    const delivery = outboundDeliveryStatus(message.status);
+    const status = element("span", delivery.className, delivery.label);
+    const errorText = String(message.error || "").trim();
+    const historyTitle = messageStatusHistoryTitle(message);
+    status.title = errorText
+      ? (historyTitle ? `${historyTitle}\nFailed: ${errorText}` : `Failed: ${errorText}`)
+      : (historyTitle || `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`);
+    status.setAttribute("aria-label", status.title.replace(/\n/g, "; "));
+    const historyEntries = messageStatusHistoryEntries(message);
+    if (historyEntries.length) {
+      const info = element("button", "message-status-info", "ⓘ");
+      info.type = "button";
+      info.dataset.action = "toggle-message-status-history";
+      info.dataset.messageId = message.messageId;
+      info.setAttribute("aria-label", "Message status history");
+      info.setAttribute("aria-haspopup", "dialog");
+      info.setAttribute("aria-expanded", "false");
+      info.title = "Status history";
+      statusCluster.append(info);
+    }
+    statusCluster.append(status);
+    return statusCluster;
+  }
+
+  function createMessageFootMain(route, timestamp, outboundSender = "", statusCluster = null) {
+    const main = element("div", "message-foot-main");
+    main.append(element("time", "", formatClock(timestamp)));
+    const meta = createMessageRouteMeta(route, outboundSender);
+    if (!meta && !statusCluster) return main;
+    const routeRow = element("div", "message-route-row");
+    if (meta) routeRow.append(meta);
+    if (statusCluster) routeRow.append(statusCluster);
+    main.append(routeRow);
     return main;
   }
 
@@ -3227,32 +3262,8 @@
     if (presentation.text) bubble.append(appendChannelFormattedText(element("p", "message-text"), presentation.text, route || conversation));
     const templateActions = renderTemplateMessageActions(presentation.buttons);
     const foot = element("div", "message-foot");
-    foot.append(createMessageFootMain(route, message.timestamp, outboundSender));
-    if (message.direction === "outbound") {
-      const statusCluster = element("div", "message-foot-status");
-      const delivery = outboundDeliveryStatus(message.status);
-      const status = element("span", delivery.className, delivery.label);
-      const errorText = String(message.error || "").trim();
-      const historyTitle = messageStatusHistoryTitle(message);
-      status.title = errorText
-        ? (historyTitle ? `${historyTitle}\nFailed: ${errorText}` : `Failed: ${errorText}`)
-        : (historyTitle || `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`);
-      status.setAttribute("aria-label", status.title.replace(/\n/g, "; "));
-      const historyEntries = messageStatusHistoryEntries(message);
-      if (historyEntries.length) {
-        const info = element("button", "message-status-info", "ⓘ");
-        info.type = "button";
-        info.dataset.action = "toggle-message-status-history";
-        info.dataset.messageId = message.messageId;
-        info.setAttribute("aria-label", "Message status history");
-        info.setAttribute("aria-haspopup", "dialog");
-        info.setAttribute("aria-expanded", "false");
-        info.title = "Status history";
-        statusCluster.append(info);
-      }
-      statusCluster.append(status);
-      foot.append(statusCluster);
-    }
+    const statusCluster = message.direction === "outbound" ? createOutboundStatusCluster(message) : null;
+    foot.append(createMessageFootMain(route, message.timestamp, outboundSender, statusCluster));
     bubble.append(foot);
     const errorText = String(message.error || "").trim();
     if (errorText && ["failed", "error"].includes(String(message.status || "").toLocaleLowerCase())) {
