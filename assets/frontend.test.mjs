@@ -507,13 +507,15 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(styles, /\.composer-route-button\s*\{[^}]*height:\s*34px/);
   assert.match(app, /function unifiedConversations\(\)/);
   assert.match(app, /const key = conversation\.contactId \|\| `conversation:/);
-  assert.match(app, /function createMessageRouteMeta\(/);
+  assert.match(app, /function createMessageFootMain\(/);
   assert.match(app, /providerLogo\(route\.connectorType, "message-route-logo"\)/);
   assert.match(app, /element\("span", "message-route-channel", route\.channelName \|\| "Channel"\)/);
   assert.match(app, /element\("span", "message-route-dot", "·"\)/);
-  assert.match(app, /footMain\.append\(createMessageRouteMeta\(route, message\.timestamp\)\)/);
+  assert.match(app, /foot\.append\(createMessageFootMain\(route, message\.timestamp, outboundSender\)\)/);
+  assert.match(app, /main\.append\(element\("time", "", formatClock\(timestamp\)\)\)/);
   assert.match(styles, /\.message-route-logo\s*\{[^}]*width:\s*10px/);
   assert.match(styles, /\.message-foot-main\s*\{/);
+  assert.match(styles, /\.message-foot-main > time\s*\{/);
   const messageRowBody = app.slice(app.indexOf("function createMessageRow"), app.indexOf("function messageThreadNearBottom"));
   assert.doesNotMatch(messageRowBody, /stack\.append\(routeMeta\)/);
   assert.doesNotMatch(messageRowBody, /route\.channelProfileId/);
@@ -554,7 +556,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /id="contactPrevPage"/);
   assert.match(html, /id="contactNextPage"/);
   assert.match(html, /id="contactPageLabel"/);
-  assert.match(html, /app\.js\?v=20261031-msg-meta/);
+  assert.match(html, /app\.js\?v=20261031-msg-draft/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -699,7 +701,7 @@ test("every message carries an exact local date and time without date-divider pi
   assert.doesNotMatch(html, /date-divider/);
   assert.doesNotMatch(styles, /\.date-divider/);
   assert.doesNotMatch(app, /element\("div", "date-divider"/);
-  assert.match(styles, /\.message-foot time\s*\{\s*font-size:\s*9px/);
+  assert.match(styles, /\.message-foot-main > time\s*\{\s*display:\s*block;\s*font-size:\s*9px/);
   const start = app.indexOf("function formatClock");
   const end = app.indexOf("function formatCalendarDate", start);
   const formatClock = Function(`${app.slice(start, end)}\nreturn formatClock;`)();
@@ -894,18 +896,24 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261031-msg-meta/);
-  assert.match(html, /assets\/styles\.css\?v=20261031-msg-meta/);
+  assert.match(html, /assets\/app\.js\?v=20261031-msg-draft/);
+  assert.match(html, /assets\/styles\.css\?v=20261031-msg-draft/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
-  // Inbound customer names must not render on the bubble; only outbound sender_name in the foot.
+  // Inbound customer names must not render on the bubble; only outbound sender_name on the route line.
   assert.doesNotMatch(app, /direction === "inbound" && message\.senderName/);
-  assert.match(app, /footMain\.append\(element\("p", "message-sender is-outbound-sender", outboundSender\)\)/);
-  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender/);
-  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*color: var\(--chat-meta\)/);
-  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*font-weight: 400/);
-  assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender \{[\s\S]*text-align: left/);
+  assert.match(app, /element\("span", "message-sender is-outbound-sender", sender\)/);
+  assert.match(styles, /\.message-route-meta \.message-sender\.is-outbound-sender/);
+  assert.match(styles, /\.message-route-meta \.message-sender\.is-outbound-sender \{[\s\S]*color: var\(--chat-meta\)/);
+  assert.match(styles, /\.message-route-meta \.message-sender\.is-outbound-sender \{[\s\S]*font-weight: 400/);
   assert.doesNotMatch(styles, /^\.message-sender \{/m);
+  assert.match(app, /composerDrafts: new Map\(\)/);
+  assert.match(app, /function saveComposerDraft\(/);
+  assert.match(app, /function restoreComposerDraft\(/);
+  assert.match(app, /saveComposerDraft\(state\.selectedConversationId\)/);
+  assert.match(app, /restoreComposerDraft\(conversationId\)/);
+  assert.match(app, /saveComposerDraft\(conversationId\)/);
+  assert.doesNotMatch(app, /discardAttachmentQueue\(conversationId\);\s*if \(state\.templateConversationId/);
 });
 
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {

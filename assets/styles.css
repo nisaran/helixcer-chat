@@ -508,8 +508,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 @keyframes located-message { 20%, 70% { box-shadow: 0 0 0 4px rgba(109,59,234,.2), 0 8px 24px rgba(16,24,40,.1); } }
 .message-row.is-outbound .message-bubble { border-color: transparent; border-radius: 18px 18px 5px 18px; background: var(--chat-outgoing); }
 .message-route-meta { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; color: var(--chat-meta); font-size: 9px; font-weight: 400; line-height: 1.25; text-align: left; }
-.message-route-meta span,
-.message-route-meta time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--chat-meta); font-weight: 400; }
+.message-route-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--chat-meta); font-weight: 400; }
 .message-route-channel { min-width: 0; }
 .message-route-dot { flex: 0 0 auto; overflow: visible; }
 .message-route-logo { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; object-fit: contain; }
@@ -524,7 +523,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .message-foot { display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; min-width: 65px; margin-top: 5px; color: var(--chat-meta); font-size: 10px; }
 .message-foot-main { display: grid; justify-items: start; gap: 2px; min-width: 0; flex: 1 1 auto; }
 .message-foot-status { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
-.message-foot time { font-size: 9px; color: var(--chat-meta); font-weight: 400; }
+.message-foot-main > time { display: block; font-size: 9px; color: var(--chat-meta); font-weight: 400; line-height: 1.25; }
 .message-status-info {
   display: inline-grid;
   place-items: center;
@@ -586,13 +585,13 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .delivery-status.is-sent, .delivery-status.is-pending { color: #7b8582; }
 .delivery-status.is-delivered { color: #397468; }
 .delivery-status.is-read { color: var(--blue); }
-.message-row.is-outbound .message-sender.is-outbound-sender {
+.message-route-meta .message-sender.is-outbound-sender {
   margin: 0;
   color: var(--chat-meta);
   font-size: 9px;
   font-weight: 400;
   text-align: left;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 .message-failed { color: #b33326; }
 .message-error {

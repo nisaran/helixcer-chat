@@ -69,6 +69,7 @@
     newMessagesBelow: { conversationId: "", count: 0 },
     replyingTo: null,
     composerRoutes: new Map(),
+    composerDrafts: new Map(),
     recentVerifyTokens: new Map(),
     selectedConversationId: null,
     selectedContactId: null,
@@ -2739,16 +2740,61 @@
     }
   }
 
+  function saveComposerDraft(conversationId = state.selectedConversationId) {
+    if (!conversationId) return;
+    const input = $("messageInput");
+    const text = String(input?.value || "");
+    const replyTo = state.replyingTo?.conversationId === conversationId ? state.replyingTo : null;
+    const hasAttachments = (state.pendingAttachments.get(conversationId) || []).length > 0;
+    if (!text && !replyTo && !hasAttachments) {
+      state.composerDrafts.delete(conversationId);
+      return;
+    }
+    state.composerDrafts.set(conversationId, {
+      text,
+      replyTo: replyTo ? {
+        conversationId: replyTo.conversationId,
+        messageId: replyTo.messageId,
+        message: replyTo.message || null,
+      } : null,
+    });
+  }
+
+  function restoreComposerDraft(conversationId) {
+    const draft = conversationId ? state.composerDrafts.get(conversationId) : null;
+    const input = $("messageInput");
+    if (input) {
+      input.value = draft?.text || "";
+      resizeComposer();
+    }
+    state.replyingTo = draft?.replyTo || null;
+  }
+
+  function clearComposerDraft(conversationId) {
+    if (!conversationId) return;
+    state.composerDrafts.delete(conversationId);
+    discardAttachmentQueue(conversationId);
+    if (state.replyingTo?.conversationId === conversationId) state.replyingTo = null;
+    if (state.selectedConversationId === conversationId) {
+      const input = $("messageInput");
+      if (input) {
+        input.value = "";
+        resizeComposer();
+      }
+    }
+  }
+
   async function selectConversation(conversationId, { markRead = true, updateUrl = true } = {}) {
     const conversation = state.conversations.find((item) => item.conversationId === conversationId);
     if (!conversation) return;
     const unreadCount = Math.max(0, Number(conversation.unreadCount) || 0);
     const changingConversation = state.selectedConversationId !== conversationId;
     if (changingConversation) {
+      saveComposerDraft(state.selectedConversationId);
       closeConversationActionMenu();
       closeComposerRouteMenu();
       state.unreadMarker = markRead && unreadCount > 0 ? { conversationId, count: unreadCount } : null;
-      state.replyingTo = null;
+      restoreComposerDraft(conversationId);
     }
     state.selectedConversationId = conversationId;
     state.pendingConversationId = null;
@@ -3136,17 +3182,27 @@
     return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot"].includes(connectorType);
   }
 
-  function createMessageRouteMeta(route, timestamp) {
+  function createMessageFootMain(route, timestamp, outboundSender = "") {
+    const main = element("div", "message-foot-main");
+    main.append(element("time", "", formatClock(timestamp)));
+    const hasRoute = Boolean(route);
+    const sender = String(outboundSender || "").trim();
+    if (!hasRoute && !sender) return main;
     const meta = element("div", "message-route-meta");
-    if (route) {
+    if (hasRoute) {
       meta.append(providerLogo(route.connectorType, "message-route-logo"));
       meta.append(element("span", "message-route-channel", route.channelName || "Channel"));
-      const dot = element("span", "message-route-dot", "·");
-      dot.setAttribute("aria-hidden", "true");
-      meta.append(dot);
     }
-    meta.append(element("time", "", formatClock(timestamp)));
-    return meta;
+    if (sender) {
+      if (hasRoute) {
+        const dot = element("span", "message-route-dot", "·");
+        dot.setAttribute("aria-hidden", "true");
+        meta.append(dot);
+      }
+      meta.append(element("span", "message-sender is-outbound-sender", sender));
+    }
+    main.append(meta);
+    return main;
   }
 
   function createMessageRow(message, conversation) {
@@ -3157,7 +3213,7 @@
     const stack = element("div", "message-stack");
     const bubble = element("div", "message-bubble");
     // Outbound agent/API name comes only from messages.sender_name (API: senderName)
-    // and sits in the bubble foot with route + clock — never above the bubble or in body text.
+    // and sits on the route meta line under the clock — never above the bubble or in body text.
     const outboundSender = message.direction === "outbound" ? String(message.senderName || "").trim() : "";
     const quoted = renderQuotedReply(message.reply, conversation);
     if (quoted) bubble.append(quoted);
@@ -3171,12 +3227,7 @@
     if (presentation.text) bubble.append(appendChannelFormattedText(element("p", "message-text"), presentation.text, route || conversation));
     const templateActions = renderTemplateMessageActions(presentation.buttons);
     const foot = element("div", "message-foot");
-    const footMain = element("div", "message-foot-main");
-    footMain.append(createMessageRouteMeta(route, message.timestamp));
-    if (outboundSender) {
-      footMain.append(element("p", "message-sender is-outbound-sender", outboundSender));
-    }
-    foot.append(footMain);
+    foot.append(createMessageFootMain(route, message.timestamp, outboundSender));
     if (message.direction === "outbound") {
       const statusCluster = element("div", "message-foot-status");
       const delivery = outboundDeliveryStatus(message.status);
@@ -5924,6 +5975,7 @@
       upsertRenderedMessage(message, conversation.conversationId);
       renderConversationList();
       if (replyToMessageId) clearReplyTarget();
+      state.composerDrafts.delete(conversation.conversationId);
     } catch (error) {
       input.value = text;
       resizeComposer();
@@ -6778,6 +6830,7 @@
         if (stillSelected()) renderAttachmentQueue();
       }
       state.pendingAttachments.delete(conversation.conversationId);
+      state.composerDrafts.delete(conversation.conversationId);
       if (stillSelected()) {
         status.textContent = `${sent} file${sent === 1 ? "" : "s"} sent`;
         setTimeout(() => { if (stillSelected()) status.hidden = true; }, 3500);
@@ -8552,7 +8605,7 @@
     const conversationId = state.selectedConversationId;
     closeConversationActionMenu();
     closeComposerRouteMenu();
-    discardAttachmentQueue(conversationId);
+    saveComposerDraft(conversationId);
     if (state.templateConversationId === conversationId) closeTemplateDialog();
     state.selectedConversationId = null;
     state.pendingConversationId = null;
@@ -8583,6 +8636,7 @@
       state.messages.delete(conversation.conversationId);
       state.conversationRevisions.delete(conversation.conversationId);
       state.conversations = state.conversations.filter((item) => item.conversationId !== conversation.conversationId);
+      clearComposerDraft(conversation.conversationId);
       clearSelectedConversation();
       renderCounts();
       renderContacts();
