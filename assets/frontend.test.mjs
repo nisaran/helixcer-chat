@@ -1047,3 +1047,12 @@ test("Import Chat shows post-import stats and supports cancel mid-run", () => {
   assert.match(styles, /\.import-chat-result-status/);
   assert.match(styles, /\.import-chat-action-buttons/);
 });
+
+test("Import Chat preserves Interakt delivered and read timestamps", () => {
+  assert.match(app, /delivered_at_utc/);
+  assert.match(app, /seen_at_utc/);
+  assert.match(app, /normalizeMessageStatusHistory/);
+  assert.match(app, /messageStatusHistoryTitle/);
+  assert.match(app, /Delivered \$\{formatClock/);
+  assert.match(app, /Read \$\{formatClock/);
+});

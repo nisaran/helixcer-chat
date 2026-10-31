@@ -205,7 +205,13 @@ export function mapInteraktMessage(message) {
     || ''
   ).trim();
   const status = mapInteraktStatus(message?.status, direction);
-  const timestamp = String(message?.timestamp || message?.raw?.created_at_utc || '').trim();
+  const statusHistory = interaktStatusHistory(message);
+  const timestamp = String(
+    message?.timestamp
+    || statusHistory.sentAt
+    || message?.raw?.created_at_utc
+    || ''
+  ).trim();
   const error = interaktMessageError(message, status);
   return {
     externalId,
@@ -216,6 +222,7 @@ export function mapInteraktMessage(message) {
     status,
     error,
     timestamp,
+    statusHistory,
     mediaUrl,
     mediaFileName,
     attachmentType,
@@ -224,6 +231,31 @@ export function mapInteraktMessage(message) {
     ...(presentation?.template ? { template: presentation.template } : {}),
     ...(templateAttachment && !topMediaUrl ? { attachment: templateAttachment } : {})
   };
+}
+
+/** Collect Interakt delivery timeline fields when the export includes them. */
+export function interaktStatusHistory(message) {
+  const raw = message?.raw && typeof message.raw === 'object' ? message.raw : {};
+  const pick = (...values) => {
+    for (const value of values) {
+      const text = String(value || '').trim();
+      if (text) return text;
+    }
+    return '';
+  };
+  const status = String(message?.status || raw.message_status || '').trim().toLowerCase();
+  const history = {
+    sentAt: pick(message?.timestamp, raw.created_at_utc, raw.received_at_utc),
+    deliveredAt: pick(raw.delivered_at_utc, message?.delivered_at_utc, message?.delivered_at),
+    readAt: pick(raw.seen_at_utc, raw.read_at_utc, message?.seen_at_utc, message?.read_at),
+    failedAt: pick(raw.failed_at_utc, message?.failed_at_utc, message?.failed_at),
+    updatedAt: pick(raw.modified_at_utc, message?.modified_at_utc)
+  };
+  // Interakt failed rows usually omit failed_at_utc; use modified/created when status is Failed.
+  if (!history.failedAt && (status === 'failed' || status === 'error')) {
+    history.failedAt = pick(raw.modified_at_utc, raw.created_at_utc, message?.timestamp);
+  }
+  return Object.fromEntries(Object.entries(history).filter(([, value]) => value));
 }
 
 /** Common WhatsApp / Interakt failure codes when the export only stores a code. */

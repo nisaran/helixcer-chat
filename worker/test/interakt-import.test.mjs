@@ -7,6 +7,7 @@ import {
   discoverInteraktContactFields,
   extractInteraktCustomer,
   interaktMessageError,
+  interaktStatusHistory,
   mapInteraktMessage,
   INTERAKT_SOURCE
 } from '../src/imports/interakt.js';
@@ -196,6 +197,25 @@ test('maps Interakt template and media messages', () => {
     interaktMessageError({ raw: { channel_error_code: '368' } }, 'failed'),
     'Temporarily blocked for policies (368)'
   );
+  assert.deepEqual(
+    interaktStatusHistory({
+      status: 'Read',
+      timestamp: '2024-11-09T10:01:22+0000',
+      raw: {
+        created_at_utc: '2024-11-09T10:01:22+0000',
+        delivered_at_utc: '2024-11-09T10:01:25+0000',
+        seen_at_utc: '2024-11-09T12:28:52+0000',
+        modified_at_utc: '2024-11-09T15:53:50+0000'
+      }
+    }),
+    {
+      sentAt: '2024-11-09T10:01:22+0000',
+      deliveredAt: '2024-11-09T10:01:25+0000',
+      readAt: '2024-11-09T12:28:52+0000',
+      updatedAt: '2024-11-09T15:53:50+0000'
+    }
+  );
+  assert.equal(failed.statusHistory?.failedAt, '2026-01-01T00:00:00+0000');
 
   const image = mapInteraktMessage({
     id: 'm2',
@@ -237,6 +257,10 @@ test('dashboard exposes Import Chat field mapping UI', async () => {
   assert.match(app, /channel_failure_reason/);
   assert.match(app, /message-error/);
   assert.match(app, /channel_failure_reason/);
+  assert.match(app, /delivered_at_utc/);
+  assert.match(app, /seen_at_utc/);
+  assert.match(app, /statusHistory/);
+  assert.match(app, /messageStatusHistoryTitle/);
   assert.equal(INTERAKT_SOURCE, 'interakt');
 });
 

@@ -1858,9 +1858,37 @@
       channelName: String(raw.channelName || raw.route?.channelName || ""),
       channelProfileId: String(raw.channelProfileId || raw.profileId || raw.route?.channelProfileId || ""),
       error: String(raw.error || ""),
+      statusHistory: normalizeMessageStatusHistory(raw.statusHistory || raw.delivery || null),
       template,
       reply,
     };
+  }
+
+  function normalizeMessageStatusHistory(value) {
+    if (!value || typeof value !== "object") return null;
+    const next = {};
+    [
+      ["sentAt", value.sentAt || value.sent_at || value.createdAt],
+      ["deliveredAt", value.deliveredAt || value.delivered_at],
+      ["readAt", value.readAt || value.read_at || value.seenAt || value.seen_at],
+      ["failedAt", value.failedAt || value.failed_at],
+      ["updatedAt", value.updatedAt || value.updated_at],
+    ].forEach(([key, raw]) => {
+      const text = String(raw || "").trim();
+      if (text) next[key] = text;
+    });
+    return Object.keys(next).length ? next : null;
+  }
+
+  function messageStatusHistoryTitle(message) {
+    const history = message?.statusHistory;
+    if (!history) return "";
+    const lines = [];
+    if (history.sentAt) lines.push(`Sent ${formatClock(history.sentAt)}`);
+    if (history.deliveredAt) lines.push(`Delivered ${formatClock(history.deliveredAt)}`);
+    if (history.readAt) lines.push(`Read ${formatClock(history.readAt)}`);
+    if (history.failedAt) lines.push(`Failed ${formatClock(history.failedAt)}`);
+    return lines.join("\n");
   }
 
   function outboundDeliveryStatus(value) {
@@ -2647,10 +2675,11 @@
       const delivery = outboundDeliveryStatus(message.status);
       const status = element("span", delivery.className, delivery.label);
       const errorText = String(message.error || "").trim();
+      const historyTitle = messageStatusHistoryTitle(message);
       status.title = errorText
-        ? `Failed: ${errorText}`
-        : `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`;
-      status.setAttribute("aria-label", status.title);
+        ? (historyTitle ? `${historyTitle}\nFailed: ${errorText}` : `Failed: ${errorText}`)
+        : (historyTitle || `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`);
+      status.setAttribute("aria-label", status.title.replace(/\n/g, "; "));
       foot.append(status);
     }
     bubble.append(foot);
@@ -7185,6 +7214,18 @@
         if (String(failureReason).trim()) {
           rawPatch.channel_failure_reason = String(failureReason).trim();
         }
+        [
+          ["created_at_utc", message?.raw?.created_at_utc],
+          ["delivered_at_utc", message?.raw?.delivered_at_utc || message?.delivered_at_utc],
+          ["seen_at_utc", message?.raw?.seen_at_utc || message?.seen_at_utc],
+          ["received_at_utc", message?.raw?.received_at_utc],
+          ["modified_at_utc", message?.raw?.modified_at_utc],
+          ["failed_at_utc", message?.raw?.failed_at_utc || message?.failed_at_utc],
+        ].forEach(([key, value]) => {
+          if (value !== undefined && value !== null && String(value).trim() !== "") {
+            rawPatch[key] = value;
+          }
+        });
         if (Object.keys(rawPatch).length) slimMessage.raw = rawPatch;
         return slimMessage;
       }),

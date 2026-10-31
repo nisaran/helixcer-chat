@@ -3983,9 +3983,24 @@ async function listMessages(env, workspaceId, conversationId, url) {
       channelMessageId: row.provider_message_id, error: row.error,
       attachment: messageAttachmentView(row.message_type, payload, row.message_id),
       ...(template ? { template } : {}),
+      ...((() => {
+        const statusHistory = messageStatusHistoryView(payload);
+        return statusHistory ? { statusHistory } : {};
+      })()),
       reply: messageReplyView(payload)
     };
   });
+}
+
+function messageStatusHistoryView(payload) {
+  const history = isPlainObject(payload?.statusHistory) ? payload.statusHistory : null;
+  if (!history) return null;
+  const next = {};
+  for (const key of ['sentAt', 'deliveredAt', 'readAt', 'failedAt', 'updatedAt']) {
+    const value = String(history[key] || '').trim();
+    if (value) next[key] = value.slice(0, 64);
+  }
+  return Object.keys(next).length ? next : null;
 }
 
 function messageReplyView(payload) {
@@ -6279,6 +6294,9 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
       contentType: mapped.contentType,
       ...(mapped.template ? { template: mapped.template } : {}),
       ...(mapped.replyTo ? { reply: { channelMessageId: mapped.replyTo } } : {}),
+      ...(mapped.statusHistory && Object.keys(mapped.statusHistory).length
+        ? { statusHistory: mapped.statusHistory }
+        : {}),
       ...(mapped.mediaUrl && attachmentType ? {
         attachment: {
           type: attachmentType,
@@ -6305,7 +6323,9 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
         && errorText !== String(existing.error || '');
       const shouldRefreshProviderId = Boolean(mapped.providerMessageId)
         && mapped.providerMessageId !== String(existing.provider_message_id || '');
-      if (shouldRefreshTemplate || shouldRefreshError || shouldRefreshProviderId) {
+      const shouldRefreshStatusHistory = Boolean(mapped.statusHistory && Object.keys(mapped.statusHistory).length)
+        && !/"statusHistory"\s*:/.test(existingPayload);
+      if (shouldRefreshTemplate || shouldRefreshError || shouldRefreshProviderId || shouldRefreshStatusHistory) {
         pendingStatements.push(env.DB.prepare(`UPDATE messages
             SET message_type=?2, text=?3, payload_json=?4, status=?5, error=?6,
                 provider_message_id=CASE
