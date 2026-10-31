@@ -8227,9 +8227,9 @@
     const list = element("div", "message-status-menu-list");
     entries.forEach((entry) => {
       const row = element("div", "message-status-menu-row");
-      const label = element("span", "message-status-menu-label", `${entry.label}:`);
+      const label = element("span", "message-status-menu-label", `${entry.label}:\u00a0`);
       const time = element("span", "message-status-menu-time", entry.when);
-      row.append(label, document.createTextNode(" "), time);
+      row.append(label, time);
       list.append(row);
     });
     menu.append(list);

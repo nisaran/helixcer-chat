@@ -551,7 +551,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0;
+  gap: 0.2em;
   line-height: 1.35;
 }
 .message-status-menu-label {

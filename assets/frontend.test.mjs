@@ -1071,7 +1071,7 @@ test("Import Chat preserves Interakt delivered and read timestamps", () => {
   assert.match(app, /messageStatusHistoryEntries/);
   assert.match(app, /\["Seen", history\.readAt\]/);
   assert.match(app, /\["Delivered", history\.deliveredAt\]/);
-  assert.match(app, /\$\{entry\.label\}:/);
+  assert.match(app, /\$\{entry\.label\}:\\u00a0/);
 });
 
 test("outbound messages expose a status-history info popup with exact local timestamps", () => {
