@@ -376,7 +376,7 @@ test("realtime messages reconcile silently across resumed browsers", () => {
   assert.match(app, /window\.addEventListener\("pageshow", resumeLiveWorkspace\)/);
   assert.match(app, /window\.addEventListener\("online", resumeLiveWorkspace\)/);
   assert.match(app, /conversationObserverPaused = true/);
-  assert.match(app, /armConversationInfiniteScroll/);
+  assert.match(app, /queueConversationListFill/);
   assert.match(app, /socket\.send\("ping"\)/);
 });
 
@@ -523,12 +523,13 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(renderConversationsBody, /conversation-time/);
   assert.match(renderConversationsBody, /unread-badge/);
   assert.match(renderConversationsBody, /loadMoreConversations|conversationNextCursor|conversation-load-more/);
-  assert.match(renderConversationsBody, /conversationScrollArmed/);
   assert.match(renderConversationsBody, /conversationsSearching/);
+  assert.match(renderConversationsBody, /conversation-load-sentinel/);
+  assert.doesNotMatch(renderConversationsBody, /"Load more"/);
   assert.match(app, /refreshInboxCatalogue/);
   assert.match(app, /listConversations\(\{[\s\S]*?cursor/);
   assert.match(app, /IntersectionObserver/);
-  assert.match(app, /armConversationInfiniteScroll/);
+  assert.match(app, /queueConversationListFill/);
   assert.match(app, /conversationList"\)\.addEventListener\("scroll"/);
   assert.match(app, /CONVERSATION_PAGE_SIZE = 100/);
   const contactsStart = app.indexOf("function renderContacts()");
@@ -547,7 +548,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /id="contactPrevPage"/);
   assert.match(html, /id="contactNextPage"/);
   assert.match(html, /id="contactPageLabel"/);
-  assert.match(html, /app\.js\?v=20261031-paging-ux2/);
+  assert.match(html, /app\.js\?v=20261031-scroll-only/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -887,8 +888,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261031-paging-ux2/);
-  assert.match(html, /assets\/styles\.css\?v=20261031-sender-below-only/);
+  assert.match(html, /assets\/app\.js\?v=20261031-scroll-only/);
+  assert.match(html, /assets\/styles\.css\?v=20261031-scroll-only/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   // Inbound customer names must not render on the bubble; only outbound sender_name below.

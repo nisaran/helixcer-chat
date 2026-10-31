@@ -374,7 +374,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   display: grid;
   justify-items: center;
   gap: 8px;
-  padding: 14px 12px 18px;
+  padding: 8px 12px 12px;
+}
+.conversation-load-more:has(> .conversation-load-sentinel:only-child) {
+  padding: 0;
+  min-height: 0;
 }
 .conversation-load-sentinel { width: 100%; height: 1px; }
 .conversation-item {
