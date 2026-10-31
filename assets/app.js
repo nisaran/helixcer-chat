@@ -10,7 +10,7 @@
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
   const $ = (id) => document.getElementById(id);
-  const CONVERSATION_PAGE_SIZE = 50;
+  const CONVERSATION_PAGE_SIZE = 100;
   const CONTACT_PAGE_SIZE = 100;
 
   const state = {
@@ -21,12 +21,16 @@
     conversationNextCursor: "",
     conversationsLoadingMore: false,
     conversationsLoadError: "",
+    conversationSearchRequestId: 0,
+    conversationSearchActive: false,
+    contactPage: 1,
+    contactTotal: 0,
+    contactPageSize: CONTACT_PAGE_SIZE,
     contactNextCursor: "",
     contactsLoadingMore: false,
     contactsLoadError: "",
     contactSearchRequestId: 0,
     conversationListObserver: null,
-    contactListObserver: null,
     channels: [],
     contacts: [],
     conversations: [],
@@ -254,12 +258,12 @@
         ["wa-sales", "demo_whatsapp_verify_token"],
         ["instagram-main", "demo_instagram_verify_token"],
       ]);
-      // Pad the demo catalogue so inbox infinite scroll and contacts load-more
+      // Pad the demo catalogue so inbox scroll and contacts pagination
       // are exercisable without a live workspace.
       const now = Date.now();
       const agoMinutes = (minutes) => new Date(now - minutes * 60_000).toISOString();
       const channels = this.data.channels;
-      for (let index = this.data.contacts.length; index < CONTACT_PAGE_SIZE + 25; index += 1) {
+      for (let index = this.data.contacts.length; index < CONTACT_PAGE_SIZE * 3 + 5; index += 1) {
         const n = index + 1;
         const channel = channels[index % channels.length];
         const contactId = `ct-demo-${n}`;
@@ -282,7 +286,7 @@
           }],
         });
       }
-      for (let index = this.data.conversations.length; index < CONVERSATION_PAGE_SIZE + 15; index += 1) {
+      for (let index = this.data.conversations.length; index < CONVERSATION_PAGE_SIZE + 40; index += 1) {
         const n = index + 1;
         const contact = this.data.contacts[Math.min(index, this.data.contacts.length - 1)];
         const channel = channels[index % channels.length];
@@ -321,6 +325,9 @@
         me: this.data.me,
         channels: clone(this.data.channels),
         contacts: contactPage,
+        contactTotal: contacts.length,
+        contactPage: 1,
+        contactPageSize: CONTACT_PAGE_SIZE,
         contactNextCursor: contacts.length > contactPage.length
           ? String(contactPage[contactPage.length - 1]?.lastMessageAt || contactPage[contactPage.length - 1]?.updatedAt || contactPage.length)
           : "",
@@ -338,8 +345,12 @@
       if (status) items = items.filter((item) => item.status === status);
       if (q) {
         const needle = String(q).toLocaleLowerCase();
-        items = items.filter((item) => `${item.subject || ""} ${item.lastMessage || ""} ${item.conversationId || ""}`
-          .toLocaleLowerCase().includes(needle));
+        items = items.filter((item) => {
+          const haystack = `${item.subject || ""} ${item.lastMessage || ""} ${item.conversationId || ""}`;
+          if (haystack.toLocaleLowerCase().includes(needle)) return true;
+          const messages = this.data.messages[item.conversationId] || [];
+          return messages.some((message) => String(message.text || "").toLocaleLowerCase().includes(needle));
+        });
       }
       if (cursor) items = items.filter((item) => String(item.lastMessageAt || "") < String(cursor));
       const page = items.slice(0, limit);
@@ -349,21 +360,37 @@
       };
     }
 
-    async listContacts({ cursor = "", limit = CONTACT_PAGE_SIZE, q = "" } = {}) {
+    async listContacts({ cursor = "", limit = CONTACT_PAGE_SIZE, q = "", page = 1 } = {}) {
       await smallDelay(80);
       let items = clone(this.data.contacts);
       if (q) {
         const needle = String(q).toLocaleLowerCase();
-        items = items.filter((item) => `${item.displayName || ""} ${item.company || ""}`
+        items = items.filter((item) => `${item.displayName || ""} ${item.company || ""} ${(item.tags || []).join(" ")}`
           .toLocaleLowerCase().includes(needle));
       }
       const sortKey = (item) => String(item.lastMessageAt || item.updatedAt || "");
       items.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
-      if (cursor) items = items.filter((item) => sortKey(item) < String(cursor));
-      const page = items.slice(0, limit);
+      const total = items.length;
+      if (cursor) {
+        items = items.filter((item) => sortKey(item) < String(cursor));
+        const pageItems = items.slice(0, limit);
+        return {
+          items: pageItems,
+          total,
+          page: Math.max(1, Number(page) || 1),
+          pageSize: limit,
+          nextCursor: items.length > limit ? sortKey(pageItems[pageItems.length - 1]) : "",
+        };
+      }
+      const safePage = Math.max(1, Number(page) || 1);
+      const offset = (safePage - 1) * limit;
+      const pageItems = items.slice(offset, offset + limit);
       return {
-        items: page,
-        nextCursor: items.length > limit ? sortKey(page[page.length - 1]) : "",
+        items: pageItems,
+        total,
+        page: safePage,
+        pageSize: limit,
+        nextCursor: offset + pageItems.length < total ? sortKey(pageItems[pageItems.length - 1]) : "",
       };
     }
 
@@ -974,10 +1001,11 @@
       return this.request(`/api/conversations?${query}`);
     }
 
-    listContacts({ cursor = "", limit = CONTACT_PAGE_SIZE, q = "" } = {}) {
-      if (this.isDemo) return this.demo.listContacts({ cursor, limit, q });
+    listContacts({ cursor = "", limit = CONTACT_PAGE_SIZE, q = "", page = 1 } = {}) {
+      if (this.isDemo) return this.demo.listContacts({ cursor, limit, q, page });
       const query = new URLSearchParams();
       query.set("contactLimit", String(limit || CONTACT_PAGE_SIZE));
+      query.set("page", String(Math.max(1, Number(page) || 1)));
       if (cursor) query.set("cursor", cursor);
       if (q) query.set("q", q);
       return this.request(`/api/contacts?${query}`);
@@ -1919,9 +1947,22 @@
     state.conversationsLoadError = "";
   }
 
-  function applyContactPageMeta(nextCursor = "") {
+  function applyContactPageMeta({
+    nextCursor = "",
+    total = state.contactTotal,
+    page = state.contactPage,
+    pageSize = state.contactPageSize || CONTACT_PAGE_SIZE,
+  } = {}) {
     state.contactNextCursor = String(nextCursor || "");
+    state.contactTotal = Math.max(0, Number(total) || 0);
+    state.contactPage = Math.max(1, Number(page) || 1);
+    state.contactPageSize = Math.max(1, Number(pageSize) || CONTACT_PAGE_SIZE);
     state.contactsLoadError = "";
+  }
+
+  function contactTotalPages() {
+    const pageSize = Math.max(1, Number(state.contactPageSize) || CONTACT_PAGE_SIZE);
+    return Math.max(1, Math.ceil(Math.max(0, Number(state.contactTotal) || 0) / pageSize));
   }
 
   function normalizeContact(raw) {
@@ -2263,8 +2304,14 @@
       // Full reload replaces the catalogue; keep only live mutations newer than this fetch.
       state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart);
       applyConversationPageMeta(data.conversationNextCursor);
+      state.conversationSearchActive = Boolean(state.search.trim());
       state.contacts = asItems(data.contacts).map(normalizeContact);
-      applyContactPageMeta(data.contactNextCursor);
+      applyContactPageMeta({
+        nextCursor: data.contactNextCursor,
+        total: data.contactTotal ?? data.contacts?.length ?? 0,
+        page: data.contactPage || 1,
+        pageSize: data.contactPageSize || CONTACT_PAGE_SIZE,
+      });
       if (!state.contacts.length) state.contacts = deriveContacts(state.conversations);
       if (!preserveSelection || !state.conversations.some((item) => item.conversationId === state.selectedConversationId)) {
         state.selectedConversationId = null;
@@ -2274,7 +2321,7 @@
     } catch (error) {
       state.conversations = [];
       applyConversationPageMeta("");
-      applyContactPageMeta("");
+      applyContactPageMeta({ nextCursor: "", total: 0, page: 1, pageSize: CONTACT_PAGE_SIZE });
       renderAll();
       setConnectionState("error");
       showToast("Unable to load the workspace", error.message, true);
@@ -2320,13 +2367,21 @@
         applyConversationPageMeta(data.conversationNextCursor || state.conversationNextCursor);
       }
       const fetchedContacts = asItems(data.contacts).map(normalizeContact);
-      state.contacts = state.contactNextCursor || state.contacts.length > fetchedContacts.length
-        ? mergeContactSnapshots(state.contacts, fetchedContacts)
-        : fetchedContacts;
-      if (data.contactNextCursor !== undefined) {
-        applyContactPageMeta(data.contactNextCursor || state.contactNextCursor);
+      // Contacts are page-backed; only refresh the catalogue when viewing page 1 with no search.
+      if (!state.contactSearch.trim() && state.contactPage <= 1) {
+        state.contacts = fetchedContacts;
+        applyContactPageMeta({
+          nextCursor: data.contactNextCursor,
+          total: data.contactTotal ?? fetchedContacts.length,
+          page: data.contactPage || 1,
+          pageSize: data.contactPageSize || CONTACT_PAGE_SIZE,
+        });
+      } else if (data.contactTotal !== undefined) {
+        state.contactTotal = Number(data.contactTotal) || state.contactTotal;
       }
-      if (!state.contacts.length) state.contacts = deriveContacts(state.conversations);
+      if (!state.contacts.length && !state.contactSearch.trim()) {
+        state.contacts = deriveContacts(state.conversations);
+      }
       const activeSelectedId = state.selectedConversationId;
       const selectionUnchanged = activeSelectedId === selectedId;
       // A reconnect has no event replay. Cached histories that were not refreshed here
@@ -2434,10 +2489,10 @@
   }
 
   function filteredConversations() {
-    const search = state.search.trim().toLocaleLowerCase();
     const selected = state.filters;
     const statusFilters = ["open", "closed"].filter((filter) => selected.has(filter));
     const assignmentFilters = ["mine", "unassigned"].filter((filter) => selected.has(filter));
+    // Text search is server-side (`refreshInboxCatalogue` / load-more with q).
     return unifiedConversations()
       .filter((item) => {
         if (statusFilters.length && !statusFilters.some((filter) => filter === "open" ? item.status !== "closed" : item.status === "closed")) return false;
@@ -2445,8 +2500,7 @@
           ? isAssignedToCurrentUser(item)
           : !item.assignedTo || item.assignedTo === "Unassigned")) return false;
         if (selected.has("unread") && item.unreadCount <= 0) return false;
-        if (!search) return true;
-        return `${item.subject} ${item.lastMessage} ${item.channelId}`.toLocaleLowerCase().includes(search);
+        return true;
       })
       .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
   }
@@ -2486,9 +2540,19 @@
     const items = filteredConversations();
     if (!items.length) {
       const empty = element("div", "empty-list");
-      empty.textContent = state.search ? "No conversations match your search." : "No conversations in this view.";
+      if (state.conversationsLoadingMore && state.conversationSearchActive) {
+        empty.textContent = "Searching conversations…";
+      } else if (state.conversationsLoadError && state.conversationSearchActive) {
+        empty.textContent = state.conversationsLoadError;
+      } else {
+        empty.textContent = state.search.trim()
+          ? "No conversations match your search."
+          : "No conversations in this view.";
+      }
       host.append(empty);
-      if (state.conversationNextCursor) appendConversationLoadSentinel(host);
+      if (state.conversationNextCursor || state.conversationsLoadingMore || state.conversationsLoadError) {
+        appendConversationLoadSentinel(host);
+      }
       return;
     }
 
@@ -2575,12 +2639,43 @@
       const data = await state.api.listConversations({
         cursor: state.conversationNextCursor,
         limit: CONVERSATION_PAGE_SIZE,
+        q: state.search.trim(),
       });
       appendConversationPage(asItems(data.items || data).map(normalizeConversation));
       applyConversationPageMeta(data.nextCursor);
     } catch (error) {
       state.conversationsLoadError = error.message || "Could not load more conversations.";
     } finally {
+      state.conversationsLoadingMore = false;
+      renderConversationList();
+      renderCounts();
+    }
+  }
+
+  async function refreshInboxCatalogue({ reset = true } = {}) {
+    if (!state.api) return;
+    const requestId = ++state.conversationSearchRequestId;
+    const q = state.search.trim();
+    state.conversationSearchActive = Boolean(q);
+    state.conversationsLoadingMore = true;
+    state.conversationsLoadError = "";
+    if (reset) applyConversationPageMeta("");
+    renderConversationList();
+    try {
+      const data = await state.api.listConversations({
+        cursor: "",
+        limit: CONVERSATION_PAGE_SIZE,
+        q,
+      });
+      if (requestId !== state.conversationSearchRequestId) return;
+      state.conversations = asItems(data.items || data).map(normalizeConversation);
+      applyConversationPageMeta(data.nextCursor);
+    } catch (error) {
+      if (requestId !== state.conversationSearchRequestId) return;
+      state.conversationsLoadError = error.message || "Could not search conversations.";
+      if (reset) state.conversations = [];
+    } finally {
+      if (requestId !== state.conversationSearchRequestId) return;
       state.conversationsLoadingMore = false;
       renderConversationList();
       renderCounts();
@@ -3994,15 +4089,6 @@
     renderContactIdentityList(context.host, drafts, mode);
   }
 
-  function contactSearchText(contact) {
-    const identities = contact.identities.flatMap((identity) => [
-      identity.platform, identityLabel(identity.platform), identity.profileId,
-      ...identity.bindings.flatMap((binding) => [binding.channelId, binding.channelName, binding.scopedProfileId]),
-    ]);
-    return [contact.displayName, contact.company, ...contact.tags, ...Object.values(contactPlatformIds(contact)), ...identities]
-      .join(" ").toLocaleLowerCase();
-  }
-
   function contactLastActive(contact) {
     const values = [
       ...state.conversations.filter((conversation) => conversation.contactId === contact.contactId).map((conversation) => conversation.lastMessageAt),
@@ -4011,159 +4097,131 @@
     return values.sort((a, b) => b - a)[0]?.toISOString() || "";
   }
 
-  function filteredContacts() {
-    const search = state.contactSearch.trim().toLocaleLowerCase();
-    if (!search) return state.contacts;
-    // Server search already scoped the catalogue when a query is active.
-    return state.contacts.filter((contact) => contactSearchText(contact).includes(search));
-  }
-
   function renderContacts() {
-    const contacts = filteredContacts();
-    const hasMore = Boolean(state.contactNextCursor);
-    const countLabel = hasMore
-      ? `${contacts.length}+ contact${contacts.length === 1 ? "" : "s"}`
-      : `${contacts.length} contact${contacts.length === 1 ? "" : "s"}`;
-    $("contactCount").textContent = countLabel;
+    const contacts = state.contacts;
+    const total = Math.max(0, Number(state.contactTotal) || contacts.length);
+    const pageSize = Math.max(1, Number(state.contactPageSize) || CONTACT_PAGE_SIZE);
+    const totalPages = contactTotalPages();
+    if (state.contactPage > totalPages) state.contactPage = totalPages;
+    const start = total ? ((state.contactPage - 1) * pageSize) + 1 : 0;
+    const end = total ? Math.min(total, start + contacts.length - 1) : 0;
+    const countNode = $("contactCount");
+    if (countNode) {
+      countNode.textContent = total === 1 ? "1 contact" : `${total} contacts`;
+    }
+    const pageLabel = $("contactPageLabel");
+    if (pageLabel) {
+      pageLabel.textContent = total
+        ? `${start}–${end} of ${total} · Page ${state.contactPage} of ${totalPages}`
+        : "0 of 0";
+    }
+    const prevButton = $("contactPrevPage");
+    const nextButton = $("contactNextPage");
+    if (prevButton) prevButton.disabled = state.contactsLoadingMore || state.contactPage <= 1 || !total;
+    if (nextButton) nextButton.disabled = state.contactsLoadingMore || state.contactPage >= totalPages || !total;
+    const pagination = $("contactPagination");
+    if (pagination) pagination.hidden = false;
     const tbody = $("contactTableBody");
     tbody.replaceChildren();
-    if (!contacts.length && !state.contactsLoadingMore) {
+    if (state.contactsLoadingMore && !contacts.length) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
       cell.colSpan = 5;
       cell.className = "empty-list";
-      cell.textContent = state.contactSearch.trim()
-        ? "No contacts match your search."
-        : "No contacts yet.";
+      cell.textContent = "Loading contacts…";
       row.append(cell);
       tbody.append(row);
-    } else {
-      contacts.forEach((contact) => {
-        const row = document.createElement("tr");
-        row.dataset.contactId = contact.contactId;
-        row.tabIndex = 0;
-        row.classList.toggle("is-selected", contact.contactId === state.selectedContactId);
-        row.setAttribute("aria-label", `View and edit ${contact.displayName}`);
-        const identityCell = document.createElement("td");
-        const identity = element("div", "contact-cell");
-        const count = contact.identities.length;
-        identity.append(
-          element("strong", "", contact.displayName),
-          element("span", "contact-count-copy", `${count} messaging ID${count === 1 ? "" : "s"}`),
-        );
-        identityCell.append(identity);
-        row.append(identityCell);
-
-        row.append(tableCell(contact.company || "—"));
-
-        const tagCell = document.createElement("td");
-        const tagWrap = element("div", "tag-list");
-        (contact.tags.length ? contact.tags.slice(0, 2) : ["—"]).forEach((tag) => tagWrap.append(element("span", "tag", tag)));
-        tagCell.append(tagWrap);
-        row.append(tagCell);
-
-        const lastActive = contactLastActive(contact);
-        row.append(tableCell(lastActive ? relativeTime(lastActive) : "—"));
-        const statusCell = document.createElement("td");
-        const closed = contact.status === "inactive";
-        statusCell.append(element("span", `status-chip${closed ? " is-inactive" : ""}`, closed ? "Closed" : "Open"));
-        row.append(statusCell);
-        tbody.append(row);
-      });
+      return;
     }
-    renderContactLoadMore();
-  }
-
-  function renderContactLoadMore() {
-    const host = $("contactLoadMore");
-    const button = $("contactLoadMoreButton");
-    const status = $("contactLoadMoreStatus");
-    if (!host || !button || !status) return;
-    disconnectContactListObserver();
-    const hasMore = Boolean(state.contactNextCursor);
-    host.hidden = !hasMore && !state.contactsLoadingMore && !state.contactsLoadError;
-    button.hidden = !hasMore || state.contactsLoadingMore;
-    button.disabled = state.contactsLoadingMore || !hasMore;
-    if (state.contactsLoadError) {
-      status.textContent = state.contactsLoadError;
-      button.hidden = false;
-      button.disabled = false;
-      button.textContent = "Retry";
-      host.hidden = false;
-    } else if (state.contactsLoadingMore) {
-      status.textContent = "Loading more contacts…";
-      button.textContent = "Load more contacts";
-    } else if (hasMore) {
-      status.textContent = "Scroll for more";
-      button.textContent = "Load more contacts";
-      observeContactListSentinel(host);
-    } else {
-      status.textContent = "";
-      button.textContent = "Load more contacts";
+    if (!contacts.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      cell.className = "empty-list";
+      cell.textContent = state.contactsLoadError
+        ? state.contactsLoadError
+        : state.contactSearch.trim()
+          ? "No contacts match your search."
+          : "No contacts yet.";
+      row.append(cell);
+      tbody.append(row);
+      return;
     }
+    contacts.forEach((contact) => {
+      const row = document.createElement("tr");
+      row.dataset.contactId = contact.contactId;
+      row.tabIndex = 0;
+      row.classList.toggle("is-selected", contact.contactId === state.selectedContactId);
+      row.setAttribute("aria-label", `View and edit ${contact.displayName}`);
+      const identityCell = document.createElement("td");
+      const identity = element("div", "contact-cell");
+      const count = contact.identities.length;
+      identity.append(
+        element("strong", "", contact.displayName),
+        element("span", "contact-count-copy", `${count} messaging ID${count === 1 ? "" : "s"}`),
+      );
+      identityCell.append(identity);
+      row.append(identityCell);
+
+      row.append(tableCell(contact.company || "—"));
+
+      const tagCell = document.createElement("td");
+      const tagWrap = element("div", "tag-list");
+      (contact.tags.length ? contact.tags.slice(0, 2) : ["—"]).forEach((tag) => tagWrap.append(element("span", "tag", tag)));
+      tagCell.append(tagWrap);
+      row.append(tagCell);
+
+      const lastActive = contactLastActive(contact);
+      row.append(tableCell(lastActive ? relativeTime(lastActive) : "—"));
+      const statusCell = document.createElement("td");
+      const closed = contact.status === "inactive";
+      statusCell.append(element("span", `status-chip${closed ? " is-inactive" : ""}`, closed ? "Closed" : "Open"));
+      row.append(statusCell);
+      tbody.append(row);
+    });
   }
 
-  function disconnectContactListObserver() {
-    state.contactListObserver?.disconnect();
-    state.contactListObserver = null;
-  }
-
-  function observeContactListSentinel(probe) {
-    disconnectContactListObserver();
-    if (!probe || typeof IntersectionObserver !== "function") return;
-    state.contactListObserver = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) loadMoreContacts();
-    }, { root: null, rootMargin: "200px 0px" });
-    state.contactListObserver.observe(probe);
-  }
-
-  async function loadMoreContacts() {
-    if (!state.api || state.contactsLoadingMore || !state.contactNextCursor) return;
+  async function loadContactsPage(page = 1, { keepSelection = true } = {}) {
+    if (!state.api) return;
+    const requestId = ++state.contactSearchRequestId;
+    const q = state.contactSearch.trim();
+    const safePage = Math.max(1, Number(page) || 1);
     state.contactsLoadingMore = true;
     state.contactsLoadError = "";
-    renderContactLoadMore();
+    state.contactPage = safePage;
+    renderContacts();
     try {
       const data = await state.api.listContacts({
-        cursor: state.contactNextCursor,
+        page: safePage,
         limit: CONTACT_PAGE_SIZE,
-        q: state.contactSearch.trim(),
+        q,
       });
-      appendContactPage(asItems(data.items || data).map(normalizeContact));
-      applyContactPageMeta(data.nextCursor);
+      if (requestId !== state.contactSearchRequestId) return;
+      state.contacts = asItems(data.items || data).map(normalizeContact);
+      applyContactPageMeta({
+        nextCursor: data.nextCursor,
+        total: data.total ?? state.contacts.length,
+        page: data.page || safePage,
+        pageSize: data.pageSize || CONTACT_PAGE_SIZE,
+      });
+      if (!keepSelection || !state.contacts.some((contact) => contact.contactId === state.selectedContactId)) {
+        state.selectedContactId = null;
+        closeContactEditor();
+      }
     } catch (error) {
-      state.contactsLoadError = error.message || "Could not load more contacts.";
+      if (requestId !== state.contactSearchRequestId) return;
+      state.contactsLoadError = error.message || "Could not load contacts.";
+      state.contacts = [];
+      applyContactPageMeta({ nextCursor: "", total: 0, page: 1, pageSize: CONTACT_PAGE_SIZE });
     } finally {
+      if (requestId !== state.contactSearchRequestId) return;
       state.contactsLoadingMore = false;
       renderContacts();
     }
   }
 
   async function refreshContactsCatalogue({ reset = true } = {}) {
-    if (!state.api) return;
-    const requestId = ++state.contactSearchRequestId;
-    const q = state.contactSearch.trim();
-    state.contactsLoadingMore = true;
-    state.contactsLoadError = "";
-    if (reset) applyContactPageMeta("");
-    renderContactLoadMore();
-    try {
-      const data = await state.api.listContacts({
-        cursor: "",
-        limit: CONTACT_PAGE_SIZE,
-        q,
-      });
-      if (requestId !== state.contactSearchRequestId) return;
-      state.contacts = asItems(data.items || data).map(normalizeContact);
-      applyContactPageMeta(data.nextCursor);
-    } catch (error) {
-      if (requestId !== state.contactSearchRequestId) return;
-      state.contactsLoadError = error.message || "Could not load contacts.";
-      if (reset) state.contacts = [];
-    } finally {
-      if (requestId !== state.contactSearchRequestId) return;
-      state.contactsLoadingMore = false;
-      renderContacts();
-    }
+    await loadContactsPage(reset ? 1 : state.contactPage, { keepSelection: !reset });
   }
 
   function contactPlatformRoutes(contact, platform, identityId = "") {
@@ -7264,6 +7322,9 @@
     if (route === "workspace") loadWorkspaceProfile().catch(() => {});
     if (route === "whatsapp-templates") loadWhatsAppTemplateLibrary().catch(() => {});
     if (route === "import-chat") renderImportChatPage();
+    if (route === "contacts") {
+      loadContactsPage(state.contactPage || 1).catch(() => {});
+    }
     if (!preserveLocation) replaceAppHash(`#${route}`);
     closeMobileMenu();
   }
@@ -8974,7 +9035,14 @@
       if (input) toggleConversationFilter(input.value);
     });
 
-    $("conversationSearch").addEventListener("input", (event) => { state.search = event.target.value; renderConversationList(); });
+    let conversationSearchTimer = 0;
+    $("conversationSearch").addEventListener("input", (event) => {
+      state.search = event.target.value;
+      window.clearTimeout(conversationSearchTimer);
+      conversationSearchTimer = window.setTimeout(() => {
+        refreshInboxCatalogue({ reset: true });
+      }, 250);
+    });
     let contactSearchTimer = 0;
     $("contactSearch").addEventListener("input", (event) => {
       state.contactSearch = event.target.value;
@@ -8983,7 +9051,14 @@
         refreshContactsCatalogue({ reset: true });
       }, 250);
     });
-    $("contactLoadMoreButton")?.addEventListener("click", () => loadMoreContacts());
+    $("contactPrevPage")?.addEventListener("click", () => {
+      if (state.contactPage <= 1) return;
+      loadContactsPage(state.contactPage - 1);
+    });
+    $("contactNextPage")?.addEventListener("click", () => {
+      if (state.contactPage >= contactTotalPages()) return;
+      loadContactsPage(state.contactPage + 1);
+    });
     $("whatsappTemplateSearch").addEventListener("input", (event) => {
       state.whatsappTemplateSearch = event.target.value;
       renderWhatsAppTemplateResults();

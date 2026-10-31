@@ -73,23 +73,31 @@ test('conversation route options stay scoped for inbox bootstrap', async () => {
   assert.match(routeOptions, /widespread 500\/504s|bootstrap 500\/504/);
 });
 
-test('contact and conversation list pages expose cursors for unlimited loading', async () => {
+test('contact and conversation lists page at 100 with totals and cursors', async () => {
   const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
   const bootstrap = index.slice(index.indexOf("url.pathname === '/api/bootstrap'"),
     index.indexOf("url.pathname === '/api/workspace'"));
   assert.match(bootstrap, /conversationNextCursor/);
-  assert.match(bootstrap, /contactNextCursor/);
+  assert.match(bootstrap, /contactTotal/);
+  assert.match(bootstrap, /contactPage/);
   assert.match(bootstrap, /BOOTSTRAP_CONTACT_LIMIT/);
   assert.match(bootstrap, /BOOTSTRAP_CONVERSATION_LIMIT/);
   assert.match(bootstrap, /withSearchParams\(url/);
-  assert.match(index, /const BOOTSTRAP_CONTACT_LIMIT = 2000/);
+  assert.match(index, /const BOOTSTRAP_CONTACT_LIMIT = 100/);
+  assert.match(index, /const BOOTSTRAP_CONVERSATION_LIMIT = 100/);
+  assert.match(index, /const DEFAULT_CONVERSATION_PAGE_SIZE = 100/);
   assert.match(index, /const MAX_CONTACT_LIST_LIMIT = 2000/);
+  const listConversations = index.slice(index.indexOf('async function listConversations'),
+    index.indexOf('function assertPrincipalChannelAccess'));
+  assert.match(listConversations, /search_message/);
+  assert.match(listConversations, /route_contact\.display_name/);
   const listContacts = index.slice(index.indexOf('async function listContacts'),
     index.indexOf('function csvCell'));
-  assert.match(listContacts, /contactCursor|searchParams\.get\('cursor'\)/);
+  assert.match(listContacts, /searchParams\.get\('page'\)/);
+  assert.match(listContacts, /OFFSET/);
+  assert.match(listContacts, /COUNT\(\*\)/);
   assert.match(listContacts, /nextCursor/);
   assert.match(listContacts, /MAX_CONTACT_LIST_LIMIT/);
-  assert.match(listContacts, /COALESCE\([\s\S]*last_message_at[\s\S]*updated_at\) < \?4/);
   const hydrate = index.slice(index.indexOf('async function contactIdentityRows'),
     index.indexOf('async function hydrateContactViews'));
   assert.match(hydrate, /json_each\(\?2\)/);

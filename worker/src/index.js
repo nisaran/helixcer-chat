@@ -60,8 +60,10 @@ const MAX_CREDENTIAL_LENGTH = 4096;
 const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_CONVERSATION_LIST_LIMIT = 2000;
 const MAX_CONTACT_LIST_LIMIT = 2000;
-const BOOTSTRAP_CONVERSATION_LIMIT = 1000;
-const BOOTSTRAP_CONTACT_LIMIT = 2000;
+const BOOTSTRAP_CONVERSATION_LIMIT = 100;
+const BOOTSTRAP_CONTACT_LIMIT = 100;
+const DEFAULT_CONVERSATION_PAGE_SIZE = 100;
+const DEFAULT_CONTACT_PAGE_SIZE = 100;
 const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024;
 const MAX_ATTACHMENT_CAPTION_LENGTH = 1024;
 const WHATSAPP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -428,11 +430,11 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/bootstrap' && request.method === 'GET') {
       const allowedChannels = restrictedChannelIds(principal);
-      // First paint covers large Interakt imports; infinite scroll / load-more
-      // continues past these caps via the dedicated list endpoints.
+      // First paint loads one page; inbox scroll and contacts pagination fetch more.
       const bootstrapUrl = withSearchParams(url, {
         limit: url.searchParams.get('limit') || String(BOOTSTRAP_CONVERSATION_LIMIT),
-        contactLimit: url.searchParams.get('contactLimit') || String(BOOTSTRAP_CONTACT_LIMIT)
+        contactLimit: url.searchParams.get('contactLimit') || String(BOOTSTRAP_CONTACT_LIMIT),
+        page: url.searchParams.get('page') || '1'
       });
       const [channelsRaw, conversationPage, contactPage, tags, workspace] = await Promise.all([
         listChannels(env, workspaceId, principal.membership.role !== 'agent'),
@@ -450,6 +452,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         conversations: conversationPage.items,
         conversationNextCursor: conversationPage.nextCursor,
         contacts: contactPage.items,
+        contactTotal: contactPage.total,
+        contactPage: contactPage.page,
+        contactPageSize: contactPage.pageSize,
         contactNextCursor: contactPage.nextCursor,
         tags,
         workspace,
@@ -632,7 +637,13 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/contacts' && request.method === 'GET') {
       const page = await listContacts(env, workspaceId, url);
-      return withCors(json({ items: page.items, nextCursor: page.nextCursor }), cors);
+      return withCors(json({
+        items: page.items,
+        nextCursor: page.nextCursor,
+        total: page.total,
+        page: page.page,
+        pageSize: page.pageSize
+      }), cors);
     }
     if (url.pathname === '/api/tags' && request.method === 'GET') {
       return withCors(json({ items: await listWorkspaceTags(env, workspaceId) }), cors);
@@ -2680,7 +2691,7 @@ function base64UrlDecode(value) {
 }
 
 async function listConversations(env, workspaceId, url, options = {}) {
-  const limit = clampInt(url.searchParams.get('limit'), 1, MAX_CONVERSATION_LIST_LIMIT, 50);
+  const limit = clampInt(url.searchParams.get('limit'), 1, MAX_CONVERSATION_LIST_LIMIT, DEFAULT_CONVERSATION_PAGE_SIZE);
   const status = url.searchParams.get('status') || '';
   const channelId = url.searchParams.get('channelId') || '';
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
@@ -2709,6 +2720,10 @@ async function listConversations(env, workspaceId, url, options = {}) {
           AND route_message.conversation_id=c.conversation_id
           AND route_message.channel_id=?3))
       AND (?4='' OR c.subject LIKE '%'||?4||'%' OR c.conversation_id LIKE '%'||?4||'%'
+        OR EXISTS (SELECT 1 FROM contacts route_contact
+          WHERE route_contact.workspace_id=c.workspace_id AND route_contact.contact_id=c.contact_id
+            AND (instr(lower(COALESCE(route_contact.display_name,'')),lower(?4))>0
+              OR instr(lower(COALESCE(route_contact.company,'')),lower(?4))>0))
         OR EXISTS (SELECT 1 FROM contact_identities route_identity
           JOIN channel_identity_bindings route_binding
             ON route_binding.workspace_id=route_identity.workspace_id
@@ -2716,7 +2731,11 @@ async function listConversations(env, workspaceId, url, options = {}) {
           WHERE route_identity.workspace_id=c.workspace_id
             AND route_identity.contact_id=c.contact_id
             AND (route_binding.scoped_profile_id LIKE '%'||?4||'%'
-              OR route_identity.profile_id LIKE '%'||?4||'%')))
+              OR route_identity.profile_id LIKE '%'||?4||'%'))
+        OR EXISTS (SELECT 1 FROM messages search_message
+          WHERE search_message.workspace_id=c.workspace_id
+            AND search_message.conversation_id=c.conversation_id
+            AND instr(lower(COALESCE(search_message.text,'')),lower(?4))>0))
       AND (?5='' OR c.last_message_at<?5)
       AND (?7=0 OR c.channel_id IN (SELECT value FROM json_each(?8)))
     ORDER BY c.last_message_at DESC LIMIT ?6`)
@@ -2968,35 +2987,63 @@ export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Dat
   };
 }
 
-async function listContacts(env, workspaceId, url) {
-  const limit = clampInt(url.searchParams.get('contactLimit') || url.searchParams.get('limit'), 1, MAX_CONTACT_LIST_LIMIT, 100);
-  const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
-  const cursor = String(url.searchParams.get('cursor') || url.searchParams.get('contactCursor') || '').trim();
-  const result = await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
-      (SELECT MAX(last_message_at) FROM conversations cv
-        WHERE cv.workspace_id=c.workspace_id AND cv.contact_id=c.contact_id) AS last_message_at
-    FROM contacts c
-    WHERE c.workspace_id=?1 AND (?2='' OR
+function contactListWhereSql() {
+  return `c.workspace_id=?1 AND (?2='' OR
       instr(lower(COALESCE(c.display_name,'')),lower(?2))>0 OR
       instr(lower(COALESCE(c.company,'')),lower(?2))>0 OR
+      instr(lower(COALESCE(c.tags_json,'')),lower(?2))>0 OR
       EXISTS (SELECT 1 FROM contact_platform_ids flat
         WHERE flat.workspace_id=c.workspace_id AND flat.contact_id=c.contact_id
           AND instr(lower(COALESCE(flat.profile_id,'')),lower(?2))>0) OR
       EXISTS (SELECT 1 FROM contact_identities legacy
         WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id
           AND legacy.platform NOT IN ('whatsapp','telegram','instagram','facebook','email')
-          AND instr(lower(COALESCE(legacy.profile_id,'')),lower(?2))>0))
-      AND (?4='' OR COALESCE(
+          AND instr(lower(COALESCE(legacy.profile_id,'')),lower(?2))>0))`;
+}
+
+async function listContacts(env, workspaceId, url) {
+  const limit = clampInt(
+    url.searchParams.get('contactLimit') || url.searchParams.get('limit'),
+    1, MAX_CONTACT_LIST_LIMIT, DEFAULT_CONTACT_PAGE_SIZE
+  );
+  const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
+  const page = clampInt(url.searchParams.get('page'), 1, 1_000_000, 1);
+  const offset = (page - 1) * limit;
+  const cursor = String(url.searchParams.get('cursor') || url.searchParams.get('contactCursor') || '').trim();
+  const whereSql = contactListWhereSql();
+  const countRow = await env.DB.prepare(`SELECT COUNT(*) AS count FROM contacts c WHERE ${whereSql}`)
+    .bind(workspaceId, q).first();
+  const total = Number(countRow?.count || 0);
+  // Prefer explicit page/offset paging; keep cursor for older clients.
+  const result = cursor
+    ? await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
+      (SELECT MAX(last_message_at) FROM conversations cv
+        WHERE cv.workspace_id=c.workspace_id AND cv.contact_id=c.contact_id) AS last_message_at
+    FROM contacts c
+    WHERE ${whereSql}
+      AND COALESCE(
         (SELECT MAX(last_message_at) FROM conversations cv
           WHERE cv.workspace_id=c.workspace_id AND cv.contact_id=c.contact_id),
-        c.updated_at) < ?4)
-    ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?3`).bind(workspaceId, q, limit, cursor).all();
+        c.updated_at) < ?3
+    ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?4`).bind(workspaceId, q, cursor, limit).all()
+    : await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
+      (SELECT MAX(last_message_at) FROM conversations cv
+        WHERE cv.workspace_id=c.workspace_id AND cv.contact_id=c.contact_id) AS last_message_at
+    FROM contacts c
+    WHERE ${whereSql}
+    ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?3 OFFSET ?4`).bind(workspaceId, q, limit, offset).all();
   const rows = result.results || [];
   const items = await hydrateContactViews(env, workspaceId, rows);
   const lastRow = rows[rows.length - 1];
+  const hasMore = cursor
+    ? items.length === limit
+    : offset + items.length < total;
   return {
     items,
-    nextCursor: items.length === limit
+    total,
+    page,
+    pageSize: limit,
+    nextCursor: hasMore
       ? String(lastRow?.last_message_at || lastRow?.updated_at || '')
       : ''
   };

@@ -737,11 +737,11 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .surface-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); padding: 13px 16px; }
 .compact-search { width: min(360px, 75%); margin: 0; }
 .contact-toolbar-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px 14px; }
-.contact-load-more {
-  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px;
-  border-top: 1px solid #eff1ee; padding: 12px 14px 14px;
+.contact-pagination {
+  display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 10px;
 }
-.contact-load-more[hidden] { display: none; }
+.contact-pagination[hidden] { display: none; }
+#contactPageLabel { white-space: nowrap; }
 .contact-table-wrap { overflow-x: auto; }
 .contact-table { width: 100%; min-width: 680px; border-collapse: collapse; }
 .contact-table th { color: var(--muted); padding: 8px 14px; text-align: left; font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
