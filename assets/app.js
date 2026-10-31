@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261026-15";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261031-paging-ux2";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -20,9 +20,12 @@
     contactSearch: "",
     conversationNextCursor: "",
     conversationsLoadingMore: false,
+    conversationsSearching: false,
     conversationsLoadError: "",
     conversationSearchRequestId: 0,
     conversationSearchActive: false,
+    conversationScrollArmed: false,
+    conversationObserverPaused: false,
     contactPage: 1,
     contactTotal: 0,
     contactPageSize: CONTACT_PAGE_SIZE,
@@ -1954,15 +1957,43 @@
     pageSize = state.contactPageSize || CONTACT_PAGE_SIZE,
   } = {}) {
     state.contactNextCursor = String(nextCursor || "");
-    state.contactTotal = Math.max(0, Number(total) || 0);
+    const parsedTotal = Number(total);
+    state.contactTotal = Number.isFinite(parsedTotal) && parsedTotal >= 0
+      ? parsedTotal
+      : Math.max(0, Number(state.contactTotal) || 0);
     state.contactPage = Math.max(1, Number(page) || 1);
     state.contactPageSize = Math.max(1, Number(pageSize) || CONTACT_PAGE_SIZE);
     state.contactsLoadError = "";
   }
 
+  function resolveContactTotal(data, pageItems = []) {
+    const raw = data?.total ?? data?.contactTotal;
+    const parsed = Number(raw);
+    const prior = Math.max(0, Number(state.contactTotal) || 0);
+    const page = Math.max(1, Number(data?.page || state.contactPage) || 1);
+    const pageSize = Math.max(1, Number(data?.pageSize || state.contactPageSize) || CONTACT_PAGE_SIZE);
+    const hasMore = Boolean(data?.nextCursor || data?.contactNextCursor);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.max(parsed, pageItems.length ? ((page - 1) * pageSize) + pageItems.length : 0);
+    if (Number.isFinite(parsed) && parsed === 0 && !pageItems.length && !hasMore) return 0;
+    if (pageItems.length) {
+      const minFromPage = ((page - 1) * pageSize) + pageItems.length;
+      return Math.max(prior, minFromPage + (hasMore ? 1 : 0));
+    }
+    return prior;
+  }
+
   function contactTotalPages() {
     const pageSize = Math.max(1, Number(state.contactPageSize) || CONTACT_PAGE_SIZE);
-    return Math.max(1, Math.ceil(Math.max(0, Number(state.contactTotal) || 0) / pageSize));
+    const total = Math.max(0, Number(state.contactTotal) || 0);
+    if (!total) return 1;
+    return Math.max(1, Math.ceil(total / pageSize));
+  }
+
+  function contactHasNextPage() {
+    if (state.contactNextCursor) return true;
+    const total = Math.max(0, Number(state.contactTotal) || 0);
+    if (!total) return false;
+    return state.contactPage < contactTotalPages();
   }
 
   function normalizeContact(raw) {
@@ -2282,6 +2313,9 @@
   async function loadAll({ preserveSelection = true } = {}) {
     state.loading = true;
     state.conversationsLoadingMore = false;
+    state.conversationsSearching = false;
+    state.conversationScrollArmed = false;
+    state.conversationObserverPaused = false;
     state.contactsLoadingMore = false;
     renderConversationList();
     try {
@@ -2305,10 +2339,11 @@
       state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart);
       applyConversationPageMeta(data.conversationNextCursor);
       state.conversationSearchActive = Boolean(state.search.trim());
-      state.contacts = asItems(data.contacts).map(normalizeContact);
+      const fetchedContacts = asItems(data.contacts).map(normalizeContact);
+      state.contacts = fetchedContacts;
       applyContactPageMeta({
         nextCursor: data.contactNextCursor,
-        total: data.contactTotal ?? data.contacts?.length ?? 0,
+        total: resolveContactTotal(data, fetchedContacts),
         page: data.contactPage || 1,
         pageSize: data.contactPageSize || CONTACT_PAGE_SIZE,
       });
@@ -2334,6 +2369,9 @@
   async function reconcileWorkspace({ includeSelectedMessages = true } = {}) {
     if (!state.api || state.api.isDemo || state.authStatus !== "authenticated") return;
     if (state.reconcilePromise) return state.reconcilePromise;
+    // Soft sync: never flip the inbox into a full loading skeleton, and pause
+    // the infinite-scroll observer so a re-render does not auto-fetch page 2+.
+    state.conversationObserverPaused = true;
     state.reconcilePromise = (async () => {
       const selectedId = state.selectedConversationId;
       const realtimeRevisionAtStart = state.realtimeRevision;
@@ -2367,17 +2405,18 @@
         applyConversationPageMeta(data.conversationNextCursor || state.conversationNextCursor);
       }
       const fetchedContacts = asItems(data.contacts).map(normalizeContact);
-      // Contacts are page-backed; only refresh the catalogue when viewing page 1 with no search.
-      if (!state.contactSearch.trim() && state.contactPage <= 1) {
+      const resolvedTotal = resolveContactTotal(data, fetchedContacts);
+      // Contacts are page-backed; only replace rows when viewing page 1 with no search.
+      if (!state.contactSearch.trim() && state.contactPage <= 1 && !state.contactsLoadingMore) {
         state.contacts = fetchedContacts;
         applyContactPageMeta({
           nextCursor: data.contactNextCursor,
-          total: data.contactTotal ?? fetchedContacts.length,
+          total: resolvedTotal,
           page: data.contactPage || 1,
           pageSize: data.contactPageSize || CONTACT_PAGE_SIZE,
         });
-      } else if (data.contactTotal !== undefined) {
-        state.contactTotal = Number(data.contactTotal) || state.contactTotal;
+      } else if (Number.isFinite(Number(data.contactTotal))) {
+        state.contactTotal = Math.max(0, Number(data.contactTotal));
       }
       if (!state.contacts.length && !state.contactSearch.trim()) {
         state.contacts = deriveContacts(state.conversations);
@@ -2540,7 +2579,7 @@
     const items = filteredConversations();
     if (!items.length) {
       const empty = element("div", "empty-list");
-      if (state.conversationsLoadingMore && state.conversationSearchActive) {
+      if (state.conversationsSearching) {
         empty.textContent = "Searching conversations…";
       } else if (state.conversationsLoadError && state.conversationSearchActive) {
         empty.textContent = state.conversationsLoadError;
@@ -2550,7 +2589,8 @@
           : "No conversations in this view.";
       }
       host.append(empty);
-      if (state.conversationNextCursor || state.conversationsLoadingMore || state.conversationsLoadError) {
+      // Never mix search/empty status with the load-more control.
+      if (!state.conversationsSearching && state.conversationsLoadError && state.conversationNextCursor) {
         appendConversationLoadSentinel(host);
       }
       return;
@@ -2585,7 +2625,8 @@
       button.append(avatarWrap, copy, side);
       host.append(button);
     });
-    if (state.conversationNextCursor || state.conversationsLoadingMore || state.conversationsLoadError) {
+    if (!state.conversationsSearching
+      && (state.conversationNextCursor || state.conversationsLoadingMore || state.conversationsLoadError)) {
       appendConversationLoadSentinel(host);
     }
   }
@@ -2599,7 +2640,7 @@
       retry.dataset.action = "load-more-conversations";
       sentinel.append(retry, element("span", "subtle", state.conversationsLoadError));
     } else if (state.conversationsLoadingMore) {
-      sentinel.append(element("span", "subtle", "Loading more conversations…"));
+      sentinel.append(element("span", "subtle", "Loading more…"));
     } else if (state.conversationNextCursor) {
       const button = element("button", "secondary-button compact-button", "Load more");
       button.type = "button";
@@ -2609,7 +2650,9 @@
       probe.setAttribute("aria-hidden", "true");
       sentinel.append(probe);
       host.append(sentinel);
-      observeConversationListSentinel(probe);
+      // Only auto-fetch after the user has scrolled the list; otherwise the
+      // sentinel is in view on first paint and immediately loads page 2+.
+      if (state.conversationScrollArmed) observeConversationListSentinel(probe);
       return;
     }
     host.append(sentinel);
@@ -2620,18 +2663,31 @@
     state.conversationListObserver = null;
   }
 
+  function armConversationInfiniteScroll() {
+    state.conversationObserverPaused = false;
+    const probe = $("conversationList")?.querySelector(".conversation-load-sentinel");
+    if (state.conversationScrollArmed) {
+      if (probe && !state.conversationListObserver) observeConversationListSentinel(probe);
+      return;
+    }
+    state.conversationScrollArmed = true;
+    if (probe) observeConversationListSentinel(probe);
+  }
+
   function observeConversationListSentinel(probe) {
     disconnectConversationListObserver();
     const root = $("conversationList");
     if (!root || !probe || typeof IntersectionObserver !== "function") return;
     state.conversationListObserver = new IntersectionObserver((entries) => {
+      if (!state.conversationScrollArmed || state.conversationObserverPaused) return;
+      if (state.loading || state.conversationsSearching || state.conversationsLoadingMore) return;
       if (entries.some((entry) => entry.isIntersecting)) loadMoreConversations();
-    }, { root, rootMargin: "120px 0px" });
+    }, { root, rootMargin: "40px 0px" });
     state.conversationListObserver.observe(probe);
   }
 
   async function loadMoreConversations() {
-    if (!state.api || state.loading || state.conversationsLoadingMore || !state.conversationNextCursor) return;
+    if (!state.api || state.loading || state.conversationsSearching || state.conversationsLoadingMore || !state.conversationNextCursor) return;
     state.conversationsLoadingMore = true;
     state.conversationsLoadError = "";
     renderConversationList();
@@ -2657,8 +2713,11 @@
     const requestId = ++state.conversationSearchRequestId;
     const q = state.search.trim();
     state.conversationSearchActive = Boolean(q);
-    state.conversationsLoadingMore = true;
+    state.conversationsSearching = true;
+    state.conversationsLoadingMore = false;
     state.conversationsLoadError = "";
+    state.conversationScrollArmed = false;
+    state.conversationObserverPaused = false;
     if (reset) applyConversationPageMeta("");
     renderConversationList();
     try {
@@ -2676,7 +2735,7 @@
       if (reset) state.conversations = [];
     } finally {
       if (requestId !== state.conversationSearchRequestId) return;
-      state.conversationsLoadingMore = false;
+      state.conversationsSearching = false;
       renderConversationList();
       renderCounts();
     }
@@ -4099,26 +4158,47 @@
 
   function renderContacts() {
     const contacts = state.contacts;
-    const total = Math.max(0, Number(state.contactTotal) || contacts.length);
     const pageSize = Math.max(1, Number(state.contactPageSize) || CONTACT_PAGE_SIZE);
-    const totalPages = contactTotalPages();
-    if (state.contactPage > totalPages) state.contactPage = totalPages;
-    const start = total ? ((state.contactPage - 1) * pageSize) + 1 : 0;
-    const end = total ? Math.min(total, start + contacts.length - 1) : 0;
+    let total = Math.max(0, Number(state.contactTotal) || 0);
+    if (!total && contacts.length) {
+      total = ((Math.max(1, state.contactPage) - 1) * pageSize) + contacts.length + (state.contactNextCursor ? 1 : 0);
+    }
+    const totalPages = Math.max(1, Math.ceil(Math.max(total, 1) / pageSize));
+    if (total && state.contactPage > totalPages) state.contactPage = totalPages;
+    const start = contacts.length ? ((state.contactPage - 1) * pageSize) + 1 : 0;
+    const end = contacts.length ? start + contacts.length - 1 : 0;
     const countNode = $("contactCount");
     if (countNode) {
-      countNode.textContent = total === 1 ? "1 contact" : `${total} contacts`;
+      if (state.contactsLoadingMore && !contacts.length && !total) {
+        countNode.textContent = "Loading contacts…";
+      } else if (!total && !contacts.length) {
+        countNode.textContent = "0 contacts";
+      } else if (state.contactNextCursor && total <= end) {
+        countNode.textContent = `${Math.max(total, end)}+ contacts`;
+      } else {
+        countNode.textContent = total === 1 ? "1 contact" : `${total} contacts`;
+      }
     }
     const pageLabel = $("contactPageLabel");
     if (pageLabel) {
-      pageLabel.textContent = total
-        ? `${start}–${end} of ${total} · Page ${state.contactPage} of ${totalPages}`
-        : "0 of 0";
+      if (state.contactsLoadingMore && !contacts.length && !total) {
+        pageLabel.textContent = "…";
+      } else if (contacts.length && total) {
+        const knownTotal = Math.max(total, end);
+        pageLabel.textContent = state.contactNextCursor && knownTotal <= end
+          ? `${start}–${end} · Page ${state.contactPage}`
+          : `${start}–${end} of ${knownTotal} · Page ${state.contactPage} of ${Math.max(1, Math.ceil(knownTotal / pageSize))}`;
+      } else if (contacts.length) {
+        pageLabel.textContent = `${start}–${end} · Page ${state.contactPage}`;
+      } else {
+        pageLabel.textContent = "0 of 0";
+      }
     }
     const prevButton = $("contactPrevPage");
     const nextButton = $("contactNextPage");
-    if (prevButton) prevButton.disabled = state.contactsLoadingMore || state.contactPage <= 1 || !total;
-    if (nextButton) nextButton.disabled = state.contactsLoadingMore || state.contactPage >= totalPages || !total;
+    const hasNext = contactHasNextPage() || (contacts.length >= pageSize && Boolean(state.contactNextCursor));
+    if (prevButton) prevButton.disabled = state.contactsLoadingMore || state.contactPage <= 1;
+    if (nextButton) nextButton.disabled = state.contactsLoadingMore || !hasNext;
     const pagination = $("contactPagination");
     if (pagination) pagination.hidden = false;
     const tbody = $("contactTableBody");
@@ -4197,10 +4277,11 @@
         q,
       });
       if (requestId !== state.contactSearchRequestId) return;
-      state.contacts = asItems(data.items || data).map(normalizeContact);
+      const fetched = asItems(data.items || data).map(normalizeContact);
+      state.contacts = fetched;
       applyContactPageMeta({
         nextCursor: data.nextCursor,
-        total: data.total ?? state.contacts.length,
+        total: resolveContactTotal(data, fetched),
         page: data.page || safePage,
         pageSize: data.pageSize || CONTACT_PAGE_SIZE,
       });
@@ -4211,12 +4292,12 @@
     } catch (error) {
       if (requestId !== state.contactSearchRequestId) return;
       state.contactsLoadError = error.message || "Could not load contacts.";
-      state.contacts = [];
-      applyContactPageMeta({ nextCursor: "", total: 0, page: 1, pageSize: CONTACT_PAGE_SIZE });
+      // Keep the previous catalogue/total so Prev/Next and counts stay usable after a blip.
     } finally {
-      if (requestId !== state.contactSearchRequestId) return;
-      state.contactsLoadingMore = false;
-      renderContacts();
+      if (requestId === state.contactSearchRequestId) {
+        state.contactsLoadingMore = false;
+        renderContacts();
+      }
     }
   }
 
@@ -7323,7 +7404,13 @@
     if (route === "whatsapp-templates") loadWhatsAppTemplateLibrary().catch(() => {});
     if (route === "import-chat") renderImportChatPage();
     if (route === "contacts") {
-      loadContactsPage(state.contactPage || 1).catch(() => {});
+      const hasFreshPage = !state.contactSearch.trim()
+        && state.contactPage === 1
+        && state.contacts.length
+        && Number(state.contactTotal) > 0
+        && !state.contactsLoadingMore;
+      if (hasFreshPage) renderContacts();
+      else loadContactsPage(state.contactPage || 1).catch(() => {});
     }
     if (!preserveLocation) replaceAppHash(`#${route}`);
     closeMobileMenu();
@@ -8971,6 +9058,9 @@
       const item = event.target.closest("[data-conversation-id]");
       if (item) selectConversation(item.dataset.conversationId);
     });
+    $("conversationList").addEventListener("scroll", () => {
+      armConversationInfiniteScroll();
+    }, { passive: true });
 
     let replySwipe = null;
     const messageThread = $("messageThread");
@@ -9051,13 +9141,20 @@
         refreshContactsCatalogue({ reset: true });
       }, 250);
     });
-    $("contactPrevPage")?.addEventListener("click", () => {
-      if (state.contactPage <= 1) return;
-      loadContactsPage(state.contactPage - 1);
-    });
-    $("contactNextPage")?.addEventListener("click", () => {
-      if (state.contactPage >= contactTotalPages()) return;
-      loadContactsPage(state.contactPage + 1);
+    const goContactPage = (delta) => {
+      if (state.contactsLoadingMore) return;
+      const nextPage = state.contactPage + delta;
+      if (nextPage < 1) return;
+      if (delta > 0 && !contactHasNextPage()) return;
+      loadContactsPage(nextPage);
+    };
+    $("contactPrevPage")?.addEventListener("click", () => goContactPage(-1));
+    $("contactNextPage")?.addEventListener("click", () => goContactPage(1));
+    $("contactPagination")?.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button || button.disabled) return;
+      if (button.id === "contactPrevPage") goContactPage(-1);
+      if (button.id === "contactNextPage") goContactPage(1);
     });
     $("whatsappTemplateSearch").addEventListener("input", (event) => {
       state.whatsappTemplateSearch = event.target.value;
@@ -9301,10 +9398,19 @@
         closeMobileMenu();
       }
     });
+    let resumeLiveWorkspaceTimer = 0;
     const resumeLiveWorkspace = () => {
       if (state.authStatus !== "authenticated") return;
+      // Pause auto load-more so tab focus / pageshow reconcile does not flash
+      // "Loading more…" when the sentinel is still in view.
+      state.conversationObserverPaused = true;
       state.api?.ensureRealtimeConnected?.({ resume: true });
-      reconcileWorkspace().catch(() => {});
+      window.clearTimeout(resumeLiveWorkspaceTimer);
+      resumeLiveWorkspaceTimer = window.setTimeout(() => {
+        if (state.authStatus !== "authenticated") return;
+        if (state.loading || state.conversationsSearching || state.contactsLoadingMore) return;
+        reconcileWorkspace().catch(() => {});
+      }, 200);
     };
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState !== "visible") return;
