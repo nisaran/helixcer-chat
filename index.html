@@ -359,29 +359,17 @@
               </div>
               <div class="contact-toolbar-meta">
                 <span class="subtle" id="contactCount">0 contacts</span>
-                <div class="contact-pagination" id="contactPagination" hidden>
-                  <label class="contact-page-size">
-                    <span class="sr-only">Rows per page</span>
-                    <select id="contactPageSize" aria-label="Rows per page">
-                      <option value="100" selected>100</option>
-                      <option value="500">500</option>
-                      <option value="1000">1000</option>
-                      <option value="all">All</option>
-                    </select>
-                  </label>
-                  <span class="subtle" id="contactPageLabel">1–0 of 0</span>
-                  <div class="contact-page-buttons">
-                    <button class="secondary-button compact-button" type="button" id="contactPrevPage" aria-label="Previous page" disabled>Prev</button>
-                    <button class="secondary-button compact-button" type="button" id="contactNextPage" aria-label="Next page" disabled>Next</button>
-                  </div>
-                </div>
               </div>
             </div>
-            <div class="contact-table-wrap">
+            <div class="contact-table-wrap" id="contactTableWrap">
               <table class="contact-table">
                 <thead><tr><th>Contact</th><th>Company</th><th>Tags</th><th>Last active</th><th>Status</th></tr></thead>
                 <tbody id="contactTableBody"></tbody>
               </table>
+              <div class="contact-load-more" id="contactLoadMore" hidden>
+                <button class="secondary-button compact-button" type="button" id="contactLoadMoreButton">Load more contacts</button>
+                <span class="subtle" id="contactLoadMoreStatus" aria-live="polite"></span>
+              </div>
             </div>
           </div>
           <aside class="surface contact-editor-panel" id="contactEditor" aria-labelledby="contactEditorTitle" hidden>

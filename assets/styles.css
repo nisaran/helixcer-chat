@@ -370,6 +370,13 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .filter-chip.is-active span { background: #e4dcff; }
 
 .conversation-list { flex: 1; min-height: 0; overflow: auto; scrollbar-color: #d8dcda transparent; }
+.conversation-load-more {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 14px 12px 18px;
+}
+.conversation-load-sentinel { width: 100%; height: 1px; }
 .conversation-item {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) auto;
@@ -730,13 +737,11 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .surface-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); padding: 13px 16px; }
 .compact-search { width: min(360px, 75%); margin: 0; }
 .contact-toolbar-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px 14px; }
-.contact-pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
-.contact-page-size select {
-  min-height: 30px; border: 1px solid var(--line-strong); border-radius: 8px; background: white;
-  color: #596461; padding: 4px 8px; font: inherit; font-size: 11px; font-weight: 650;
+.contact-load-more {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px;
+  border-top: 1px solid #eff1ee; padding: 12px 14px 14px;
 }
-.contact-page-buttons { display: flex; align-items: center; gap: 6px; }
-.contact-page-buttons .compact-button { min-height: 30px; padding: 4px 10px; font-size: 11px; }
+.contact-load-more[hidden] { display: none; }
 .contact-table-wrap { overflow-x: auto; }
 .contact-table { width: 100%; min-width: 680px; border-collapse: collapse; }
 .contact-table th { color: var(--muted); padding: 8px 14px; text-align: left; font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
@@ -1416,7 +1421,6 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .contacts-route { padding-top: 10px; }
   .route-heading { align-items: flex-start; }
   .contact-toolbar-meta { width: 100%; justify-content: space-between; }
-  .contact-pagination { width: 100%; justify-content: space-between; }
   .route-heading-actions { align-items: stretch; flex-direction: column-reverse; }
   .route-heading-actions > * { width: 100%; }
   .route-heading .primary-button { padding-inline: 10px; }
