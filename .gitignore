@@ -26,3 +26,4 @@ backups/
 
 # Temporary agent deploy artifacts
 .deploy/
+.deploy-staging/
