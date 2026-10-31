@@ -58,6 +58,10 @@ const MAX_IMPORT_JSON_BODY = 1_500_000;
 const MAX_EXTERNAL_JSON_BODY = 131072;
 const MAX_CREDENTIAL_LENGTH = 4096;
 const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAX_CONVERSATION_LIST_LIMIT = 2000;
+const MAX_CONTACT_LIST_LIMIT = 2000;
+const BOOTSTRAP_CONVERSATION_LIMIT = 1000;
+const BOOTSTRAP_CONTACT_LIMIT = 2000;
 const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024;
 const MAX_ATTACHMENT_CAPTION_LENGTH = 1024;
 const WHATSAPP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -424,10 +428,16 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/bootstrap' && request.method === 'GET') {
       const allowedChannels = restrictedChannelIds(principal);
+      // First paint covers large Interakt imports; infinite scroll / load-more
+      // continues past these caps via the dedicated list endpoints.
+      const bootstrapUrl = withSearchParams(url, {
+        limit: url.searchParams.get('limit') || String(BOOTSTRAP_CONVERSATION_LIMIT),
+        contactLimit: url.searchParams.get('contactLimit') || String(BOOTSTRAP_CONTACT_LIMIT)
+      });
       const [channelsRaw, conversationPage, contactPage, tags, workspace] = await Promise.all([
         listChannels(env, workspaceId, principal.membership.role !== 'agent'),
-        listConversations(env, workspaceId, url, { allowedChannelIds: allowedChannels }),
-        listContacts(env, workspaceId, url),
+        listConversations(env, workspaceId, bootstrapUrl, { allowedChannelIds: allowedChannels }),
+        listContacts(env, workspaceId, bootstrapUrl),
         listWorkspaceTags(env, workspaceId),
         getWorkspaceProfile(env, workspaceId)
       ]);
@@ -2670,7 +2680,7 @@ function base64UrlDecode(value) {
 }
 
 async function listConversations(env, workspaceId, url, options = {}) {
-  const limit = clampInt(url.searchParams.get('limit'), 1, 100, 50);
+  const limit = clampInt(url.searchParams.get('limit'), 1, MAX_CONVERSATION_LIST_LIMIT, 50);
   const status = url.searchParams.get('status') || '';
   const channelId = url.searchParams.get('channelId') || '';
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
@@ -2959,7 +2969,7 @@ export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Dat
 }
 
 async function listContacts(env, workspaceId, url) {
-  const limit = clampInt(url.searchParams.get('contactLimit') || url.searchParams.get('limit'), 1, 200, 100);
+  const limit = clampInt(url.searchParams.get('contactLimit') || url.searchParams.get('limit'), 1, MAX_CONTACT_LIST_LIMIT, 100);
   const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
   const cursor = String(url.searchParams.get('cursor') || url.searchParams.get('contactCursor') || '').trim();
   const result = await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
@@ -7262,6 +7272,15 @@ function cleanMetaIdentifier(value, label) {
 function clampInt(value, min, max, fallback) {
   const number = Number.parseInt(value, 10);
   return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+}
+
+function withSearchParams(url, overrides = {}) {
+  const next = new URL(url);
+  for (const [key, value] of Object.entries(overrides || {})) {
+    if (value == null || value === '') next.searchParams.delete(key);
+    else next.searchParams.set(key, String(value));
+  }
+  return next;
 }
 
 function secretPrefix(value) {
