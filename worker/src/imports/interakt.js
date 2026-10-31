@@ -182,8 +182,11 @@ export function mapInteraktMessage(message) {
   const messageType = CONTENT_TYPE_MAP[contentType] || 'text';
   const presentation = messageType === 'template' ? interaktTemplatePresentation(message) : null;
   const text = presentation?.text || interaktMessageText(message);
-  const providerMessageId = String(message?.channel_message_id || '').trim();
   const externalId = String(message?.id || '').trim();
+  // Prefer WhatsApp/Interakt channel ids; fall back to a stable Interakt-only key so
+  // re-imports without channel_message_id still dedupe instead of inserting copies.
+  const providerMessageId = String(message?.channel_message_id || '').trim()
+    || (externalId ? `interakt:${externalId}` : '');
   const topMediaUrl = String(message?.media_url || message?.raw?.media_url || '').trim();
   const topMediaFileName = String(message?.media_file_name || message?.raw?.media_file_name || '').trim();
   const templateAttachment = presentation?.attachment || null;

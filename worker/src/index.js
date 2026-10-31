@@ -6153,6 +6153,30 @@ async function importChatHistory(env, workspaceId, principal, payload) {
   return { ok: true, ...summary };
 }
 
+async function findExistingInteraktMessage(env, workspaceId, channelId, mapped) {
+  if (mapped.providerMessageId) {
+    const byProvider = await env.DB.prepare(`SELECT message_id, message_type, text, payload_json, error, status,
+        provider_message_id
+      FROM messages
+      WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3
+      LIMIT 1`)
+      .bind(workspaceId, channelId, mapped.providerMessageId).first();
+    if (byProvider) return byProvider;
+  }
+  if (mapped.externalId) {
+    // Secondary key for older rows / missing channel ids: Interakt message UUID in payload.
+    return env.DB.prepare(`SELECT message_id, message_type, text, payload_json, error, status,
+        provider_message_id
+      FROM messages
+      WHERE workspace_id=?1 AND channel_id=?2
+        AND json_extract(payload_json, '$.source') = ?3
+        AND json_extract(payload_json, '$.externalId') = ?4
+      LIMIT 1`)
+      .bind(workspaceId, channelId, INTERAKT_SOURCE, mapped.externalId).first();
+  }
+  return null;
+}
+
 async function importInteraktConversation(env, workspaceId, channel, conversation, fieldMapping) {
   const customer = extractInteraktCustomer(conversation, fieldMapping);
   if (!customer.phone) throw httpError(400, 'Conversation is missing a WhatsApp phone number.');
@@ -6265,38 +6289,40 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
     };
     const text = String(mapped.text || '').slice(0, MAX_TEXT_LENGTH);
     const payloadJson = truncateJson(payload);
-    if (mapped.providerMessageId) {
-      const existing = await env.DB.prepare(`SELECT message_id, message_type, text, payload_json, error, status FROM messages
-        WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3 LIMIT 1`)
-        .bind(workspaceId, channel.channelId, mapped.providerMessageId).first();
-      if (existing) {
-        // Re-import refreshes Interakt template bodies that were previously stored as
-        // parameter-only middot strings / bare media filenames without the full copy.
-        const existingPayload = String(existing.payload_json || '');
-        const refreshAttachment = Boolean(payload.attachment)
-          && !/"attachment"\s*:/.test(existingPayload);
-        const shouldRefreshTemplate = mapped.messageType === 'template'
-          && (existing.message_type === 'template' || existingPayload.includes('"interakt"'))
-          && text
-          && (text !== String(existing.text || '') || refreshAttachment);
-        const errorText = String(mapped.error || '').slice(0, 500);
-        const shouldRefreshError = Boolean(errorText)
-          && errorText !== String(existing.error || '');
-        if (shouldRefreshTemplate || shouldRefreshError) {
-          pendingStatements.push(env.DB.prepare(`UPDATE messages
-              SET message_type=?2, text=?3, payload_json=?4, status=?5, error=?6
-            WHERE workspace_id=?7 AND message_id=?1`)
-            .bind(
-              existing.message_id, mapped.messageType, text, payloadJson, mapped.status,
-              errorText, workspaceId
-            ));
-          result.messagesUpdated += 1;
-          if (pendingStatements.length >= 40) await flush();
-          continue;
-        }
-        result.messagesSkipped += 1;
+    const existing = await findExistingInteraktMessage(env, workspaceId, channel.channelId, mapped);
+    if (existing) {
+      // Same Interakt/WhatsApp message already stored — never insert a second copy.
+      // Refresh template body / attachment / failure reason when the re-import improves them.
+      const existingPayload = String(existing.payload_json || '');
+      const refreshAttachment = Boolean(payload.attachment)
+        && !/"attachment"\s*:/.test(existingPayload);
+      const shouldRefreshTemplate = mapped.messageType === 'template'
+        && (existing.message_type === 'template' || existingPayload.includes('"interakt"'))
+        && text
+        && (text !== String(existing.text || '') || refreshAttachment);
+      const errorText = String(mapped.error || '').slice(0, 500);
+      const shouldRefreshError = Boolean(errorText)
+        && errorText !== String(existing.error || '');
+      const shouldRefreshProviderId = Boolean(mapped.providerMessageId)
+        && mapped.providerMessageId !== String(existing.provider_message_id || '');
+      if (shouldRefreshTemplate || shouldRefreshError || shouldRefreshProviderId) {
+        pendingStatements.push(env.DB.prepare(`UPDATE messages
+            SET message_type=?2, text=?3, payload_json=?4, status=?5, error=?6,
+                provider_message_id=CASE
+                  WHEN ?8<>'' THEN ?8
+                  ELSE provider_message_id
+                END
+          WHERE workspace_id=?7 AND message_id=?1`)
+          .bind(
+            existing.message_id, mapped.messageType, text, payloadJson, mapped.status,
+            errorText, workspaceId, mapped.providerMessageId || ''
+          ));
+        result.messagesUpdated += 1;
+        if (pendingStatements.length >= 40) await flush();
         continue;
       }
+      result.messagesSkipped += 1;
+      continue;
     }
     const messageId = crypto.randomUUID();
     pendingStatements.push(env.DB.prepare(`INSERT INTO messages

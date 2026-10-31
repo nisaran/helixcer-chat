@@ -216,5 +216,27 @@ test('dashboard exposes Import Chat field mapping UI', async () => {
   assert.match(app, /parameter values joined with middots/);
   assert.match(app, /channel_failure_reason/);
   assert.match(app, /message-error/);
+  assert.match(app, /channel_failure_reason/);
   assert.equal(INTERAKT_SOURCE, 'interakt');
+});
+
+test('worker import dedupes by provider and Interakt external ids', async () => {
+  const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(index, /findExistingInteraktMessage/);
+  assert.match(index, /json_extract\(payload_json, '\$\.externalId'\)/);
+  assert.match(index, /never insert a second copy/);
+});
+
+test('maps a stable provider id for Interakt messages without channel ids', () => {
+  const mapped = mapInteraktMessage({
+    id: 'ext-42',
+    channel_message_id: '',
+    direction: 'outbound',
+    content_type: 'Text',
+    text: 'hello',
+    status: 'Sent',
+    timestamp: '2026-01-01T00:00:00+0000'
+  });
+  assert.equal(mapped.externalId, 'ext-42');
+  assert.equal(mapped.providerMessageId, 'interakt:ext-42');
 });
