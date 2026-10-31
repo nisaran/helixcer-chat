@@ -384,7 +384,7 @@ test("reconnect reconciliation expires stale histories and marks only an activel
   const realtimeHandler = app.slice(app.indexOf("async function handleRealtimeEvent"), app.indexOf("function isIosDevice"));
   assert.match(loadAll, /mergeConversationSnapshots\(fetchedConversations, realtimeRevisionAtStart\)/);
   assert.match(reconcile, /const realtimeRevisionAtStart = state\.realtimeRevision/);
-  assert.match(reconcile, /mergeConversationSnapshots\(fetchedConversations, realtimeRevisionAtStart\)/);
+  assert.match(reconcile, /mergeConversationSnapshots\(fetchedConversations, realtimeRevisionAtStart,\s*\{[\s\S]*?keepUnfetched/);
   assert.match(realtimeHandler, /markConversationRealtimeMutation\(conversationId\)/);
   assert.match(realtimeHandler, /markConversationRealtimeMutation\(incoming\.conversationId\)/);
   assert.match(reconcile, /for \(const cachedConversationId of state\.messages\.keys\(\)\)/);
@@ -409,6 +409,11 @@ test("reconnect reconciliation expires stale histories and marks only an activel
     { conversationId: "steady", lastMessage: "stored", unreadCount: 0 },
   ], 1).map((item) => [item.conversationId, item.lastMessage]), [
     ["new-live", "new"], ["changed", "live"], ["steady", "stored"],
+  ]);
+  assert.deepEqual(mergeConversations([
+    { conversationId: "changed", lastMessage: "stale", unreadCount: 1 },
+  ], 1, { keepUnfetched: true }).map((item) => item.conversationId), [
+    "new-live", "changed",
   ]);
 });
 
@@ -515,6 +520,9 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.doesNotMatch(renderConversationsBody, /providerLogo|providerLogoPaths|channel-mini/);
   assert.match(renderConversationsBody, /conversation-time/);
   assert.match(renderConversationsBody, /unread-badge/);
+  assert.match(renderConversationsBody, /loadMoreConversations|conversationNextCursor|conversation-load-more/);
+  assert.match(app, /listConversations\(\{[\s\S]*?cursor/);
+  assert.match(app, /IntersectionObserver/);
   const contactsStart = app.indexOf("function renderContacts()");
   const contactsEnd = app.indexOf("function contactPlatformRoutes", contactsStart);
   const renderContactsBody = app.slice(contactsStart, contactsEnd);
@@ -522,13 +530,16 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(renderContactsBody, /Closed" : "Open"/);
   assert.doesNotMatch(renderContactsBody, /Inactive" : "Active"|providerLogo|providerLogoPaths|provider-(?:whatsapp|telegram|instagram)\.svg/);
   assert.doesNotMatch(renderContactsBody, /avatarPalettes|element\("span", "avatar"/);
-  assert.match(renderContactsBody, /contactPageSizeValue|contactPrevPage|contactNextPage/);
-  assert.match(html, /id="contactPageSize"/);
-  assert.match(html, /id="contactPrevPage"/);
-  assert.match(html, /id="contactNextPage"/);
+  assert.match(renderContactsBody, /loadMoreContacts|contactNextCursor|contactLoadMore/);
+  assert.match(app, /listContacts\(\{[\s\S]*?cursor/);
+  assert.match(app, /refreshContactsCatalogue/);
+  assert.match(html, /id="contactLoadMore"/);
+  assert.match(html, /id="contactLoadMoreButton"/);
+  assert.doesNotMatch(html, /id="contactPageSize"|id="contactPrevPage"|id="contactNextPage"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
-  assert.match(styles, /\.contact-pagination/);
+  assert.match(styles, /\.contact-load-more/);
+  assert.match(styles, /\.conversation-load-more/);
 });
 
 test("conversation routes drive replies, templates, media, and every outbound API request", () => {

@@ -58,6 +58,10 @@ const MAX_IMPORT_JSON_BODY = 1_500_000;
 const MAX_EXTERNAL_JSON_BODY = 131072;
 const MAX_CREDENTIAL_LENGTH = 4096;
 const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAX_CONVERSATION_LIST_LIMIT = 2000;
+const MAX_CONTACT_LIST_LIMIT = 2000;
+const BOOTSTRAP_CONVERSATION_LIMIT = 1000;
+const BOOTSTRAP_CONTACT_LIMIT = 2000;
 const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024;
 const MAX_ATTACHMENT_CAPTION_LENGTH = 1024;
 const WHATSAPP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -424,10 +428,16 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/bootstrap' && request.method === 'GET') {
       const allowedChannels = restrictedChannelIds(principal);
-      const [channelsRaw, conversations, contacts, tags, workspace] = await Promise.all([
+      // First paint covers large Interakt imports; infinite scroll / load-more
+      // continues past these caps via the dedicated list endpoints.
+      const bootstrapUrl = withSearchParams(url, {
+        limit: url.searchParams.get('limit') || String(BOOTSTRAP_CONVERSATION_LIMIT),
+        contactLimit: url.searchParams.get('contactLimit') || String(BOOTSTRAP_CONTACT_LIMIT)
+      });
+      const [channelsRaw, conversationPage, contactPage, tags, workspace] = await Promise.all([
         listChannels(env, workspaceId, principal.membership.role !== 'agent'),
-        listConversations(env, workspaceId, url, { allowedChannelIds: allowedChannels }),
-        listContacts(env, workspaceId, url),
+        listConversations(env, workspaceId, bootstrapUrl, { allowedChannelIds: allowedChannels }),
+        listContacts(env, workspaceId, bootstrapUrl),
         listWorkspaceTags(env, workspaceId),
         getWorkspaceProfile(env, workspaceId)
       ]);
@@ -435,7 +445,15 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         ? channelsRaw.filter(channel => allowedChannels.includes(channel.channelId))
         : channelsRaw;
       return withCors(json({
-        appName: env.APP_NAME || 'Helixcer Chat', channels, conversations, contacts, tags, workspace, me: principalView(principal),
+        appName: env.APP_NAME || 'Helixcer Chat',
+        channels,
+        conversations: conversationPage.items,
+        conversationNextCursor: conversationPage.nextCursor,
+        contacts: contactPage.items,
+        contactNextCursor: contactPage.nextCursor,
+        tags,
+        workspace,
+        me: principalView(principal),
         connectorTypes: [
           { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: ['text'] },
           { value: 'telegram', label: 'Telegram Bot', capabilities: ['text'] },
@@ -504,11 +522,10 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json(await getChannelVerifyToken(env, workspaceId, channelId, principal)), cors);
     }
     if (url.pathname === '/api/conversations' && request.method === 'GET') {
-      return withCors(json({
-        items: await listConversations(env, workspaceId, url, {
-          allowedChannelIds: restrictedChannelIds(principal)
-        })
-      }), cors);
+      const page = await listConversations(env, workspaceId, url, {
+        allowedChannelIds: restrictedChannelIds(principal)
+      });
+      return withCors(json({ items: page.items, nextCursor: page.nextCursor }), cors);
     }
     if (url.pathname === '/api/conversations' && request.method === 'POST') {
       const result = await openIdentityConversation(env, workspaceId, await readJson(request), principal);
@@ -614,7 +631,8 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json(result, 201), cors);
     }
     if (url.pathname === '/api/contacts' && request.method === 'GET') {
-      return withCors(json({ items: await listContacts(env, workspaceId, url) }), cors);
+      const page = await listContacts(env, workspaceId, url);
+      return withCors(json({ items: page.items, nextCursor: page.nextCursor }), cors);
     }
     if (url.pathname === '/api/tags' && request.method === 'GET') {
       return withCors(json({ items: await listWorkspaceTags(env, workspaceId) }), cors);
@@ -2662,13 +2680,15 @@ function base64UrlDecode(value) {
 }
 
 async function listConversations(env, workspaceId, url, options = {}) {
-  const limit = clampInt(url.searchParams.get('limit'), 1, 100, 50);
+  const limit = clampInt(url.searchParams.get('limit'), 1, MAX_CONVERSATION_LIST_LIMIT, 50);
   const status = url.searchParams.get('status') || '';
   const channelId = url.searchParams.get('channelId') || '';
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
   const cursor = url.searchParams.get('cursor') || '';
   const allowedChannelIds = Array.isArray(options.allowedChannelIds) ? options.allowedChannelIds : null;
-  if (allowedChannelIds && channelId && !allowedChannelIds.includes(channelId)) return [];
+  if (allowedChannelIds && channelId && !allowedChannelIds.includes(channelId)) {
+    return { items: [], nextCursor: '' };
+  }
   const result = await env.DB.prepare(`SELECT c.conversation_id,c.contact_id,c.channel_id,c.identity_id,c.status,c.assigned_to,
       c.subject,c.last_message_at,c.unread_count,c.tags_json,ch.name AS channel_name,ch.connector_type,ch.provider_type,
       COALESCE(b.scoped_profile_id,CASE WHEN c.identity_id='' THEN (SELECT legacy.channel_profile_id FROM channel_identities legacy
@@ -2705,7 +2725,7 @@ async function listConversations(env, workspaceId, url, options = {}) {
   const items = result.results.map(conversationListItem);
   const contactIds = [...new Set(items.map(item => item.contactId).filter(Boolean))];
   const routes = await conversationRouteOptionsByContact(env, workspaceId, { contactIds });
-  return items.map(item => {
+  const mapped = items.map(item => {
     const next = withConversationRoutes(item, routes.get(item.contactId) || []);
     if (!allowedChannelIds) return next;
     return {
@@ -2714,6 +2734,11 @@ async function listConversations(env, workspaceId, url, options = {}) {
         .filter(route => allowedChannelIds.includes(route.channelId))
     };
   });
+  const lastRow = result.results[result.results.length - 1];
+  return {
+    items: mapped,
+    nextCursor: mapped.length === limit ? String(lastRow?.last_message_at || '') : ''
+  };
 }
 
 function assertPrincipalChannelAccess(principal, channelId) {
@@ -2944,8 +2969,9 @@ export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Dat
 }
 
 async function listContacts(env, workspaceId, url) {
-  const limit = clampInt(url.searchParams.get('contactLimit'), 1, 200, 100);
+  const limit = clampInt(url.searchParams.get('contactLimit') || url.searchParams.get('limit'), 1, MAX_CONTACT_LIST_LIMIT, 100);
   const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
+  const cursor = String(url.searchParams.get('cursor') || url.searchParams.get('contactCursor') || '').trim();
   const result = await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
       (SELECT MAX(last_message_at) FROM conversations cv
         WHERE cv.workspace_id=c.workspace_id AND cv.contact_id=c.contact_id) AS last_message_at
@@ -2960,8 +2986,20 @@ async function listContacts(env, workspaceId, url) {
         WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id
           AND legacy.platform NOT IN ('whatsapp','telegram','instagram','facebook','email')
           AND instr(lower(COALESCE(legacy.profile_id,'')),lower(?2))>0))
-    ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?3`).bind(workspaceId, q, limit).all();
-  return hydrateContactViews(env, workspaceId, result.results || []);
+      AND (?4='' OR COALESCE(
+        (SELECT MAX(last_message_at) FROM conversations cv
+          WHERE cv.workspace_id=c.workspace_id AND cv.contact_id=c.contact_id),
+        c.updated_at) < ?4)
+    ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?3`).bind(workspaceId, q, limit, cursor).all();
+  const rows = result.results || [];
+  const items = await hydrateContactViews(env, workspaceId, rows);
+  const lastRow = rows[rows.length - 1];
+  return {
+    items,
+    nextCursor: items.length === limit
+      ? String(lastRow?.last_message_at || lastRow?.updated_at || '')
+      : ''
+  };
 }
 
 function csvCell(value) {
@@ -3271,8 +3309,12 @@ async function prevalidateContactIdentityBatch(env, workspaceId, contactId, valu
 
 async function contactIdentityRows(env, workspaceId, contactIds = []) {
   if (!contactIds.length) return [];
-  const ids = [...new Set(contactIds.map(String))].slice(0, 200);
-  const placeholders = ids.map((_, index) => `?${index + 2}`).join(',');
+  // D1 allows at most 100 bound variables. Contact list pages and bootstrap can
+  // hydrate hundreds of contacts, so pass ids through a single json_each(?) param
+  // instead of one placeholder per contact.
+  const ids = [...new Set(contactIds.map(id => String(id || '').trim()).filter(Boolean))]
+    .slice(0, 2000);
+  if (!ids.length) return [];
   const result = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,ci.platform,ci.profile_id,ci.username,
       ci.phone_number,ci.display_name,ci.metadata_json,ci.created_at,ci.updated_at,
       b.binding_id,b.channel_id,b.scoped_profile_id,b.metadata_json AS binding_metadata_json,
@@ -3288,11 +3330,11 @@ async function contactIdentityRows(env, workspaceId, contactIds = []) {
     LEFT JOIN channels ch ON ch.workspace_id=ci.workspace_id AND ch.channel_id=b.channel_id
     LEFT JOIN conversations cv ON cv.workspace_id=ci.workspace_id AND cv.identity_id=ci.identity_id
       AND cv.channel_id=b.channel_id
-    WHERE ci.workspace_id=?1 AND ci.contact_id IN (${placeholders})
+    WHERE ci.workspace_id=?1 AND ci.contact_id IN (SELECT value FROM json_each(?2))
       AND (ci.platform NOT IN ('whatsapp','telegram','instagram','facebook','email')
         OR flat.identity_id IS NOT NULL)
     ORDER BY ci.created_at,ci.identity_id,b.last_seen_at DESC,b.created_at DESC`)
-    .bind(workspaceId, ...ids).all();
+    .bind(workspaceId, JSON.stringify(ids)).all();
   return result.results || [];
 }
 
@@ -7230,6 +7272,15 @@ function cleanMetaIdentifier(value, label) {
 function clampInt(value, min, max, fallback) {
   const number = Number.parseInt(value, 10);
   return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+}
+
+function withSearchParams(url, overrides = {}) {
+  const next = new URL(url);
+  for (const [key, value] of Object.entries(overrides || {})) {
+    if (value == null || value === '') next.searchParams.delete(key);
+    else next.searchParams.set(key, String(value));
+  }
+  return next;
 }
 
 function secretPrefix(value) {
