@@ -5795,22 +5795,25 @@ async function markMessageSent(env, messageId, result) {
   // Keep the original payload_json (senderName, reply, template, attachment).
   // Provider send results only update status / provider_message_id — never wipe
   // outbound attribution by replacing the stored presentation payload.
+  const deliveryStatus = result.status || 'submitted';
   await env.DB.batch([
     env.DB.prepare(`UPDATE messages SET
         status=CASE WHEN status IN ('sent','delivered','read','failed') THEN status ELSE ?2 END,
         provider_message_id=CASE WHEN provider_message_id='' THEN ?3 ELSE provider_message_id END,
         error=CASE WHEN status='failed' THEN error ELSE '' END
       WHERE message_id=?1`)
-      .bind(messageId, result.status || 'submitted', result.providerMessageId || ''),
+      .bind(messageId, deliveryStatus, result.providerMessageId || ''),
     env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId),
     env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(messageId)
   ]);
-  const stored = await env.DB.prepare(`SELECT conversation_id,status,error,provider_message_id
+  const stored = await env.DB.prepare(`SELECT conversation_id,status,error,provider_message_id,payload_json
     FROM messages WHERE message_id=?1`).bind(messageId).first();
+  const statusHistory = await persistMessageStatusHistory(env, stored, deliveryStatus, new Date().toISOString());
   await broadcastMessageStatusChanges(env, result.workspaceId, [{
     messageId, conversationId: stored?.conversation_id,
-    status: stored?.status || result.status || 'submitted', error: stored?.error || '',
-    channelMessageId: String(stored?.provider_message_id || result.providerMessageId || '')
+    status: stored?.status || deliveryStatus, error: stored?.error || '',
+    channelMessageId: String(stored?.provider_message_id || result.providerMessageId || ''),
+    ...(statusHistory ? { statusHistory } : {})
   }]);
 }
 
@@ -6013,7 +6016,8 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
   try {
     // Status webhooks must not replace payload_json. Overwriting with the raw
     // provider receipt wiped outbound senderName (and other presentation fields)
-    // so listMessages lost attribution after refresh.
+    // so listMessages lost attribution after refresh. Timestamps are merged into
+    // payload_json.statusHistory via persistMessageStatusHistory instead.
     const updated = await env.DB.prepare(`UPDATE messages SET
         status=CASE
           WHEN status='failed' THEN status
@@ -6038,11 +6042,17 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
       await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
       return [];
     }
-    const changed = await env.DB.prepare(`SELECT message_id,conversation_id,status,error,provider_message_id FROM messages
+    const at = normalizeTimestamp(event.timestamp, new Date().toISOString());
+    const changed = await env.DB.prepare(`SELECT message_id,conversation_id,status,error,provider_message_id,payload_json FROM messages
       WHERE workspace_id=?1 AND channel_id=?2
         AND ((?3<>'' AND provider_message_id=?3) OR (?4<>'' AND message_id=?4))`)
       .bind(workspaceId, channelId, providerMessageId, internalMessageId).all();
-    return changed.results.map(realtimeMessageStatus);
+    const results = [];
+    for (const row of changed.results || []) {
+      const statusHistory = await persistMessageStatusHistory(env, row, status, at);
+      results.push(realtimeMessageStatus({ ...row, statusHistory }));
+    }
+    return results;
   } catch (error) {
     await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
     throw error;
@@ -6075,7 +6085,7 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
           WHERE workspace_id=?1 AND channel_id=?2 AND scoped_profile_id=?3)`)
       .bind(workspaceId, channelId, channelProfileId, timestamp, status).run();
     if (!updated.meta?.changes) return [];
-    const changed = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.status,m.error,m.provider_message_id FROM messages m
+    const changed = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.status,m.error,m.provider_message_id,m.payload_json FROM messages m
       WHERE m.workspace_id=?1 AND m.channel_id=?2 AND m.direction='outbound' AND m.timestamp<=?4
         AND m.provider_message_id<>'' AND m.status IN ('submitted','sent','delivered','read')
         AND COALESCE(NULLIF(m.identity_id,''),(SELECT NULLIF(c.identity_id,'') FROM conversations c
@@ -6083,7 +6093,12 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
           IN (SELECT identity_id FROM channel_identity_bindings
           WHERE workspace_id=?1 AND channel_id=?2 AND scoped_profile_id=?3)`)
       .bind(workspaceId, channelId, channelProfileId, timestamp).all();
-    return changed.results.map(realtimeMessageStatus);
+    const results = [];
+    for (const row of changed.results || []) {
+      const statusHistory = await persistMessageStatusHistory(env, row, status, timestamp);
+      results.push(realtimeMessageStatus({ ...row, statusHistory }));
+    }
+    return results;
   } catch (error) {
     await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
     throw error;
@@ -6091,13 +6106,62 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
 }
 
 function realtimeMessageStatus(row) {
+  const statusHistory = isPlainObject(row.statusHistory)
+    ? messageStatusHistoryView({ statusHistory: row.statusHistory })
+    : messageStatusHistoryView(safeJsonParse(row.payload_json, {}));
   return {
     messageId: String(row.message_id || ''),
     conversationId: String(row.conversation_id || ''),
     status: String(row.status || ''),
     error: String(row.error || ''),
-    channelMessageId: String(row.provider_message_id || row.channelMessageId || '')
+    channelMessageId: String(row.provider_message_id || row.channelMessageId || ''),
+    ...(statusHistory ? { statusHistory } : {})
   };
+}
+
+function statusHistoryFieldForStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'failed' || normalized === 'error') return 'failedAt';
+  if (normalized === 'read' || normalized === 'seen') return 'readAt';
+  if (normalized === 'delivered') return 'deliveredAt';
+  if (['sent', 'submitted', 'accepted'].includes(normalized)) return 'sentAt';
+  return '';
+}
+
+function mergeStatusHistoryPayload(payload, status, at) {
+  const field = statusHistoryFieldForStatus(status);
+  const when = String(at || '').trim().slice(0, 64);
+  if (!field || !when) {
+    return {
+      payload: isPlainObject(payload) ? payload : {},
+      history: messageStatusHistoryView(payload),
+      changed: false
+    };
+  }
+  const nextPayload = isPlainObject(payload) ? { ...payload } : {};
+  const current = isPlainObject(nextPayload.statusHistory) ? { ...nextPayload.statusHistory } : {};
+  let changed = false;
+  if (!String(current[field] || '').trim()) {
+    current[field] = when;
+    changed = true;
+  }
+  if (String(current.updatedAt || '').trim() !== when) {
+    current.updatedAt = when;
+    changed = true;
+  }
+  if (changed) nextPayload.statusHistory = current;
+  return { payload: nextPayload, history: messageStatusHistoryView(nextPayload), changed };
+}
+
+async function persistMessageStatusHistory(env, row, status, at) {
+  if (!row?.message_id) return null;
+  const existingPayload = safeJsonParse(row.payload_json, {});
+  const { payload, history, changed } = mergeStatusHistoryPayload(existingPayload, status, at);
+  if (!changed || !history) return messageStatusHistoryView(existingPayload);
+  // Merge only statusHistory keys; never replace the full presentation payload.
+  await env.DB.prepare('UPDATE messages SET payload_json=?2 WHERE message_id=?1')
+    .bind(row.message_id, JSON.stringify(payload)).run();
+  return history;
 }
 
 async function broadcastMessageStatusChanges(env, workspaceId, changes) {

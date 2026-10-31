@@ -66,13 +66,20 @@ test('send and delivery status updates never replace message payload_json', asyn
   assert.match(markMessageSent, /Keep the original payload_json/);
   assert.doesNotMatch(markMessageSent, /payload_json\s*=/);
   assert.doesNotMatch(markMessageSent, /JSON\.stringify\(result\)/);
+  assert.match(markMessageSent, /persistMessageStatusHistory/);
   const applyProviderStatus = index.slice(index.indexOf('async function applyProviderStatus'),
     index.indexOf('async function applyProviderWatermarkStatus'));
   assert.match(applyProviderStatus, /must not replace payload_json/);
   assert.doesNotMatch(applyProviderStatus, /payload_json\s*=/);
+  assert.match(applyProviderStatus, /persistMessageStatusHistory/);
   const watermark = index.slice(index.indexOf('async function applyProviderWatermarkStatus'),
     index.indexOf('function realtimeMessageStatus'));
   assert.doesNotMatch(watermark, /payload_json\s*=/);
+  assert.match(watermark, /persistMessageStatusHistory/);
+  const persist = index.slice(index.indexOf('async function persistMessageStatusHistory'),
+    index.indexOf('async function broadcastMessageStatusChanges'));
+  assert.match(persist, /Merge only statusHistory keys/);
+  assert.match(persist, /UPDATE messages SET payload_json=\?2 WHERE message_id=\?1/);
 });
 
 test('message search is bounded and explicitly scoped to the authenticated workspace', async () => {

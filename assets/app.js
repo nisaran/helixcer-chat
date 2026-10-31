@@ -58,6 +58,7 @@
     contactEditIdentityDrafts: [],
     contactRouteMenu: null,
     contactPlatformMenu: null,
+    messageStatusMenu: null,
     expandedChannelIds: new Set(),
     detailsOpen: false,
     currentUser: null,
@@ -1881,15 +1882,35 @@
     return Object.keys(next).length ? next : null;
   }
 
+  function resolveMessageStatusHistory(message) {
+    const history = normalizeMessageStatusHistory(message?.statusHistory || null) || {};
+    const status = String(message?.status || "").toLocaleLowerCase();
+    // Older outbound rows may lack webhook timestamps; fall back to message time as Sent.
+    if (!history.sentAt && message?.timestamp &&
+        ["submitted", "accepted", "sent", "delivered", "read", "seen", "failed", "error"].includes(status)) {
+      history.sentAt = message.timestamp;
+    }
+    return Object.keys(history).length ? history : null;
+  }
+
+  function messageStatusHistoryEntries(message) {
+    const history = resolveMessageStatusHistory(message);
+    if (!history) return [];
+    return [
+      ["Sent at", history.sentAt],
+      ["Delivered at", history.deliveredAt],
+      ["Seen at", history.readAt],
+      ["Failed at", history.failedAt],
+    ].flatMap(([label, value]) => {
+      const when = formatStatusHistoryTime(value);
+      return when ? [{ label, when }] : [];
+    });
+  }
+
   function messageStatusHistoryTitle(message) {
-    const history = message?.statusHistory;
-    if (!history) return "";
-    const lines = [];
-    if (history.sentAt) lines.push(`Sent ${formatClock(history.sentAt)}`);
-    if (history.deliveredAt) lines.push(`Delivered ${formatClock(history.deliveredAt)}`);
-    if (history.readAt) lines.push(`Read ${formatClock(history.readAt)}`);
-    if (history.failedAt) lines.push(`Failed ${formatClock(history.failedAt)}`);
-    return lines.join("\n");
+    return messageStatusHistoryEntries(message)
+      .map((entry) => `${entry.label} ${entry.when}`)
+      .join("\n");
   }
 
   function outboundDeliveryStatus(value) {
@@ -1944,9 +1965,20 @@
       combined.attachment = fetched.attachment || cached.attachment;
       // Keep live outbound attribution if a refresh omits or blanks senderName.
       combined.senderName = fetched.senderName || cached.senderName || "";
+      combined.statusHistory = mergeMessageStatusHistory(cached.statusHistory, fetched.statusHistory);
       merged.set(cached.messageId, combined);
     }
     return [...merged.values()];
+  }
+
+  function mergeMessageStatusHistory(cached, fetched) {
+    const left = normalizeMessageStatusHistory(cached) || {};
+    const right = normalizeMessageStatusHistory(fetched) || {};
+    const next = { ...left };
+    for (const key of ["sentAt", "deliveredAt", "readAt", "failedAt", "updatedAt"]) {
+      if (right[key]) next[key] = right[key];
+    }
+    return Object.keys(next).length ? next : null;
   }
 
   function updateRenderedMessageStatus(message) {
@@ -1957,9 +1989,42 @@
     const delivery = outboundDeliveryStatus(message.status);
     status.className = delivery.className;
     status.textContent = delivery.label;
-    status.title = `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`;
-    status.setAttribute("aria-label", status.title);
+    const errorText = String(message.error || "").trim();
+    const historyTitle = messageStatusHistoryTitle(message);
+    status.title = errorText
+      ? (historyTitle ? `${historyTitle}\nFailed: ${errorText}` : `Failed: ${errorText}`)
+      : (historyTitle || `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`);
+    status.setAttribute("aria-label", status.title.replace(/\n/g, "; "));
+    syncMessageStatusInfoButton(row, message);
     return true;
+  }
+
+  function syncMessageStatusInfoButton(row, message) {
+    const foot = row?.querySelector(".message-foot");
+    if (!foot) return;
+    let info = foot.querySelector(".message-status-info");
+    const entries = messageStatusHistoryEntries(message);
+    if (!entries.length) {
+      info?.remove();
+      if (state.messageStatusMenu?.messageId === message.messageId) closeMessageStatusMenu();
+      return;
+    }
+    if (!info) {
+      info = element("button", "message-status-info", "ⓘ");
+      info.type = "button";
+      info.dataset.action = "toggle-message-status-history";
+      info.dataset.messageId = message.messageId;
+      const status = foot.querySelector(".delivery-status, .message-failed");
+      if (status) foot.insertBefore(info, status);
+      else foot.append(info);
+    }
+    info.dataset.messageId = message.messageId;
+    info.setAttribute("aria-label", "Message status history");
+    info.title = "Status history";
+    if (state.messageStatusMenu?.messageId === message.messageId) {
+      renderMessageStatusMenuContent(state.messageStatusMenu.menu, entries);
+      positionMessageStatusMenu();
+    }
   }
 
   function deriveContacts(conversations) {
@@ -2697,6 +2762,18 @@
         ? (historyTitle ? `${historyTitle}\nFailed: ${errorText}` : `Failed: ${errorText}`)
         : (historyTitle || `Message status: ${delivery.label.replace(/\s*[✓]+$/, "")}`);
       status.setAttribute("aria-label", status.title.replace(/\n/g, "; "));
+      const historyEntries = messageStatusHistoryEntries(message);
+      if (historyEntries.length) {
+        const info = element("button", "message-status-info", "ⓘ");
+        info.type = "button";
+        info.dataset.action = "toggle-message-status-history";
+        info.dataset.messageId = message.messageId;
+        info.setAttribute("aria-label", "Message status history");
+        info.setAttribute("aria-haspopup", "dialog");
+        info.setAttribute("aria-expanded", "false");
+        info.title = "Status history";
+        foot.append(info);
+      }
       foot.append(status);
     }
     bubble.append(foot);
@@ -6232,6 +6309,7 @@
       if (existing.direction === "outbound" || message.direction === "outbound") {
         merged.status = mergeOutboundMessageStatus(existing.status, message.status);
       }
+      merged.statusHistory = mergeMessageStatusHistory(existing.statusHistory, message.statusHistory);
       messages[index] = merged;
     }
     else messages.push(message);
@@ -6279,6 +6357,7 @@
         conversationId,
         // Status-only broadcasts omit senderName; never blank a known outbound label.
         senderName: rawMessage.senderName || existingMessage?.senderName || "",
+        statusHistory: mergeMessageStatusHistory(existingMessage?.statusHistory, rawMessage.statusHistory),
       });
       const replyBecameAvailable = Boolean(existingMessage && !existingMessage.channelMessageId && message.channelMessageId);
       if (cachedMessages || conversationId === state.selectedConversationId) upsertMessage(conversationId, message);
@@ -8111,11 +8190,100 @@
     return `${day} ${monthNames[date.getMonth()]}${year} · ${hour}:${minute} ${period}`;
   }
 
+  function formatStatusHistoryTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const day = String(date.getDate()).padStart(2, "0");
+    const hour = String(date.getHours() % 12 || 12).padStart(2, "0");
+    const minute = String(date.getMinutes()).padStart(2, "0");
+    const second = String(date.getSeconds()).padStart(2, "0");
+    const period = date.getHours() < 12 ? "am" : "pm";
+    return `${day}-${monthNames[date.getMonth()]}-${date.getFullYear()} · ${hour}:${minute}:${second} ${period}`;
+  }
+
   function formatCalendarDate(value) {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(undefined, {
       day: "numeric", month: "short", year: "numeric",
     }).format(date);
+  }
+
+  function closeMessageStatusMenu(restoreFocus = false) {
+    const current = state.messageStatusMenu;
+    if (!current) return;
+    current.trigger?.setAttribute("aria-expanded", "false");
+    current.trigger?.removeAttribute("aria-controls");
+    current.menu?.remove();
+    state.messageStatusMenu = null;
+    if (restoreFocus && current.trigger?.isConnected) current.trigger.focus();
+  }
+
+  function renderMessageStatusMenuContent(menu, entries) {
+    if (!menu) return;
+    menu.replaceChildren();
+    menu.append(element("div", "message-status-menu-title", "Status history"));
+    const list = element("div", "message-status-menu-list");
+    entries.forEach((entry) => {
+      const row = element("div", "message-status-menu-row");
+      row.append(element("span", "message-status-menu-label", entry.label));
+      row.append(element("span", "message-status-menu-time", entry.when));
+      list.append(row);
+    });
+    menu.append(list);
+  }
+
+  function positionMessageStatusMenu() {
+    const current = state.messageStatusMenu;
+    if (!current?.trigger?.isConnected || !current?.menu?.isConnected) {
+      closeMessageStatusMenu();
+      return;
+    }
+    const triggerRect = current.trigger.getBoundingClientRect();
+    if (triggerRect.bottom < 0 || triggerRect.top > window.innerHeight ||
+        triggerRect.right < 0 || triggerRect.left > window.innerWidth) {
+      closeMessageStatusMenu();
+      return;
+    }
+    const edge = 8;
+    const gap = 6;
+    const width = Math.max(1, Math.min(260, window.innerWidth - (edge * 2)));
+    current.menu.style.width = `${width}px`;
+    current.menu.style.left = `${Math.min(Math.max(edge, triggerRect.right - width), window.innerWidth - width - edge)}px`;
+    current.menu.style.top = `${triggerRect.bottom + gap}px`;
+    current.menu.style.visibility = "hidden";
+    const menuHeight = current.menu.getBoundingClientRect().height;
+    const below = window.innerHeight - triggerRect.bottom - gap - edge;
+    const above = triggerRect.top - gap - edge;
+    const top = below < Math.min(menuHeight, 180) && above > below
+      ? Math.max(edge, triggerRect.top - Math.min(menuHeight, above) - gap)
+      : Math.min(triggerRect.bottom + gap, window.innerHeight - Math.min(menuHeight, window.innerHeight - (edge * 2)) - edge);
+    current.menu.style.top = `${Math.max(edge, top)}px`;
+    current.menu.style.visibility = "visible";
+  }
+
+  function toggleMessageStatusHistory(messageId, trigger) {
+    if (state.messageStatusMenu?.messageId === messageId) {
+      closeMessageStatusMenu(true);
+      return;
+    }
+    closeMessageStatusMenu();
+    const conversationId = state.selectedConversationId;
+    const message = (state.messages.get(conversationId) || [])
+      .find((item) => item.messageId === messageId);
+    const entries = messageStatusHistoryEntries(message);
+    if (!entries.length || !trigger) return;
+    const menu = element("section", "message-status-menu");
+    const menuId = `message-status-menu-${String(messageId).replace(/[^a-z0-9_-]/gi, "-")}`;
+    menu.id = menuId;
+    menu.setAttribute("role", "dialog");
+    menu.setAttribute("aria-label", "Message status history");
+    renderMessageStatusMenuContent(menu, entries);
+    document.body.append(menu);
+    trigger.setAttribute("aria-expanded", "true");
+    trigger.setAttribute("aria-controls", menuId);
+    state.messageStatusMenu = { trigger, menu, messageId };
+    positionMessageStatusMenu();
   }
 
   function resizeComposer() {
@@ -8150,6 +8318,9 @@
       if (state.contactPlatformMenu &&
           !state.contactPlatformMenu.menu.contains(event.target) &&
           !state.contactPlatformMenu.trigger.contains(event.target)) closeContactPlatformMenu();
+      if (state.messageStatusMenu &&
+          !state.messageStatusMenu.menu.contains(event.target) &&
+          !state.messageStatusMenu.trigger.contains(event.target)) closeMessageStatusMenu();
       if (!event.target.closest(".template-filter")) closeTemplateFilterMenus();
       if (!event.target.closest(".conversation-filter-desktop")) closeConversationFilterMenu();
       if (!event.target.closest(".conversation-menu-wrap")) closeConversationActionMenu();
@@ -8158,6 +8329,10 @@
       if (routeButton) { setRoute(routeButton.dataset.route); return; }
       const actionButton = event.target.closest("[data-action]");
       if (actionButton) {
+        if (actionButton.dataset.action === "toggle-message-status-history") {
+          toggleMessageStatusHistory(actionButton.dataset.messageId, actionButton);
+          return;
+        }
         if (actionButton.dataset.action === "choose-composer-route") {
           chooseComposerRoute(actionButton.dataset.routeIndex);
           return;
@@ -8661,7 +8836,9 @@
     window.addEventListener("focus", () => prepareBrowserPush().catch(() => {}));
     window.addEventListener("resize", positionContactRouteMenu);
     window.addEventListener("resize", positionContactPlatformMenu);
+    window.addEventListener("resize", positionMessageStatusMenu);
     document.addEventListener("scroll", positionContactRouteMenu, true);
+    document.addEventListener("scroll", positionMessageStatusMenu, true);
     document.addEventListener("scroll", positionContactPlatformMenu, true);
     window.addEventListener("pagehide", () => state.disconnectRealtime?.());
     window.addEventListener("beforeunload", () => state.disconnectRealtime?.());
@@ -8673,6 +8850,7 @@
         $("conversationSearch").focus();
       }
       if (event.key === "Escape") {
+        closeMessageStatusMenu(true);
         closeContactRouteMenu({ restoreFocus: true });
         closeContactPlatformMenu({ restoreFocus: true });
         closeConversationActionMenu({ restoreFocus: true });

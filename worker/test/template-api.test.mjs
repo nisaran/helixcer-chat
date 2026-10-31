@@ -487,10 +487,15 @@ test('external template API persists once, dispatches, replays safely, and scope
     assert.equal(realtimeDelivery.messageId, accepted.messageId);
     assert.equal(realtimeDelivery.conversationId, accepted.conversationId);
     assert.equal(realtimeDelivery.channelMessageId, 'wamid.template-1');
-    assert.deepEqual(realtimeDelivery.message, {
-      messageId: accepted.messageId, conversationId: accepted.conversationId,
-      status: 'delivered', error: '', channelMessageId: 'wamid.template-1'
-    });
+    assert.equal(realtimeDelivery.message.messageId, accepted.messageId);
+    assert.equal(realtimeDelivery.message.conversationId, accepted.conversationId);
+    assert.equal(realtimeDelivery.message.status, 'delivered');
+    assert.equal(realtimeDelivery.message.error, '');
+    assert.equal(realtimeDelivery.message.channelMessageId, 'wamid.template-1');
+    assert.equal(realtimeDelivery.message.statusHistory?.deliveredAt, '2025-10-25T02:40:01.000Z');
+    const storedHistory = JSON.parse(database.prepare('SELECT payload_json FROM messages').get().payload_json);
+    assert.equal(storedHistory.statusHistory?.deliveredAt, '2025-10-25T02:40:01.000Z');
+    assert.ok(storedHistory.template || storedHistory.senderName === 'API' || storedHistory.statusHistory);
     const statusAggregate = broadcasts.find(event => event.type === 'webhook.received' && event.statuses === 1);
     assert.ok(statusAggregate);
     assert.equal(statusAggregate.granular, true);

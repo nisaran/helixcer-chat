@@ -703,10 +703,12 @@ test("delivery status realtime updates patch only the existing message status", 
 });
 
 test("outbound status reconciliation is monotonic and permits explicit retry transitions", () => {
+  const normalizeStart = app.indexOf("function normalizeMessageStatusHistory");
+  const normalizeEnd = app.indexOf("function resolveMessageStatusHistory", normalizeStart);
   const start = app.indexOf("function mergeOutboundMessageStatus");
   const end = app.indexOf("function updateRenderedMessageStatus", start);
-  assert.ok(start >= 0 && end > start);
-  const { mergeStatus, mergeSnapshots } = Function(`${app.slice(start, end)}\nreturn { mergeStatus: mergeOutboundMessageStatus, mergeSnapshots: mergeMessageSnapshots };`)();
+  assert.ok(normalizeStart >= 0 && normalizeEnd > normalizeStart && start >= 0 && end > start);
+  const { mergeStatus, mergeSnapshots } = Function(`${app.slice(normalizeStart, normalizeEnd)}\n${app.slice(start, end)}\nreturn { mergeStatus: mergeOutboundMessageStatus, mergeSnapshots: mergeMessageSnapshots };`)();
   assert.equal(mergeStatus("submitted", "pending"), "submitted");
   assert.equal(mergeStatus("delivered", "sent"), "delivered");
   assert.equal(mergeStatus("read", "delivered"), "read");
@@ -715,13 +717,15 @@ test("outbound status reconciliation is monotonic and permits explicit retry tra
   assert.equal(mergeStatus("failed", "retrying"), "retrying");
   assert.equal(mergeStatus("retrying", "submitted"), "submitted");
   const merged = mergeSnapshots(
-    [{ messageId: "live", direction: "outbound", status: "delivered", channelMessageId: "provider-live", senderName: "Nisar" }],
-    [{ messageId: "stored", direction: "inbound", status: "received" }, { messageId: "live", direction: "outbound", status: "sent", senderName: "" }],
+    [{ messageId: "live", direction: "outbound", status: "delivered", channelMessageId: "provider-live", senderName: "Nisar", statusHistory: { sentAt: "2026-10-21T08:00:00.000Z" } }],
+    [{ messageId: "stored", direction: "inbound", status: "received" }, { messageId: "live", direction: "outbound", status: "sent", senderName: "", statusHistory: { deliveredAt: "2026-10-21T08:01:00.000Z" } }],
   );
   assert.deepEqual(merged.map((item) => item.messageId), ["stored", "live"]);
   assert.equal(merged.find((item) => item.messageId === "live").status, "delivered");
   assert.equal(merged.find((item) => item.messageId === "live").channelMessageId, "provider-live");
   assert.equal(merged.find((item) => item.messageId === "live").senderName, "Nisar");
+  assert.equal(merged.find((item) => item.messageId === "live").statusHistory.sentAt, "2026-10-21T08:00:00.000Z");
+  assert.equal(merged.find((item) => item.messageId === "live").statusHistory.deliveredAt, "2026-10-21T08:01:00.000Z");
 });
 
 test("desktop Enter sends while mobile Enter and Shift+Enter insert a newline", () => {
@@ -1064,6 +1068,21 @@ test("Import Chat preserves Interakt delivered and read timestamps", () => {
   assert.match(app, /seen_at_utc/);
   assert.match(app, /normalizeMessageStatusHistory/);
   assert.match(app, /messageStatusHistoryTitle/);
-  assert.match(app, /Delivered \$\{formatClock/);
-  assert.match(app, /Read \$\{formatClock/);
+  assert.match(app, /messageStatusHistoryEntries/);
+  assert.match(app, /Seen at/);
+  assert.match(app, /Delivered at/);
+});
+
+test("outbound messages expose a status-history info popup with exact local timestamps", () => {
+  assert.match(app, /message-status-info/);
+  assert.match(app, /toggle-message-status-history/);
+  assert.match(app, /function formatStatusHistoryTime/);
+  assert.match(app, /function toggleMessageStatusHistory/);
+  assert.match(styles, /\.message-status-info/);
+  assert.match(styles, /\.message-status-menu/);
+  const start = app.indexOf("function formatStatusHistoryTime");
+  const end = app.indexOf("function formatCalendarDate", start);
+  const formatStatusHistoryTime = Function(`${app.slice(start, end)}\nreturn formatStatusHistoryTime;`)();
+  assert.equal(formatStatusHistoryTime(new Date(2026, 9, 21, 13, 30, 45)), "21-Oct-2026 · 01:30:45 pm");
+  assert.equal(formatStatusHistoryTime(new Date(2026, 0, 5, 0, 5, 9)), "05-Jan-2026 · 12:05:09 am");
 });

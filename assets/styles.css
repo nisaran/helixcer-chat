@@ -509,6 +509,46 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .message-template-action[aria-disabled="true"] { cursor: default; }
 .message-foot { display: flex; justify-content: flex-end; align-items: center; gap: 5px; min-width: 65px; margin-top: 5px; color: var(--chat-meta); font-size: 10px; }
 .message-foot time { font-size: 9px; }
+.message-status-info {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #7b8582;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.message-status-info:hover,
+.message-status-info[aria-expanded="true"] { color: var(--brand-deep); background: rgba(109, 59, 234, 0.08); }
+.message-status-info:focus-visible { outline: 2px solid rgba(109, 59, 234, 0.42); outline-offset: 1px; }
+.message-status-menu {
+  position: fixed;
+  z-index: 95;
+  display: grid;
+  gap: 6px;
+  border: 1px solid #d9dfdb;
+  border-radius: 12px;
+  background: white;
+  padding: 8px 10px;
+  box-shadow: 0 14px 36px rgba(27, 37, 33, 0.18), 0 2px 8px rgba(27, 37, 33, 0.08);
+}
+.message-status-menu-title {
+  color: #66716e;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.message-status-menu-list { display: grid; gap: 6px; }
+.message-status-menu-row { display: grid; gap: 1px; }
+.message-status-menu-label { color: var(--ink); font-size: 11px; font-weight: 700; }
+.message-status-menu-time { color: #66716e; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .delivery-status { font-size: 10px; font-weight: 750; white-space: nowrap; }
 .delivery-status.is-sent, .delivery-status.is-pending { color: #7b8582; }
 .delivery-status.is-delivered { color: #397468; }
