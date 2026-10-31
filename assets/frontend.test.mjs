@@ -695,6 +695,7 @@ test("delivery status realtime updates patch only the existing message status", 
   assert.match(realtimeHandler, /if \(!event\.granular\) await reconcileWorkspace\(\)/);
   assert.match(realtimeHandler, /const statusOnly = type === "message\.updated"/);
   assert.match(realtimeHandler, /if \(statusOnly\)[\s\S]*?updateRenderedMessageStatus\(message\);[\s\S]*?return/);
+  assert.match(realtimeHandler, /senderName: rawMessage\.senderName \|\| existingMessage\?\.senderName \|\| ""/);
   assert.match(realtimeHandler, /const replyBecameAvailable = Boolean\(existingMessage && !existingMessage\.channelMessageId && message\.channelMessageId\)/);
   assert.match(realtimeHandler, /if \(replyBecameAvailable\) upsertRenderedMessage\(message, conversationId\)/);
   const missingStatusFallback = realtimeHandler.slice(realtimeHandler.indexOf("if (!existingMessage"), realtimeHandler.indexOf("const statusOnly"));
@@ -714,12 +715,13 @@ test("outbound status reconciliation is monotonic and permits explicit retry tra
   assert.equal(mergeStatus("failed", "retrying"), "retrying");
   assert.equal(mergeStatus("retrying", "submitted"), "submitted");
   const merged = mergeSnapshots(
-    [{ messageId: "live", direction: "outbound", status: "delivered", channelMessageId: "provider-live" }],
-    [{ messageId: "stored", direction: "inbound", status: "received" }, { messageId: "live", direction: "outbound", status: "sent" }],
+    [{ messageId: "live", direction: "outbound", status: "delivered", channelMessageId: "provider-live", senderName: "Nisar" }],
+    [{ messageId: "stored", direction: "inbound", status: "received" }, { messageId: "live", direction: "outbound", status: "sent", senderName: "" }],
   );
   assert.deepEqual(merged.map((item) => item.messageId), ["stored", "live"]);
   assert.equal(merged.find((item) => item.messageId === "live").status, "delivered");
   assert.equal(merged.find((item) => item.messageId === "live").channelMessageId, "provider-live");
+  assert.equal(merged.find((item) => item.messageId === "live").senderName, "Nisar");
 });
 
 test("desktop Enter sends while mobile Enter and Shift+Enter insert a newline", () => {
@@ -848,8 +850,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261031-sender-internal-only/);
-  assert.match(html, /assets\/styles\.css\?v=20261031-sender-internal-only/);
+  assert.match(html, /assets\/app\.js\?v=20261031-preserve-sender/);
+  assert.match(html, /assets\/styles\.css\?v=20261031-preserve-sender/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   assert.match(styles, /\.message-row\.is-outbound \.message-sender\.is-outbound-sender/);

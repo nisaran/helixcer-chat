@@ -2377,8 +2377,59 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal(Object.hasOwn(documentMessage, 'providerMessageId'), false);
     const listedReply = messageBody.items.find(item => item.messageId === replyItem.messageId);
     assert.equal(listedReply.status, 'submitted');
+    assert.equal(listedReply.senderName, 'Emergency recovery');
     assert.equal(listedReply.reply.text, 'Hello');
     assert.equal(listedReply.reply.direction, 'inbound');
+
+    // Plain outbound text (no reply object) used to lose senderName when
+    // markMessageSent / status webhooks replaced payload_json.
+    const plainPending = [];
+    const plainResponse = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-dashboard/messages', {
+        method: 'POST', headers: jsonHeaders,
+        body: JSON.stringify({ text: 'Plain outbound without reply' })
+      }), env, { waitUntil(promise) { plainPending.push(promise); } });
+    assert.equal(plainResponse.status, 202);
+    const plainItem = (await plainResponse.json()).item;
+    assert.equal(plainItem.senderName, 'Emergency recovery');
+    await Promise.all(plainPending.splice(0));
+    const plainStored = JSON.parse(database.prepare('SELECT payload_json,status,provider_message_id FROM messages WHERE message_id=?')
+      .get(plainItem.messageId).payload_json);
+    assert.equal(plainStored.senderName, 'Emergency recovery');
+    const plainRow = database.prepare('SELECT status,provider_message_id FROM messages WHERE message_id=?')
+      .get(plainItem.messageId);
+    assert.equal(plainRow.status, 'submitted');
+    assert.match(plainRow.provider_message_id, /^wamid\.dashboard-/);
+
+    const statusPayload = { object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: {
+      messaging_product: 'whatsapp',
+      metadata: { display_phone_number: '916282010794', phone_number_id: '523456789012346' },
+      statuses: [{ id: plainRow.provider_message_id, status: 'delivered', timestamp: '1761360100',
+        recipient_id: '919999999999' }]
+    } }] }] };
+    const statusRaw = JSON.stringify(statusPayload);
+    const statusKey = await crypto.subtle.importKey('raw',
+      new TextEncoder().encode('1234567890abcdef1234567890abcdef'),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const statusDigest = await crypto.subtle.sign('HMAC', statusKey, new TextEncoder().encode(statusRaw));
+    const statusSignature = `sha256=${Buffer.from(statusDigest).toString('hex')}`;
+    const statusResponse = await handleRequest(new Request('https://api.chat.helixcer.com/webhooks/whatsapp/wa-dashboard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': statusSignature },
+      body: statusRaw
+    }), env, ctx);
+    assert.equal(statusResponse.status, 200);
+    assert.deepEqual(await statusResponse.json(), { ok: true, received: 0, statuses: 1 });
+    const afterStatus = database.prepare('SELECT status,payload_json FROM messages WHERE message_id=?')
+      .get(plainItem.messageId);
+    assert.equal(afterStatus.status, 'delivered');
+    assert.equal(JSON.parse(afterStatus.payload_json).senderName, 'Emergency recovery');
+    const listedPlain = (await (await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/conversations/conversation-dashboard/messages', {
+        headers: { Authorization: 'Bearer recovery-secret' }
+      }), env)).json()).items.find(item => item.messageId === plainItem.messageId);
+    assert.equal(listedPlain.status, 'delivered');
+    assert.equal(listedPlain.senderName, 'Emergency recovery');
 
     const protectedTemplateMedia = await handleRequest(new Request(`https://api.chat.helixcer.com${templateMessage.attachment.url}`, {
       headers: { Authorization: 'Bearer recovery-secret' }

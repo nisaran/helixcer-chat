@@ -5766,18 +5766,16 @@ async function sendInstagram(env, channel, recipient, text) {
 }
 
 async function markMessageSent(env, messageId, result) {
+  // Keep the original payload_json (senderName, reply, template, attachment).
+  // Provider send results only update status / provider_message_id — never wipe
+  // outbound attribution by replacing the stored presentation payload.
   await env.DB.batch([
     env.DB.prepare(`UPDATE messages SET
         status=CASE WHEN status IN ('sent','delivered','read','failed') THEN status ELSE ?2 END,
         provider_message_id=CASE WHEN provider_message_id='' THEN ?3 ELSE provider_message_id END,
-        payload_json=CASE
-          WHEN message_type='template' OR status IN ('sent','delivered','read','failed') THEN payload_json
-          WHEN json_type(payload_json,'$.reply')='object' THEN payload_json
-          ELSE ?4
-        END,
         error=CASE WHEN status='failed' THEN error ELSE '' END
       WHERE message_id=?1`)
-      .bind(messageId, result.status || 'submitted', result.providerMessageId || '', JSON.stringify(result)),
+      .bind(messageId, result.status || 'submitted', result.providerMessageId || ''),
     env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(messageId),
     env.DB.prepare('DELETE FROM outbound_payloads WHERE message_id=?1').bind(messageId)
   ]);
@@ -5987,6 +5985,9 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
     VALUES (?1,?2,'status',?3,?4)`).bind(key, channelId, new Date().toISOString(), workspaceId).run();
   if (!dedupe.meta?.changes) return [];
   try {
+    // Status webhooks must not replace payload_json. Overwriting with the raw
+    // provider receipt wiped outbound senderName (and other presentation fields)
+    // so listMessages lost attribution after refresh.
     const updated = await env.DB.prepare(`UPDATE messages SET
         status=CASE
           WHEN status='failed' THEN status
@@ -5995,26 +5996,17 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
           WHEN status='delivered' AND ?4='sent' THEN status
           ELSE ?4
         END,
-        payload_json=CASE
-          WHEN message_type IN ('image','video','audio','document','template') THEN payload_json
-          WHEN json_type(payload_json,'$.reply')='object' THEN payload_json
-          WHEN status='failed' THEN payload_json
-          WHEN ?4='failed' THEN ?5
-          WHEN status='read' THEN payload_json
-          WHEN status='delivered' AND ?4='sent' THEN payload_json
-          ELSE ?5
-        END,
         error=CASE
           WHEN status='failed' THEN error
-          WHEN ?4='failed' THEN ?6
+          WHEN ?4='failed' THEN ?5
           WHEN status='read' THEN error
           WHEN status='delivered' AND ?4='sent' THEN error
-          ELSE ?6
+          ELSE ?5
         END,
         provider_message_id=CASE WHEN provider_message_id='' AND ?3<>'' THEN ?3 ELSE provider_message_id END
       WHERE workspace_id=?1 AND channel_id=?2
-        AND ((?3<>'' AND provider_message_id=?3) OR (?7<>'' AND message_id=?7))`)
-      .bind(workspaceId, channelId, providerMessageId, status, truncateJson(rawPayload),
+        AND ((?3<>'' AND provider_message_id=?3) OR (?6<>'' AND message_id=?6))`)
+      .bind(workspaceId, channelId, providerMessageId, status,
         String(event.error || '').slice(0, 500), internalMessageId).run();
     if (!updated.meta?.changes) {
       await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(key).run();
@@ -6048,14 +6040,6 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
           WHEN status='delivered' AND ?5='delivered' THEN status
           ELSE ?5
         END,
-        payload_json=CASE
-          WHEN message_type IN ('image','video','audio','document','template') THEN payload_json
-          WHEN json_type(payload_json,'$.reply')='object' THEN payload_json
-          WHEN status='failed' THEN payload_json
-          WHEN status='read' THEN payload_json
-          WHEN status='delivered' AND ?5='delivered' THEN payload_json
-          ELSE ?6
-        END,
         error=CASE WHEN status='failed' THEN error ELSE '' END
       WHERE workspace_id=?1 AND channel_id=?2 AND direction='outbound' AND timestamp<=?4
         AND provider_message_id<>'' AND status IN ('submitted','sent','delivered','read')
@@ -6063,7 +6047,7 @@ async function applyProviderWatermarkStatus(env, workspaceId, channelId, event, 
           WHERE c.workspace_id=messages.workspace_id AND c.conversation_id=messages.conversation_id),'')
           IN (SELECT identity_id FROM channel_identity_bindings
           WHERE workspace_id=?1 AND channel_id=?2 AND scoped_profile_id=?3)`)
-      .bind(workspaceId, channelId, channelProfileId, timestamp, status, truncateJson(rawPayload)).run();
+      .bind(workspaceId, channelId, channelProfileId, timestamp, status).run();
     if (!updated.meta?.changes) return [];
     const changed = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.status,m.error,m.provider_message_id FROM messages m
       WHERE m.workspace_id=?1 AND m.channel_id=?2 AND m.direction='outbound' AND m.timestamp<=?4

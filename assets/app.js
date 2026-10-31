@@ -1942,6 +1942,8 @@
       combined.channelMessageId = fetched.channelMessageId || cached.channelMessageId || "";
       combined.reply = fetched.reply || cached.reply || null;
       combined.attachment = fetched.attachment || cached.attachment;
+      // Keep live outbound attribution if a refresh omits or blanks senderName.
+      combined.senderName = fetched.senderName || cached.senderName || "";
       merged.set(cached.messageId, combined);
     }
     return [...merged.values()];
@@ -6270,7 +6272,13 @@
       }
       const statusOnly = type === "message.updated" && Boolean(existingMessage)
         && rawMessage.status !== undefined && rawMessage.text === undefined && rawMessage.direction === undefined;
-      const message = normalizeMessage({ ...existingMessage, ...rawMessage, conversationId });
+      const message = normalizeMessage({
+        ...existingMessage,
+        ...rawMessage,
+        conversationId,
+        // Status-only broadcasts omit senderName; never blank a known outbound label.
+        senderName: rawMessage.senderName || existingMessage?.senderName || "",
+      });
       const replyBecameAvailable = Boolean(existingMessage && !existingMessage.channelMessageId && message.channelMessageId);
       if (cachedMessages || conversationId === state.selectedConversationId) upsertMessage(conversationId, message);
       if (statusOnly) {

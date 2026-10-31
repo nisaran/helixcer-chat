@@ -45,6 +45,22 @@ test('outbound sender labels are internal metadata only', () => {
   }), 'Emergency recovery');
 });
 
+test('send and delivery status updates never replace message payload_json', async () => {
+  const index = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const markMessageSent = index.slice(index.indexOf('async function markMessageSent'),
+    index.indexOf('async function retryDueMessages'));
+  assert.match(markMessageSent, /Keep the original payload_json/);
+  assert.doesNotMatch(markMessageSent, /payload_json\s*=/);
+  assert.doesNotMatch(markMessageSent, /JSON\.stringify\(result\)/);
+  const applyProviderStatus = index.slice(index.indexOf('async function applyProviderStatus'),
+    index.indexOf('async function applyProviderWatermarkStatus'));
+  assert.match(applyProviderStatus, /must not replace payload_json/);
+  assert.doesNotMatch(applyProviderStatus, /payload_json\s*=/);
+  const watermark = index.slice(index.indexOf('async function applyProviderWatermarkStatus'),
+    index.indexOf('function realtimeMessageStatus'));
+  assert.doesNotMatch(watermark, /payload_json\s*=/);
+});
+
 test('message search is bounded and explicitly scoped to the authenticated workspace', async () => {
   let sql = '';
   let bindings = [];
