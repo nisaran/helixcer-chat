@@ -184,8 +184,18 @@ export function mapInteraktMessage(message) {
   const text = presentation?.text || interaktMessageText(message);
   const providerMessageId = String(message?.channel_message_id || '').trim();
   const externalId = String(message?.id || '').trim();
-  const mediaUrl = String(message?.media_url || message?.raw?.media_url || '').trim();
-  const mediaFileName = String(message?.media_file_name || message?.raw?.media_file_name || '').trim();
+  const topMediaUrl = String(message?.media_url || message?.raw?.media_url || '').trim();
+  const topMediaFileName = String(message?.media_file_name || message?.raw?.media_file_name || '').trim();
+  const templateAttachment = presentation?.attachment || null;
+  const mediaUrl = topMediaUrl || String(templateAttachment?.externalUrl || '').trim();
+  const mediaFileName = topMediaFileName || String(templateAttachment?.filename || '').trim();
+  let attachmentType = String(templateAttachment?.type || '').trim();
+  if (!attachmentType && ['image', 'video', 'audio', 'document'].includes(messageType)) {
+    attachmentType = messageType;
+  }
+  if (!attachmentType && (mediaUrl || mediaFileName)) {
+    attachmentType = guessAttachmentType(mediaFileName || mediaUrl);
+  }
   const replyTo = String(
     message?.reply_to
     || message?.raw?.reply_channel_message_id
@@ -203,9 +213,11 @@ export function mapInteraktMessage(message) {
     timestamp,
     mediaUrl,
     mediaFileName,
+    attachmentType,
     replyTo,
     contentType,
-    ...(presentation?.template ? { template: presentation.template } : {})
+    ...(presentation?.template ? { template: presentation.template } : {}),
+    ...(templateAttachment && !topMediaUrl ? { attachment: templateAttachment } : {})
   };
 }
 
@@ -234,6 +246,7 @@ export function interaktTemplatePresentation(message) {
 
   const parts = [];
   const buttons = [];
+  let attachment = null;
   if (definition) {
     const headerFormat = String(definition.header_format || '').trim().toUpperCase();
     const headerParameters = componentParameters(components, 'header');
@@ -244,8 +257,8 @@ export function interaktTemplatePresentation(message) {
       const headerText = replaceTemplateVariables(headerTemplate, headerParameters);
       if (headerText) parts.push(headerText);
     } else if (headerFormat === 'DOCUMENT' || headerFormat === 'IMAGE' || headerFormat === 'VIDEO') {
-      const mediaLine = templateMediaPreview(headerParameters[0], headerFormat);
-      if (mediaLine) parts.push(mediaLine);
+      // Media headers are real attachments — never prepend filenames like "file.pdf" into body text.
+      attachment = extractTemplateMediaAttachment(headerParameters[0], headerFormat);
     } else if (headerFormat === 'TEXT' && headerParameters.length) {
       const headerValue = templateParameterPreview(headerParameters[0]);
       if (headerValue) parts.push(headerValue);
@@ -256,7 +269,7 @@ export function interaktTemplatePresentation(message) {
       const bodyText = replaceTemplateVariables(bodyTemplate, bodyParameters);
       if (bodyText) parts.push(bodyText);
     } else {
-      const fallback = templateParametersText(components);
+      const fallback = templateParametersText(components, { skipMedia: true });
       if (fallback) parts.push(fallback);
     }
 
@@ -266,9 +279,15 @@ export function interaktTemplatePresentation(message) {
     for (const button of parseInteraktButtons(definition.buttons)) {
       buttons.push(button);
     }
+
+    if (!attachment && headerParameters.length) {
+      attachment = extractTemplateMediaAttachment(headerParameters[0], headerFormat);
+    }
   } else {
-    const fallback = templateParametersText(components);
+    const fallback = templateParametersText(components, { skipMedia: true });
     if (fallback) parts.push(fallback);
+    const headerParameters = componentParameters(components, 'header');
+    attachment = extractTemplateMediaAttachment(headerParameters[0], '');
   }
 
   if (buttons.length) {
@@ -276,7 +295,7 @@ export function interaktTemplatePresentation(message) {
   }
 
   const text = parts.filter(Boolean).join('\n').trim();
-  if (!text && !definition) return null;
+  if (!text && !definition && !attachment) return null;
 
   const name = String(definition?.name || '').trim();
   const language = String(definition?.language || '').trim();
@@ -294,7 +313,8 @@ export function interaktTemplatePresentation(message) {
 
   return {
     text: text || (name ? `Template: ${name}${language ? ` (${language})` : ''}` : ''),
-    template
+    template,
+    ...(attachment ? { attachment } : {})
   };
 }
 
@@ -390,23 +410,54 @@ function templateParameterPreview(parameter) {
   return '';
 }
 
-function templateMediaPreview(parameter, format) {
-  const type = String(parameter?.type || format || '').toLowerCase();
-  if (type === 'document' || format === 'DOCUMENT') {
-    const filename = String(parameter?.document?.filename || '').trim();
-    return filename || 'Document';
-  }
-  if (type === 'image' || format === 'IMAGE') return 'Image';
-  if (type === 'video' || format === 'VIDEO') return 'Video';
-  return templateParameterPreview(parameter);
+function guessAttachmentType(value) {
+  const lower = String(value || '').toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|bmp)(?:\?|$)/i.test(lower)) return 'image';
+  if (/\.(mp4|mov|webm|m4v)(?:\?|$)/i.test(lower)) return 'video';
+  if (/\.(mp3|ogg|wav|m4a|aac|opus)(?:\?|$)/i.test(lower)) return 'audio';
+  if (/\.(pdf|docx?|xlsx?|pptx?|csv|txt|zip|rar)(?:\?|$)/i.test(lower)) return 'document';
+  return value ? 'document' : '';
 }
 
-function templateParametersText(value) {
+function extractTemplateMediaAttachment(parameter, format = '') {
+  if (!parameter || typeof parameter !== 'object') return null;
+  const rawType = String(parameter.type || format || '').trim().toLowerCase();
+  const type = rawType === 'document' || format === 'DOCUMENT'
+    ? 'document'
+    : (rawType === 'image' || format === 'IMAGE'
+      ? 'image'
+      : (rawType === 'video' || format === 'VIDEO' ? 'video' : ''));
+  if (!type) return null;
+  const media = parameter[type] && typeof parameter[type] === 'object' ? parameter[type] : {};
+  const externalUrl = String(media.link || media.url || '').trim();
+  let filename = String(media.filename || '').trim();
+  if (!filename && externalUrl) {
+    try {
+      filename = decodeURIComponent(new URL(externalUrl).pathname.split('/').filter(Boolean).at(-1) || '');
+    } catch {
+      filename = '';
+    }
+  }
+  if (!externalUrl && !filename) return null;
+  return {
+    type,
+    filename: filename || `${type}-attachment`,
+    ...(externalUrl ? { externalUrl } : {})
+  };
+}
+
+function isMediaParameter(parameter) {
+  const type = String(parameter?.type || '').toLowerCase();
+  return type === 'document' || type === 'image' || type === 'video';
+}
+
+function templateParametersText(value, { skipMedia = false } = {}) {
   const parts = [];
   const components = Array.isArray(value) ? value : (Array.isArray(value?.components) ? value.components : null);
   if (!components) return '';
   for (const component of components) {
     for (const parameter of component?.parameters || []) {
+      if (skipMedia && isMediaParameter(parameter)) continue;
       const preview = templateParameterPreview(parameter);
       if (preview) parts.push(preview);
     }

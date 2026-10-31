@@ -110,6 +110,44 @@ test('maps Interakt template and media messages', () => {
   });
   assert.equal(paramsOnly.text, 'Acme · 1200');
 
+  const withDocument = mapInteraktMessage({
+    id: 'm1c',
+    channel_message_id: 'wamid.1c',
+    direction: 'outbound',
+    content_type: 'Template',
+    text: JSON.stringify([
+      {
+        type: 'header',
+        parameters: [{
+          type: 'document',
+          document: {
+            link: 'https://www.helixcer.com/_files/ugd/ticket.pdf',
+            filename: 'ticket.pdf'
+          }
+        }]
+      },
+      { type: 'body', parameters: [{ type: 'text', text: 'Nisar' }] }
+    ]),
+    status: 'Read',
+    timestamp: '2026-01-01T00:00:00+0000',
+    raw: {
+      raw_template: {
+        name: 'flight_ticket',
+        language: 'en',
+        header_format: 'DOCUMENT',
+        body: 'Hello {{1}}, your flight is confirmed.',
+        buttons: '[{"type":"URL","text":"Download Ticket","url":"https://example.com"}]'
+      }
+    }
+  });
+  assert.equal(withDocument.text,
+    'Hello Nisar, your flight is confirmed.\nActions: Download Ticket');
+  assert.doesNotMatch(withDocument.text, /\.pdf/i);
+  assert.equal(withDocument.attachmentType, 'document');
+  assert.equal(withDocument.mediaFileName, 'ticket.pdf');
+  assert.equal(withDocument.mediaUrl, 'https://www.helixcer.com/_files/ugd/ticket.pdf');
+  assert.equal(withDocument.attachment?.type, 'document');
+
   const image = mapInteraktMessage({
     id: 'm2',
     channel_message_id: 'wamid.2',

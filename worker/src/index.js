@@ -6246,15 +6246,18 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
     }
     const timestamp = normalizeTimestamp(mapped.timestamp, now);
     if (!latestTimestamp || timestamp > latestTimestamp) latestTimestamp = timestamp;
+    const attachmentType = ['image', 'video', 'audio', 'document'].includes(mapped.attachmentType)
+      ? mapped.attachmentType
+      : (['image', 'video', 'audio', 'document'].includes(mapped.messageType) ? mapped.messageType : '');
     const payload = {
       source: INTERAKT_SOURCE,
       externalId: mapped.externalId,
       contentType: mapped.contentType,
       ...(mapped.template ? { template: mapped.template } : {}),
       ...(mapped.replyTo ? { reply: { channelMessageId: mapped.replyTo } } : {}),
-      ...(mapped.mediaUrl ? {
+      ...(mapped.mediaUrl && attachmentType ? {
         attachment: {
-          type: mapped.messageType,
+          type: attachmentType,
           filename: mapped.mediaFileName || '',
           externalUrl: mapped.mediaUrl
         }
@@ -6268,11 +6271,14 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
         .bind(workspaceId, channel.channelId, mapped.providerMessageId).first();
       if (existing) {
         // Re-import refreshes Interakt template bodies that were previously stored as
-        // parameter-only middot strings (e.g. "Acme · 1200") without the full copy.
+        // parameter-only middot strings / bare media filenames without the full copy.
+        const existingPayload = String(existing.payload_json || '');
+        const refreshAttachment = Boolean(payload.attachment)
+          && !/"attachment"\s*:/.test(existingPayload);
         const shouldRefreshTemplate = mapped.messageType === 'template'
-          && (existing.message_type === 'template' || String(existing.payload_json || '').includes('"interakt"'))
+          && (existing.message_type === 'template' || existingPayload.includes('"interakt"'))
           && text
-          && text !== String(existing.text || '');
+          && (text !== String(existing.text || '') || refreshAttachment);
         if (shouldRefreshTemplate) {
           pendingStatements.push(env.DB.prepare(`UPDATE messages
               SET message_type=?2, text=?3, payload_json=?4, status=?5
