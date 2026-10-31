@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261031-import-errors">
-  <script src="./assets/app.js?v=20261031-import-errors" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261031-import-status">
+  <script src="./assets/app.js?v=20261031-import-status" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -462,7 +462,10 @@
             <div class="import-chat-result" id="importChatResult" hidden></div>
             <div class="import-chat-actions">
               <p class="subtle" id="importChatHelp">Interakt JSON exports are supported. More sources can be added later.</p>
-              <button class="primary-button" id="importChatSubmit" type="submit">Start import</button>
+              <div class="import-chat-action-buttons">
+                <button class="secondary-button" id="importChatCancel" type="button" hidden>Cancel import</button>
+                <button class="primary-button" id="importChatSubmit" type="submit">Start import</button>
+              </div>
             </div>
           </form>
         </section>

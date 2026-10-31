@@ -43,6 +43,8 @@
       sourceAssignments: {},
       fieldMapping: { name: "", phone: "", company: "", tags: "" },
       importing: false,
+      abortController: null,
+      lastSummary: null,
     },
     pendingConversationId: null,
     unreadMarker: null,
@@ -465,8 +467,18 @@
       };
     }
 
-    async importChat(payload) {
+    async importChat(payload, { signal } = {}) {
+      if (signal?.aborted) {
+        const error = new Error("The operation was aborted.");
+        error.name = "AbortError";
+        throw error;
+      }
       await smallDelay(120);
+      if (signal?.aborted) {
+        const error = new Error("The operation was aborted.");
+        error.name = "AbortError";
+        throw error;
+      }
       const conversations = Array.isArray(payload?.conversations) ? payload.conversations : [];
       return {
         ok: true,
@@ -477,6 +489,7 @@
         conversationsCreated: conversations.length,
         conversationsReused: 0,
         messagesImported: conversations.reduce((total, item) => total + (item.messages?.length || 0), 0),
+        messagesUpdated: 0,
         messagesSkipped: 0,
         failed: [],
       };
@@ -900,12 +913,13 @@
         : this.request("/api/channel-data/whatsapp-templates");
     }
 
-    importChat(payload) {
+    importChat(payload, { signal } = {}) {
       return this.isDemo
-        ? this.demo.importChat(payload)
+        ? this.demo.importChat(payload, { signal })
         : this.request("/api/channel-data/import-chat", {
           method: "POST",
           body: JSON.stringify(payload),
+          signal,
         });
     }
 
@@ -6851,11 +6865,22 @@
 
   function syncImportFieldMappingFromAssignments() {
     state.importChat.fieldMapping = fieldMappingFromSourceAssignments(state.importChat.sourceAssignments);
+    syncImportChatActionButtons();
+  }
+
+  function syncImportChatActionButtons() {
     const channels = whatsappImportChannels();
-    $("importChatSubmit").disabled = state.importChat.importing
-      || !channels.length
-      || !state.importChat.conversations.length
-      || !state.importChat.fieldMapping.phone;
+    const canImport = channels.length
+      && state.importChat.conversations.length
+      && state.importChat.fieldMapping.phone;
+    $("importChatSubmit").disabled = state.importChat.importing || !canImport;
+    $("importChatSubmit").hidden = false;
+    $("importChatSubmit").textContent = state.importChat.importing ? "Importing…" : "Start import";
+    const cancel = $("importChatCancel");
+    const cancelling = Boolean(state.importChat.importing && state.importChat.abortController?.signal?.aborted);
+    cancel.hidden = !state.importChat.importing;
+    cancel.disabled = !state.importChat.importing || cancelling;
+    cancel.textContent = cancelling ? "Cancelling…" : "Cancel import";
   }
 
   function renderImportChatPage() {
@@ -6875,10 +6900,13 @@
     });
     if (selected && channels.some((channel) => channel.channelId === selected)) channelSelect.value = selected;
     $("importChatSource").value = state.importChat.source || "interakt";
-    const canImport = channels.length && state.importChat.conversations.length && state.importChat.fieldMapping.phone;
-    $("importChatSubmit").disabled = state.importChat.importing || !canImport;
+    channelSelect.disabled = state.importChat.importing;
+    $("importChatSource").disabled = state.importChat.importing;
+    $("importChatFile").disabled = state.importChat.importing;
+    syncImportChatActionButtons();
     renderImportChatPreview();
     renderImportChatMapping();
+    if (state.importChat.lastSummary) showImportChatResult(state.importChat.lastSummary);
   }
 
   function renderImportChatPreview() {
@@ -7006,25 +7034,58 @@
     text.textContent = label || `Imported ${done} of ${total}…`;
   }
 
+  function importChatResultTitle(summary) {
+    if (summary?.cancelled) return "Import cancelled";
+    const failed = Array.isArray(summary?.failed) ? summary.failed.length : 0;
+    if (failed) return `Import finished with ${failed} conversation issue${failed === 1 ? "" : "s"}`;
+    return "Import finished";
+  }
+
   function showImportChatResult(summary) {
     const host = $("importChatResult");
+    if (!summary) {
+      host.hidden = true;
+      host.innerHTML = "";
+      return;
+    }
+    state.importChat.lastSummary = summary;
     host.hidden = false;
     const failed = Array.isArray(summary.failed) ? summary.failed : [];
     host.innerHTML = "";
     const title = document.createElement("strong");
-    title.textContent = failed.length
-      ? `Import finished with ${failed.length} conversation issue${failed.length === 1 ? "" : "s"}`
-      : "Import finished";
-    const detail = document.createElement("p");
-    detail.className = "subtle";
-    detail.textContent = [
-      `${summary.messagesImported || 0} messages imported`,
-      `${summary.messagesUpdated || 0} templates refreshed`,
-      `${summary.messagesSkipped || 0} skipped`,
-      `${summary.contactsCreated || 0} contacts created`,
-      `${summary.conversationsCreated || 0} conversations created`,
-    ].join(" · ");
-    host.append(title, detail);
+    title.textContent = importChatResultTitle(summary);
+    const status = document.createElement("p");
+    status.className = "import-chat-result-status";
+    if (summary.cancelled) status.classList.add("is-cancelled");
+    else if (failed.length) status.classList.add("is-warning");
+    const batchesDone = Number(summary.batchesCompleted || 0);
+    const batchesTotal = Number(summary.batchesTotal || 0);
+    status.textContent = summary.cancelled
+      ? (batchesTotal
+        ? `Stopped after ${batchesDone} of ${batchesTotal} batches`
+        : "Stopped before any batch completed")
+      : (batchesTotal ? `Completed ${batchesDone} of ${batchesTotal} batches` : "Completed");
+    const stats = document.createElement("dl");
+    stats.className = "import-chat-stats";
+    [
+      ["Messages imported", String(summary.messagesImported || 0)],
+      ["Messages updated", String(summary.messagesUpdated || 0)],
+      ["Messages skipped", String(summary.messagesSkipped || 0)],
+      ["Contacts created", String(summary.contactsCreated || 0)],
+      ["Contacts reused", String(summary.contactsReused || 0)],
+      ["Conversations created", String(summary.conversationsCreated || 0)],
+      ["Conversations reused", String(summary.conversationsReused || 0)],
+      ["Conversation issues", String(failed.length)],
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      item.append(dt, dd);
+      stats.append(item);
+    });
+    host.append(title, status, stats);
     if (failed.length) {
       const list = document.createElement("ul");
       failed.slice(0, 8).forEach((item) => {
@@ -7034,6 +7095,35 @@
       });
       host.append(list);
     }
+  }
+
+  function cancelImportChat() {
+    if (!state.importChat.importing) return;
+    state.importChat.abortController?.abort();
+    syncImportChatActionButtons();
+    setImportChatProgress(
+      Number(state.importChat.lastSummary?.batchesCompleted || 0) || 0,
+      Number(state.importChat.lastSummary?.batchesTotal || 1),
+      "Cancelling import…"
+    );
+  }
+
+  function importChatProgressLabel(summary, index, total) {
+    const parts = [
+      `Uploading batch ${index + 1} of ${total}`,
+      `${summary.messagesImported || 0} imported`,
+      `${summary.messagesUpdated || 0} updated`,
+      `${summary.messagesSkipped || 0} skipped`,
+    ];
+    return `${parts[0]}… (${parts.slice(1).join(", ")})`;
+  }
+
+  function isImportAbortError(error) {
+    return Boolean(
+      error?.name === "AbortError"
+      || error?.code === 20
+      || /aborted|abort/i.test(String(error?.message || ""))
+    );
   }
 
   function slimInteraktConversation(conversation, fieldMapping = state.importChat.fieldMapping) {
@@ -7146,7 +7236,8 @@
       state.importChat.availableFields = [];
       state.importChat.sourceAssignments = {};
       state.importChat.fieldMapping = { name: "", phone: "", company: "", tags: "" };
-      $("importChatResult").hidden = true;
+      state.importChat.lastSummary = null;
+      showImportChatResult(null);
       renderImportChatPage();
       return;
     }
@@ -7171,7 +7262,8 @@
     state.importChat.availableFields = availableFields;
     state.importChat.fieldMapping = defaultImportFieldMapping(availableFields);
     state.importChat.sourceAssignments = sourceAssignmentsFromFieldMapping(state.importChat.fieldMapping);
-    $("importChatResult").hidden = true;
+    state.importChat.lastSummary = null;
+    showImportChatResult(null);
     renderImportChatPage();
   }
 
@@ -7198,22 +7290,39 @@
       return;
     }
     const batches = chunkInteraktConversations(state.importChat.conversations);
+    const abortController = new AbortController();
+    state.importChat.abortController = abortController;
     state.importChat.importing = true;
-    $("importChatSubmit").disabled = true;
-    $("importChatResult").hidden = true;
     const summary = {
-      messagesImported: 0, messagesUpdated: 0, messagesSkipped: 0, contactsCreated: 0, contactsReused: 0,
-      conversationsCreated: 0, conversationsReused: 0, failed: [],
+      messagesImported: 0,
+      messagesUpdated: 0,
+      messagesSkipped: 0,
+      contactsCreated: 0,
+      contactsReused: 0,
+      conversationsCreated: 0,
+      conversationsReused: 0,
+      failed: [],
+      batchesCompleted: 0,
+      batchesTotal: batches.length,
+      cancelled: false,
     };
+    state.importChat.lastSummary = summary;
+    showImportChatResult(null);
+    renderImportChatPage();
+    let shouldReload = false;
     try {
       for (let index = 0; index < batches.length; index += 1) {
-        setImportChatProgress(index, batches.length, `Uploading batch ${index + 1} of ${batches.length}…`);
+        if (abortController.signal.aborted) {
+          summary.cancelled = true;
+          break;
+        }
+        setImportChatProgress(index, batches.length, importChatProgressLabel(summary, index, batches.length));
         const result = await state.api.importChat({
           source,
           channelId,
           fieldMapping,
           conversations: [batches[index]],
-        });
+        }, { signal: abortController.signal });
         summary.messagesImported += Number(result.messagesImported || 0);
         summary.messagesUpdated += Number(result.messagesUpdated || 0);
         summary.messagesSkipped += Number(result.messagesSkipped || 0);
@@ -7222,19 +7331,50 @@
         summary.conversationsCreated += Number(result.conversationsCreated || 0);
         summary.conversationsReused += Number(result.conversationsReused || 0);
         if (Array.isArray(result.failed)) summary.failed.push(...result.failed);
+        summary.batchesCompleted = index + 1;
+        state.importChat.lastSummary = summary;
+        shouldReload = true;
       }
-      setImportChatProgress(batches.length, batches.length, "Import complete");
-      showImportChatResult(summary);
-      const updatedNote = summary.messagesUpdated
-        ? ` (${summary.messagesUpdated} templates refreshed)`
-        : "";
-      showToast("Chat import complete", `${summary.messagesImported} messages imported${updatedNote}.`);
-      await loadAll({ preserveSelection: true });
+      if (abortController.signal.aborted) summary.cancelled = true;
+      if (summary.cancelled) {
+        setImportChatProgress(summary.batchesCompleted, batches.length || 1, "Import cancelled");
+        showImportChatResult(summary);
+        showToast(
+          "Import cancelled",
+          `${summary.messagesImported} messages imported before cancel${summary.messagesUpdated ? `, ${summary.messagesUpdated} updated` : ""}.`
+        );
+      } else {
+        setImportChatProgress(batches.length, batches.length, "Import complete");
+        showImportChatResult(summary);
+        const updatedNote = summary.messagesUpdated
+          ? ` (${summary.messagesUpdated} templates refreshed)`
+          : "";
+        showToast("Chat import complete", `${summary.messagesImported} messages imported${updatedNote}.`);
+        shouldReload = true;
+      }
+      if (shouldReload) await loadAll({ preserveSelection: true });
     } catch (error) {
-      showToast("Import failed", error.message, true);
-      setImportChatProgress(0, 0, "");
+      if (isImportAbortError(error) || abortController.signal.aborted) {
+        summary.cancelled = true;
+        setImportChatProgress(summary.batchesCompleted, batches.length || 1, "Import cancelled");
+        showImportChatResult(summary);
+        showToast(
+          "Import cancelled",
+          `${summary.messagesImported} messages imported before cancel${summary.messagesUpdated ? `, ${summary.messagesUpdated} updated` : ""}.`
+        );
+        if (summary.batchesCompleted > 0) await loadAll({ preserveSelection: true });
+      } else {
+        showToast("Import failed", error.message, true);
+        if (summary.batchesCompleted > 0) {
+          showImportChatResult(summary);
+          await loadAll({ preserveSelection: true });
+        } else {
+          setImportChatProgress(0, 0, "");
+        }
+      }
     } finally {
       state.importChat.importing = false;
+      state.importChat.abortController = null;
       renderImportChatPage();
     }
   }
@@ -8282,6 +8422,7 @@
       event.target.setCustomValidity("");
     });
     $("importChatForm").addEventListener("submit", runImportChat);
+    $("importChatCancel").addEventListener("click", cancelImportChat);
     $("importChatSource").addEventListener("change", (event) => {
       state.importChat.source = event.target.value || "interakt";
     });

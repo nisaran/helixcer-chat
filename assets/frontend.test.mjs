@@ -1021,3 +1021,29 @@ test("modal errors render inside the open dialog where the top layer cannot hide
   assert.match(app, /toast\.setAttribute\("role", isError \? "alert" : "status"\)/);
   assert.match(app, /isError \? 12000 : 4500/);
 });
+
+test("Import Chat shows post-import stats and supports cancel mid-run", () => {
+  assert.match(html, /id="importChatCancel"/);
+  assert.match(html, />Cancel import</);
+  assert.match(html, /id="importChatResult"/);
+  assert.match(html, /id="importChatProgress"/);
+  assert.match(app, /abortController:\s*null/);
+  assert.match(app, /lastSummary:\s*null/);
+  assert.match(app, /function cancelImportChat\(/);
+  assert.match(app, /new AbortController\(\)/);
+  assert.match(app, /signal:\s*abortController\.signal|signal: abortController\.signal/);
+  assert.match(app, /importChatCancel"\)\.addEventListener\("click", cancelImportChat\)/);
+  assert.match(app, /\["Messages imported"/);
+  assert.match(app, /\["Messages updated"/);
+  assert.match(app, /\["Messages skipped"/);
+  assert.match(app, /\["Contacts created"/);
+  assert.match(app, /\["Contacts reused"/);
+  assert.match(app, /\["Conversations created"/);
+  assert.match(app, /\["Conversations reused"/);
+  assert.match(app, /summary\.cancelled/);
+  assert.match(app, /Import cancelled/);
+  assert.match(app, /batchesCompleted/);
+  assert.match(app, /batchesTotal/);
+  assert.match(styles, /\.import-chat-result-status/);
+  assert.match(styles, /\.import-chat-action-buttons/);
+});
