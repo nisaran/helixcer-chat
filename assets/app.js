@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-import-running-result";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-import-issues-csv";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -7978,6 +7978,12 @@
       .filter((item) => item.phone || item.externalId || item.error);
   }
 
+  function csvEscapeCell(value) {
+    const text = String(value ?? "");
+    if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+    return text;
+  }
+
   function downloadImportChatIssues(summary = state.importChat.lastSummary) {
     const issues = importChatIssueRows(summary);
     if (!issues.length) {
@@ -7985,20 +7991,20 @@
       return;
     }
     const stamp = new Date().toISOString().slice(0, 10);
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      source: "import-chat-issues",
-      issueCount: issues.length,
-      batchesCompleted: Number(summary?.batchesCompleted || 0),
-      batchesTotal: Number(summary?.batchesTotal || 0),
-      cancelled: Boolean(summary?.cancelled),
-      issues,
-    };
-    const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json;charset=utf-8" });
+    const lines = [
+      ["index", "phone", "external_id", "error"].map(csvEscapeCell).join(","),
+      ...issues.map((item) => [
+        item.index,
+        item.phone,
+        item.externalId,
+        item.error,
+      ].map(csvEscapeCell).join(",")),
+    ];
+    const blob = new Blob([`\uFEFF${lines.join("\n")}\n`], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `helixcer-import-issues-${stamp}.json`;
+    link.download = `helixcer-import-issues-${stamp}.csv`;
     document.body.append(link);
     link.click();
     link.remove();

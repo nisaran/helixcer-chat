@@ -569,7 +569,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261101-import-running-result/);
+  assert.match(html, /app\.js\?v=20261101-import-issues-csv/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -910,8 +910,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261101-import-running-result/);
-  assert.match(html, /assets\/styles\.css\?v=20261101-import-running-result/);
+  assert.match(html, /assets\/app\.js\?v=20261101-import-issues-csv/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-import-issues-csv/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   // Inbound customer names must not render on the bubble; only outbound sender_name on the route line.
@@ -1135,17 +1135,19 @@ test("Import Chat shows post-import stats and supports cancel mid-run", () => {
   assert.match(styles, /\.import-chat-action-buttons/);
 });
 
-test("Import Chat lists failed conversations and downloads only issue cases", () => {
+test("Import Chat lists failed conversations and downloads only issue cases as CSV", () => {
+  const helperStart = app.indexOf("function csvEscapeCell");
   const downloadStart = app.indexOf("function downloadImportChatIssues");
   const downloadEnd = app.indexOf("function showImportChatResult", downloadStart);
+  assert.ok(helperStart >= 0 && helperStart < downloadStart);
   assert.ok(downloadStart >= 0 && downloadEnd > downloadStart);
-  const downloadBody = app.slice(downloadStart, downloadEnd);
+  const downloadBody = app.slice(helperStart, downloadEnd);
   assert.match(app, /function importChatIssueRows/);
-  assert.match(downloadBody, /helixcer-import-issues-/);
-  assert.match(downloadBody, /source: "import-chat-issues"/);
-  assert.match(downloadBody, /issueCount: issues\.length/);
-  assert.match(downloadBody, /issues,/);
-  assert.doesNotMatch(downloadBody, /messagesImported|contactsCreated|conversationsCreated/);
+  assert.match(downloadBody, /helixcer-import-issues-.*\.csv/);
+  assert.match(downloadBody, /text\/csv;charset=utf-8/);
+  assert.match(downloadBody, /\["index", "phone", "external_id", "error"\]/);
+  assert.match(downloadBody, /csvEscapeCell/);
+  assert.doesNotMatch(downloadBody, /application\/json|JSON\.stringify|messagesImported|contactsCreated|conversationsCreated/);
   assert.match(app, /download-import-issues/);
   assert.match(app, /Download issues/);
   assert.match(app, /Failed conversations/);
