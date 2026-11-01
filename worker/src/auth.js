@@ -135,7 +135,8 @@ export async function authenticateRequest(request, env) {
   const rawToken = credential.token;
   if (!rawToken) return null;
   const row = await env.DB.prepare(`SELECT s.session_id,s.expires_at,s.session_type,s.device_id,
-      u.user_id,u.email,u.display_name,u.avatar_url,
+      u.user_id,u.email,u.display_name,u.avatar_url,u.phone,u.address_line1,u.address_line2,
+      u.city,u.state,u.postal_code,u.country,
       m.membership_id,m.role,m.status,m.allowed_channel_ids_json,
       w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
     FROM sessions s JOIN users u ON u.user_id=s.user_id
@@ -280,7 +281,11 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
     user = { user_id: userId, google_sub: identity.sub };
     createdUser = true;
   } else {
-    await env.DB.prepare(`UPDATE users SET email=?2,display_name=?3,avatar_url=?4,email_verified=1,last_login_at=?5,updated_at=?5
+    // Keep a saved profile name/avatar; only fill blanks from Google on later sign-ins.
+    await env.DB.prepare(`UPDATE users SET email=?2,
+        display_name=CASE WHEN trim(display_name)='' THEN ?3 ELSE display_name END,
+        avatar_url=CASE WHEN trim(avatar_url)='' THEN ?4 ELSE avatar_url END,
+        email_verified=1,last_login_at=?5,updated_at=?5
       WHERE user_id=?1`).bind(user.user_id, email, String(identity.name || '').slice(0, 160), String(identity.picture || '').slice(0, 1000), now).run();
   }
 
@@ -320,7 +325,8 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
     selectedWorkspaceId = invite.workspace_id;
   }
 
-  const row = await env.DB.prepare(`SELECT u.user_id,u.email,u.display_name,u.avatar_url,m.membership_id,m.role,m.status,
+  const row = await env.DB.prepare(`SELECT u.user_id,u.email,u.display_name,u.avatar_url,u.phone,u.address_line1,
+      u.address_line2,u.city,u.state,u.postal_code,u.country,m.membership_id,m.role,m.status,
       m.allowed_channel_ids_json,w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
     FROM users u JOIN memberships m ON m.user_id=u.user_id JOIN workspaces w ON w.workspace_id=m.workspace_id
     WHERE u.user_id=?1 AND m.status='active' AND w.status='active' AND (?2='' OR m.workspace_id=?2)
@@ -615,7 +621,10 @@ async function recoveryPrincipal(request, env) {
   const workspace = await resolveDefaultWorkspace(env);
   return {
     authType: 'recovery',
-    user: { userId: '', email: 'emergency-recovery', displayName: 'Emergency recovery', avatarUrl: '' },
+    user: {
+      userId: '', email: 'emergency-recovery', displayName: 'Emergency recovery', avatarUrl: '',
+      phone: '', addressLine1: '', addressLine2: '', city: '', state: '', postalCode: '', country: ''
+    },
     workspace: { workspaceId: workspace.workspace_id, name: workspace.name, slug: workspace.slug },
     membership: { membershipId: '', role: 'owner', status: 'active' }
   };
@@ -643,13 +652,84 @@ function principalFromRow(row, authType = 'session') {
   return {
     authType, sessionId: row.session_id || '', sessionExpiresAt: row.expires_at || '',
     deviceId: row.device_id || '',
-    user: { userId: row.user_id, email: row.email, displayName: row.display_name, avatarUrl: row.avatar_url },
+    user: {
+      userId: row.user_id,
+      email: row.email,
+      displayName: row.display_name,
+      avatarUrl: row.avatar_url,
+      phone: row.phone || '',
+      addressLine1: row.address_line1 || '',
+      addressLine2: row.address_line2 || '',
+      city: row.city || '',
+      state: row.state || '',
+      postalCode: row.postal_code || '',
+      country: row.country || ''
+    },
     workspace: { workspaceId: row.workspace_id, name: row.workspace_name, slug: row.workspace_slug },
     membership: {
       membershipId: row.membership_id, role: row.role, status: row.status,
       allowedChannelIds
     }
   };
+}
+
+function cleanProfileText(value, label, maxLength, { required = false } = {}) {
+  const text = String(value ?? '').trim().replace(/\s+/g, ' ');
+  if (!text) {
+    if (required) throw authError(400, `${label} is required.`);
+    return '';
+  }
+  if (text.length > maxLength) throw authError(400, `${label} must be ${maxLength} characters or fewer.`);
+  return text;
+}
+
+function cleanProfilePhone(value) {
+  const phone = String(value ?? '').trim();
+  if (!phone) return '';
+  if (phone.length > 32) throw authError(400, 'Phone number must be 32 characters or fewer.');
+  if (!/^\+?[0-9()\s.-]{6,32}$/.test(phone)) {
+    throw authError(400, 'Enter a phone number with country code, for example +91 98765 43210.');
+  }
+  return phone.replace(/\s+/g, ' ');
+}
+
+export async function updateUserProfile(env, principal, payload = {}) {
+  if (!principal?.user?.userId) {
+    throw authError(403, 'A signed-in account is required to update your profile.');
+  }
+  if (!['session', 'mobile_session'].includes(principal.authType)) {
+    throw authError(403, 'A verified session is required to update your profile.');
+  }
+  const body = payload && typeof payload === 'object' ? payload : {};
+  const displayName = cleanProfileText(body.displayName ?? body.name, 'Name', 120, { required: true });
+  const phone = cleanProfilePhone(body.phone ?? body.phoneNumber);
+  const addressLine1 = cleanProfileText(body.addressLine1, 'Address line 1', 180);
+  const addressLine2 = cleanProfileText(body.addressLine2, 'Address line 2', 180);
+  const city = cleanProfileText(body.city, 'City', 100);
+  const region = cleanProfileText(body.state, 'State / region', 100);
+  const postalCode = cleanProfileText(body.postalCode, 'Postal code', 24);
+  const country = cleanProfileText(body.country, 'Country', 100);
+  const now = new Date().toISOString();
+  await env.DB.prepare(`UPDATE users SET display_name=?2,phone=?3,address_line1=?4,address_line2=?5,
+      city=?6,state=?7,postal_code=?8,country=?9,updated_at=?10
+    WHERE user_id=?1`)
+    .bind(principal.user.userId, displayName, phone, addressLine1, addressLine2, city, region, postalCode, country, now)
+    .run();
+  const user = {
+    ...principal.user,
+    displayName,
+    phone,
+    addressLine1,
+    addressLine2,
+    city,
+    state: region,
+    postalCode,
+    country
+  };
+  await auditAuthAction(env, { ...principal, user }, 'profile.updated', 'user', principal.user.userId, {
+    fields: ['displayName', 'phone', 'address']
+  });
+  return { ...principal, user };
 }
 
 function memberView(row) {

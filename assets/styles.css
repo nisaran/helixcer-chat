@@ -267,9 +267,13 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .user-menu-identity strong { font-size: 12px; }
 .user-menu-identity span { overflow: hidden; color: var(--muted); margin-top: 2px; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .user-menu-identity em { justify-self: start; border-radius: 999px; background: var(--brand-soft); color: var(--brand-deep); margin-top: 7px; padding: 3px 8px; font-size: 9px; font-style: normal; font-weight: 750; text-transform: capitalize; }
-.user-menu > button { display: block; width: 100%; border: 0; border-radius: 8px; background: transparent; padding: 9px 10px; text-align: left; font-size: 11px; }
+.user-menu > button { display: block; width: 100%; border: 0; border-radius: 8px; background: transparent; padding: 9px 10px; text-align: left; font-size: 11px; color: var(--ink); }
 .user-menu > button:hover { background: #f4f5f2; }
 .user-menu .logout-button { color: #a63e2d; }
+.phone-fields { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
+.phone-country-code { text-align: center; }
+.profile-modal .modal-card { width: min(520px, calc(100vw - 28px)); }
+.profile-save-state { flex: 1; color: var(--muted); font-size: 11px; align-self: center; }
 
 .connection-pill {
   display: inline-flex;

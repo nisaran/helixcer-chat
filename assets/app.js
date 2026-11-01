@@ -187,7 +187,10 @@
       appName: "Helixcer Chat",
       me: {
         authenticated: true,
-        user: { userId: "demo-owner", email: "owner@helixcer.example", displayName: "Nisar", avatarUrl: "" },
+        user: {
+          userId: "demo-owner", email: "owner@helixcer.example", displayName: "Nisar", avatarUrl: "",
+          phone: "", addressLine1: "", addressLine2: "", city: "", state: "", postalCode: "", country: "",
+        },
         workspace: { ...workspaceProfile, name: workspaceProfile.displayName, slug: "helixcer" },
         membership: { membershipId: "demo-membership-owner", role: "owner", status: "active" },
       },
@@ -405,6 +408,30 @@
     async me() {
       await smallDelay(120);
       return clone(this.data.me);
+    }
+
+    async updateProfile(payload) {
+      await smallDelay(140);
+      const displayName = String(payload.displayName || "").trim();
+      if (!displayName) throw new Error("Name is required.");
+      const phone = String(payload.phone || "").trim();
+      if (phone && !/^\+?[0-9()\s.-]{6,32}$/.test(phone)) {
+        throw new Error("Enter a phone number with country code, for example +91 98765 43210.");
+      }
+      this.data.me.user = {
+        ...this.data.me.user,
+        displayName,
+        phone,
+        addressLine1: String(payload.addressLine1 || "").trim(),
+        addressLine2: String(payload.addressLine2 || "").trim(),
+        city: String(payload.city || "").trim(),
+        state: String(payload.state || "").trim(),
+        postalCode: String(payload.postalCode || "").trim(),
+        country: String(payload.country || "").trim(),
+      };
+      const member = this.data.team.members.find((entry) => entry.userId === this.data.me.user.userId);
+      if (member) member.displayName = displayName;
+      return { ok: true, ...clone(this.data.me) };
     }
 
     async getWorkspace() {
@@ -990,6 +1017,12 @@
       return this.isDemo ? this.demo.me() : this.request("/api/me");
     }
 
+    updateProfile(payload) {
+      return this.isDemo
+        ? this.demo.updateProfile(payload)
+        : this.request("/api/me", { method: "PATCH", body: JSON.stringify(payload) });
+    }
+
     logout() {
       return this.isDemo ? this.demo.logout() : this.request("/api/logout", { method: "POST" });
     }
@@ -1418,12 +1451,36 @@
       email: String(user.email || ""),
       displayName: user.displayName || user.name || user.email?.split("@")[0] || "Team member",
       avatarUrl: user.avatarUrl || user.picture || "",
+      phone: String(user.phone || user.phoneNumber || ""),
+      addressLine1: String(user.addressLine1 || ""),
+      addressLine2: String(user.addressLine2 || ""),
+      city: String(user.city || ""),
+      state: String(user.state || ""),
+      postalCode: String(user.postalCode || ""),
+      country: String(user.country || ""),
       membershipId: String(membership.membershipId || membership.id || ""),
       role: ["owner", "admin", "agent"].includes(membership.role) ? membership.role : "agent",
       status: membership.status || "active",
       allowedChannelIds: normalizeAllowedChannelIds(membership.allowedChannelIds ?? membership.allowed_channel_ids),
       workspace: source.workspace || { workspaceId: "default", name: DEFAULT_WORKSPACE, slug: "helixcer" },
     };
+  }
+
+  function splitProfilePhone(phone) {
+    const text = String(phone || "").trim();
+    if (!text) return { countryCode: "+91", number: "" };
+    const match = text.match(/^(\+\d{1,4})\s*(.*)$/);
+    if (match) return { countryCode: match[1], number: String(match[2] || "").trim() };
+    return { countryCode: "+91", number: text };
+  }
+
+  function combineProfilePhone(countryCode, number) {
+    const code = String(countryCode || "").trim();
+    const local = String(number || "").trim();
+    if (!code && !local) return "";
+    if (!local) return code;
+    if (!code) return local;
+    return `${code} ${local}`.replace(/\s+/g, " ").trim();
   }
 
   function normalizeWorkspaceProfile(raw = {}) {
@@ -8433,6 +8490,79 @@
     $("userMenuButton").setAttribute("aria-expanded", String(shouldOpen));
   }
 
+  function setProfileFormBusy(busy) {
+    $("profileForm").querySelectorAll("input").forEach((field) => {
+      if (field.id === "profileEmail") {
+        field.readOnly = true;
+        field.setAttribute("aria-readonly", "true");
+        return;
+      }
+      field.disabled = busy;
+    });
+    $("profileSaveButton").disabled = busy;
+  }
+
+  function openProfileDialog() {
+    const user = state.currentUser;
+    if (!user) return;
+    toggleUserMenu(false);
+    const phone = splitProfilePhone(user.phone);
+    $("profileEmail").value = user.email || "";
+    $("profileDisplayName").value = user.displayName || "";
+    $("profilePhoneCountryCode").value = phone.countryCode;
+    $("profilePhoneNumber").value = phone.number;
+    $("profileAddressLine1").value = user.addressLine1 || "";
+    $("profileAddressLine2").value = user.addressLine2 || "";
+    $("profileCity").value = user.city || "";
+    $("profileState").value = user.state || "";
+    $("profilePostalCode").value = user.postalCode || "";
+    $("profileCountry").value = user.country || "";
+    $("profileSaveState").textContent = "";
+    setProfileFormBusy(false);
+    $("profileDialog").showModal();
+    $("profileDisplayName").focus();
+  }
+
+  async function saveProfile(form) {
+    if (!state.currentUser || !state.api) return;
+    const data = new FormData(form);
+    const phoneCountryCode = String(data.get("phoneCountryCode") || "").trim();
+    const phoneNumber = String(data.get("phoneNumber") || "").trim();
+    const phone = combineProfilePhone(phoneCountryCode, phoneNumber);
+    $("profilePhoneCountryCode").setCustomValidity("");
+    $("profilePhoneNumber").setCustomValidity("");
+    if ((phoneCountryCode || phoneNumber) && !/^\+?[0-9()\s.-]{6,32}$/.test(phone)) {
+      $("profilePhoneNumber").setCustomValidity("Enter a phone number with country code, for example +91 98765 43210.");
+    } else if (phoneNumber && !/^\+?\d{1,4}$/.test(phoneCountryCode.replace(/\s+/g, ""))) {
+      $("profilePhoneCountryCode").setCustomValidity("Enter a country code such as +91.");
+    }
+    if (!form.reportValidity()) return;
+    const payload = {
+      displayName: String(data.get("displayName") || "").trim(),
+      phone,
+      addressLine1: String(data.get("addressLine1") || "").trim(),
+      addressLine2: String(data.get("addressLine2") || "").trim(),
+      city: String(data.get("city") || "").trim(),
+      state: String(data.get("state") || "").trim(),
+      postalCode: String(data.get("postalCode") || "").trim(),
+      country: String(data.get("country") || "").trim(),
+    };
+    $("profileSaveState").textContent = "Saving…";
+    setProfileFormBusy(true);
+    try {
+      const response = await state.api.updateProfile(payload);
+      state.currentUser = normalizeAuth(response);
+      renderCurrentUser();
+      $("profileSaveState").textContent = "Saved";
+      showToast("Profile saved", "Your account details are up to date.");
+      $("profileDialog").close();
+    } catch (error) {
+      $("profileSaveState").textContent = "Changes not saved";
+      setProfileFormBusy(false);
+      showToast("Profile was not updated", error.message, true);
+    }
+  }
+
   async function copyInviteLink() {
     const input = $("inviteLinkOutput");
     try {
@@ -9493,6 +9623,8 @@
         const actions = {
           "toggle-composer-route-menu": toggleComposerRouteMenu,
           "toggle-user-menu": () => toggleUserMenu(),
+          "open-profile": openProfileDialog,
+          "close-profile": () => $("profileDialog").close(),
           "logout": logout,
           "toggle-details": toggleDetails,
           "toggle-conversation-menu": toggleConversationActionMenu,
@@ -9747,6 +9879,15 @@
     $("workspaceProfileForm").addEventListener("submit", (event) => {
       event.preventDefault();
       saveWorkspaceProfile(event.currentTarget);
+    });
+    $("profileForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveProfile(event.currentTarget);
+    });
+    ["profilePhoneCountryCode", "profilePhoneNumber"].forEach((id) => {
+      $(id).addEventListener("input", (event) => {
+        event.target.setCustomValidity("");
+      });
     });
     $("workspaceGstin").addEventListener("input", (event) => {
       event.target.value = event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");

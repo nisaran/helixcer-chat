@@ -131,6 +131,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0016_internal_slug.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0017_agent_channel_access.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0019_outbound_sender.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0020_user_profile.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -754,6 +755,87 @@ test('session-authenticated bootstrap is workspace scoped and returns verified i
   assert.deepEqual(body.channels.map(channel => channel.channelId), ['default-channel']);
   assert.equal(body.me.user.email, 'owner@example.com');
   assert.equal(body.me.workspace.workspaceId, 'ws_default');
+  database.close();
+});
+
+test('signed-in members can update their own profile without changing login email', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const { sessionToken, principal } = await performOwnerLogin(env);
+  const headers = {
+    Cookie: `__Host-helixcer_session=${encodeURIComponent(sessionToken)}`,
+    Origin: 'https://chat.helixcer.com',
+    'Content-Type': 'application/json'
+  };
+
+  const me = await handleRequest(new Request('https://api.chat.helixcer.com/api/me', {
+    headers: { Cookie: headers.Cookie, Origin: headers.Origin }
+  }), env);
+  assert.equal(me.status, 200);
+  const meBody = await me.json();
+  assert.equal(meBody.user.email, principal.user.email);
+  assert.equal(meBody.user.phone, '');
+  assert.equal(meBody.user.addressLine1, '');
+
+  const update = await handleRequest(new Request('https://api.chat.helixcer.com/api/me', {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({
+      displayName: 'Nisar Ahammed',
+      phone: '+91 98765 43210',
+      addressLine1: '12 Palm Grove',
+      addressLine2: 'Near Metro',
+      city: 'Kochi',
+      state: 'Kerala',
+      postalCode: '682001',
+      country: 'India',
+      email: 'attacker@example.com'
+    })
+  }), env);
+  assert.equal(update.status, 200);
+  const updated = await update.json();
+  assert.equal(updated.ok, true);
+  assert.equal(updated.user.displayName, 'Nisar Ahammed');
+  assert.equal(updated.user.email, principal.user.email);
+  assert.equal(updated.user.phone, '+91 98765 43210');
+  assert.equal(updated.user.addressLine1, '12 Palm Grove');
+  assert.equal(updated.user.city, 'Kochi');
+  assert.equal(updated.user.country, 'India');
+
+  const row = database.prepare('SELECT email,display_name,phone,address_line1,city,country FROM users WHERE user_id=?')
+    .get(principal.user.userId);
+  assert.equal(row.email, principal.user.email);
+  assert.equal(row.display_name, 'Nisar Ahammed');
+  assert.equal(row.phone, '+91 98765 43210');
+  assert.equal(row.address_line1, '12 Palm Grove');
+  assert.equal(row.city, 'Kochi');
+  assert.equal(row.country, 'India');
+  assert.equal(database.prepare("SELECT action FROM audit_log WHERE action='profile.updated'").get().action, 'profile.updated');
+
+  const invalidPhone = await handleRequest(new Request('https://api.chat.helixcer.com/api/me', {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ displayName: 'Nisar', phone: 'abc' })
+  }), env);
+  assert.equal(invalidPhone.status, 400);
+
+  const blankName = await handleRequest(new Request('https://api.chat.helixcer.com/api/me', {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ displayName: '   ' })
+  }), env);
+  assert.equal(blankName.status, 400);
+
+  const recovery = await handleRequest(new Request('https://api.chat.helixcer.com/api/me', {
+    method: 'PATCH',
+    headers: {
+      Authorization: 'Bearer recovery-secret',
+      Origin: 'https://chat.helixcer.com',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ displayName: 'Recovery' })
+  }), { ...env, RECOVERY_MODE: 'true', ADMIN_TOKEN: 'recovery-secret' });
+  assert.equal(recovery.status, 403);
   database.close();
 });
 
