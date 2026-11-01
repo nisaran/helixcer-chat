@@ -1387,12 +1387,27 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .import-chat-action-buttons .secondary-button { flex: 1 1 auto; }
 }
 
-.campaigns-route { display: grid; gap: 22px; align-content: start; }
+.campaigns-route {
+  display: grid; gap: 14px; align-content: start;
+  padding-top: 12px;
+}
 .campaigns-route .route-heading,
 .campaigns-route .campaign-panel {
   max-width: none;
   width: 100%;
   margin: 0;
+}
+.campaigns-heading {
+  align-items: center;
+  margin-bottom: 0;
+}
+.campaigns-heading h2 {
+  font-size: clamp(18px, 2.4vw, 22px);
+  font-weight: 700;
+  letter-spacing: -.4px;
+}
+.campaign-create-panel .campaign-panel-toolbar {
+  padding-bottom: 8px;
 }
 .campaign-panel {
   min-width: 0;

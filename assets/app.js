@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-create-polish";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-layout";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;

@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-create-polish">
-  <script src="./assets/app.js?v=20261101-campaign-create-polish" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-layout">
+  <script src="./assets/app.js?v=20261101-campaign-layout" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -473,11 +473,7 @@
 
       <section class="route content-route campaigns-route" id="campaignsRoute" data-route-panel="campaigns" aria-labelledby="campaignsTitle" hidden>
         <div class="route-heading campaigns-heading">
-          <div>
-            <p class="eyebrow">Bulk messaging</p>
-            <h2 id="campaignsTitle">Campaign</h2>
-            <p>Send one message to many contacts, then track delivery in history.</p>
-          </div>
+          <div><h2 id="campaignsTitle">Campaign</h2></div>
           <div class="route-heading-actions">
             <button class="secondary-button" type="button" data-action="campaign-show-history" id="campaignHistoryButton" hidden>Campaign history</button>
             <button class="primary-button" type="button" data-action="campaign-show-create" id="campaignCreateButton"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create campaign</button>
@@ -517,7 +513,6 @@
           <div class="campaign-panel-toolbar">
             <div>
               <strong id="campaignCreateTitle">Create campaign</strong>
-              <span class="subtle">Choose a channel, build the audience, then compose the message.</span>
             </div>
           </div>
           <form class="campaign-create-form" id="campaignCreateForm" autocomplete="off">
