@@ -86,7 +86,7 @@ test("single workspace profile stores organisation, address, and GST details", (
   assert.match(app, /if \(data\.workspace\)[\s\S]*?state\.workspaceProfileLoaded = true/);
   assert.match(app, /const editable = admin && state\.workspaceProfileLoaded/);
   assert.match(html, /Only workspace owners and admins can edit these details/);
-  assert.match(app, /\["inbox", "contacts", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"\]/);
+  assert.match(app, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"\]/);
   assert.match(styles, /\.workspace-form-grid \{[^}]*grid-template-columns: repeat\(2/);
   assert.match(styles, /\.workspace-profile-form \.text-field\[readonly\]/);
   assert.doesNotMatch(`${html}\n${app}`, /createWorkspace|deleteWorkspace|workspaceSwitcher/i);
@@ -569,7 +569,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261101-import-issues-csv/);
+  assert.match(html, /app\.js\?v=20261101-campaigns/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -910,8 +910,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261101-import-issues-csv/);
-  assert.match(html, /assets\/styles\.css\?v=20261101-import-issues-csv/);
+  assert.match(html, /assets\/app\.js\?v=20261101-campaigns/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-campaigns/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   // Inbound customer names must not render on the bubble; only outbound sender_name on the route line.
@@ -1254,4 +1254,28 @@ test("outbound messages expose a status-history info popup with exact local time
     ["Delivered", formatStatusHistoryTime("2026-10-31T07:16:54.000Z")],
   ]);
   assert.equal(rows.some((row) => row.label === "Seen"), false);
+});
+
+test("Campaign page supports create flow, contact/upload audiences, and expandable history", () => {
+  assert.match(html, /data-route="campaigns"/);
+  assert.match(html, />Campaign<\/span>/);
+  assert.match(html, /id="campaignsRoute" data-route-panel="campaigns"/);
+  assert.match(html, /id="campaignHistoryPanel"/);
+  assert.match(html, /id="campaignCreatePanel"/);
+  assert.match(html, /name="campaignAudience"/);
+  assert.match(html, /name="campaignUploadMode"/);
+  assert.match(html, /id="campaignContactList"/);
+  assert.match(html, /id="campaignFieldMapping"/);
+  assert.match(html, /id="campaignVariableFields"/);
+  assert.match(app, /campaigns: "Campaign"/);
+  assert.match(app, /request\("\/api\/campaigns"\)/);
+  assert.match(app, /request\("\/api\/campaigns", \{ method: "POST"/);
+  assert.match(app, /\/api\/campaigns\/template-media/);
+  assert.match(app, /async function submitCampaign/);
+  assert.match(app, /function renderCampaignHistory/);
+  assert.match(app, /type === "campaign\.updated"/);
+  assert.match(html, /Existing chats keep their open or closed status/);
+  assert.match(styles, /\.campaign-table/);
+  assert.match(styles, /\.campaign-recipient-table/);
+  assert.match(styles, /\.campaign-variable-row/);
 });

@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-import-issues-csv";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaigns";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -68,6 +68,27 @@
       importing: false,
       abortController: null,
       lastSummary: null,
+    },
+    campaigns: {
+      mode: "history",
+      items: [],
+      loading: false,
+      expandedId: "",
+      recipientsByCampaign: new Map(),
+      audienceSource: "contacts",
+      uploadMode: "file",
+      uploadHeaders: [],
+      uploadRows: [],
+      fieldMapping: { displayName: "", profileId: "", company: "", tags: "" },
+      selectedContactIds: new Set(),
+      audienceContactIds: new Set(),
+      contactFilter: "",
+      contactCandidates: [],
+      templates: [],
+      templateKey: "",
+      variableMappings: [],
+      textVariables: [],
+      submitting: false,
     },
     pendingConversationId: null,
     unreadMarker: null,
@@ -644,6 +665,80 @@
       };
     }
 
+    async listCampaigns() {
+      await smallDelay(80);
+      return { items: clone(this.data.campaigns || []) };
+    }
+
+    async getCampaign(campaignId) {
+      await smallDelay(80);
+      const item = (this.data.campaigns || []).find((campaign) => campaign.campaignId === campaignId);
+      if (!item) throw Object.assign(new Error("Campaign not found."), { status: 404 });
+      const recipients = (this.data.campaignRecipients || {})[campaignId] || [];
+      return { item: clone(item), recipients: clone(recipients) };
+    }
+
+    async createCampaign(payload) {
+      await smallDelay(120);
+      const channel = this.data.channels.find((entry) => entry.channelId === payload.channelId) || {};
+      const recipients = Array.isArray(payload.recipients) ? payload.recipients : [];
+      const campaignId = `campaign-${Date.now().toString(36)}`;
+      const now = new Date().toISOString();
+      const item = {
+        campaignId,
+        name: payload.name || "Campaign",
+        channelId: payload.channelId || "",
+        channelName: channel.name || "",
+        connectorType: channel.connectorType || "",
+        audienceSource: payload.audienceSource || "contacts",
+        messageType: payload.messageType || "text",
+        templateName: payload.template?.name || "",
+        templateLanguage: payload.template?.language?.code || "",
+        messageBody: payload.text || "",
+        status: "completed",
+        totalCount: recipients.length,
+        pendingCount: 0,
+        sentCount: recipients.length,
+        deliveredCount: recipients.length,
+        readCount: 0,
+        failedCount: 0,
+        createdBy: "Demo",
+        createdAt: now,
+        updatedAt: now,
+        completedAt: now,
+      };
+      this.data.campaigns = [item, ...(this.data.campaigns || [])];
+      this.data.campaignRecipients = this.data.campaignRecipients || {};
+      this.data.campaignRecipients[campaignId] = recipients.map((recipient, index) => ({
+        recipientId: `recipient-${campaignId}-${index + 1}`,
+        campaignId,
+        contactId: recipient.contactId || "",
+        conversationId: "",
+        messageId: "",
+        displayName: recipient.displayName || recipient.row?.Name || recipient.contactId || `Recipient ${index + 1}`,
+        profileId: recipient.profileId || "",
+        status: "delivered",
+        error: "",
+        createdAt: now,
+        updatedAt: now,
+      }));
+      this.emit({ type: "campaign.updated", campaignId, campaign: clone(item) });
+      return { ok: true, campaignId, item: clone(item) };
+    }
+
+    async uploadCampaignTemplateMedia(formData) {
+      await smallDelay(80);
+      const file = formData.get("file");
+      return {
+        ok: true,
+        mediaId: `demo-media-${Date.now().toString(36)}`,
+        filename: file?.name || "media",
+        mimeType: file?.type || "",
+        size: Number(file?.size || 0),
+        type: String(formData.get("type") || "image"),
+      };
+    }
+
     async sendAttachment(conversationId, formData) {
       const file = formData.get("file");
       const caption = String(formData.get("caption") || "").trim();
@@ -1091,6 +1186,30 @@
           body: JSON.stringify(payload),
           signal,
         });
+    }
+
+    listCampaigns() {
+      return this.isDemo
+        ? this.demo.listCampaigns()
+        : this.request("/api/campaigns");
+    }
+
+    getCampaign(campaignId) {
+      return this.isDemo
+        ? this.demo.getCampaign(campaignId)
+        : this.request(`/api/campaigns/${encodeURIComponent(campaignId)}`);
+    }
+
+    createCampaign(payload) {
+      return this.isDemo
+        ? this.demo.createCampaign(payload)
+        : this.request("/api/campaigns", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    uploadCampaignTemplateMedia(formData) {
+      return this.isDemo
+        ? this.demo.uploadCampaignTemplateMedia(formData)
+        : this.request("/api/campaigns/template-media", { method: "POST", body: formData });
     }
 
     sendAttachment(conversationId, formData) {
@@ -7285,6 +7404,18 @@
       }
       return;
     }
+    if (type === "campaign.updated") {
+      const campaign = event.campaign || event.item;
+      if (campaign?.campaignId) upsertCampaignItem(campaign);
+      if (state.route === "campaigns" && state.campaigns.mode === "history") {
+        if (state.campaigns.expandedId === campaign?.campaignId) {
+          loadCampaignDetail(campaign.campaignId).catch(() => {});
+        } else {
+          renderCampaignHistory();
+        }
+      }
+      return;
+    }
     if (["channel.updated", "channel.deleted", "bootstrap.changed"].includes(type)) {
       state.whatsappTemplatesLoaded = false;
       await reconcileWorkspace();
@@ -7631,7 +7762,7 @@
     const raw = String(value || "").replace(/^#/, "");
     const separator = raw.indexOf("/");
     const requestedRoute = separator >= 0 ? raw.slice(0, separator) : raw;
-    const allowedRoutes = ["inbox", "contacts", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"];
+    const allowedRoutes = ["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"];
     const route = allowedRoutes.includes(requestedRoute) ? requestedRoute : "inbox";
     if (route !== "inbox" || separator < 0) return { route, conversationId: "" };
     let conversationId = "";
@@ -7672,7 +7803,7 @@
   function setRoute(route, { preserveLocation = false } = {}) {
     closeContactRouteMenu();
     closeContactPlatformMenu();
-    if (!["inbox", "contacts", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"].includes(route)) route = "inbox";
     if (!canAdmin() && ["channels", "whatsapp-templates", "import-chat", "developer", "team"].includes(route)) route = "inbox";
     if (!preserveLocation) {
       state.pendingConversationId = null;
@@ -7710,7 +7841,7 @@
       $("channelDataNavChildren").hidden = false;
     }
     const labels = {
-      inbox: "Inbox", contacts: "Contacts", channels: "Channels",
+      inbox: "Inbox", contacts: "Contacts", campaigns: "Campaign", channels: "Channels",
       "whatsapp-templates": "WhatsApp Templates", "import-chat": "Import Chat",
       developer: "Developer API", team: "Team", workspace: "Workspace", settings: "Settings",
     };
@@ -7719,6 +7850,7 @@
     if (route === "workspace") loadWorkspaceProfile().catch(() => {});
     if (route === "whatsapp-templates") loadWhatsAppTemplateLibrary().catch(() => {});
     if (route === "import-chat") renderImportChatPage();
+    if (route === "campaigns") renderCampaignsPage();
     if (route === "contacts") {
       const hasFreshPage = !state.contactSearch.trim()
         && state.contactPage === 1
@@ -7737,6 +7869,650 @@
       .filter((channel) => channel.connectorType === "whatsapp_cloud" || channel.connectorType === "whatsapp")
       .slice()
       .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }));
+  }
+
+  const CAMPAIGN_CONTACT_TARGETS = [
+    { key: "displayName", label: "Name", required: false },
+    { key: "profileId", label: "Messaging ID / Phone", required: true },
+    { key: "company", label: "Company", required: false },
+    { key: "tags", label: "Tags", required: false },
+  ];
+
+  function upsertCampaignItem(campaign) {
+    if (!campaign?.campaignId) return;
+    const index = state.campaigns.items.findIndex((item) => item.campaignId === campaign.campaignId);
+    if (index >= 0) state.campaigns.items[index] = { ...state.campaigns.items[index], ...campaign };
+    else state.campaigns.items.unshift(campaign);
+  }
+
+  function showCampaignMode(mode) {
+    state.campaigns.mode = mode === "create" ? "create" : "history";
+    const history = $("campaignHistoryPanel");
+    const create = $("campaignCreatePanel");
+    const historyButton = $("campaignHistoryButton");
+    const createButton = $("campaignCreateButton");
+    if (history) history.hidden = state.campaigns.mode !== "history";
+    if (create) create.hidden = state.campaigns.mode !== "create";
+    if (historyButton) historyButton.hidden = state.campaigns.mode !== "create";
+    if (createButton) createButton.hidden = state.campaigns.mode !== "history";
+    if (state.campaigns.mode === "create") renderCampaignCreateForm();
+    else renderCampaignHistory();
+  }
+
+  function renderCampaignsPage() {
+    showCampaignMode(state.campaigns.mode || "history");
+    if (state.campaigns.mode === "history") loadCampaigns().catch(() => {});
+  }
+
+  async function loadCampaigns() {
+    state.campaigns.loading = true;
+    renderCampaignHistory();
+    try {
+      const data = await state.api.listCampaigns();
+      state.campaigns.items = asItems(data?.items);
+      renderCampaignHistory();
+    } catch (error) {
+      showToast("Campaigns unavailable", error.message, true);
+    } finally {
+      state.campaigns.loading = false;
+      renderCampaignHistory();
+    }
+  }
+
+  function campaignStatusLabel(status) {
+    const value = String(status || "queued");
+    if (value === "completed_with_errors") return "Completed with errors";
+    return capitalize(value.replaceAll("_", " "));
+  }
+
+  function formatCampaignTime(value) {
+    if (!value) return "—";
+    try {
+      return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+    } catch {
+      return String(value);
+    }
+  }
+
+  function renderCampaignHistory() {
+    const body = $("campaignTableBody");
+    const empty = $("campaignHistoryEmpty");
+    if (!body) return;
+    body.replaceChildren();
+    const items = state.campaigns.items || [];
+    if (empty) empty.hidden = items.length > 0 || state.campaigns.loading;
+    if (!items.length) {
+      if (state.campaigns.loading) {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td colspan="9"><span class="subtle">Loading campaigns…</span></td>`;
+        body.append(row);
+      }
+      return;
+    }
+    for (const campaign of items) {
+      const row = document.createElement("tr");
+      row.className = "campaign-row";
+      row.dataset.campaignId = campaign.campaignId;
+      if (state.campaigns.expandedId === campaign.campaignId) row.classList.add("is-open");
+      const statusClass = String(campaign.status || "").replace(/[^\w-]+/g, "_");
+      row.innerHTML = `
+        <td><button class="campaign-expand-button" type="button" data-action="toggle-campaign-detail" data-campaign-id="${escapeHtml(campaign.campaignId)}" aria-expanded="${state.campaigns.expandedId === campaign.campaignId ? "true" : "false"}" aria-label="Show campaign details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></button></td>
+        <td class="campaign-name-cell"><strong>${escapeHtml(campaign.name || "Campaign")}</strong><span>${escapeHtml(campaign.messageType === "template" ? (campaign.templateName || "Template") : "Text message")}</span></td>
+        <td>${escapeHtml(campaign.channelName || campaign.channelId || "—")}</td>
+        <td><span class="campaign-status-pill is-${escapeHtml(statusClass)}">${escapeHtml(campaignStatusLabel(campaign.status))}</span></td>
+        <td>${Number(campaign.totalCount || 0)}</td>
+        <td>${Number(campaign.deliveredCount || 0)}</td>
+        <td>${Number(campaign.readCount || 0)}</td>
+        <td>${Number(campaign.failedCount || 0)}</td>
+        <td>${escapeHtml(formatCampaignTime(campaign.createdAt))}</td>`;
+      body.append(row);
+      if (state.campaigns.expandedId === campaign.campaignId) {
+        const detail = document.createElement("tr");
+        detail.className = "campaign-detail-row";
+        detail.dataset.campaignDetail = campaign.campaignId;
+        const recipients = state.campaigns.recipientsByCampaign.get(campaign.campaignId) || [];
+        detail.innerHTML = `<td colspan="9">${renderCampaignRecipientTable(recipients)}</td>`;
+        body.append(detail);
+      }
+    }
+  }
+
+  function renderCampaignRecipientTable(recipients) {
+    if (!recipients.length) {
+      return `<div class="subtle" style="padding:14px 16px">Loading recipient details…</div>`;
+    }
+    const rows = recipients.map((recipient) => `
+      <tr>
+        <td>${escapeHtml(recipient.displayName || recipient.profileId || recipient.contactId || "—")}</td>
+        <td>${escapeHtml(recipient.profileId || "—")}</td>
+        <td><span class="campaign-status-pill is-${escapeHtml(String(recipient.status || "").replace(/[^\w-]+/g, "_"))}">${escapeHtml(campaignStatusLabel(recipient.status))}</span></td>
+        <td>${escapeHtml(recipient.error || recipient.messageText || "—")}</td>
+      </tr>`).join("");
+    return `<table class="campaign-recipient-table"><thead><tr><th>Recipient</th><th>ID</th><th>Status</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  async function toggleCampaignDetail(campaignId) {
+    if (!campaignId) return;
+    if (state.campaigns.expandedId === campaignId) {
+      state.campaigns.expandedId = "";
+      renderCampaignHistory();
+      return;
+    }
+    state.campaigns.expandedId = campaignId;
+    renderCampaignHistory();
+    await loadCampaignDetail(campaignId);
+  }
+
+  async function loadCampaignDetail(campaignId) {
+    try {
+      const data = await state.api.getCampaign(campaignId);
+      if (data?.item) upsertCampaignItem(data.item);
+      state.campaigns.recipientsByCampaign.set(campaignId, asItems(data?.recipients));
+      if (state.campaigns.expandedId === campaignId) renderCampaignHistory();
+    } catch (error) {
+      showToast("Campaign details unavailable", error.message, true);
+    }
+  }
+
+  function selectedCampaignChannel() {
+    return state.channels.find((channel) => channel.channelId === $("campaignChannel")?.value) || null;
+  }
+
+  function isWhatsAppCampaignChannel(channel = selectedCampaignChannel()) {
+    return channel?.connectorType === "whatsapp_cloud" || channel?.connectorType === "whatsapp";
+  }
+
+  function renderCampaignCreateForm() {
+    const select = $("campaignChannel");
+    if (select) {
+      const current = select.value;
+      select.replaceChildren(new Option("Select a channel…", ""));
+      state.channels
+        .slice()
+        .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }))
+        .forEach((channel) => select.append(new Option(channel.name || channel.channelId, channel.channelId)));
+      if ([...select.options].some((option) => option.value === current)) select.value = current;
+    }
+    const audience = state.campaigns.audienceSource === "upload" ? "upload" : "contacts";
+    document.querySelectorAll('input[name="campaignAudience"]').forEach((input) => {
+      input.checked = input.value === audience;
+    });
+    $("campaignContactsAudience").hidden = audience !== "contacts";
+    $("campaignUploadAudience").hidden = audience !== "upload";
+    const uploadMode = state.campaigns.uploadMode === "url" ? "url" : "file";
+    document.querySelectorAll('input[name="campaignUploadMode"]').forEach((input) => {
+      input.checked = input.value === uploadMode;
+    });
+    $("campaignUploadFileLabel").hidden = uploadMode !== "file";
+    $("campaignUploadUrlLabel").hidden = uploadMode !== "url";
+    $("campaignLoadUploadUrl").hidden = uploadMode !== "url";
+    renderCampaignContactPicker();
+    renderCampaignSelectedContacts();
+    renderCampaignFieldMapping();
+    renderCampaignUploadPreview();
+    renderCampaignMessageComposer();
+  }
+
+  function renderCampaignContactPicker() {
+    const host = $("campaignContactList");
+    if (!host) return;
+    const needle = String(state.campaigns.contactFilter || "").trim().toLocaleLowerCase();
+    const contacts = (state.contacts || []).filter((contact) => {
+      if (!needle) return true;
+      const haystack = `${contact.displayName || ""} ${contact.company || ""} ${(contact.tags || []).join(" ")}`.toLocaleLowerCase();
+      return haystack.includes(needle);
+    });
+    state.campaigns.contactCandidates = contacts;
+    host.replaceChildren();
+    if (!contacts.length) {
+      host.innerHTML = `<div class="subtle" style="padding:12px">No contacts match this filter.</div>`;
+      return;
+    }
+    for (const contact of contacts.slice(0, 200)) {
+      const row = document.createElement("label");
+      row.className = "campaign-contact-item";
+      const checked = state.campaigns.selectedContactIds.has(contact.contactId);
+      row.innerHTML = `<input type="checkbox" data-campaign-contact-id="${escapeHtml(contact.contactId)}" ${checked ? "checked" : ""}>
+        <span><strong>${escapeHtml(contact.displayName || "Contact")}</strong><span>${escapeHtml(contact.company || contactPlatformSummary(contact))}</span></span>`;
+      host.append(row);
+    }
+    const selectAll = $("campaignContactSelectAll");
+    if (selectAll) {
+      const visibleIds = contacts.map((contact) => contact.contactId);
+      selectAll.checked = visibleIds.length > 0 && visibleIds.every((id) => state.campaigns.selectedContactIds.has(id));
+      selectAll.indeterminate = !selectAll.checked && visibleIds.some((id) => state.campaigns.selectedContactIds.has(id));
+    }
+  }
+
+  function contactPlatformSummary(contact) {
+    const ids = contactPlatformIds(contact);
+    return Object.entries(ids).filter(([, value]) => value).map(([platform, value]) => `${capitalize(platform)} ${value}`).join(" · ") || "No messaging ID";
+  }
+
+  function renderCampaignSelectedContacts() {
+    const host = $("campaignSelectedContacts");
+    if (!host) return;
+    host.replaceChildren();
+    const ids = [...state.campaigns.audienceContactIds];
+    if (!ids.length) {
+      host.innerHTML = `<div class="subtle" style="padding:12px">No contacts added to this campaign yet.</div>`;
+      return;
+    }
+    for (const contactId of ids) {
+      const contact = state.contacts.find((item) => item.contactId === contactId) || { contactId, displayName: contactId };
+      const row = document.createElement("div");
+      row.className = "campaign-selected-item";
+      row.innerHTML = `<span></span><span><strong>${escapeHtml(contact.displayName || contactId)}</strong><span>${escapeHtml(contact.company || contactId)}</span></span>
+        <button class="secondary-button compact-button" type="button" data-action="campaign-remove-contact" data-contact-id="${escapeHtml(contactId)}">Remove</button>`;
+      host.append(row);
+    }
+  }
+
+  function renderCampaignFieldMapping() {
+    const host = $("campaignFieldMapping");
+    if (!host) return;
+    const headers = state.campaigns.uploadHeaders || [];
+    if (!headers.length) {
+      host.hidden = true;
+      host.replaceChildren();
+      return;
+    }
+    host.hidden = false;
+    host.replaceChildren();
+    const title = document.createElement("p");
+    title.className = "import-chat-preview-title";
+    title.textContent = "Map CSV fields to contact fields";
+    host.append(title);
+    for (const target of CAMPAIGN_CONTACT_TARGETS) {
+      const row = document.createElement("div");
+      row.className = "campaign-mapping-row";
+      const options = [`<option value="">${target.required ? "Select column…" : "Don’t import"}</option>`]
+        .concat(headers.map((header) => `<option value="${escapeHtml(header)}" ${state.campaigns.fieldMapping[target.key] === header ? "selected" : ""}>${escapeHtml(header)}</option>`))
+        .join("");
+      row.innerHTML = `<div><strong>${escapeHtml(target.label)}</strong><span class="subtle">${target.required ? "Required for sending" : "Optional"}</span></div>
+        <select class="text-field" data-campaign-field="${escapeHtml(target.key)}">${options}</select>`;
+      host.append(row);
+    }
+  }
+
+  function renderCampaignUploadPreview() {
+    const host = $("campaignUploadPreview");
+    if (!host) return;
+    const rows = state.campaigns.uploadRows || [];
+    if (!rows.length) {
+      host.hidden = true;
+      host.replaceChildren();
+      return;
+    }
+    host.hidden = false;
+    host.replaceChildren();
+    const summary = document.createElement("div");
+    summary.className = "subtle";
+    summary.style.padding = "10px 12px";
+    summary.textContent = `${rows.length} rows ready. Showing the first ${Math.min(rows.length, 25)}.`;
+    host.append(summary);
+    rows.slice(0, 25).forEach((row, index) => {
+      const item = document.createElement("div");
+      item.className = "campaign-upload-row";
+      const profileHeader = state.campaigns.fieldMapping.profileId;
+      const nameHeader = state.campaigns.fieldMapping.displayName;
+      item.innerHTML = `<span></span><span><strong>${escapeHtml(String(row[nameHeader] || row[profileHeader] || `Row ${index + 1}`))}</strong><span>${escapeHtml(String(row[profileHeader] || Object.values(row)[0] || ""))}</span></span>`;
+      host.append(item);
+    });
+  }
+
+  function renderCampaignMessageComposer() {
+    const channel = selectedCampaignChannel();
+    const whatsapp = isWhatsAppCampaignChannel(channel);
+    $("campaignWhatsAppComposer").hidden = !whatsapp;
+    $("campaignTextComposer").hidden = whatsapp || !channel;
+    if (whatsapp) {
+      loadCampaignTemplates().catch(() => {});
+      renderCampaignTemplateVariables();
+    } else if (channel) {
+      renderCampaignTextVariables();
+    }
+  }
+
+  async function loadCampaignTemplates() {
+    const status = $("campaignTemplateStatus");
+    const channel = selectedCampaignChannel();
+    if (!channel || !isWhatsAppCampaignChannel(channel)) return;
+    if (status) status.textContent = "Loading approved templates…";
+    try {
+      if (!state.whatsappTemplatesLoaded) await loadWhatsAppTemplateLibrary();
+      state.campaigns.templates = (state.whatsappTemplates || [])
+        .filter((template) => !template.channelId || template.channelId === channel.channelId);
+      renderCampaignTemplateOptions();
+      if (status) {
+        status.textContent = state.campaigns.templates.length
+          ? `${state.campaigns.templates.length} templates available`
+          : "No approved templates found for this channel.";
+      }
+    } catch (error) {
+      if (status) status.textContent = error.message || "Could not load templates.";
+    }
+  }
+
+  function renderCampaignTemplateOptions() {
+    const menu = $("campaignTemplateOptions");
+    const search = $("campaignTemplateSearch");
+    if (!menu || !search) return;
+    const needle = String(search.value || "").trim().toLocaleLowerCase();
+    menu.replaceChildren();
+    const templates = state.campaigns.templates.filter((template) => {
+      if (!needle) return true;
+      return `${template.name || ""} ${template.language?.code || ""}`.toLocaleLowerCase().includes(needle);
+    });
+    templates.forEach((template) => {
+      const key = `${template.name}:${template.language?.code || template.language || ""}`;
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "searchable-combobox-option";
+      option.role = "option";
+      option.dataset.templateKey = key;
+      option.textContent = `${template.name} (${template.language?.code || template.language || "en"})`;
+      option.addEventListener("click", () => {
+        state.campaigns.templateKey = key;
+        $("campaignTemplateSelect").value = key;
+        search.value = option.textContent;
+        menu.hidden = true;
+        search.setAttribute("aria-expanded", "false");
+        renderCampaignTemplateVariables();
+      });
+      menu.append(option);
+    });
+  }
+
+  function selectedCampaignTemplate() {
+    const key = state.campaigns.templateKey || $("campaignTemplateSelect")?.value || "";
+    return state.campaigns.templates.find((template) => `${template.name}:${template.language?.code || template.language || ""}` === key) || null;
+  }
+
+  function campaignVariableSourceOptions({ includeFields = true } = {}) {
+    const options = [
+      { value: "contact.displayName", label: "Contact name" },
+      { value: "contact.company", label: "Company" },
+      { value: "contact.tags", label: "Tags" },
+      { value: "contact.profileId", label: "Messaging ID" },
+      { value: "constant", label: "Constant value" },
+    ];
+    if (includeFields && state.campaigns.audienceSource === "upload") {
+      for (const header of state.campaigns.uploadHeaders || []) {
+        options.push({ value: `field.${header}`, label: `CSV: ${header}` });
+      }
+    }
+    return options;
+  }
+
+  function renderCampaignTemplateVariables() {
+    const host = $("campaignVariableFields");
+    if (!host) return;
+    host.replaceChildren();
+    const template = selectedCampaignTemplate();
+    if (!template) return;
+    const descriptors = templateVariableDescriptors(template);
+    const existing = new Map((state.campaigns.variableMappings || []).map((item) => [item.id, item]));
+    const nextMappings = [];
+    for (const descriptor of descriptors) {
+      const current = existing.get(descriptor.id) || {};
+      const row = document.createElement("div");
+      row.className = "campaign-variable-row";
+      row.dataset.variableId = descriptor.id;
+      const sourceOptions = descriptor.kind === "media"
+        ? [
+          { value: "upload", label: "Upload file" },
+          { value: "url", label: "Use URL" },
+        ]
+        : campaignVariableSourceOptions();
+      const source = current.source || (descriptor.kind === "media" ? "upload" : "");
+      row.innerHTML = `
+        <label class="field-label">${escapeHtml(descriptor.label)}
+          <select class="text-field campaign-variable-source">${sourceOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === source ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>
+        </label>
+        <label class="field-label campaign-variable-value-label">${descriptor.kind === "media" && source === "upload" ? "File" : "Value"}
+          ${descriptor.kind === "media" && source === "upload"
+    ? `<input class="text-field campaign-variable-file" type="file" accept="image/*,video/*,.pdf,application/pdf">`
+    : `<input class="text-field campaign-variable-value" type="text" value="${escapeHtml(current.value || "")}" placeholder="${descriptor.kind === "media" ? "https://…" : "Optional constant"}">`}
+        </label>
+        <span class="subtle">${descriptor.kind === "media" ? "Shared across every recipient" : "Mapped per recipient"}</span>`;
+      host.append(row);
+      nextMappings.push({
+        id: descriptor.id,
+        componentType: descriptor.componentType,
+        componentIndex: descriptor.componentIndex,
+        parameterIndex: descriptor.parameterIndex,
+        parameterName: descriptor.parameterName || "",
+        buttonIndex: descriptor.buttonIndex || 0,
+        subType: descriptor.subType || "",
+        kind: descriptor.kind,
+        mediaType: descriptor.mediaType || "",
+        source,
+        value: current.value || "",
+      });
+      row.querySelector(".campaign-variable-source")?.addEventListener("change", () => {
+        syncCampaignVariableMappingsFromDom();
+        renderCampaignTemplateVariables();
+      });
+    }
+    state.campaigns.variableMappings = nextMappings;
+  }
+
+  function syncCampaignVariableMappingsFromDom() {
+    const host = $("campaignVariableFields");
+    if (!host) return;
+    state.campaigns.variableMappings = [...host.querySelectorAll("[data-variable-id]")].map((row) => {
+      const id = row.dataset.variableId;
+      const previous = state.campaigns.variableMappings.find((item) => item.id === id) || {};
+      const source = row.querySelector(".campaign-variable-source")?.value || previous.source || "";
+      const value = row.querySelector(".campaign-variable-value")?.value?.trim() || previous.value || "";
+      return { ...previous, id, source, value };
+    });
+  }
+
+  function renderCampaignTextVariables() {
+    const host = $("campaignTextVariableFields");
+    const text = $("campaignMessageText")?.value || "";
+    if (!host) return;
+    const keys = templatePlaceholders(text);
+    const existing = new Map((state.campaigns.textVariables || []).map((item) => [item.key, item]));
+    host.replaceChildren();
+    const next = [];
+    for (const key of keys) {
+      const current = existing.get(key) || { key, source: "", value: "" };
+      const row = document.createElement("div");
+      row.className = "campaign-variable-row";
+      row.dataset.textVariable = key;
+      const options = campaignVariableSourceOptions();
+      row.innerHTML = `
+        <label class="field-label">{{${escapeHtml(key)}}}
+          <select class="text-field campaign-text-source">${options.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === current.source ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>
+        </label>
+        <label class="field-label">Constant / override
+          <input class="text-field campaign-text-value" type="text" value="${escapeHtml(current.value || "")}" placeholder="Used when source is constant">
+        </label>
+        <span class="subtle">Mapped per recipient</span>`;
+      host.append(row);
+      next.push(current);
+    }
+    state.campaigns.textVariables = next;
+  }
+
+  function parseCampaignCsv(text) {
+    const rows = [];
+    let current = "";
+    let row = [];
+    let inQuotes = false;
+    const pushCell = () => { row.push(current); current = ""; };
+    const pushRow = () => {
+      if (row.some((cell) => String(cell || "").trim())) rows.push(row);
+      row = [];
+    };
+    const input = String(text || "").replace(/^\uFEFF/, "");
+    for (let index = 0; index < input.length; index += 1) {
+      const char = input[index];
+      const next = input[index + 1];
+      if (inQuotes) {
+        if (char === '"' && next === '"') { current += '"'; index += 1; }
+        else if (char === '"') inQuotes = false;
+        else current += char;
+        continue;
+      }
+      if (char === '"') inQuotes = true;
+      else if (char === ",") pushCell();
+      else if (char === "\n") { pushCell(); pushRow(); }
+      else if (char === "\r") continue;
+      else current += char;
+    }
+    pushCell();
+    pushRow();
+    if (!rows.length) return { headers: [], records: [] };
+    const headers = rows[0].map((header, index) => String(header || `Column ${index + 1}`).trim() || `Column ${index + 1}`);
+    const records = rows.slice(1).map((cells) => {
+      const record = {};
+      headers.forEach((header, index) => { record[header] = String(cells[index] ?? "").trim(); });
+      return record;
+    }).filter((record) => Object.values(record).some(Boolean));
+    return { headers, records };
+  }
+
+  async function applyCampaignCsvText(text, fileName = "contacts.csv") {
+    const parsed = parseCampaignCsv(text);
+    if (!parsed.headers.length) throw new Error("The CSV file has no header row.");
+    state.campaigns.uploadHeaders = parsed.headers;
+    state.campaigns.uploadRows = parsed.records.slice(0, 500);
+    const lower = Object.fromEntries(parsed.headers.map((header) => [header.toLocaleLowerCase(), header]));
+    state.campaigns.fieldMapping = {
+      displayName: lower.name || lower.display_name || lower.fullname || "",
+      profileId: lower.phone || lower.whatsapp || lower.mobile || lower.profile_id || lower.id || "",
+      company: lower.company || "",
+      tags: lower.tags || lower.tag || "",
+    };
+    renderCampaignFieldMapping();
+    renderCampaignUploadPreview();
+    if (isWhatsAppCampaignChannel()) renderCampaignTemplateVariables();
+    else renderCampaignTextVariables();
+    showToast("Contacts loaded", `${state.campaigns.uploadRows.length} rows from ${fileName}.`);
+  }
+
+  async function submitCampaign(event) {
+    event.preventDefault();
+    if (state.campaigns.submitting) return;
+    const name = $("campaignName")?.value?.trim();
+    const channel = selectedCampaignChannel();
+    if (!name) { showToast("Name required", "Enter a campaign name.", true); return; }
+    if (!channel) { showToast("Channel required", "Select a channel for this campaign.", true); return; }
+
+    const audienceSource = state.campaigns.audienceSource === "upload" ? "upload" : "contacts";
+    let recipients = [];
+    if (audienceSource === "contacts") {
+      recipients = [...state.campaigns.audienceContactIds].map((contactId) => ({ contactId }));
+      if (!recipients.length) { showToast("Add contacts", "Select contacts and add them to the campaign list.", true); return; }
+    } else {
+      if (!state.campaigns.uploadRows.length) { showToast("Upload contacts", "Upload a CSV or load a CSV URL first.", true); return; }
+      if (!state.campaigns.fieldMapping.profileId) {
+        showToast("Map messaging ID", "Map a CSV column to Messaging ID / Phone.", true);
+        return;
+      }
+      recipients = state.campaigns.uploadRows.map((row) => ({ row }));
+    }
+
+    const payload = {
+      name,
+      channelId: channel.channelId,
+      audienceSource,
+      recipients,
+      fieldMapping: audienceSource === "upload" ? state.campaigns.fieldMapping : {},
+    };
+
+    const submit = $("campaignSubmit");
+    state.campaigns.submitting = true;
+    if (submit) { submit.disabled = true; submit.textContent = "Sending…"; }
+    try {
+      if (isWhatsAppCampaignChannel(channel)) {
+        const template = selectedCampaignTemplate();
+        if (!template) throw new Error("Choose a WhatsApp template.");
+        syncCampaignVariableMappingsFromDom();
+        const variableMappings = [];
+        let mediaPreview = null;
+        for (const mapping of state.campaigns.variableMappings) {
+          const row = $("campaignVariableFields")?.querySelector(`[data-variable-id="${CSS.escape(mapping.id)}"]`);
+          const source = row?.querySelector(".campaign-variable-source")?.value || mapping.source || "";
+          if (mapping.kind === "media") {
+            if (source === "upload") {
+              const file = row?.querySelector(".campaign-variable-file")?.files?.[0];
+              if (!file) throw new Error(`Upload a file for ${mapping.id}.`);
+              const form = new FormData();
+              form.append("file", file, file.name);
+              form.append("type", mapping.mediaType || "image");
+              form.append("channelId", channel.channelId);
+              const uploaded = await state.api.uploadCampaignTemplateMedia(form);
+              variableMappings.push({ ...mapping, source: "upload", value: uploaded.mediaId });
+              mediaPreview = {
+                filename: uploaded.filename || file.name,
+                mimeType: uploaded.mimeType || file.type || "",
+                size: Number(uploaded.size || file.size || 0),
+              };
+            } else {
+              const value = row?.querySelector(".campaign-variable-value")?.value?.trim() || mapping.value || "";
+              if (!value) throw new Error("Enter a media URL.");
+              variableMappings.push({ ...mapping, source: "url", value });
+            }
+          } else {
+            const value = row?.querySelector(".campaign-variable-value")?.value?.trim() || mapping.value || "";
+            if (!source) throw new Error("Map every template variable.");
+            if ((source === "constant" || source === "manual") && !value) throw new Error("Enter a constant value for every manual variable.");
+            variableMappings.push({ ...mapping, source, value });
+          }
+        }
+        payload.messageType = "template";
+        payload.template = {
+          name: template.name,
+          language: { code: template.language?.code || template.language || "en" },
+        };
+        payload.variableMappings = variableMappings;
+        payload.previewText = template.name;
+        if (mediaPreview) payload.mediaPreview = mediaPreview;
+      } else {
+        const text = $("campaignMessageText")?.value?.trim() || "";
+        if (!text) throw new Error("Compose a message.");
+        const textVariables = [...($("campaignTextVariableFields")?.querySelectorAll("[data-text-variable]") || [])].map((row) => ({
+          key: row.dataset.textVariable,
+          source: row.querySelector(".campaign-text-source")?.value || "",
+          value: row.querySelector(".campaign-text-value")?.value?.trim() || "",
+        }));
+        for (const item of textVariables) {
+          if (!item.source) throw new Error(`Map the {{${item.key}}} variable.`);
+          if (item.source === "constant" && !item.value) throw new Error(`Enter a constant for {{${item.key}}}.`);
+        }
+        payload.messageType = "text";
+        payload.text = text;
+        payload.textVariables = textVariables;
+      }
+
+      const result = await state.api.createCampaign(payload);
+      if (result?.item) upsertCampaignItem(result.item);
+      showToast("Campaign queued", `${name} is sending. Delivery updates appear in history and the inbox.`);
+      state.campaigns.audienceContactIds = new Set();
+      state.campaigns.selectedContactIds = new Set();
+      state.campaigns.uploadRows = [];
+      state.campaigns.uploadHeaders = [];
+      showCampaignMode("history");
+      await loadCampaigns();
+    } catch (error) {
+      showToast("Campaign not sent", error.message, true);
+    } finally {
+      state.campaigns.submitting = false;
+      if (submit) { submit.disabled = false; submit.textContent = "Send campaign"; }
+    }
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
   }
 
   const IMPORT_CONTACT_TARGETS = [
@@ -9438,6 +10214,43 @@
           downloadImportChatIssues();
           return;
         }
+        if (actionButton.dataset.action === "campaign-show-history") {
+          showCampaignMode("history");
+          loadCampaigns().catch(() => {});
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-show-create") {
+          showCampaignMode("create");
+          return;
+        }
+        if (actionButton.dataset.action === "refresh-campaigns") {
+          loadCampaigns().catch(() => {});
+          return;
+        }
+        if (actionButton.dataset.action === "toggle-campaign-detail") {
+          toggleCampaignDetail(actionButton.dataset.campaignId);
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-add-selected-contacts") {
+          for (const contactId of state.campaigns.selectedContactIds) state.campaigns.audienceContactIds.add(contactId);
+          renderCampaignSelectedContacts();
+          showToast("Contacts added", `${state.campaigns.selectedContactIds.size || 0} selected contact(s) added to the campaign.`);
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-remove-contact") {
+          state.campaigns.audienceContactIds.delete(actionButton.dataset.contactId);
+          renderCampaignSelectedContacts();
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-load-upload-url") {
+          const url = $("campaignUploadUrl")?.value?.trim() || "";
+          if (!url) { showToast("URL required", "Enter a CSV URL.", true); return; }
+          fetch(url).then(async (response) => {
+            if (!response.ok) throw new Error(`Could not download CSV (${response.status}).`);
+            await applyCampaignCsvText(await response.text(), url);
+          }).catch((error) => showToast("CSV URL failed", error.message, true));
+          return;
+        }
         if (actionButton.dataset.action === "clear-template-filter") {
           state.whatsappTemplateFilters[actionButton.dataset.filterType]?.clear();
           renderWhatsAppTemplateLibrary();
@@ -9796,6 +10609,72 @@
       event.target.setCustomValidity("");
     });
     $("importChatForm").addEventListener("submit", runImportChat);
+    $("campaignCreateForm")?.addEventListener("submit", submitCampaign);
+    $("campaignChannel")?.addEventListener("change", () => {
+      renderCampaignMessageComposer();
+    });
+    document.querySelectorAll('input[name="campaignAudience"]').forEach((input) => {
+      input.addEventListener("change", () => {
+        if (!input.checked) return;
+        state.campaigns.audienceSource = input.value === "upload" ? "upload" : "contacts";
+        renderCampaignCreateForm();
+      });
+    });
+    document.querySelectorAll('input[name="campaignUploadMode"]').forEach((input) => {
+      input.addEventListener("change", () => {
+        if (!input.checked) return;
+        state.campaigns.uploadMode = input.value === "url" ? "url" : "file";
+        renderCampaignCreateForm();
+      });
+    });
+    $("campaignContactSearch")?.addEventListener("input", (event) => {
+      state.campaigns.contactFilter = event.target.value || "";
+      renderCampaignContactPicker();
+    });
+    $("campaignContactSelectAll")?.addEventListener("change", (event) => {
+      const ids = (state.campaigns.contactCandidates || []).map((contact) => contact.contactId);
+      if (event.target.checked) ids.forEach((id) => state.campaigns.selectedContactIds.add(id));
+      else ids.forEach((id) => state.campaigns.selectedContactIds.delete(id));
+      renderCampaignContactPicker();
+    });
+    $("campaignContactList")?.addEventListener("change", (event) => {
+      const input = event.target.closest("[data-campaign-contact-id]");
+      if (!input) return;
+      if (input.checked) state.campaigns.selectedContactIds.add(input.dataset.campaignContactId);
+      else state.campaigns.selectedContactIds.delete(input.dataset.campaignContactId);
+      renderCampaignContactPicker();
+    });
+    $("campaignUploadFile")?.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        await applyCampaignCsvText(await file.text(), file.name);
+      } catch (error) {
+        showToast("CSV upload failed", error.message, true);
+      }
+    });
+    $("campaignFieldMapping")?.addEventListener("change", (event) => {
+      const select = event.target.closest("[data-campaign-field]");
+      if (!select) return;
+      state.campaigns.fieldMapping[select.dataset.campaignField] = select.value || "";
+      renderCampaignUploadPreview();
+      if (isWhatsAppCampaignChannel()) renderCampaignTemplateVariables();
+      else renderCampaignTextVariables();
+    });
+    $("campaignTemplateSearch")?.addEventListener("focus", () => {
+      const menu = $("campaignTemplateOptions");
+      if (!menu) return;
+      renderCampaignTemplateOptions();
+      menu.hidden = false;
+      $("campaignTemplateSearch").setAttribute("aria-expanded", "true");
+    });
+    $("campaignTemplateSearch")?.addEventListener("input", () => {
+      renderCampaignTemplateOptions();
+      $("campaignTemplateOptions").hidden = false;
+    });
+    $("campaignMessageText")?.addEventListener("input", () => {
+      renderCampaignTextVariables();
+    });
     $("importChatCancel").addEventListener("click", cancelImportChat);
     $("importChatSource").addEventListener("change", (event) => {
       state.importChat.source = event.target.value || "interakt";
