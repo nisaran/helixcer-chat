@@ -1504,8 +1504,12 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
 }
 .campaign-audience-actions { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.campaign-contact-list, .campaign-upload-preview {
-  max-height: none; overflow: visible;
+.campaign-contact-list {
+  max-height: 420px; overflow: auto;
+  border: 1px solid #e6e9e6; border-radius: 12px; background: #fff;
+}
+.campaign-upload-preview {
+  max-height: 320px; overflow: auto;
   border: 1px solid #e6e9e6; border-radius: 12px; background: #fff;
 }
 .campaign-contact-item, .campaign-selected-item, .campaign-upload-row {

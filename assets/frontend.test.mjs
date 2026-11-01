@@ -947,8 +947,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(html, /assets\/styles\.css\?v=20261101-campaign-create-ux/);
   assert.match(html, /class="campaign-panel campaign-create-panel"/);
   assert.match(styles, /\.campaign-panel\s*\{[\s\S]*background:\s*transparent/);
-  assert.match(styles, /\.campaign-contact-list,\s*\.campaign-upload-preview\s*\{[\s\S]*max-height:\s*none/);
-  assert.match(styles, /\.campaign-contact-list,\s*\.campaign-upload-preview\s*\{[\s\S]*overflow:\s*visible/);
+  assert.match(styles, /\.campaign-contact-list\s*\{[\s\S]*max-height:\s*420px/);
+  assert.match(styles, /\.campaign-contact-list\s*\{[\s\S]*overflow:\s*auto/);
   assert.match(styles, /\.campaign-fieldset\s*\{[\s\S]*border:\s*1px solid/);
   assert.match(styles, /\.campaign-channel-picker/);
   assert.match(styles, /\.campaign-multi-filter/);

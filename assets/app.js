@@ -8444,7 +8444,11 @@
     if (type === "telegram" || type === "telegram_bot") {
       const username = String(setup.verifiedUsername || config.verifiedUsername || "").trim();
       if (username) return username.startsWith("@") ? username : `@${username}`;
-      return String(setup.verifiedProviderId || setup.verifiedName || config.botId || "").trim();
+      const botId = String(setup.verifiedProviderId || config.botId || "").trim();
+      if (botId) return botId;
+      const name = String(setup.verifiedName || "").trim();
+      if (name && !/\s/.test(name)) return name.startsWith("@") ? name : `@${name}`;
+      return name;
     }
     if (type === "instagram" || type === "instagram_messaging") {
       return String(setup.verifiedUsername || setup.verifiedName || config.username || config.instagramAccountId || "").trim();
@@ -8469,12 +8473,10 @@
     return wrap;
   }
 
-  function setCampaignChannel(channelId, { silent = false } = {}) {
+  function updateCampaignChannelTrigger(channelId) {
     const input = $("campaignChannel");
-    const trigger = $("campaignChannelTrigger");
     const empty = $("campaignChannelTriggerEmpty");
     const valueHost = $("campaignChannelTriggerValue");
-    const menu = $("campaignChannelMenu");
     const channel = state.channels.find((item) => item.channelId === channelId) || null;
     if (input) input.value = channel?.channelId || "";
     if (empty) empty.hidden = Boolean(channel);
@@ -8483,9 +8485,20 @@
       valueHost.replaceChildren();
       if (channel) valueHost.append(campaignChannelOptionContent(channel));
     }
-    if (trigger) trigger.setAttribute("aria-expanded", "false");
-    if (menu) menu.hidden = true;
+    return channel;
+  }
+
+  function closeCampaignChannelMenu() {
     state.campaigns.channelMenuOpen = false;
+    const menu = $("campaignChannelMenu");
+    const trigger = $("campaignChannelTrigger");
+    if (menu) menu.hidden = true;
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+  }
+
+  function setCampaignChannel(channelId, { silent = false } = {}) {
+    updateCampaignChannelTrigger(channelId);
+    closeCampaignChannelMenu();
     if (!silent) renderCampaignMessageComposer();
   }
 
@@ -8494,6 +8507,7 @@
     const trigger = $("campaignChannelTrigger");
     if (!menu || !trigger) return;
     const current = $("campaignChannel")?.value || "";
+    const keepOpen = Boolean(state.campaigns.channelMenuOpen);
     menu.replaceChildren();
     const channels = state.channels
       .slice()
@@ -8509,13 +8523,18 @@
         option.dataset.channelId = channel.channelId;
         option.setAttribute("aria-selected", String(channel.channelId === current));
         option.append(campaignChannelOptionContent(channel));
-        option.addEventListener("click", () => setCampaignChannel(channel.channelId));
+        option.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setCampaignChannel(channel.channelId);
+        });
         menu.append(option);
       });
     }
-    setCampaignChannel(current, { silent: true });
-    menu.hidden = !state.campaigns.channelMenuOpen;
-    trigger.setAttribute("aria-expanded", String(Boolean(state.campaigns.channelMenuOpen)));
+    updateCampaignChannelTrigger(current);
+    state.campaigns.channelMenuOpen = keepOpen;
+    menu.hidden = !keepOpen;
+    trigger.setAttribute("aria-expanded", String(keepOpen));
   }
 
   function contactBoundChannelIds(contact = {}) {
@@ -11720,13 +11739,8 @@
       });
     });
     document.addEventListener("click", (event) => {
-      if (!event.target.closest("#campaignChannelPicker")) {
-        if (state.campaigns.channelMenuOpen) {
-          state.campaigns.channelMenuOpen = false;
-          const menu = $("campaignChannelMenu");
-          if (menu) menu.hidden = true;
-          $("campaignChannelTrigger")?.setAttribute("aria-expanded", "false");
-        }
+      if (!event.target.closest("#campaignChannelPicker") && state.campaigns.channelMenuOpen) {
+        closeCampaignChannelMenu();
       }
       if (!event.target.closest("[data-campaign-filter]")) {
         document.querySelectorAll("[data-campaign-filter]").forEach((host) => {
