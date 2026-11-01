@@ -2491,29 +2491,47 @@
     renderConversationFilterControls();
   }
 
+  const conversationFilterOptions = ["mine", "unassigned", "open", "unread", "closed"];
   const conversationFilterLabels = {
     mine: "Mine", unassigned: "Unassigned", open: "Open", unread: "Unread", closed: "Closed",
   };
 
+  function isAllConversationFilters(selected = state.filters) {
+    return selected.size === 0 || conversationFilterOptions.every((filter) => selected.has(filter));
+  }
+
+  function selectAllConversationFilters() {
+    state.filters = new Set(conversationFilterOptions);
+  }
+
   function renderConversationFilterControls() {
     const selected = state.filters;
+    const showingAll = isAllConversationFilters(selected);
     const activeLabels = [...selected].map((filter) => conversationFilterLabels[filter]).filter(Boolean);
-    $("conversationFilterSummary").textContent = activeLabels.length ? activeLabels.join(" · ") : "All conversations";
-    $("conversationFilterCount").textContent = String(selected.size);
-    $("conversationFilterCount").hidden = selected.size === 0;
+    $("conversationFilterSummary").textContent = showingAll ? "All conversations" : activeLabels.join(" · ");
+    $("conversationFilterCount").textContent = String(showingAll ? conversationFilterOptions.length : selected.size);
+    $("conversationFilterCount").hidden = showingAll;
     document.querySelectorAll("[data-conversation-filter-option]").forEach((input) => {
-      input.checked = input.value === "all" ? selected.size === 0 : selected.has(input.value);
+      input.checked = input.value === "all" ? showingAll : showingAll || selected.has(input.value);
     });
     document.querySelectorAll("#conversationFilters [data-filter]").forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.filter === "all" ? selected.size === 0 : selected.has(button.dataset.filter));
+      button.classList.toggle(
+        "is-active",
+        button.dataset.filter === "all" ? showingAll : showingAll || selected.has(button.dataset.filter),
+      );
       button.setAttribute("aria-pressed", String(button.classList.contains("is-active")));
     });
   }
 
   function toggleConversationFilter(filter) {
-    if (filter === "all") state.filters.clear();
-    else if (state.filters.has(filter)) state.filters.delete(filter);
-    else state.filters.add(filter);
+    if (filter === "all") selectAllConversationFilters();
+    else if (isAllConversationFilters()) {
+      state.filters = new Set(conversationFilterOptions.filter((item) => item !== filter));
+    } else if (state.filters.has(filter)) state.filters.delete(filter);
+    else {
+      state.filters.add(filter);
+      if (isAllConversationFilters()) selectAllConversationFilters();
+    }
     renderConversationFilterControls();
     renderConversationList();
   }
@@ -2534,8 +2552,9 @@
 
   function filteredConversations() {
     const selected = state.filters;
-    const statusFilters = ["open", "closed"].filter((filter) => selected.has(filter));
-    const assignmentFilters = ["mine", "unassigned"].filter((filter) => selected.has(filter));
+    const showingAll = isAllConversationFilters(selected);
+    const statusFilters = showingAll ? [] : ["open", "closed"].filter((filter) => selected.has(filter));
+    const assignmentFilters = showingAll ? [] : ["mine", "unassigned"].filter((filter) => selected.has(filter));
     // Text search is server-side (`refreshInboxCatalogue` / load-more with q).
     return unifiedConversations()
       .filter((item) => {
@@ -2543,7 +2562,7 @@
         if (assignmentFilters.length && !assignmentFilters.some((filter) => filter === "mine"
           ? isAssignedToCurrentUser(item)
           : !item.assignedTo || item.assignedTo === "Unassigned")) return false;
-        if (selected.has("unread") && item.unreadCount <= 0) return false;
+        if (!showingAll && selected.has("unread") && item.unreadCount <= 0) return false;
         return true;
       })
       .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
@@ -9381,7 +9400,7 @@
           return;
         }
         if (actionButton.dataset.action === "clear-conversation-filters") {
-          state.filters.clear();
+          selectAllConversationFilters();
           renderConversationFilterControls();
           renderConversationList();
           closeConversationFilterMenu({ restoreFocus: true });

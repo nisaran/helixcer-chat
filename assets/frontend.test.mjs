@@ -976,9 +976,14 @@ test("conversation filters are multi-selectable with responsive desktop and mobi
   assert.match(html, /id="conversationFilterToggle"[^>]*aria-controls="conversationFilterMenu"/);
   assert.match(html, /data-conversation-filter-option[^>]*value="mine"|value="mine"[^>]*data-conversation-filter-option/);
   assert.match(html, /class="filter-chip is-active"[^>]*data-filter="open"/);
-  assert.match(app, /const statusFilters = \["open", "closed"\]\.filter/);
-  assert.match(app, /const assignmentFilters = \["mine", "unassigned"\]\.filter/);
-  assert.match(app, /selected\.has\("unread"\)/);
+  assert.match(app, /conversationFilterOptions = \["mine", "unassigned", "open", "unread", "closed"\]/);
+  assert.match(app, /function isAllConversationFilters/);
+  assert.match(app, /function selectAllConversationFilters/);
+  assert.match(app, /if \(filter === "all"\) selectAllConversationFilters\(\)/);
+  assert.match(app, /showingAll \|\| selected\.has\(input\.value\)/);
+  assert.match(app, /const statusFilters = showingAll \? \[\] : \["open", "closed"\]\.filter/);
+  assert.match(app, /const assignmentFilters = showingAll \? \[\] : \["mine", "unassigned"\]\.filter/);
+  assert.match(app, /!showingAll && selected\.has\("unread"\)/);
   assert.match(app, /toggleConversationFilter\(button\.dataset\.filter\)/);
   assert.match(styles, /\.conversation-filter-desktop \{/);
   assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.conversation-filter-desktop \{ display: none; \}[\s\S]*?\.filter-row \{ display: flex; \}/);
