@@ -1002,7 +1002,7 @@ test("conversation filters are multi-selectable with responsive desktop and mobi
   assert.match(clearFiltersBody, /renderConversationList\(\)/);
   assert.doesNotMatch(clearFiltersBody, /closeConversationFilterMenu/);
   assert.match(app, /if \(selected\.size === 0\) return \[\]/);
-  assert.match(app, /input\.checked = input\.value === "all" \? showingAll : selected\.has\(input\.value\)/);
+  assert.match(app, /input\.checked = input\.value === "all" \? showingAll : showingAll \|\| selected\.has\(input\.value\)/);
   assert.match(app, /const statusFilters = showingAll \? \[\] : \["open", "closed"\]\.filter/);
   assert.match(app, /const assignmentFilters = showingAll \? \[\] : \["mine", "unassigned"\]\.filter/);
   assert.match(app, /!showingAll && selected\.has\("unread"\)/);
@@ -1032,6 +1032,18 @@ test("conversation URLs deep-link safely without auto-selecting plain inbox", ()
   assert.match(reconcile, /keepUnfetched:\s*true/);
   assert.doesNotMatch(reconcile, /\["pending", "closed"\]\.includes\(selectedConversation\.status\)/);
   assert.match(reconcile, /routedId === activeSelectedId[\s\S]*?openPendingConversation\(\{ refreshIfMissing: true \}\)/);
+});
+
+test("direct chat URLs show only the visited conversation with filters cleared", () => {
+  assert.match(app, /inboxFocusConversationId:\s*null/);
+  assert.match(app, /function enterDeepLinkedConversationList/);
+  assert.match(app, /function clearDeepLinkedConversationList/);
+  const applyRoute = app.slice(app.indexOf("async function applyLocationRoute"), app.indexOf("function setRoute"));
+  assert.match(applyRoute, /enterDeepLinkedConversationList\(target\.conversationId\)/);
+  assert.match(applyRoute, /selectAllConversationFilters|enterDeepLinkedConversationList/);
+  assert.match(app, /if \(state\.inboxFocusConversationId\) \{[\s\S]*?item\.conversationId === state\.inboxFocusConversationId/);
+  assert.match(app, /toggleConversationFilter\(filter\) \{[\s\S]*?clearDeepLinkedConversationList\(\)/);
+  assert.match(app, /conversationSearch[\s\S]*?clearDeepLinkedConversationList\(\)/);
 });
 
 test("Helixcer mark brands the login, sidebar, and favicon", () => {
