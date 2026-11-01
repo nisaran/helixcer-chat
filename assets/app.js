@@ -9411,7 +9411,6 @@
           clearConversationFilters();
           renderConversationFilterControls();
           renderConversationList();
-          closeConversationFilterMenu({ restoreFocus: true });
           return;
         }
         if (actionButton.dataset.action === "load-more-conversations") {
