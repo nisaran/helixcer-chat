@@ -66,7 +66,7 @@ test('campaign counts and final status aggregate recipient delivery', () => {
 });
 
 test('campaigns migration creates campaign tables', async () => {
-  const sql = await readFile(new URL('../migrations/0020_campaigns.sql', import.meta.url), 'utf8');
+  const sql = await readFile(new URL('../migrations/0021_campaigns.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(sql);
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name);

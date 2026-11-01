@@ -7031,7 +7031,7 @@ async function syncCampaignRecipientStatus(env, workspaceId, messageId, status, 
     recipient = await env.DB.prepare(`SELECT recipient_id,campaign_id,status FROM campaign_recipients
       WHERE workspace_id=?1 AND message_id=?2 LIMIT 1`).bind(workspaceId, messageId).first();
   } catch (queryError) {
-    // Campaign tables are added by migration 0020; older test DBs and mid-deploy
+    // Campaign tables are added by migration 0021; older test DBs and mid-deploy
     // workspaces should still deliver message status updates normally.
     if (/no such table:\s*campaign_recipients/i.test(String(queryError?.message || queryError))) return null;
     throw queryError;
