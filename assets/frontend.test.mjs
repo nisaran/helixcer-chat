@@ -386,7 +386,7 @@ test("reconnect reconciliation expires stale histories and marks only an activel
   const realtimeHandler = app.slice(app.indexOf("async function handleRealtimeEvent"), app.indexOf("function isIosDevice"));
   assert.match(loadAll, /mergeConversationSnapshots\(fetchedConversations, realtimeRevisionAtStart\)/);
   assert.match(reconcile, /const realtimeRevisionAtStart = state\.realtimeRevision/);
-  assert.match(reconcile, /mergeConversationSnapshots\(fetchedConversations, realtimeRevisionAtStart,\s*\{[\s\S]*?keepUnfetched/);
+  assert.match(reconcile, /mergeConversationSnapshots\(fetchedConversations, realtimeRevisionAtStart,\s*\{[\s\S]*?keepUnfetched:\s*true/);
   assert.match(realtimeHandler, /markConversationRealtimeMutation\(conversationId\)/);
   assert.match(realtimeHandler, /markConversationRealtimeMutation\(incoming\.conversationId\)/);
   assert.match(reconcile, /for \(const cachedConversationId of state\.messages\.keys\(\)\)/);
@@ -394,7 +394,9 @@ test("reconnect reconciliation expires stale histories and marks only an activel
   assert.match(reconcile, /selectedConversation\.unreadCount > 0 &&[\s\S]*?isConversationActivelyViewed\(activeSelectedId\)/);
   assert.match(reconcile, /if \(shouldMarkRead\) selectedConversation\.unreadCount = 0/);
   assert.match(reconcile, /updateConversation\(activeSelectedId, \{ markRead: true \}\)\.catch/);
-  assert.match(reconcile, /\["pending", "closed"\]\.includes\(selectedConversation\.status\)[\s\S]*?clearSelectedConversation/);
+  // Soft reconcile must not kick deep-linked / Closed-filter chats back to the empty inbox.
+  assert.doesNotMatch(reconcile, /\["pending", "closed"\]\.includes\(selectedConversation\.status\)[\s\S]*?clearSelectedConversation/);
+  assert.match(reconcile, /openPendingConversation\(\{ refreshIfMissing: true \}\)/);
   const helperStart = app.indexOf("function markConversationRealtimeMutation");
   const helperEnd = app.indexOf("function normalizeContact", helperStart);
   const localState = {
@@ -1026,6 +1028,10 @@ test("conversation URLs deep-link safely without auto-selecting plain inbox", ()
   assert.match(app, /markRead: false, updateUrl: false/);
   assert.match(app, /clearSelectedConversation\(\{ updateUrl: false \}\);[\s\S]*?replaceAppHash\("#inbox"\)/);
   assert.match(app, /mobileBack[\s\S]*?clearSelectedConversation\(\)/);
+  const reconcile = app.slice(app.indexOf("async function reconcileWorkspace"), app.indexOf("function renderAll"));
+  assert.match(reconcile, /keepUnfetched:\s*true/);
+  assert.doesNotMatch(reconcile, /\["pending", "closed"\]\.includes\(selectedConversation\.status\)/);
+  assert.match(reconcile, /routedId === activeSelectedId[\s\S]*?openPendingConversation\(\{ refreshIfMissing: true \}\)/);
 });
 
 test("Helixcer mark brands the login, sidebar, and favicon", () => {

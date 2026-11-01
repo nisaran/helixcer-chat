@@ -2402,9 +2402,11 @@
       }
       state.channels = asItems(data.channels).map(normalizeChannel);
       const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
-      // Keep older infinite-scroll pages that bootstrap does not re-fetch.
+      // Soft reconcile only refreshes the first catalogue page. Always keep rows
+      // already loaded (infinite-scroll pages and deep-linked chats) so a focus /
+      // pageshow refresh cannot blank the open conversation while the URL stays.
       state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart, {
-        keepUnfetched: Boolean(state.conversationNextCursor) || state.conversations.length > fetchedConversations.length,
+        keepUnfetched: true,
       });
       if (data.conversationNextCursor !== undefined) {
         applyConversationPageMeta(data.conversationNextCursor || state.conversationNextCursor);
@@ -2436,10 +2438,21 @@
       }
       const selectedConversation = state.conversations.find((item) => item.conversationId === activeSelectedId);
       if (selectionUnchanged && activeSelectedId && !selectedConversation) {
-        clearSelectedConversation({ updateUrl: false });
-      } else if (selectionUnchanged && selectedConversation && ["pending", "closed"].includes(selectedConversation.status)) {
-        clearSelectedConversation({ updateUrl: false });
+        // Deep links and address-bar reloads must not leave a chat URL pointing at
+        // an empty inbox shell. Recover via the route helper, which updates the hash
+        // only when the conversation is truly gone.
+        const routedId = parseAppHash().conversationId;
+        if (routedId === activeSelectedId) {
+          state.pendingConversationId = activeSelectedId;
+          await openPendingConversation({ refreshIfMissing: true });
+        } else {
+          clearSelectedConversation({ updateUrl: false });
+        }
       } else if (selectedConversation) {
+        // Do not auto-dismiss pending/closed chats here. Soft reconcile runs on
+        // focus/pageshow and would kick deep-linked or Closed-filter threads back
+        // to the empty inbox while leaving #inbox/<id> in the URL. Live status
+        // transitions still clear via conversation.updated / the status control.
         const shouldMarkRead = selectedConversation.unreadCount > 0 &&
           isConversationActivelyViewed(activeSelectedId);
         if (shouldMarkRead) selectedConversation.unreadCount = 0;
