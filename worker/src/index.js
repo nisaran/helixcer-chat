@@ -1075,7 +1075,8 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`)
       .bind(externalRequestId, principal.workspaceId, principal.apiKeyId, EXTERNAL_API_OPERATION,
         idempotencyHash, requestHash, messageId, input.clientReference, now, expiresAt),
-    env.DB.prepare(`UPDATE conversations SET status='open',last_message_at=?3,updated_at=?3
+    // Keep open/closed/pending as-is on Developer API sends; only bump activity.
+    env.DB.prepare(`UPDATE conversations SET last_message_at=?3,updated_at=?3
       WHERE conversation_id=?1 AND workspace_id=?2`).bind(identity.conversationId, principal.workspaceId, now)
   ];
   try {
