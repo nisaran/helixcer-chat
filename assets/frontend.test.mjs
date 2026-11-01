@@ -537,12 +537,14 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(renderConversationsBody, /loadMoreConversations|conversationNextCursor|conversation-load-more/);
   assert.match(renderConversationsBody, /conversationsSearching/);
   assert.match(renderConversationsBody, /conversation-load-sentinel/);
+  assert.match(renderConversationsBody, /inboxSelectMode|selectedConversationIds/);
   assert.doesNotMatch(renderConversationsBody, /"Load more"/);
   assert.match(app, /refreshInboxCatalogue/);
   assert.match(app, /listConversations\(\{[\s\S]*?cursor/);
   assert.match(app, /IntersectionObserver/);
   assert.match(app, /queueConversationListFill/);
   assert.match(app, /conversationList"\)\.addEventListener\("scroll"/);
+  assert.match(app, /bulkCloseConversations|bulkDeleteConversations|bulkDeleteContacts/);
   assert.match(app, /CONVERSATION_PAGE_SIZE = 100/);
   const contactsStart = app.indexOf("function renderContacts()");
   const contactsEnd = app.indexOf("function contactPlatformRoutes", contactsStart);
@@ -553,6 +555,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.doesNotMatch(renderContactsBody, /avatarPalettes|element\("span", "avatar"/);
   assert.match(renderContactsBody, /contactPageLabel|Page \$\{state\.contactPage\}/);
   assert.match(renderContactsBody, /contactHasNextPage/);
+  assert.match(renderContactsBody, /contactSelectMode|selectedContactIds/);
   assert.match(app, /loadContactsPage/);
   assert.match(app, /resolveContactTotal/);
   assert.match(app, /refreshContactsCatalogue/);
@@ -560,12 +563,18 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /id="contactPrevPage"/);
   assert.match(html, /id="contactNextPage"/);
   assert.match(html, /id="contactPageLabel"/);
-  assert.match(html, /app\.js\?v=20261031-status-line/);
+  assert.match(html, /id="inboxSelectToggle"|data-action="toggle-inbox-select"/);
+  assert.match(html, /id="contactSelectToggle"|data-action="toggle-contact-select"/);
+  assert.match(html, /data-action="bulk-close-conversations"/);
+  assert.match(html, /data-action="bulk-delete-conversations"/);
+  assert.match(html, /data-action="bulk-delete-contacts"/);
+  assert.match(html, /app\.js\?v=20261031-bulk-select/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
   assert.match(styles, /\.contact-pagination/);
   assert.match(styles, /\.conversation-load-more/);
+  assert.match(styles, /\.select-mode-toggle|\.bulk-action-bar/);
 });
 
 test("conversation routes drive replies, templates, media, and every outbound API request", () => {
@@ -900,8 +909,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261031-status-line/);
-  assert.match(html, /assets\/styles\.css\?v=20261031-status-line/);
+  assert.match(html, /assets\/app\.js\?v=20261031-bulk-select/);
+  assert.match(html, /assets\/styles\.css\?v=20261031-bulk-select/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   // Inbound customer names must not render on the bubble; only outbound sender_name on the route line.
