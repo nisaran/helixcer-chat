@@ -331,6 +331,78 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .panel-toolbar h2, .details-head h2 { margin: 0 0 2px; font-family: var(--font-sans); font-size: 19px; font-weight: 720; letter-spacing: -.35px; }
 .subtle { color: var(--muted); font-size: 12px; }
 
+.inbox-search-row,
+.contact-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 12px;
+}
+.inbox-search-row .search-wrap,
+.contact-search-row .search-wrap { flex: 1; min-width: 0; margin: 0; }
+.contact-search-row { margin: 0; width: min(420px, 100%); }
+.contact-search-row .compact-search { width: auto; flex: 1; }
+.select-mode-toggle {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border-color: #d7dcd9;
+  background: white;
+  color: #53605f;
+}
+.select-mode-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.select-mode-toggle[aria-pressed="true"] {
+  border-color: #c4b3f5;
+  background: #f4efff;
+  color: var(--brand);
+}
+.bulk-action-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  margin: 0 14px 10px;
+  padding: 8px 10px;
+  border: 1px solid #e7ebe8;
+  border-radius: 12px;
+  background: #fafbf9;
+}
+.contact-bulk-bar { margin: 0 16px 10px; }
+.bulk-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+.bulk-select-all input { width: 15px; height: 15px; accent-color: var(--brand); }
+.bulk-action-buttons { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.conversation-item.is-select-mode {
+  grid-template-columns: 22px 42px minmax(0, 1fr) auto;
+  cursor: pointer;
+}
+.conversation-item.is-select-mode.is-checked { background: #f7f4ff; }
+.conversation-select-check {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--brand);
+  align-self: center;
+}
+.contact-select-col { width: 36px; text-align: center; }
+.contact-table tbody tr.is-checked { background: #f7f4ff; }
+.contact-row-check { width: 15px; height: 15px; accent-color: var(--brand); }
 .search-wrap { position: relative; display: flex; align-items: center; margin: 0 14px 12px; }
 .search-wrap svg { position: absolute; left: 12px; width: 17px; height: 17px; color: #84908e; pointer-events: none; }
 .search-wrap input {

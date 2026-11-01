@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261031-scroll-only";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261031-bulk-select";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -25,6 +25,11 @@
     conversationSearchRequestId: 0,
     conversationSearchActive: false,
     conversationObserverPaused: false,
+    inboxSelectMode: false,
+    selectedConversationIds: new Set(),
+    contactSelectMode: false,
+    selectedContactIds: new Set(),
+    bulkActionBusy: false,
     contactPage: 1,
     contactTotal: 0,
     contactPageSize: CONTACT_PAGE_SIZE,
@@ -2599,12 +2604,29 @@
     }
 
     items.forEach((conversation, index) => {
-      const button = element("button", "conversation-item");
-      button.type = "button";
-      button.dataset.conversationId = conversation.conversationId;
-      button.setAttribute("role", "listitem");
-      button.classList.toggle("is-selected", conversation.conversationId === state.selectedConversationId);
-      button.setAttribute("aria-label", `${conversation.subject}, ${conversation.unreadCount} unread messages`);
+      const selected = state.inboxSelectMode
+        ? state.selectedConversationIds.has(conversation.conversationId)
+        : conversation.conversationId === state.selectedConversationId;
+      const row = element(state.inboxSelectMode ? "div" : "button", "conversation-item");
+      if (!state.inboxSelectMode) row.type = "button";
+      else row.classList.add("is-select-mode");
+      row.dataset.conversationId = conversation.conversationId;
+      row.setAttribute("role", "listitem");
+      row.classList.toggle("is-selected", !state.inboxSelectMode && selected);
+      row.classList.toggle("is-checked", state.inboxSelectMode && selected);
+      row.setAttribute("aria-label", state.inboxSelectMode
+        ? `${selected ? "Deselect" : "Select"} ${conversation.subject}`
+        : `${conversation.subject}, ${conversation.unreadCount} unread messages`);
+
+      if (state.inboxSelectMode) {
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        check.className = "conversation-select-check";
+        check.checked = selected;
+        check.tabIndex = -1;
+        check.setAttribute("aria-hidden", "true");
+        row.append(check);
+      }
 
       const avatarWrap = element("span", "conversation-avatar");
       const avatar = element("span", "avatar", initials(conversation.subject));
@@ -2624,13 +2646,79 @@
       const side = element("span", "conversation-side");
       side.append(element("span", "conversation-time", relativeTime(conversation.lastMessageAt)));
       if (conversation.unreadCount > 0) side.append(element("span", "unread-badge", conversation.unreadCount > 99 ? "99+" : String(conversation.unreadCount)));
-      button.append(avatarWrap, copy, side);
-      host.append(button);
+      row.append(avatarWrap, copy, side);
+      host.append(row);
     });
+    renderInboxBulkBar(items);
     if (!state.conversationsSearching
       && (state.conversationNextCursor || state.conversationsLoadingMore || state.conversationsLoadError)) {
       appendConversationLoadSentinel(host);
     }
+  }
+
+  function visibleConversationIds(items = filteredConversations()) {
+    return items.map((item) => item.conversationId).filter(Boolean);
+  }
+
+  function renderInboxBulkBar(items = filteredConversations()) {
+    const bar = $("inboxBulkBar");
+    const toggle = $("inboxSelectToggle");
+    const selectAll = $("inboxSelectAll");
+    const countNode = $("inboxSelectedCount");
+    const closeButton = $("inboxBulkClose");
+    const deleteButton = $("inboxBulkDelete");
+    if (toggle) {
+      toggle.setAttribute("aria-pressed", String(state.inboxSelectMode));
+      toggle.classList.toggle("is-active", state.inboxSelectMode);
+    }
+    if (!bar) return;
+    bar.hidden = !state.inboxSelectMode;
+    if (!state.inboxSelectMode) return;
+    const knownIds = new Set(state.conversations.map((item) => item.conversationId));
+    if ([...state.selectedConversationIds].some((id) => !knownIds.has(id))) {
+      state.selectedConversationIds = new Set([...state.selectedConversationIds].filter((id) => knownIds.has(id)));
+    }
+    const visibleIds = visibleConversationIds(items);
+    const selectedVisible = visibleIds.filter((id) => state.selectedConversationIds.has(id));
+    const selectedCount = state.selectedConversationIds.size;
+    if (selectAll) {
+      selectAll.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
+      selectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
+      selectAll.disabled = state.bulkActionBusy || !visibleIds.length;
+    }
+    if (countNode) countNode.textContent = selectedCount === 1 ? "1 selected" : `${selectedCount} selected`;
+    if (closeButton) closeButton.disabled = state.bulkActionBusy || !selectedCount;
+    if (deleteButton) {
+      deleteButton.hidden = !canAdmin();
+      deleteButton.disabled = state.bulkActionBusy || !selectedCount || !canAdmin();
+    }
+  }
+
+  function setInboxSelectMode(enabled) {
+    state.inboxSelectMode = Boolean(enabled);
+    if (!state.inboxSelectMode) state.selectedConversationIds = new Set();
+    renderConversationList();
+  }
+
+  function toggleConversationSelection(conversationId, force) {
+    if (!conversationId || !state.inboxSelectMode) return;
+    const next = new Set(state.selectedConversationIds);
+    const shouldSelect = force === undefined ? !next.has(conversationId) : Boolean(force);
+    if (shouldSelect) next.add(conversationId);
+    else next.delete(conversationId);
+    state.selectedConversationIds = next;
+    renderConversationList();
+  }
+
+  function setInboxSelectAll(checked) {
+    const visibleIds = visibleConversationIds();
+    const next = new Set(state.selectedConversationIds);
+    visibleIds.forEach((id) => {
+      if (checked) next.add(id);
+      else next.delete(id);
+    });
+    state.selectedConversationIds = next;
+    renderConversationList();
   }
 
   function appendConversationLoadSentinel(host) {
@@ -4272,12 +4360,16 @@
     if (nextButton) nextButton.disabled = state.contactsLoadingMore || !hasNext;
     const pagination = $("contactPagination");
     if (pagination) pagination.hidden = false;
+    const selectHeader = $("contactSelectHeader");
+    if (selectHeader) selectHeader.hidden = !state.contactSelectMode;
+    const columnCount = state.contactSelectMode ? 6 : 5;
     const tbody = $("contactTableBody");
     tbody.replaceChildren();
+    renderContactBulkBar(contacts);
     if (state.contactsLoadingMore && !contacts.length) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
-      cell.colSpan = 5;
+      cell.colSpan = columnCount;
       cell.className = "empty-list";
       cell.textContent = "Loading contacts…";
       row.append(cell);
@@ -4287,7 +4379,7 @@
     if (!contacts.length) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
-      cell.colSpan = 5;
+      cell.colSpan = columnCount;
       cell.className = "empty-list";
       cell.textContent = state.contactsLoadError
         ? state.contactsLoadError
@@ -4299,11 +4391,27 @@
       return;
     }
     contacts.forEach((contact) => {
+      const checked = state.contactSelectMode && state.selectedContactIds.has(contact.contactId);
       const row = document.createElement("tr");
       row.dataset.contactId = contact.contactId;
       row.tabIndex = 0;
-      row.classList.toggle("is-selected", contact.contactId === state.selectedContactId);
-      row.setAttribute("aria-label", `View and edit ${contact.displayName}`);
+      row.classList.toggle("is-selected", !state.contactSelectMode && contact.contactId === state.selectedContactId);
+      row.classList.toggle("is-checked", checked);
+      row.setAttribute("aria-label", state.contactSelectMode
+        ? `${checked ? "Deselect" : "Select"} ${contact.displayName}`
+        : `View and edit ${contact.displayName}`);
+      if (state.contactSelectMode) {
+        const selectCell = document.createElement("td");
+        selectCell.className = "contact-select-col";
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        check.className = "contact-row-check";
+        check.checked = checked;
+        check.tabIndex = -1;
+        check.setAttribute("aria-hidden", "true");
+        selectCell.append(check);
+        row.append(selectCell);
+      }
       const identityCell = document.createElement("td");
       const identity = element("div", "contact-cell");
       const count = contact.identities.length;
@@ -4330,6 +4438,66 @@
       row.append(statusCell);
       tbody.append(row);
     });
+  }
+
+  function renderContactBulkBar(contacts = state.contacts) {
+    const bar = $("contactBulkBar");
+    const toggle = $("contactSelectToggle");
+    const selectAll = $("contactSelectAll");
+    const countNode = $("contactSelectedCount");
+    const deleteButton = $("contactBulkDelete");
+    if (toggle) {
+      toggle.hidden = !canAdmin();
+      toggle.setAttribute("aria-pressed", String(state.contactSelectMode));
+      toggle.classList.toggle("is-active", state.contactSelectMode);
+    }
+    if (!bar) return;
+    bar.hidden = !state.contactSelectMode || !canAdmin();
+    if (!state.contactSelectMode) return;
+    const visibleIds = contacts.map((contact) => contact.contactId).filter(Boolean);
+    const selectedVisible = visibleIds.filter((id) => state.selectedContactIds.has(id));
+    const selectedCount = state.selectedContactIds.size;
+    if (selectAll) {
+      selectAll.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
+      selectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
+      selectAll.disabled = state.bulkActionBusy || !visibleIds.length;
+    }
+    if (countNode) countNode.textContent = selectedCount === 1 ? "1 selected" : `${selectedCount} selected`;
+    if (deleteButton) deleteButton.disabled = state.bulkActionBusy || !selectedCount;
+  }
+
+  function setContactSelectMode(enabled) {
+    if (!canAdmin()) {
+      state.contactSelectMode = false;
+      state.selectedContactIds = new Set();
+      renderContacts();
+      return;
+    }
+    state.contactSelectMode = Boolean(enabled);
+    if (!state.contactSelectMode) state.selectedContactIds = new Set();
+    if (state.contactSelectMode) closeContactEditor();
+    renderContacts();
+  }
+
+  function toggleContactSelection(contactId, force) {
+    if (!contactId || !state.contactSelectMode) return;
+    const next = new Set(state.selectedContactIds);
+    const shouldSelect = force === undefined ? !next.has(contactId) : Boolean(force);
+    if (shouldSelect) next.add(contactId);
+    else next.delete(contactId);
+    state.selectedContactIds = next;
+    renderContacts();
+  }
+
+  function setContactSelectAll(checked) {
+    const next = new Set(state.selectedContactIds);
+    state.contacts.forEach((contact) => {
+      if (!contact.contactId) return;
+      if (checked) next.add(contact.contactId);
+      else next.delete(contact.contactId);
+    });
+    state.selectedContactIds = next;
+    renderContacts();
   }
 
   async function loadContactsPage(page = 1, { keepSelection = true } = {}) {
@@ -7443,6 +7611,14 @@
       state.pendingConversationId = null;
       if (route === "inbox") clearSelectedConversation({ updateUrl: false });
     }
+    if (route !== "inbox" && state.inboxSelectMode) {
+      state.inboxSelectMode = false;
+      state.selectedConversationIds = new Set();
+    }
+    if (route !== "contacts" && state.contactSelectMode) {
+      state.contactSelectMode = false;
+      state.selectedContactIds = new Set();
+    }
     state.route = route;
     document.querySelectorAll("[data-route-panel]").forEach((panel) => {
       const active = panel.dataset.routePanel === route;
@@ -8598,14 +8774,17 @@
     if (resolve) resolve(Boolean(confirmed));
   }
 
-  function requestConfirmation({ eyebrow = "Confirm deletion", title, message, note = "", confirmLabel = "Delete" }) {
+  function requestConfirmation({ eyebrow = "Confirm deletion", title, message, note = "", confirmLabel = "Delete", danger = true }) {
     if (state.confirmationResolve) finishConfirmation(false);
     $("confirmationEyebrow").textContent = eyebrow;
     $("confirmationTitle").textContent = title;
     $("confirmationMessage").textContent = message;
     $("confirmationNote").textContent = note;
     $("confirmationNote").hidden = !note;
-    $("confirmationSubmit").textContent = confirmLabel;
+    const submit = $("confirmationSubmit");
+    submit.textContent = confirmLabel;
+    submit.classList.toggle("danger-button", danger);
+    submit.classList.toggle("primary-button", !danger);
     return new Promise((resolve) => {
       state.confirmationResolve = resolve;
       $("confirmationDialog").showModal();
@@ -8727,6 +8906,155 @@
       );
     } catch (error) {
       showToast("Conversation was not deleted", error.message, true);
+    }
+  }
+
+  async function bulkCloseConversations() {
+    const ids = [...state.selectedConversationIds];
+    if (!ids.length || state.bulkActionBusy) return;
+    const openIds = ids.filter((id) => {
+      const conversation = state.conversations.find((item) => item.conversationId === id);
+      return conversation && conversation.status !== "closed";
+    });
+    if (!openIds.length) {
+      showToast("Already closed", "The selected conversations are already closed.");
+      return;
+    }
+    const confirmed = await requestConfirmation({
+      eyebrow: "Confirm close",
+      title: openIds.length === 1 ? "Close this chat?" : `Close ${openIds.length} chats?`,
+      message: "Closed chats leave the Open filter. You can still find them under Closed or All.",
+      note: "Customers are not notified when a chat is closed.",
+      confirmLabel: openIds.length === 1 ? "Close chat" : `Close ${openIds.length} chats`,
+      danger: false,
+    });
+    if (!confirmed) return;
+    state.bulkActionBusy = true;
+    renderInboxBulkBar();
+    let closed = 0;
+    let failed = 0;
+    try {
+      for (const conversationId of openIds) {
+        try {
+          await state.api.updateConversation(conversationId, { status: "closed" });
+          const conversation = state.conversations.find((item) => item.conversationId === conversationId);
+          if (conversation) conversation.status = "closed";
+          closed += 1;
+          if (conversationId === state.selectedConversationId) clearSelectedConversation({ updateUrl: false });
+        } catch {
+          failed += 1;
+        }
+      }
+      state.selectedConversationIds = new Set();
+      state.inboxSelectMode = false;
+      renderCounts();
+      renderConversationList();
+      if (closed && !failed) showToast("Chats closed", closed === 1 ? "1 conversation was closed." : `${closed} conversations were closed.`);
+      else if (closed) showToast("Some chats closed", `${closed} closed, ${failed} could not be updated.`, true);
+      else showToast("Chats were not closed", "None of the selected conversations could be updated.", true);
+    } finally {
+      state.bulkActionBusy = false;
+      renderInboxBulkBar();
+    }
+  }
+
+  async function bulkDeleteConversations() {
+    const ids = [...state.selectedConversationIds];
+    if (!canAdmin() || !ids.length || state.bulkActionBusy) return;
+    const confirmed = await requestConfirmation({
+      title: ids.length === 1 ? "Delete this conversation?" : `Delete ${ids.length} conversations?`,
+      message: "This permanently deletes the selected conversations, their message history, and attachment media from Helixcer.",
+      note: "Contacts and provider accounts are not deleted. A future customer message may create a new conversation.",
+      confirmLabel: ids.length === 1 ? "Delete conversation" : `Delete ${ids.length} conversations`,
+    });
+    if (!confirmed) return;
+    state.bulkActionBusy = true;
+    renderInboxBulkBar();
+    let deleted = 0;
+    let failed = 0;
+    let deletedMedia = 0;
+    try {
+      closeAttachmentPreview();
+      for (const conversationId of ids) {
+        try {
+          const result = await state.api.deleteConversation(conversationId);
+          deletedMedia += Number(result?.deletedMedia || 0);
+          state.messages.delete(conversationId);
+          state.conversationRevisions.delete(conversationId);
+          clearComposerDraft(conversationId);
+          state.conversations = state.conversations.filter((item) => item.conversationId !== conversationId);
+          if (conversationId === state.selectedConversationId) clearSelectedConversation({ updateUrl: false });
+          deleted += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      state.selectedConversationIds = new Set();
+      state.inboxSelectMode = false;
+      renderCounts();
+      renderContacts();
+      renderChannels();
+      renderConversationList();
+      if (deleted && !failed) {
+        showToast(
+          "Conversations deleted",
+          deletedMedia > 0
+            ? `${deleted} conversation${deleted === 1 ? "" : "s"} and ${deletedMedia} media file${deletedMedia === 1 ? "" : "s"} were removed.`
+            : `${deleted} conversation${deleted === 1 ? "" : "s"} removed from Helixcer.`
+        );
+      } else if (deleted) showToast("Some conversations deleted", `${deleted} deleted, ${failed} could not be removed.`, true);
+      else showToast("Conversations were not deleted", "None of the selected conversations could be removed.", true);
+    } finally {
+      state.bulkActionBusy = false;
+      renderInboxBulkBar();
+    }
+  }
+
+  async function bulkDeleteContacts() {
+    const ids = [...state.selectedContactIds];
+    if (!canAdmin() || !ids.length || state.bulkActionBusy) return;
+    const confirmed = await requestConfirmation({
+      title: ids.length === 1 ? "Delete this contact?" : `Delete ${ids.length} contacts?`,
+      message: "This permanently deletes the selected contacts from Helixcer, including every conversation and message stored for them.",
+      note: "This does not block or delete the customers on the original messaging providers.",
+      confirmLabel: ids.length === 1 ? "Delete contact" : `Delete ${ids.length} contacts`,
+    });
+    if (!confirmed) return;
+    state.bulkActionBusy = true;
+    renderContactBulkBar();
+    let deleted = 0;
+    let failed = 0;
+    try {
+      for (const contactId of ids) {
+        try {
+          const relatedConversations = state.conversations.filter((conversation) => conversation.contactId === contactId);
+          await state.api.deleteContact(contactId);
+          const conversationIds = new Set(relatedConversations.map((conversation) => conversation.conversationId));
+          conversationIds.forEach((conversationId) => {
+            state.messages.delete(conversationId);
+            state.conversationRevisions.delete(conversationId);
+          });
+          state.contacts = state.contacts.filter((item) => item.contactId !== contactId);
+          state.conversations = state.conversations.filter((conversation) => !conversationIds.has(conversation.conversationId));
+          if (conversationIds.has(state.selectedConversationId)) clearSelectedConversation({ updateUrl: false });
+          if (contactId === state.selectedContactId) closeContactEditor();
+          deleted += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      state.selectedContactIds = new Set();
+      state.contactSelectMode = false;
+      renderCounts();
+      renderChannels();
+      renderConversationList();
+      renderContacts();
+      if (deleted && !failed) showToast("Contacts deleted", deleted === 1 ? "1 contact was removed." : `${deleted} contacts were removed.`);
+      else if (deleted) showToast("Some contacts deleted", `${deleted} deleted, ${failed} could not be removed.`, true);
+      else showToast("Contacts were not deleted", "None of the selected contacts could be removed.", true);
+    } finally {
+      state.bulkActionBusy = false;
+      renderContactBulkBar();
     }
   }
 
@@ -9113,6 +9441,11 @@
           "toggle-details": toggleDetails,
           "toggle-conversation-menu": toggleConversationActionMenu,
           "delete-conversation": deleteSelectedConversation,
+          "toggle-inbox-select": () => setInboxSelectMode(!state.inboxSelectMode),
+          "bulk-close-conversations": () => { bulkCloseConversations().catch(() => {}); },
+          "bulk-delete-conversations": () => { bulkDeleteConversations().catch(() => {}); },
+          "toggle-contact-select": () => setContactSelectMode(!state.contactSelectMode),
+          "bulk-delete-contacts": () => { bulkDeleteContacts().catch(() => {}); },
           "open-channel": () => openChannelDialog(),
           "close-channel-dialog": () => $("channelDialog").close(),
           "delete-channel": deleteEditingChannel,
@@ -9200,7 +9533,18 @@
 
     $("conversationList").addEventListener("click", (event) => {
       const item = event.target.closest("[data-conversation-id]");
-      if (item) selectConversation(item.dataset.conversationId);
+      if (!item) return;
+      if (state.inboxSelectMode) {
+        toggleConversationSelection(item.dataset.conversationId);
+        return;
+      }
+      selectConversation(item.dataset.conversationId);
+    });
+    $("inboxSelectAll")?.addEventListener("change", (event) => {
+      setInboxSelectAll(Boolean(event.target.checked));
+    });
+    $("contactSelectAll")?.addEventListener("change", (event) => {
+      setContactSelectAll(Boolean(event.target.checked));
     });
     $("conversationList").addEventListener("scroll", () => {
       // Resume auto-load after a tab-focus pause once the user scrolls again.
@@ -9253,13 +9597,22 @@
 
     $("contactTableBody").addEventListener("click", (event) => {
       const row = event.target.closest("[data-contact-id]");
-      if (row) selectContact(row.dataset.contactId);
+      if (!row) return;
+      if (state.contactSelectMode) {
+        toggleContactSelection(row.dataset.contactId);
+        return;
+      }
+      selectContact(row.dataset.contactId);
     });
     $("contactTableBody").addEventListener("keydown", (event) => {
       if (!['Enter', ' '].includes(event.key)) return;
       const row = event.target.closest("[data-contact-id]");
       if (!row) return;
       event.preventDefault();
+      if (state.contactSelectMode) {
+        toggleContactSelection(row.dataset.contactId);
+        return;
+      }
       selectContact(row.dataset.contactId);
     });
 

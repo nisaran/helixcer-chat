@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261031-status-line">
-  <script src="./assets/app.js?v=20261031-status-line" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261031-bulk-select">
+  <script src="./assets/app.js?v=20261031-bulk-select" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -179,11 +179,31 @@
               </button>
             </div>
 
-            <div class="search-wrap">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-              <label class="sr-only" for="conversationSearch">Search conversations</label>
-              <input id="conversationSearch" type="search" placeholder="Search people or messages…" autocomplete="off">
-              <kbd class="search-shortcut">/</kbd>
+            <div class="inbox-search-row">
+              <div class="search-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+                <label class="sr-only" for="conversationSearch">Search conversations</label>
+                <input id="conversationSearch" type="search" placeholder="Search people or messages…" autocomplete="off">
+                <kbd class="search-shortcut">/</kbd>
+              </div>
+              <button class="icon-button select-mode-toggle" id="inboxSelectToggle" type="button" data-action="toggle-inbox-select" aria-pressed="false" aria-label="Select conversations" title="Select conversations">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7.2 8.4 8.5 9.7 10.8 7.4"/>
+                  <path d="M12.2 8.6h4.2"/>
+                  <path d="M7.2 12.1 8.5 13.4 10.8 11.1"/>
+                  <path d="M12.2 12.3h4.2"/>
+                  <path d="M7.2 15.8 8.5 17.1 10.8 14.8"/>
+                  <path d="M12.2 16h4.2"/>
+                </svg>
+              </button>
+            </div>
+            <div class="bulk-action-bar" id="inboxBulkBar" hidden>
+              <label class="bulk-select-all"><input type="checkbox" id="inboxSelectAll"><span>Select all</span></label>
+              <span class="subtle" id="inboxSelectedCount">0 selected</span>
+              <div class="bulk-action-buttons">
+                <button class="secondary-button compact-button" type="button" data-action="bulk-close-conversations" id="inboxBulkClose">Close chat</button>
+                <button class="danger-button compact-button" type="button" data-action="bulk-delete-conversations" id="inboxBulkDelete" data-admin-only>Delete</button>
+              </div>
             </div>
 
             <div class="conversation-filter-desktop" id="conversationFilterPicker">
@@ -352,10 +372,22 @@
         <div class="contacts-workspace" id="contactsWorkspace">
           <div class="surface contact-list-surface">
             <div class="surface-toolbar">
-              <div class="search-wrap compact-search">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-                <label class="sr-only" for="contactSearch">Search contacts</label>
-                <input id="contactSearch" type="search" placeholder="Search contacts…">
+              <div class="contact-search-row">
+                <div class="search-wrap compact-search">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+                  <label class="sr-only" for="contactSearch">Search contacts</label>
+                  <input id="contactSearch" type="search" placeholder="Search contacts…">
+                </div>
+                <button class="icon-button select-mode-toggle" id="contactSelectToggle" type="button" data-action="toggle-contact-select" data-admin-only aria-pressed="false" aria-label="Select contacts" title="Select contacts">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M7.2 8.4 8.5 9.7 10.8 7.4"/>
+                    <path d="M12.2 8.6h4.2"/>
+                    <path d="M7.2 12.1 8.5 13.4 10.8 11.1"/>
+                    <path d="M12.2 12.3h4.2"/>
+                    <path d="M7.2 15.8 8.5 17.1 10.8 14.8"/>
+                    <path d="M12.2 16h4.2"/>
+                  </svg>
+                </button>
               </div>
               <div class="contact-toolbar-meta">
                 <span class="subtle" id="contactCount">0 contacts</span>
@@ -366,9 +398,21 @@
                 </div>
               </div>
             </div>
+            <div class="bulk-action-bar contact-bulk-bar" id="contactBulkBar" hidden>
+              <label class="bulk-select-all"><input type="checkbox" id="contactSelectAll"><span>Select all</span></label>
+              <span class="subtle" id="contactSelectedCount">0 selected</span>
+              <div class="bulk-action-buttons">
+                <button class="danger-button compact-button" type="button" data-action="bulk-delete-contacts" id="contactBulkDelete">Delete</button>
+              </div>
+            </div>
             <div class="contact-table-wrap" id="contactTableWrap">
-              <table class="contact-table">
-                <thead><tr><th>Contact</th><th>Company</th><th>Tags</th><th>Last active</th><th>Status</th></tr></thead>
+              <table class="contact-table" id="contactTable">
+                <thead>
+                  <tr>
+                    <th class="contact-select-col" id="contactSelectHeader" hidden><span class="sr-only">Select</span></th>
+                    <th>Contact</th><th>Company</th><th>Tags</th><th>Last active</th><th>Status</th>
+                  </tr>
+                </thead>
                 <tbody id="contactTableBody"></tbody>
               </table>
             </div>
