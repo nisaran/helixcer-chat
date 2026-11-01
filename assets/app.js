@@ -43,6 +43,7 @@
     conversationListObserver: null,
     channels: [],
     contacts: [],
+    workspaceTags: [],
     conversations: [],
     messages: new Map(),
     pendingAttachments: new Map(),
@@ -334,6 +335,15 @@
       const contacts = clone(this.data.contacts);
       const conversationPage = conversations.slice(0, CONVERSATION_PAGE_SIZE);
       const contactPage = contacts.slice(0, CONTACT_PAGE_SIZE);
+      const tagMap = new Map();
+      contacts.forEach((contact) => {
+        (contact.tags || []).forEach((tag) => {
+          const label = String(tag || "").trim();
+          if (!label) return;
+          const key = label.toLocaleLowerCase("en-US");
+          if (!tagMap.has(key)) tagMap.set(key, label);
+        });
+      });
       return {
         appName: this.data.appName,
         me: this.data.me,
@@ -349,6 +359,7 @@
         conversationNextCursor: conversations.length > conversationPage.length
           ? String(conversationPage[conversationPage.length - 1]?.lastMessageAt || "")
           : "",
+        tags: [...tagMap.values()].sort((a, b) => a.localeCompare(b, "en-US", { sensitivity: "base" })),
       };
     }
 
@@ -2399,6 +2410,7 @@
         else updateWorkspaceIdentity(state.workspaceProfile);
       }
       state.channels = asItems(data.channels).map(normalizeChannel);
+      if (data.tags) state.workspaceTags = normalizeWorkspaceTags(data.tags);
       const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
       // Full reload replaces the catalogue; keep only live mutations newer than this fetch.
       state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart);
@@ -2461,6 +2473,7 @@
         else updateWorkspaceIdentity(state.workspaceProfile);
       }
       state.channels = asItems(data.channels).map(normalizeChannel);
+      if (data.tags) state.workspaceTags = normalizeWorkspaceTags(data.tags);
       const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
       // Soft reconcile only refreshes the first catalogue page. Always keep rows
       // already loaded (infinite-scroll pages and deep-linked chats) so a focus /
@@ -3105,6 +3118,12 @@
     tagHost.replaceChildren();
     const tags = contact?.tags?.length ? contact.tags : ["No tags"];
     tags.forEach((tag) => tagHost.append(element("span", "tag", tag)));
+    const editContact = $("detailsEditContact");
+    if (editContact) {
+      const canEdit = Boolean(conversation.contactId);
+      editContact.hidden = !canEdit;
+      editContact.disabled = !canEdit;
+    }
     if (renderThread) renderMessages({ preserveScroll });
     renderComposerState();
   }
@@ -5026,6 +5045,233 @@
     showContactRouteMenu(trigger, context.contact, context.identity.platform, eligibleRoutes);
   }
 
+  function normalizeWorkspaceTags(value) {
+    const map = new Map();
+    asItems(value).forEach((tag) => {
+      const label = String(tag || "").trim().slice(0, 40);
+      if (!label) return;
+      const key = label.toLocaleLowerCase("en-US");
+      if (!map.has(key)) map.set(key, label);
+    });
+    return [...map.values()].sort((a, b) => a.localeCompare(b, "en-US", { sensitivity: "base" }));
+  }
+
+  function rememberWorkspaceTags(tags) {
+    if (!Array.isArray(tags) || !tags.length) return;
+    state.workspaceTags = normalizeWorkspaceTags([...(state.workspaceTags || []), ...tags]);
+  }
+
+  function tagInputRoot(mode) {
+    return document.querySelector(`[data-tag-input="${mode}"]`);
+  }
+
+  function parseTagValues(value) {
+    const map = new Map();
+    String(value || "").split(/[,\n]/).forEach((part) => {
+      const label = String(part || "").trim().slice(0, 40);
+      if (!label) return;
+      const key = label.toLocaleLowerCase("en-US");
+      if (!map.has(key)) map.set(key, label);
+    });
+    return [...map.values()].slice(0, 20);
+  }
+
+  function readTagInputValues(root = tagInputRoot("edit")) {
+    if (!root) return [];
+    const hidden = root.querySelector('input[type="hidden"][name="tags"]');
+    if (hidden) return parseTagValues(hidden.value);
+    return [...root.querySelectorAll(".tag-chip")].map((chip) => chip.dataset.tag || chip.textContent).filter(Boolean);
+  }
+
+  function syncTagInputHidden(root, tags) {
+    const hidden = root?.querySelector('input[type="hidden"][name="tags"]');
+    if (hidden) hidden.value = tags.join(", ");
+  }
+
+  function setTagInputMenuOpen(root, open) {
+    const field = root?.querySelector(".tag-input-field");
+    const menu = root?.querySelector(".tag-input-menu");
+    if (!field || !menu) return;
+    menu.hidden = !open;
+    field.setAttribute("aria-expanded", String(open));
+  }
+
+  function renderTagInputMenu(root) {
+    const field = root?.querySelector(".tag-input-field");
+    const menu = root?.querySelector(".tag-input-menu");
+    if (!field || !menu) return;
+    const selected = new Set(readTagInputValues(root).map((tag) => tag.toLocaleLowerCase("en-US")));
+    const query = String(field.value || "").trim();
+    const needle = query.toLocaleLowerCase("en-US");
+    const suggestions = (state.workspaceTags || []).filter((tag) => {
+      const key = tag.toLocaleLowerCase("en-US");
+      if (selected.has(key)) return false;
+      return !needle || key.includes(needle);
+    }).slice(0, 12);
+    menu.replaceChildren();
+    suggestions.forEach((tag) => {
+      const option = element("button", "tag-input-option", tag);
+      option.type = "button";
+      option.setAttribute("role", "option");
+      option.dataset.tag = tag;
+      menu.append(option);
+    });
+    if (query) {
+      const exact = selected.has(needle)
+        || (state.workspaceTags || []).some((tag) => tag.toLocaleLowerCase("en-US") === needle);
+      if (!exact && !selected.has(needle)) {
+        const create = element("button", "tag-input-option is-create", `Create “${query.slice(0, 40)}”`);
+        create.type = "button";
+        create.setAttribute("role", "option");
+        create.dataset.tag = query.slice(0, 40);
+        create.dataset.create = "true";
+        menu.append(create);
+      }
+    }
+    if (!menu.children.length) {
+      menu.append(element("span", "tag-input-empty", query ? "No matching tags" : "No saved tags yet"));
+    }
+  }
+
+  function renderTagInput(root, tags = []) {
+    if (!root) return;
+    const chips = root.querySelector(".tag-input-chips");
+    const field = root.querySelector(".tag-input-field");
+    if (!chips || !field) return;
+    const selected = parseTagValues(Array.isArray(tags) ? tags.join(", ") : tags).slice(0, 20);
+    chips.replaceChildren();
+    selected.forEach((tag) => {
+      const chip = element("span", "tag-chip");
+      chip.dataset.tag = tag;
+      chip.append(element("span", "", tag));
+      const remove = element("button", "tag-chip-remove", "×");
+      remove.type = "button";
+      remove.dataset.action = "remove-contact-tag";
+      remove.dataset.tag = tag;
+      remove.setAttribute("aria-label", `Remove ${tag}`);
+      chip.append(remove);
+      chips.append(chip);
+    });
+    syncTagInputHidden(root, selected);
+    field.disabled = selected.length >= 20;
+    if (selected.length >= 20) field.placeholder = "Tag limit reached";
+    else field.placeholder = "Add or create a tag";
+    renderTagInputMenu(root);
+  }
+
+  function addTagToInput(root, rawTag, { keepMenuOpen = false } = {}) {
+    if (!root) return;
+    const field = root.querySelector(".tag-input-field");
+    const next = [...readTagInputValues(root), ...parseTagValues(rawTag)];
+    renderTagInput(root, next);
+    if (field) {
+      field.value = "";
+      if (!keepMenuOpen) setTagInputMenuOpen(root, false);
+      else {
+        renderTagInputMenu(root);
+        setTagInputMenuOpen(root, true);
+      }
+      field.focus();
+    }
+  }
+
+  function removeTagFromInput(root, tag) {
+    if (!root) return;
+    const key = String(tag || "").trim().toLocaleLowerCase("en-US");
+    const next = readTagInputValues(root).filter((item) => item.toLocaleLowerCase("en-US") !== key);
+    renderTagInput(root, next);
+    root.querySelector(".tag-input-field")?.focus();
+  }
+
+  function commitTagInputDraft(root) {
+    const field = root?.querySelector(".tag-input-field");
+    if (!field) return false;
+    const draft = String(field.value || "").trim();
+    if (!draft) return false;
+    addTagToInput(root, draft);
+    return true;
+  }
+
+  function bindTagInput(root) {
+    if (!root || root.dataset.bound === "true") return;
+    root.dataset.bound = "true";
+    const field = root.querySelector(".tag-input-field");
+    const menu = root.querySelector(".tag-input-menu");
+    if (!field || !menu) return;
+    field.addEventListener("focus", () => {
+      renderTagInputMenu(root);
+      setTagInputMenuOpen(root, true);
+    });
+    field.addEventListener("input", () => {
+      const value = field.value;
+      if (value.includes(",") || value.includes("\n")) {
+        const parts = value.split(/[,\n]/);
+        const complete = parts.slice(0, -1).join(",");
+        const remainder = parts[parts.length - 1] || "";
+        if (complete.trim()) addTagToInput(root, complete, { keepMenuOpen: true });
+        field.value = remainder;
+      }
+      renderTagInputMenu(root);
+      setTagInputMenuOpen(root, true);
+    });
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "," || event.key === "Enter") {
+        event.preventDefault();
+        if (!commitTagInputDraft(root)) {
+          const first = menu.querySelector(".tag-input-option");
+          if (first && !menu.hidden) first.click();
+        }
+      } else if (event.key === "Backspace" && !field.value) {
+        const tags = readTagInputValues(root);
+        if (tags.length) {
+          event.preventDefault();
+          removeTagFromInput(root, tags[tags.length - 1]);
+        }
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        renderTagInputMenu(root);
+        setTagInputMenuOpen(root, true);
+        menu.querySelector(".tag-input-option")?.focus();
+      } else if (event.key === "Escape") {
+        setTagInputMenuOpen(root, false);
+      }
+    });
+    menu.addEventListener("click", (event) => {
+      const option = event.target.closest(".tag-input-option");
+      if (!option) return;
+      addTagToInput(root, option.dataset.tag || "");
+    });
+    menu.addEventListener("keydown", (event) => {
+      const options = [...menu.querySelectorAll(".tag-input-option")];
+      const index = options.indexOf(event.target);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const next = event.key === "ArrowDown"
+          ? options[Math.min(options.length - 1, index + 1)]
+          : options[Math.max(0, index - 1)];
+        next?.focus();
+      } else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        event.target.click();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        setTagInputMenuOpen(root, false);
+        field.focus();
+      }
+    });
+    root.addEventListener("click", (event) => {
+      const remove = event.target.closest('[data-action="remove-contact-tag"]');
+      if (!remove) {
+        if (event.target === root.querySelector(".tag-input-shell") || event.target.closest(".tag-input-chips")) {
+          field.focus();
+        }
+        return;
+      }
+      event.preventDefault();
+      removeTagFromInput(root, remove.dataset.tag || "");
+    });
+  }
+
   function showContactEditor(contact, { loading = false, error = "" } = {}) {
     closeContactRouteMenu();
     closeContactPlatformMenu();
@@ -5045,7 +5291,10 @@
     $("contactEditId").value = normalized.contactId;
     $("contactEditName").value = normalized.displayName;
     $("contactEditCompany").value = normalized.company;
-    $("contactEditTags").value = normalized.tags.join(", ");
+    const editTagInput = tagInputRoot("edit");
+    bindTagInput(editTagInput);
+    renderTagInput(editTagInput, normalized.tags);
+    setTagInputMenuOpen(editTagInput, false);
     renderContactPlatformIdFields($("contactEditPlatformIds"), normalized, "edit");
   }
 
@@ -5127,10 +5376,12 @@
   async function saveContactEdits(form) {
     const data = new FormData(form);
     const contactId = String(data.get("contactId") || "");
+    const editTagInput = tagInputRoot("edit");
+    commitTagInputDraft(editTagInput);
     const payload = {
       displayName: String(data.get("displayName") || "").trim(),
       company: String(data.get("company") || "").trim(),
-      tags: String(data.get("tags") || "").split(/[,\n]/).map((tag) => tag.trim()).filter(Boolean),
+      tags: readTagInputValues(editTagInput),
     };
     if (!contactId || !payload.displayName) {
       form.reportValidity();
@@ -5153,6 +5404,7 @@
       await state.api.updateContact(contactId, payload);
       const refreshed = await state.api.getContact(contactId);
       const updated = normalizeContact(refreshed.item || refreshed || { contactId, ...payload });
+      rememberWorkspaceTags(updated.tags);
       const index = state.contacts.findIndex((contact) => contact.contactId === contactId);
       if (index >= 0) state.contacts[index] = { ...state.contacts[index], ...updated };
       state.conversations.filter((conversation) => conversation.contactId === contactId).forEach((conversation) => {
@@ -8940,9 +9192,26 @@
 
   function openContactDialog() {
     $("contactForm").reset();
+    const createTagInput = tagInputRoot("create");
+    bindTagInput(createTagInput);
+    renderTagInput(createTagInput, []);
+    setTagInputMenuOpen(createTagInput, false);
     renderContactPlatformIdFields($("contactCreatePlatformIds"), null, "create");
     $("contactDialog").showModal();
     $("contactForm").elements.displayName?.focus();
+  }
+
+  function editContactFromDetails() {
+    const conversation = selectedConversation();
+    const contactId = conversation?.contactId;
+    if (!contactId) {
+      showToast("No contact linked", "This conversation is not linked to a saved contact.", true);
+      return;
+    }
+    state.detailsOpen = false;
+    updateDetailsVisibility();
+    setRoute("contacts");
+    selectContact(contactId);
   }
 
   async function createContact(form) {
@@ -8954,10 +9223,12 @@
       showToast("Contact needs attention", error.message, true);
       return;
     }
+    const createTagInput = tagInputRoot("create");
+    commitTagInputDraft(createTagInput);
     const payload = {
       displayName: String(formData.get("displayName") || "").trim(),
       company: String(formData.get("company") || "").trim(),
-      tags: String(formData.get("tags") || "").split(/[,\n]/).map((tag) => tag.trim()).filter(Boolean),
+      tags: readTagInputValues(createTagInput),
       platformIds,
     };
     if (!payload.displayName) {
@@ -8968,8 +9239,10 @@
     submit.disabled = true;
     try {
       await state.api.createContact(payload);
+      rememberWorkspaceTags(payload.tags);
       $("contactDialog").close();
       form.reset();
+      renderTagInput(tagInputRoot("create"), []);
       $("contactCreatePlatformIds").replaceChildren();
       await loadAll({ preserveSelection: false });
       setRoute("contacts");
@@ -9727,6 +10000,7 @@
           "close-profile": () => $("profileDialog").close(),
           "logout": logout,
           "toggle-details": toggleDetails,
+          "edit-contact-from-details": editContactFromDetails,
           "toggle-conversation-menu": toggleConversationActionMenu,
           "delete-conversation": deleteSelectedConversation,
           "toggle-inbox-select": () => setInboxSelectMode(!state.inboxSelectMode),
@@ -10137,7 +10411,14 @@
         input.value = input.dataset.selectedLabel || input.value;
         setSearchableComboboxOpen(input, menu, false);
       });
+      if (!event.target.closest(".tag-input")) {
+        document.querySelectorAll("[data-tag-input]").forEach((root) => setTagInputMenuOpen(root, false));
+      }
     });
+    bindTagInput(tagInputRoot("edit"));
+    bindTagInput(tagInputRoot("create"));
+    renderTagInput(tagInputRoot("edit"), []);
+    renderTagInput(tagInputRoot("create"), []);
     $("templateForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentTemplate(event.currentTarget); });
     $("templateDialog").addEventListener("close", () => {
       revokeTemplatePreviewUrl();

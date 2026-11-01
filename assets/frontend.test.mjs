@@ -499,6 +499,9 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /id="chatChannelProfileId"[^>]*hidden/);
   assert.match(html, /id="chatChannelBadge"[^>]*hidden/);
   assert.match(html, /class="chat-contact-card"[^>]*data-action="toggle-details"/);
+  assert.match(html, /id="detailsEditContact"[^>]*data-action="edit-contact-from-details"/);
+  assert.match(app, /function editContactFromDetails/);
+  assert.match(app, /"edit-contact-from-details": editContactFromDetails/);
   assert.match(html, /id="composerRouteButton"[^>]*data-action="toggle-composer-route-menu"/);
   assert.match(html, /id="composerRouteName"/);
   assert.match(html, /id="composerRouteMenu"[^>]*role="menu"/);
@@ -571,7 +574,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261101-compose-taller/);
+  assert.match(html, /app\.js\?v=20261101-contact-tag-chips/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -615,6 +618,19 @@ test("contacts use one flat ID per platform and open the exact saved channel rou
   assert.doesNotMatch(html, /id="contactEditChannel(?:Help|ProfileId)?"/);
   assert.match(html, /id="contactEditCompany"/);
   assert.match(html, /id="contactEditTags"/);
+  assert.match(html, /id="contactEditTagInput"[^>]*data-tag-input="edit"/);
+  assert.match(html, /id="contactCreateTagInput"[^>]*data-tag-input="create"/);
+  assert.match(html, /id="contactEditTagMenu"|id="contactCreateTagMenu"/);
+  assert.match(styles, /\.tag-chip\s*\{/);
+  assert.match(styles, /\.tag-chip-remove\s*\{/);
+  assert.match(app, /function renderTagInput\(/);
+  assert.match(app, /function addTagToInput\(/);
+  assert.match(app, /function commitTagInputDraft\(/);
+  assert.match(app, /workspaceTags:\s*\[\]/);
+  assert.match(app, /if \(data\.tags\) state\.workspaceTags = normalizeWorkspaceTags\(data\.tags\)/);
+  assert.match(app, /tags: readTagInputValues\(editTagInput\)/);
+  assert.match(app, /tags: readTagInputValues\(createTagInput\)/);
+  assert.match(app, /value\.includes\(","\) \|\| value\.includes\("\\n"\)/);
   assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`\)/);
   assert.match(app, /request\(`\/api\/contacts\/\$\{encodeURIComponent\(contactId\)\}`, \{ method: "PATCH"/);
   assert.match(app, /whatsapp: \{ label: "WhatsApp", profileLabel: "WhatsApp ID", profilePlaceholder: "Phone number or WhatsApp username" \}/);
@@ -919,8 +935,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261101-compose-taller/);
-  assert.match(html, /assets\/styles\.css\?v=20261101-compose-taller/);
+  assert.match(html, /assets\/app\.js\?v=20261101-contact-tag-chips/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-contact-tag-chips/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   // Inbound customer names must not render on the bubble; only outbound sender_name on the route line.
