@@ -15,6 +15,8 @@ import {
   isRetryableWhatsAppStatus,
   normalizeGeneric,
   normalizeGenericStatuses,
+  facebookMessengerProfileNameFromGraph,
+  fetchFacebookMessengerProfileName,
   normalizeFacebookMessenger,
   normalizeInstagram,
   normalizeTelegram,
@@ -424,6 +426,29 @@ test('normalizes Messenger messages, attachments, echoes, and receipts', () => {
     { channelProfileId: 'psid-1', status: 'read', timestamp: '2025-10-25T02:40:03.000Z' }
   ]);
   assert.deepEqual(result.recipientIds, ['109876543210987']);
+});
+
+test('builds Messenger profile names from Graph user fields', async () => {
+  assert.equal(facebookMessengerProfileNameFromGraph({ name: 'Asha Rao' }), 'Asha Rao');
+  assert.equal(facebookMessengerProfileNameFromGraph({ first_name: 'Asha', last_name: 'Rao' }), 'Asha Rao');
+  assert.equal(facebookMessengerProfileNameFromGraph({ first_name: 'Asha' }), 'Asha');
+  assert.equal(facebookMessengerProfileNameFromGraph({}), '');
+  const name = await fetchFacebookMessengerProfileName(
+    { config: { apiVersion: 'v26.0' } },
+    { accessToken: 'page-token' },
+    '3618960714878059',
+    async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.origin, 'https://graph.facebook.com');
+      assert.equal(url.pathname, '/v26.0/3618960714878059');
+      assert.equal(url.searchParams.get('fields'), 'name,first_name,last_name');
+      assert.equal(init.headers.Authorization, 'Bearer page-token');
+      return new Response(JSON.stringify({ name: 'Nisar Khan', first_name: 'Nisar', last_name: 'Khan' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  );
+  assert.equal(name, 'Nisar Khan');
 });
 
 test('encrypts channel credentials with workspace and channel binding', async () => {

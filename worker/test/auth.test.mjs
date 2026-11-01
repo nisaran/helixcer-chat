@@ -1792,6 +1792,11 @@ test('Messenger verification uses Page Graph lookup and shared app webhooks rout
         status: 200, headers: { 'Content-Type': 'application/json' }
       });
     }
+    if (url.pathname === '/v26.0/100200300400500' && url.searchParams.get('fields') === 'name,first_name,last_name') {
+      return new Response(JSON.stringify({ id: '100200300400500', name: 'Asha Rao', first_name: 'Asha', last_name: 'Rao' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
     return new Response('{}', { status: 404 });
   };
   try {
@@ -1823,10 +1828,19 @@ test('Messenger verification uses Page Graph lookup and shared app webhooks rout
     }), env);
     assert.equal(delivered.status, 200);
     assert.equal((await delivered.json()).received, 1);
-    const identity = database.prepare(`SELECT platform,profile_id FROM contact_identities
+    const identity = database.prepare(`SELECT platform,profile_id,display_name FROM contact_identities
       WHERE workspace_id=(SELECT workspace_id FROM channels WHERE channel_id='messenger-page-one')
         AND profile_id='100200300400500'`).get();
     assert.equal(identity.platform, 'facebook');
+    assert.equal(identity.display_name, 'Asha Rao');
+    const contact = database.prepare(`SELECT display_name FROM contacts
+      WHERE workspace_id=(SELECT workspace_id FROM channels WHERE channel_id='messenger-page-one')
+        AND contact_id=(SELECT contact_id FROM contact_identities WHERE profile_id='100200300400500' LIMIT 1)`).get();
+    assert.equal(contact.display_name, 'Asha Rao');
+    const conversation = database.prepare(`SELECT subject FROM conversations
+      WHERE workspace_id=(SELECT workspace_id FROM channels WHERE channel_id='messenger-page-one')
+        AND contact_id=(SELECT contact_id FROM contact_identities WHERE profile_id='100200300400500' LIMIT 1)`).get();
+    assert.equal(conversation.subject, 'Asha Rao');
   } finally {
     globalThis.fetch = originalFetch;
     database.close();
