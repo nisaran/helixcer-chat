@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-platform-rows-2">
-  <script src="./assets/app.js?v=20261101-campaign-platform-rows-2" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-history-ux">
+  <script src="./assets/app.js?v=20261101-campaign-history-ux" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -488,11 +488,37 @@
             </div>
             <button class="secondary-button compact-button" type="button" data-action="refresh-campaigns">Refresh</button>
           </div>
-          <div class="campaign-table-wrap">
+          <div class="campaign-history-filters" id="campaignHistoryFilters">
+            <label class="field-label campaign-history-filter" for="campaignHistoryPlatform">
+              Platform
+              <select class="text-field" id="campaignHistoryPlatform">
+                <option value="">Any platform</option>
+              </select>
+            </label>
+            <label class="field-label campaign-history-filter" for="campaignHistoryChannel">
+              Channel
+              <select class="text-field" id="campaignHistoryChannel">
+                <option value="">Any channel</option>
+              </select>
+            </label>
+            <label class="field-label campaign-history-filter" for="campaignHistoryCreatedFrom">
+              Created from
+              <input class="text-field" id="campaignHistoryCreatedFrom" type="date">
+            </label>
+            <label class="field-label campaign-history-filter" for="campaignHistoryCreatedTo">
+              Created to
+              <input class="text-field" id="campaignHistoryCreatedTo" type="date">
+            </label>
+            <button class="secondary-button compact-button" type="button" data-action="campaign-clear-history-filters" id="campaignClearHistoryFilters">Clear filters</button>
+          </div>
+          <div class="campaign-table-wrap" id="campaignHistoryTableWrap">
+            <div class="campaign-history-loading" id="campaignHistoryLoading" hidden>
+              <span class="auth-spinner" aria-hidden="true"></span>
+              <span>Loading campaign history…</span>
+            </div>
             <table class="campaign-table" id="campaignTable">
               <thead>
                 <tr>
-                  <th class="campaign-expand-col"><span class="sr-only">Expand</span></th>
                   <th>Campaign</th>
                   <th>Channel</th>
                   <th>Status</th>
@@ -501,10 +527,30 @@
                   <th>Read</th>
                   <th>Failed</th>
                   <th>Created</th>
+                  <th class="campaign-expand-col"><span class="sr-only">Expand</span></th>
                 </tr>
               </thead>
               <tbody id="campaignTableBody"></tbody>
             </table>
+          </div>
+          <div class="campaign-history-footer" id="campaignHistoryFooter">
+            <p class="subtle campaign-history-meta" id="campaignHistoryMeta"></p>
+            <div class="campaign-history-pagination" id="campaignHistoryPagination">
+              <label class="campaign-page-size" for="campaignHistoryPageSize">
+                <span class="sr-only">Rows per page</span>
+                <select class="text-field compact-select" id="campaignHistoryPageSize">
+                  <option value="20">20</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                  <option value="500">500</option>
+                  <option value="1000">1000</option>
+                  <option value="all">All</option>
+                </select>
+              </label>
+              <button class="secondary-button compact-button" type="button" data-action="campaign-history-prev" id="campaignHistoryPrev">Prev</button>
+              <span class="campaign-page-chip" id="campaignHistoryPageLabel">Page 1 of 1</span>
+              <button class="secondary-button compact-button" type="button" data-action="campaign-history-next" id="campaignHistoryNext">Next</button>
+            </div>
           </div>
           <p class="subtle campaign-empty" id="campaignHistoryEmpty" hidden>No campaigns yet. Create one to send bulk messages.</p>
         </section>

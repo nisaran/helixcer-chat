@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-platform-rows-2";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-history-ux";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -81,6 +81,16 @@
       loading: false,
       expandedId: "",
       recipientsByCampaign: new Map(),
+      historyPage: 1,
+      historyPageSize: 20,
+      historyFilters: {
+        platform: "",
+        channelId: "",
+        createdFrom: "",
+        createdTo: "",
+      },
+      recipientPage: 1,
+      recipientPageSize: 20,
       audienceSource: "contacts",
       uploadMode: "file",
       uploadHeaders: [],
@@ -8496,29 +8506,152 @@
     }
   }
 
+  function campaignHistoryPageSizeValue() {
+    const raw = state.campaigns.historyPageSize;
+    if (raw === "all" || raw === "All") return "all";
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 20;
+  }
+
+  function campaignRecipientPageSizeValue() {
+    const raw = state.campaigns.recipientPageSize;
+    if (raw === "all" || raw === "All") return "all";
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 20;
+  }
+
+  function campaignHistoryPlatform(campaign) {
+    return connectorPlatform(campaign?.connectorType)
+      || connectorPlatform(state.channels.find((channel) => channel.channelId === campaign?.channelId)?.connectorType)
+      || "";
+  }
+
+  function campaignCreatedDay(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function filteredCampaignHistory() {
+    const filters = state.campaigns.historyFilters || {};
+    const platform = String(filters.platform || "").trim();
+    const channelId = String(filters.channelId || "").trim();
+    const createdFrom = String(filters.createdFrom || "").trim();
+    const createdTo = String(filters.createdTo || "").trim();
+    return (state.campaigns.items || []).filter((campaign) => {
+      if (platform && campaignHistoryPlatform(campaign) !== platform) return false;
+      if (channelId && String(campaign.channelId || "") !== channelId) return false;
+      const createdDay = campaignCreatedDay(campaign.createdAt);
+      if (createdFrom && (!createdDay || createdDay < createdFrom)) return false;
+      if (createdTo && (!createdDay || createdDay > createdTo)) return false;
+      return true;
+    });
+  }
+
+  function syncCampaignHistoryFilterControls() {
+    const filters = state.campaigns.historyFilters || {};
+    const platformSelect = $("campaignHistoryPlatform");
+    const channelSelect = $("campaignHistoryChannel");
+    const fromInput = $("campaignHistoryCreatedFrom");
+    const toInput = $("campaignHistoryCreatedTo");
+    const pageSizeSelect = $("campaignHistoryPageSize");
+    const items = state.campaigns.items || [];
+    const platforms = [...new Set(items.map((item) => campaignHistoryPlatform(item)).filter(Boolean))]
+      .sort((a, b) => campaignPlatformLabel(a).localeCompare(campaignPlatformLabel(b)));
+    const channels = [...new Map(items
+      .filter((item) => item.channelId)
+      .map((item) => [item.channelId, item.channelName || item.channelId]))]
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+
+    if (platformSelect) {
+      const current = String(filters.platform || "");
+      platformSelect.replaceChildren(new Option("Any platform", ""));
+      for (const value of platforms) platformSelect.append(new Option(campaignPlatformLabel(value), value));
+      platformSelect.value = platforms.includes(current) ? current : "";
+      if (platformSelect.value !== current) state.campaigns.historyFilters.platform = platformSelect.value;
+    }
+    if (channelSelect) {
+      const current = String(filters.channelId || "");
+      channelSelect.replaceChildren(new Option("Any channel", ""));
+      for (const [id, name] of channels) channelSelect.append(new Option(name, id));
+      channelSelect.value = channels.some(([id]) => id === current) ? current : "";
+      if (channelSelect.value !== current) state.campaigns.historyFilters.channelId = channelSelect.value;
+    }
+    if (fromInput && fromInput.value !== String(filters.createdFrom || "")) {
+      fromInput.value = filters.createdFrom || "";
+    }
+    if (toInput && toInput.value !== String(filters.createdTo || "")) {
+      toInput.value = filters.createdTo || "";
+    }
+    if (pageSizeSelect) {
+      const size = campaignHistoryPageSizeValue();
+      pageSizeSelect.value = size === "all" ? "all" : String(size);
+    }
+  }
+
+  function clearCampaignHistoryFilters() {
+    state.campaigns.historyFilters = {
+      platform: "",
+      channelId: "",
+      createdFrom: "",
+      createdTo: "",
+    };
+    state.campaigns.historyPage = 1;
+    renderCampaignHistory();
+  }
+
   function renderCampaignHistory() {
     const body = $("campaignTableBody");
     const empty = $("campaignHistoryEmpty");
+    const loading = $("campaignHistoryLoading");
+    const wrap = $("campaignHistoryTableWrap");
+    const footer = $("campaignHistoryFooter");
+    const meta = $("campaignHistoryMeta");
+    const pageLabel = $("campaignHistoryPageLabel");
+    const prev = $("campaignHistoryPrev");
+    const next = $("campaignHistoryNext");
     if (!body) return;
+
+    syncCampaignHistoryFilterControls();
     body.replaceChildren();
-    const items = state.campaigns.items || [];
-    if (empty) empty.hidden = items.length > 0 || state.campaigns.loading;
-    if (!items.length) {
-      if (state.campaigns.loading) {
-        const row = document.createElement("tr");
-        row.innerHTML = `<td colspan="9"><span class="subtle">Loading campaigns…</span></td>`;
-        body.append(row);
-      }
+
+    const isLoading = Boolean(state.campaigns.loading);
+    if (loading) loading.hidden = !isLoading;
+    if (wrap) wrap.classList.toggle("is-loading", isLoading);
+
+    const items = filteredCampaignHistory();
+    const pageSize = campaignHistoryPageSizeValue();
+    const total = items.length;
+    const totalPages = pageSize === "all" ? 1 : Math.max(1, Math.ceil(total / pageSize) || 1);
+    if (state.campaigns.historyPage > totalPages) state.campaigns.historyPage = totalPages;
+    if (state.campaigns.historyPage < 1) state.campaigns.historyPage = 1;
+    const page = state.campaigns.historyPage;
+    const start = pageSize === "all" ? 0 : (page - 1) * pageSize;
+    const pageItems = pageSize === "all" ? items : items.slice(start, start + pageSize);
+
+    if (empty) empty.hidden = total > 0 || isLoading;
+    if (footer) footer.hidden = total < 1 && !isLoading;
+
+    if (!total && !isLoading) {
+      if (meta) meta.textContent = "";
+      if (pageLabel) pageLabel.textContent = "Page 1 of 1";
+      if (prev) prev.disabled = true;
+      if (next) next.disabled = true;
       return;
     }
-    for (const campaign of items) {
+
+    for (const campaign of pageItems) {
       const row = document.createElement("tr");
       row.className = "campaign-row";
       row.dataset.campaignId = campaign.campaignId;
-      if (state.campaigns.expandedId === campaign.campaignId) row.classList.add("is-open");
+      const expanded = state.campaigns.expandedId === campaign.campaignId;
+      if (expanded) row.classList.add("is-open");
       const statusClass = String(campaign.status || "").replace(/[^\w-]+/g, "_");
       row.innerHTML = `
-        <td><button class="campaign-expand-button" type="button" data-action="toggle-campaign-detail" data-campaign-id="${escapeHtml(campaign.campaignId)}" aria-expanded="${state.campaigns.expandedId === campaign.campaignId ? "true" : "false"}" aria-label="Show campaign details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></button></td>
         <td class="campaign-name-cell"><strong>${escapeHtml(campaign.name || "Campaign")}</strong><span>${escapeHtml(campaign.messageType === "template" ? (campaign.templateName || "Template") : "Text message")}</span></td>
         <td>${escapeHtml(campaign.channelName || campaign.channelId || "—")}</td>
         <td><span class="campaign-status-pill is-${escapeHtml(statusClass)}">${escapeHtml(campaignStatusLabel(campaign.status))}</span></td>
@@ -8526,41 +8659,99 @@
         <td>${Number(campaign.deliveredCount || 0)}</td>
         <td>${Number(campaign.readCount || 0)}</td>
         <td>${Number(campaign.failedCount || 0)}</td>
-        <td>${escapeHtml(formatCampaignTime(campaign.createdAt))}</td>`;
+        <td>${escapeHtml(formatCampaignTime(campaign.createdAt))}</td>
+        <td class="campaign-expand-col">
+          <button class="campaign-expand-button" type="button" data-action="toggle-campaign-detail" data-campaign-id="${escapeHtml(campaign.campaignId)}" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Hide campaign details" : "Show campaign details"}" title="${expanded ? "Collapse" : "Expand"}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+            <span class="campaign-expand-label">${expanded ? "Hide" : "Details"}</span>
+          </button>
+        </td>`;
       body.append(row);
-      if (state.campaigns.expandedId === campaign.campaignId) {
+      if (expanded) {
         const detail = document.createElement("tr");
         detail.className = "campaign-detail-row";
         detail.dataset.campaignDetail = campaign.campaignId;
         const recipients = state.campaigns.recipientsByCampaign.get(campaign.campaignId) || [];
-        detail.innerHTML = `<td colspan="9">${renderCampaignRecipientTable(recipients)}</td>`;
+        const loaded = state.campaigns.recipientsByCampaign.has(campaign.campaignId);
+        detail.innerHTML = `<td colspan="9">${renderCampaignRecipientTable(recipients, { loaded })}</td>`;
         body.append(detail);
       }
     }
+
+    if (meta) {
+      if (isLoading && !total) meta.textContent = "Loading campaigns…";
+      else if (!total) meta.textContent = "0 campaigns";
+      else if (pageSize === "all") meta.textContent = `${total.toLocaleString()} campaign${total === 1 ? "" : "s"}`;
+      else {
+        const from = start + 1;
+        const to = Math.min(start + pageSize, total);
+        meta.textContent = `${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()} campaign${total === 1 ? "" : "s"}`;
+      }
+    }
+    if (pageLabel) pageLabel.textContent = `Page ${page} of ${totalPages}`;
+    if (prev) prev.disabled = page <= 1 || pageSize === "all";
+    if (next) next.disabled = page >= totalPages || !total || pageSize === "all";
   }
 
-  function renderCampaignRecipientTable(recipients) {
-    if (!recipients.length) {
-      return `<div class="subtle" style="padding:14px 16px">Loading recipient details…</div>`;
+  function renderCampaignRecipientTable(recipients, { loaded = false } = {}) {
+    if (!loaded) {
+      return `<div class="campaign-recipient-loading"><span class="auth-spinner" aria-hidden="true"></span><span>Loading recipient details…</span></div>`;
     }
-    const rows = recipients.map((recipient) => `
+    if (!recipients.length) {
+      return `<div class="subtle campaign-recipient-empty">No recipients for this campaign.</div>`;
+    }
+    const pageSize = campaignRecipientPageSizeValue();
+    const total = recipients.length;
+    const totalPages = pageSize === "all" ? 1 : Math.max(1, Math.ceil(total / pageSize) || 1);
+    if (state.campaigns.recipientPage > totalPages) state.campaigns.recipientPage = totalPages;
+    if (state.campaigns.recipientPage < 1) state.campaigns.recipientPage = 1;
+    const page = state.campaigns.recipientPage;
+    const start = pageSize === "all" ? 0 : (page - 1) * pageSize;
+    const pageItems = pageSize === "all" ? recipients : recipients.slice(start, start + pageSize);
+    const rows = pageItems.map((recipient) => `
       <tr>
         <td>${escapeHtml(recipient.displayName || recipient.profileId || recipient.contactId || "—")}</td>
         <td>${escapeHtml(recipient.profileId || "—")}</td>
         <td><span class="campaign-status-pill is-${escapeHtml(String(recipient.status || "").replace(/[^\w-]+/g, "_"))}">${escapeHtml(campaignStatusLabel(recipient.status))}</span></td>
         <td>${escapeHtml(recipient.error || recipient.messageText || "—")}</td>
       </tr>`).join("");
-    return `<table class="campaign-recipient-table"><thead><tr><th>Recipient</th><th>ID</th><th>Status</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table>`;
+    const meta = pageSize === "all"
+      ? `${total.toLocaleString()} recipient${total === 1 ? "" : "s"}`
+      : `${(start + 1).toLocaleString()}–${Math.min(start + pageSize, total).toLocaleString()} of ${total.toLocaleString()}`;
+    const sizeOptions = [20, 50, 100, 500, 1000, "all"]
+      .map((value) => {
+        const selected = String(pageSize) === String(value) ? "selected" : "";
+        const label = value === "all" ? "All" : String(value);
+        return `<option value="${value}" ${selected}>${label}</option>`;
+      })
+      .join("");
+    return `<div class="campaign-recipient-panel">
+      <table class="campaign-recipient-table"><thead><tr><th>Recipient</th><th>ID</th><th>Status</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="campaign-recipient-footer">
+        <p class="subtle campaign-recipient-meta">${escapeHtml(meta)}</p>
+        <div class="campaign-history-pagination">
+          <label class="campaign-page-size" for="campaignRecipientPageSize">
+            <span class="sr-only">Recipients per page</span>
+            <select class="text-field compact-select" id="campaignRecipientPageSize" data-campaign-recipient-page-size="1">${sizeOptions}</select>
+          </label>
+          <button class="secondary-button compact-button" type="button" data-action="campaign-recipient-prev" ${page <= 1 || pageSize === "all" ? "disabled" : ""}>Prev</button>
+          <span class="campaign-page-chip">Page ${page} of ${totalPages}</span>
+          <button class="secondary-button compact-button" type="button" data-action="campaign-recipient-next" ${page >= totalPages || pageSize === "all" ? "disabled" : ""}>Next</button>
+        </div>
+      </div>
+    </div>`;
   }
 
   async function toggleCampaignDetail(campaignId) {
     if (!campaignId) return;
     if (state.campaigns.expandedId === campaignId) {
       state.campaigns.expandedId = "";
+      state.campaigns.recipientPage = 1;
       renderCampaignHistory();
       return;
     }
     state.campaigns.expandedId = campaignId;
+    state.campaigns.recipientPage = 1;
     renderCampaignHistory();
     await loadCampaignDetail(campaignId);
   }
@@ -11767,6 +11958,30 @@
           toggleCampaignDetail(actionButton.dataset.campaignId);
           return;
         }
+        if (actionButton.dataset.action === "campaign-clear-history-filters") {
+          clearCampaignHistoryFilters();
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-history-prev") {
+          state.campaigns.historyPage = Math.max(1, (state.campaigns.historyPage || 1) - 1);
+          renderCampaignHistory();
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-history-next") {
+          state.campaigns.historyPage = (state.campaigns.historyPage || 1) + 1;
+          renderCampaignHistory();
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-recipient-prev") {
+          state.campaigns.recipientPage = Math.max(1, (state.campaigns.recipientPage || 1) - 1);
+          renderCampaignHistory();
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-recipient-next") {
+          state.campaigns.recipientPage = (state.campaigns.recipientPage || 1) + 1;
+          renderCampaignHistory();
+          return;
+        }
         if (actionButton.dataset.action === "campaign-add-selected-contacts") {
           addSelectedContactsToCampaign();
           return;
@@ -12272,6 +12487,40 @@
         state.campaigns.uploadMode = input.value === "url" ? "url" : "file";
         renderCampaignCreateForm();
       });
+    });
+    $("campaignHistoryPlatform")?.addEventListener("change", (event) => {
+      state.campaigns.historyFilters.platform = event.target.value || "";
+      state.campaigns.historyPage = 1;
+      renderCampaignHistory();
+    });
+    $("campaignHistoryChannel")?.addEventListener("change", (event) => {
+      state.campaigns.historyFilters.channelId = event.target.value || "";
+      state.campaigns.historyPage = 1;
+      renderCampaignHistory();
+    });
+    $("campaignHistoryCreatedFrom")?.addEventListener("change", (event) => {
+      state.campaigns.historyFilters.createdFrom = event.target.value || "";
+      state.campaigns.historyPage = 1;
+      renderCampaignHistory();
+    });
+    $("campaignHistoryCreatedTo")?.addEventListener("change", (event) => {
+      state.campaigns.historyFilters.createdTo = event.target.value || "";
+      state.campaigns.historyPage = 1;
+      renderCampaignHistory();
+    });
+    $("campaignHistoryPageSize")?.addEventListener("change", (event) => {
+      const value = event.target.value === "all" ? "all" : Number(event.target.value) || 20;
+      state.campaigns.historyPageSize = value;
+      state.campaigns.historyPage = 1;
+      renderCampaignHistory();
+    });
+    $("campaignHistoryPanel")?.addEventListener("change", (event) => {
+      const select = event.target.closest("[data-campaign-recipient-page-size]");
+      if (!select) return;
+      const value = select.value === "all" ? "all" : Number(select.value) || 20;
+      state.campaigns.recipientPageSize = value;
+      state.campaigns.recipientPage = 1;
+      renderCampaignHistory();
     });
     $("campaignContactSearch")?.addEventListener("input", (event) => {
       state.campaigns.contactFilter = event.target.value || "";
