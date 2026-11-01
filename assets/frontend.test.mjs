@@ -571,7 +571,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261101-deeplink-filters-none/);
+  assert.match(html, /app\.js\?v=20261101-compose-taller/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -919,8 +919,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261101-deeplink-filters-none/);
-  assert.match(html, /assets\/styles\.css\?v=20261101-deeplink-filters-none/);
+  assert.match(html, /assets\/app\.js\?v=20261101-compose-taller/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-compose-taller/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   // Inbound customer names must not render on the bubble; only outbound sender_name on the route line.
@@ -945,7 +945,7 @@ test("the first opened chat restores the composer after the panel is visible", (
   assert.match(app, /function scheduleComposerResize\(\)/);
   assert.match(app, /if \(next > 0\) input\.style\.height = `\$\{next\}px`/);
   assert.match(app, /scheduleComposerResize\(\)/);
-  assert.match(styles, /\.composer textarea\s*\{[^}]*min-height:\s*24px/);
+  assert.match(styles, /\.composer textarea\s*\{[^}]*min-height:\s*36px/);
 });
 
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {
