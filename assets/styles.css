@@ -385,8 +385,23 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   font-weight: 600;
   color: var(--ink);
   cursor: pointer;
+  user-select: none;
 }
-.bulk-select-all input { width: 15px; height: 15px; accent-color: var(--brand); }
+.bulk-select-all input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--brand);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.bulk-select-all input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.bulk-select-all:has(input:disabled) {
+  cursor: not-allowed;
+  color: #8a9491;
+}
 .bulk-action-buttons { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 .conversation-item.is-select-mode {
   grid-template-columns: 22px 42px minmax(0, 1fr) auto;
