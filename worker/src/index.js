@@ -1871,6 +1871,7 @@ async function handleFacebookMessengerWebhook(request, env, channelId, ctx) {
       normalized.recipientIds.some(id => id !== expectedPageId))) {
     return json({ ok: false, error: 'Webhook Facebook Page does not match this channel.' }, 403);
   }
+  await enrichFacebookMessengerDisplayNames(env, channel, credentials, normalized.messages);
   let received = 0;
   let latestInbound = null;
   for (const event of normalized.messages) {
@@ -1893,6 +1894,8 @@ async function handleFacebookMessengerWebhook(request, env, channelId, ctx) {
     updatedStatuses += changes.length;
     statusChanges.push(...changes);
   }
+  await refreshFacebookMessengerPlaceholderProfiles(env, channel, credentials,
+    facebookMessengerCustomerIds(payload, expectedPageId)).catch(() => {});
   await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
   await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
   if (received || updatedStatuses) {
@@ -1961,6 +1964,8 @@ async function handleFacebookMessengerAppWebhook(request, env, requestedAppId, c
     if (normalized.recipientIds.some(id => id !== route.pageId)) {
       throw httpError(400, 'Messenger app webhook page routing is inconsistent.');
     }
+    const credentials = await readChannelCredentials(env, route.channel);
+    await enrichFacebookMessengerDisplayNames(env, route.channel, credentials, normalized.messages);
     let channelReceived = 0;
     let latestInbound = null;
     for (const event of normalized.messages) {
@@ -1984,6 +1989,8 @@ async function handleFacebookMessengerAppWebhook(request, env, requestedAppId, c
       channelStatuses += changes.length;
       statusChanges.push(...changes);
     }
+    await refreshFacebookMessengerPlaceholderProfiles(env, route.channel, credentials,
+      facebookMessengerCustomerIds(route.payload, route.pageId)).catch(() => {});
     await updateChannelRuntimeConfig(env, route.channel, { lastWebhookAt: now });
     await broadcastMessageStatusChanges(env, route.channel.workspaceId, statusChanges);
     if (channelReceived || channelStatuses) {
@@ -2550,6 +2557,7 @@ async function verifyFacebookMessengerChannel(env, channel) {
     verifiedProviderId: pageId,
     verifiedName: String(data.name || channel.config?.pageName || '')
   });
+  await refreshFacebookMessengerPlaceholderProfiles(env, channel, credentials).catch(() => {});
   return {
     ok: true,
     channelId: channel.channelId,
@@ -6635,6 +6643,8 @@ async function storeInbound(env, channel, event, rawPayload) {
       }
     }
   }
+  identity = await upgradeInboundContactDisplayName(env, channel.workspaceId, identity, profileId,
+    event.displayName, now);
   const conversationId = await ensureIdentityConversation(env, channel.workspaceId, identity.contact_id,
     identity.identity_id, channel.channelId, '');
   const conversation = { conversation_id: conversationId };
@@ -8082,6 +8092,7 @@ export function normalizeFacebookMessenger(payload) {
           : `[Facebook ${String(message?.attachments?.[0]?.type || 'message').replace(/_/g, ' ')} received]`));
       messages.push({
         channelProfileId: senderId,
+        // Messenger webhooks omit profile names; enrichFacebookMessengerDisplayNames fills this.
         displayName: senderId,
         text,
         providerMessageId: String(message?.mid || postback?.mid || `${entry?.id || recipientId}:${event?.timestamp || ''}:${senderId}`),
@@ -8092,6 +8103,123 @@ export function normalizeFacebookMessenger(payload) {
     }
   }
   return { messages, statuses, watermarkStatuses, recipientIds: [...recipientIds] };
+}
+
+export function facebookMessengerProfileNameFromGraph(data) {
+  const name = String(data?.name || '').trim();
+  if (name) return name.slice(0, 120);
+  const composed = [data?.first_name, data?.last_name].map(part => String(part || '').trim()).filter(Boolean).join(' ');
+  return composed.slice(0, 120);
+}
+
+export async function fetchFacebookMessengerProfileName(channel, credentials, psid, fetchImpl = fetch) {
+  const profileId = String(psid || '').trim();
+  const token = String(credentials?.accessToken || '');
+  if (!profileId || !token) return '';
+  const version = metaApiVersion(channel?.config?.apiVersion);
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(profileId)}`);
+  endpoint.searchParams.set('fields', 'name,first_name,last_name');
+  const response = await fetchImpl(endpoint, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) return '';
+  return facebookMessengerProfileNameFromGraph(data);
+}
+
+async function enrichFacebookMessengerDisplayNames(env, channel, credentials, messages, fetchImpl = fetch) {
+  if (!Array.isArray(messages) || !messages.length) return messages;
+  const cache = new Map();
+  for (const event of messages) {
+    const psid = String(event?.channelProfileId || '').trim();
+    if (!psid) continue;
+    const current = String(event.displayName || '').trim();
+    if (current && current !== psid) continue;
+    if (!cache.has(psid)) {
+      const name = await fetchFacebookMessengerProfileName(channel, credentials, psid, fetchImpl).catch(() => '');
+      cache.set(psid, name);
+    }
+    const resolved = cache.get(psid);
+    if (resolved) event.displayName = resolved;
+  }
+  return messages;
+}
+
+async function upgradeInboundContactDisplayName(env, workspaceId, identity, profileId, displayName, now) {
+  const name = String(displayName || '').trim().slice(0, 120);
+  if (!identity?.contact_id || !identity?.identity_id || !name || name === String(profileId || '')) {
+    return identity;
+  }
+  const current = String(identity.contact_display_name || '').trim();
+  if (current && current !== String(profileId || '')) return identity;
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE contacts SET display_name=?3,updated_at=?4
+      WHERE workspace_id=?1 AND contact_id=?2`)
+      .bind(workspaceId, identity.contact_id, name, now),
+    env.DB.prepare(`UPDATE contact_identities SET display_name=?3,updated_at=?4
+      WHERE workspace_id=?1 AND identity_id=?2`)
+      .bind(workspaceId, identity.identity_id, name, now),
+    env.DB.prepare(`UPDATE conversations SET subject=?3,updated_at=?4
+      WHERE workspace_id=?1 AND contact_id=?2
+        AND (subject='' OR subject=?5)`)
+      .bind(workspaceId, identity.contact_id, name, now, String(profileId || ''))
+  ]);
+  return { ...identity, contact_display_name: name };
+}
+
+function facebookMessengerCustomerIds(payload, pageId) {
+  const page = String(pageId || '');
+  const ids = new Set();
+  for (const entry of payload?.entry || []) {
+    for (const event of entry?.messaging || []) {
+      const senderId = String(event?.sender?.id || '');
+      if (senderId && senderId !== page) ids.add(senderId);
+    }
+  }
+  return [...ids];
+}
+
+async function refreshFacebookMessengerPlaceholderProfiles(env, channel, credentials, profileIds = null, fetchImpl = fetch) {
+  const workspaceId = channel.workspaceId;
+  const channelId = channel.channelId;
+  let rows;
+  if (Array.isArray(profileIds) && profileIds.length) {
+    const unique = [...new Set(profileIds.map(id => String(id || '').trim()).filter(Boolean))].slice(0, 50);
+    rows = [];
+    for (const psid of unique) {
+      const row = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name,
+          b.scoped_profile_id AS profile_id
+        FROM channel_identity_bindings b
+        JOIN contact_identities ci ON ci.identity_id=b.identity_id AND ci.workspace_id=b.workspace_id
+        JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+        WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1
+        LIMIT 1`).bind(workspaceId, channelId, psid).first();
+      if (row) rows.push(row);
+    }
+  } else {
+    const result = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name,
+        b.scoped_profile_id AS profile_id
+      FROM channel_identity_bindings b
+      JOIN contact_identities ci ON ci.identity_id=b.identity_id AND ci.workspace_id=b.workspace_id
+      JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+      WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.active=1
+        AND (c.display_name='' OR c.display_name=b.scoped_profile_id)
+      ORDER BY c.updated_at DESC LIMIT 50`).bind(workspaceId, channelId).all();
+    rows = result.results || [];
+  }
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    const profileId = String(row.profile_id || '');
+    const current = String(row.contact_display_name || '');
+    if (!profileId || (current && current !== profileId)) continue;
+    const name = await fetchFacebookMessengerProfileName(channel, credentials, profileId, fetchImpl).catch(() => '');
+    if (!name) continue;
+    await upgradeInboundContactDisplayName(env, workspaceId, {
+      identity_id: row.identity_id,
+      contact_id: row.contact_id,
+      contact_display_name: current
+    }, profileId, name, now);
+  }
 }
 
 function messengerInboundAttachment(message) {
