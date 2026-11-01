@@ -1533,58 +1533,65 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
 }
 .campaign-audience-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.campaign-contact-list {
-  max-height: 320px; overflow: auto;
-  border: 1px solid #e6e9e6; border-radius: 10px; background: #fff;
+.campaign-contact-table,
+.campaign-audience-table {
+  overflow: hidden; border: 1px solid #e3e7e4; border-radius: 10px; background: #fff;
+}
+.campaign-contact-head,
+.campaign-contact-item,
+.campaign-audience-head,
+.campaign-audience-row {
+  display: grid;
+  grid-template-columns: 28px minmax(120px, 1.3fr) minmax(120px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr);
+  gap: 8px; align-items: center; min-width: 720px;
+}
+.campaign-audience-head,
+.campaign-audience-row {
+  grid-template-columns: minmax(140px, 1.2fr) minmax(140px, 1fr) 72px;
+  min-width: 0;
+}
+.campaign-contact-head,
+.campaign-audience-head {
+  border-bottom: 1px solid #e8ebe9; background: #f7f9f8; padding: 7px 10px;
+  color: #60706b; font-size: 10px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase;
+}
+.campaign-contact-list,
+.campaign-audience-rows {
+  max-height: 280px; overflow: auto;
 }
 .campaign-upload-preview {
   max-height: 240px; overflow: auto;
   border: 1px solid #e6e9e6; border-radius: 10px; background: #fff;
 }
-.campaign-contact-item, .campaign-selected-item, .campaign-upload-row {
-  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: center;
-  padding: 7px 10px; border-bottom: 1px solid #eceae6;
+.campaign-contact-item, .campaign-selected-item, .campaign-upload-row, .campaign-audience-row {
+  padding: 6px 10px; border-bottom: 1px solid #eef1ef;
 }
-.campaign-contact-item:last-child, .campaign-selected-item:last-child, .campaign-upload-row:last-child { border-bottom: 0; }
-.campaign-contact-cols {
-  display: grid; grid-template-columns: minmax(110px, 1.2fr) minmax(110px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr);
-  gap: 8px; align-items: center; min-width: 0;
-}
+.campaign-contact-item:last-child, .campaign-selected-item:last-child, .campaign-upload-row:last-child,
+.campaign-audience-row:last-child { border-bottom: 0; }
+.campaign-contact-item:hover, .campaign-audience-row:hover { background: #fafbfa; }
+.campaign-contact-check { display: grid; place-items: center; }
 .campaign-contact-name { color: var(--ink); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .campaign-contact-id,
 .campaign-contact-company,
 .campaign-contact-tags {
   color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.campaign-empty-state { color: var(--muted); padding: 12px 10px; font-size: 11px; }
+.campaign-empty-state { color: var(--muted); padding: 14px 12px; font-size: 11px; }
+.campaign-contact-footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+}
+.campaign-contact-pagination {
+  display: inline-flex; align-items: center; gap: 8px;
+}
 .campaign-sending-list-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
 .campaign-sending-list-head .field-label-text { color: var(--ink); font-size: 11px; font-weight: 700; }
-.campaign-audience-tags {
-  display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px;
-  min-height: 88px; max-height: 180px; overflow: auto;
-  border: 1px solid #e2e6e3; border-radius: 10px; background: #fff; padding: 10px;
+.campaign-audience-remove {
+  justify-self: end; border: 0; border-radius: 6px; background: transparent; color: #7a8782;
+  padding: 4px 6px; font-size: 10px; font-weight: 700; cursor: pointer;
 }
-.campaign-audience-empty { color: var(--muted); font-size: 12px; font-weight: 650; align-self: center; }
-.campaign-audience-tag {
-  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
-  border: 1px solid #d7e2dc; border-radius: 999px; background: #f3f8f5; color: var(--ink);
-  padding: 6px 8px 6px 12px;
-}
-.campaign-audience-tag-label { display: grid; gap: 1px; min-width: 0; }
-.campaign-audience-tag-label strong {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 750;
-}
-.campaign-audience-tag-label span {
-  overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 10px;
-}
-.campaign-audience-tag-remove {
-  display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 auto;
-  border: 0; border-radius: 999px; background: rgba(23, 24, 39, .06); color: #51615c;
-  font-size: 14px; line-height: 1; cursor: pointer;
-}
-.campaign-audience-tag-remove:hover { background: rgba(23, 24, 39, .12); color: var(--ink); }
+.campaign-audience-remove:hover { background: #f2f4f3; color: var(--ink); }
 .campaign-mapping { display: grid; gap: 10px; }
 .campaign-mapping-row {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, 220px); gap: 10px; align-items: center;
@@ -1625,12 +1632,11 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-create-actions .subtle { margin: 0; max-width: 460px; line-height: 1.5; }
 @media (max-width: 980px) {
   .campaign-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .campaign-contact-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .campaign-message-layout { grid-template-columns: 1fr; }
   .campaign-message-preview { position: static; }
 }
 @media (max-width: 720px) {
-  .campaign-create-grid, .campaign-mapping-row, .campaign-variable-row, .campaign-filter-grid, .campaign-contact-cols { grid-template-columns: 1fr; }
+  .campaign-create-grid, .campaign-mapping-row, .campaign-variable-row, .campaign-filter-grid { grid-template-columns: 1fr; }
   .campaign-create-actions { align-items: stretch; flex-direction: column-reverse; }
   .campaign-create-action-buttons { width: 100%; }
   .campaign-create-action-buttons .primary-button,

@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-uncap">
-  <script src="./assets/app.js?v=20261101-campaign-uncap" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-pages">
+  <script src="./assets/app.js?v=20261101-campaign-pages" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -582,18 +582,41 @@
                   </div>
                   <div class="campaign-audience-actions">
                     <label class="bulk-select-all"><input type="checkbox" id="campaignContactSelectAll"><span>Select all filtered</span></label>
-                    <button class="secondary-button compact-button" type="button" data-action="campaign-add-selected-contacts">Add to campaign</button>
+                    <button class="primary-button compact-button" type="button" data-action="campaign-add-selected-contacts" id="campaignAddSelected" disabled>Add to campaign</button>
                   </div>
                 </div>
-                <div class="campaign-contact-list" id="campaignContactList"></div>
-                <p class="subtle" id="campaignContactListMeta"></p>
+                <div class="campaign-contact-table" id="campaignContactTable">
+                  <div class="campaign-contact-head" aria-hidden="true">
+                    <span class="campaign-contact-check"></span>
+                    <span>Name</span>
+                    <span>ID</span>
+                    <span>Company</span>
+                    <span>Tags</span>
+                  </div>
+                  <div class="campaign-contact-list" id="campaignContactList"></div>
+                </div>
+                <div class="campaign-contact-footer">
+                  <p class="subtle" id="campaignContactListMeta"></p>
+                  <div class="campaign-contact-pagination" id="campaignContactPagination" hidden>
+                    <button class="secondary-button compact-button" type="button" data-action="campaign-contact-prev" id="campaignContactPrev">Previous</button>
+                    <span class="subtle" id="campaignContactPageLabel"></span>
+                    <button class="secondary-button compact-button" type="button" data-action="campaign-contact-next" id="campaignContactNext">Next</button>
+                  </div>
+                </div>
                 <div class="campaign-sending-list-head">
                   <span class="field-label-text">Campaign sending list</span>
                   <button class="secondary-button compact-button" type="button" data-action="campaign-clear-audience" id="campaignClearAudience">Clear all</button>
                 </div>
-                <div class="campaign-audience-tags" id="campaignAudienceTags" role="list" aria-live="polite" aria-label="Campaign sending list"></div>
+                <div class="campaign-audience-table" id="campaignAudienceTable">
+                  <div class="campaign-audience-head" aria-hidden="true">
+                    <span>Name</span>
+                    <span>ID</span>
+                    <span></span>
+                  </div>
+                  <div class="campaign-audience-rows" id="campaignAudienceTags" role="list" aria-live="polite" aria-label="Campaign sending list"></div>
+                </div>
                 <input type="hidden" id="campaignAudienceInput" value="">
-                <p class="subtle" id="campaignAudienceHelp">Added contacts appear as tags.</p>
+                <p class="subtle" id="campaignAudienceHelp">No recipients added yet.</p>
               </div>
 
               <div id="campaignUploadAudience" hidden>
