@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-layout-3";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-platform-rows";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -357,6 +357,22 @@
             bindings: [{ channelId: channel.channelId, channelName: channel.name }],
           }],
         });
+        // Give every 5th demo contact a second messaging platform so campaign
+        // pickers can show one row per platform ID.
+        if (n % 5 === 0) {
+          const extraChannel = channels[(index + 1) % channels.length];
+          const extraPlatform = connectorPlatform(extraChannel.connectorType);
+          const primaryPlatform = connectorPlatform(channel.connectorType);
+          if (extraPlatform && extraPlatform !== primaryPlatform) {
+            this.data.contacts[this.data.contacts.length - 1].identities.push({
+              identityId: `identity-demo-${n}-extra`,
+              platform: extraPlatform,
+              profileId: `demo-${n}-${extraPlatform}`,
+              isPrimary: false,
+              bindings: [{ channelId: extraChannel.channelId, channelName: extraChannel.name }],
+            });
+          }
+        }
       }
       for (let index = this.data.conversations.length; index < CONVERSATION_PAGE_SIZE + 40; index += 1) {
         const n = index + 1;
@@ -8726,9 +8742,66 @@
     return String(contact.contactId || "").trim();
   }
 
-  function formatCampaignAudienceEntry(contact) {
+  function campaignAudienceRowKey(contactId, platform = "") {
+    return `${String(contactId || "")}::${String(platform || "")}`;
+  }
+
+  function parseCampaignAudienceRowKey(key) {
+    const value = String(key || "");
+    const index = value.lastIndexOf("::");
+    if (index < 0) return { contactId: value, platform: "" };
+    return {
+      contactId: value.slice(0, index),
+      platform: value.slice(index + 2),
+    };
+  }
+
+  function campaignPlatformLabel(platform) {
+    if (!platform) return "—";
+    return identityPlatforms[platform]?.label || capitalize(platform);
+  }
+
+  function campaignContactPlatformRows(contact) {
+    if (!contact?.contactId) return [];
+    const ids = contactPlatformIds(contact);
+    const messagingPlatforms = Object.keys(identityPlatforms).filter((platform) => platform !== "email");
+    const rows = messagingPlatforms
+      .filter((platform) => String(ids[platform] || "").trim())
+      .map((platform) => ({
+        contact,
+        contactId: contact.contactId,
+        platform,
+        profileId: String(ids[platform]).trim(),
+        rowKey: campaignAudienceRowKey(contact.contactId, platform),
+      }));
+    if (rows.length) return rows;
+    const fallbackId = campaignContactMessagingId(contact) || contact.contactId;
+    return [{
+      contact,
+      contactId: contact.contactId,
+      platform: "",
+      profileId: String(fallbackId || "").trim(),
+      rowKey: campaignAudienceRowKey(contact.contactId, ""),
+    }];
+  }
+
+  function filteredCampaignContactRows() {
+    const selectedPlatforms = state.campaigns.contactFilters?.platforms || new Set();
+    let rows = filteredCampaignContacts().flatMap(campaignContactPlatformRows);
+    if (selectedPlatforms.size) {
+      rows = rows.filter((row) => row.platform && selectedPlatforms.has(row.platform));
+    }
+    return rows;
+  }
+
+  function formatCampaignAudienceEntry(contact, platform = "") {
     const name = String(contact?.displayName || contact?.contactId || "Contact").trim();
-    const id = campaignContactMessagingId(contact);
+    const ids = contactPlatformIds(contact || {});
+    const id = platform && ids[platform]
+      ? String(ids[platform])
+      : campaignContactMessagingId(contact);
+    const platformLabel = platform ? campaignPlatformLabel(platform) : "";
+    if (id && platformLabel) return `${name} [${platformLabel}] <${id}>`;
     return id ? `${name} <${id}>` : name;
   }
 
@@ -8913,38 +8986,41 @@
   function renderCampaignContactPicker() {
     const host = $("campaignContactList");
     if (!host) return;
-    const contacts = filteredCampaignContacts();
-    state.campaigns.contactCandidates = contacts;
+    const rows = filteredCampaignContactRows();
+    state.campaigns.contactCandidates = rows;
     const pageSize = CAMPAIGN_CONTACT_PAGE_SIZE;
-    const totalPages = Math.max(1, Math.ceil(contacts.length / pageSize) || 1);
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize) || 1);
     if (state.campaigns.contactPage > totalPages) state.campaigns.contactPage = totalPages;
     if (state.campaigns.contactPage < 1) state.campaigns.contactPage = 1;
     const page = state.campaigns.contactPage;
     const start = (page - 1) * pageSize;
-    const pageItems = contacts.slice(start, start + pageSize);
+    const pageItems = rows.slice(start, start + pageSize);
     const loading = state.campaigns.catalogueLoading && !state.campaigns.catalogueLoaded;
+    const contactCount = filteredCampaignContacts().length;
     const expectedTotal = Math.max(
       Number(state.campaigns.catalogueExpectedTotal) || 0,
       Number(state.contactTotal) || 0,
-      contacts.length,
+      contactCount,
     );
     host.replaceChildren();
-    if (loading && !contacts.length) {
+    if (loading && !rows.length) {
       host.innerHTML = `<div class="campaign-empty-state">Loading contacts…</div>`;
-    } else if (state.campaigns.catalogueError && !contacts.length) {
+    } else if (state.campaigns.catalogueError && !rows.length) {
       host.innerHTML = `<div class="campaign-empty-state">${escapeHtml(state.campaigns.catalogueError)}</div>`;
-    } else if (!contacts.length) {
+    } else if (!rows.length) {
       host.innerHTML = `<div class="campaign-empty-state">No contacts match these filters.</div>`;
     } else {
-      for (const contact of pageItems) {
+      for (const item of pageItems) {
         const row = document.createElement("label");
         row.className = "campaign-contact-item";
-        const checked = state.campaigns.selectedContactIds.has(contact.contactId);
-        const messagingId = campaignContactMessagingId(contact) || "—";
-        const company = String(contact.company || "").trim() || "—";
-        const tags = campaignContactTagsLabel(contact);
-        row.innerHTML = `<span class="campaign-contact-check"><input type="checkbox" data-campaign-contact-id="${escapeHtml(contact.contactId)}" ${checked ? "checked" : ""}></span>
-          <span class="campaign-contact-name" title="${escapeHtml(contact.displayName || "Contact")}">${escapeHtml(contact.displayName || "Contact")}</span>
+        const checked = state.campaigns.selectedContactIds.has(item.rowKey);
+        const messagingId = item.profileId || "—";
+        const platformLabel = campaignPlatformLabel(item.platform);
+        const company = String(item.contact.company || "").trim() || "—";
+        const tags = campaignContactTagsLabel(item.contact);
+        row.innerHTML = `<span class="campaign-contact-check"><input type="checkbox" data-campaign-row-key="${escapeHtml(item.rowKey)}" ${checked ? "checked" : ""}></span>
+          <span class="campaign-contact-name" title="${escapeHtml(item.contact.displayName || "Contact")}">${escapeHtml(item.contact.displayName || "Contact")}</span>
+          <span class="campaign-contact-platform" title="${escapeHtml(platformLabel)}">${escapeHtml(platformLabel)}</span>
           <span class="campaign-contact-id" title="${escapeHtml(messagingId)}">${escapeHtml(messagingId)}</span>
           <span class="campaign-contact-company" title="${escapeHtml(company)}">${escapeHtml(company)}</span>
           <span class="campaign-contact-tags" title="${escapeHtml(tags)}">${escapeHtml(tags)}</span>`;
@@ -8953,38 +9029,38 @@
     }
     const selectAll = $("campaignContactSelectAll");
     if (selectAll) {
-      const filteredIds = contacts.map((contact) => contact.contactId);
-      selectAll.disabled = loading || filteredIds.length < 1;
-      selectAll.checked = !loading && filteredIds.length > 0 && filteredIds.every((id) => state.campaigns.selectedContactIds.has(id));
-      selectAll.indeterminate = !selectAll.checked && filteredIds.some((id) => state.campaigns.selectedContactIds.has(id));
+      const filteredKeys = rows.map((item) => item.rowKey);
+      selectAll.disabled = loading || filteredKeys.length < 1;
+      selectAll.checked = !loading && filteredKeys.length > 0 && filteredKeys.every((key) => state.campaigns.selectedContactIds.has(key));
+      selectAll.indeterminate = !selectAll.checked && filteredKeys.some((key) => state.campaigns.selectedContactIds.has(key));
       selectAll.title = loading ? "Loading all contacts…" : "Select all filtered contacts";
     }
     const meta = $("campaignContactListMeta");
     if (meta) {
       const selected = state.campaigns.selectedContactIds.size;
-      if (loading && !contacts.length) meta.textContent = "Loading contacts…";
+      if (loading && !rows.length) meta.textContent = "Loading contacts…";
       else if (loading) {
-        meta.textContent = `Loading contacts… ${contacts.length.toLocaleString()}${expectedTotal > contacts.length ? ` of ${expectedTotal.toLocaleString()}` : ""} loaded`;
-      } else if (!contacts.length) meta.textContent = "0 contacts";
+        meta.textContent = `Loading contacts… ${contactCount.toLocaleString()}${expectedTotal > contactCount ? ` of ${expectedTotal.toLocaleString()}` : ""} loaded`;
+      } else if (!rows.length) meta.textContent = "0 contacts";
       else {
         const from = start + 1;
-        const to = Math.min(start + pageSize, contacts.length);
-        meta.textContent = `${from.toLocaleString()}–${to.toLocaleString()} of ${contacts.length.toLocaleString()} · ${selected.toLocaleString()} selected across all pages`;
+        const to = Math.min(start + pageSize, rows.length);
+        meta.textContent = `${from.toLocaleString()}–${to.toLocaleString()} of ${rows.length.toLocaleString()} · ${selected.toLocaleString()} selected across all pages`;
       }
     }
     const pagination = $("campaignContactPagination");
     const pageLabel = $("campaignContactPageLabel");
     const prev = $("campaignContactPrev");
     const next = $("campaignContactNext");
-    const showPagination = contacts.length > pageSize || expectedTotal > pageSize;
+    const showPagination = rows.length > pageSize;
     if (pagination) pagination.hidden = !showPagination;
     if (pageLabel) {
-      pageLabel.textContent = loading && expectedTotal > contacts.length
+      pageLabel.textContent = loading && expectedTotal > contactCount
         ? `Page ${page} · loading…`
         : `Page ${page} of ${totalPages}`;
     }
     if (prev) prev.disabled = page <= 1;
-    if (next) next.disabled = page >= totalPages || !contacts.length;
+    if (next) next.disabled = page >= totalPages || !rows.length;
     updateCampaignAddSelectedButton();
   }
 
@@ -9011,9 +9087,9 @@
 
   function addSelectedContactsToCampaign() {
     let added = 0;
-    for (const contactId of state.campaigns.selectedContactIds) {
-      if (state.campaigns.audienceContactIds.has(contactId)) continue;
-      state.campaigns.audienceContactIds.add(contactId);
+    for (const rowKey of state.campaigns.selectedContactIds) {
+      if (state.campaigns.audienceContactIds.has(rowKey)) continue;
+      state.campaigns.audienceContactIds.add(rowKey);
       added += 1;
     }
     state.campaigns.selectedContactIds = new Set();
@@ -9030,31 +9106,36 @@
   function renderCampaignSelectedContacts() {
     const host = $("campaignAudienceTags");
     const input = $("campaignAudienceInput");
-    const ids = [...state.campaigns.audienceContactIds];
+    const keys = [...state.campaigns.audienceContactIds];
     const needle = String(state.campaigns.audienceSearch || "").trim().toLocaleLowerCase();
     if (input) {
       state.campaigns.audienceInputSyncing = true;
-      input.value = ids.map((contactId) => {
+      input.value = keys.map((rowKey) => {
+        const { contactId, platform } = parseCampaignAudienceRowKey(rowKey);
         const contact = findCampaignContact(contactId) || { contactId, displayName: contactId };
-        return formatCampaignAudienceEntry(contact);
+        return formatCampaignAudienceEntry(contact, platform);
       }).join(", ");
       state.campaigns.audienceInputSyncing = false;
     }
     if (host) {
       host.replaceChildren();
-      if (!ids.length) {
+      if (!keys.length) {
         host.append(element("div", "campaign-empty-state", "No recipients added yet."));
       } else {
         let visible = 0;
-        ids.forEach((contactId) => {
+        keys.forEach((rowKey) => {
+          const { contactId, platform } = parseCampaignAudienceRowKey(rowKey);
           const contact = findCampaignContact(contactId) || { contactId, displayName: contactId };
-          const messagingId = campaignContactMessagingId(contact) || contactId;
+          const ids = contactPlatformIds(contact);
+          const messagingId = (platform && ids[platform]) || campaignContactMessagingId(contact) || contactId;
+          const platformLabel = campaignPlatformLabel(platform);
           const company = String(contact.company || "").trim() || "—";
           const tags = campaignContactTagsLabel(contact);
           if (needle) {
             const haystack = [
               contact.displayName,
               contactId,
+              platformLabel,
               messagingId,
               company,
               tags,
@@ -9067,10 +9148,11 @@
           row.role = "listitem";
           row.innerHTML = `
             <span class="campaign-contact-name" title="${escapeHtml(contact.displayName || contactId)}">${escapeHtml(contact.displayName || contactId)}</span>
+            <span class="campaign-contact-platform" title="${escapeHtml(platformLabel)}">${escapeHtml(platformLabel)}</span>
             <span class="campaign-contact-id" title="${escapeHtml(messagingId)}">${escapeHtml(messagingId)}</span>
             <span class="campaign-contact-company" title="${escapeHtml(company)}">${escapeHtml(company)}</span>
             <span class="campaign-contact-tags" title="${escapeHtml(tags)}">${escapeHtml(tags)}</span>
-            <button class="campaign-audience-remove" type="button" data-action="campaign-remove-contact" data-contact-id="${escapeHtml(contactId)}" aria-label="Remove ${escapeHtml(contact.displayName || contactId)}">Remove</button>`;
+            <button class="campaign-audience-remove" type="button" data-action="campaign-remove-contact" data-audience-key="${escapeHtml(rowKey)}" aria-label="Remove ${escapeHtml(contact.displayName || contactId)}">Remove</button>`;
           host.append(row);
         });
         if (!visible) {
@@ -9080,12 +9162,12 @@
     }
     const help = $("campaignAudienceHelp");
     if (help) {
-      help.textContent = ids.length
-        ? `${ids.length.toLocaleString()} recipient${ids.length === 1 ? "" : "s"} ready to send.`
+      help.textContent = keys.length
+        ? `${keys.length.toLocaleString()} recipient${keys.length === 1 ? "" : "s"} ready to send.`
         : "No recipients added yet.";
     }
     const clearAudience = $("campaignClearAudience");
-    if (clearAudience) clearAudience.disabled = !ids.length;
+    if (clearAudience) clearAudience.disabled = !keys.length;
     renderCampaignMessagePreview();
   }
 
@@ -9176,9 +9258,28 @@
       };
       return { contact, row, profileId: contact.channelProfileId, label: contact.displayName };
     }
-    const contact = audienceIds.length
-      ? (state.contacts.find((item) => item.contactId === audienceIds[0]) || null)
-      : (state.campaigns.contactCandidates[0] || state.contacts[0] || null);
+    if (audienceIds.length) {
+      const { contactId, platform } = parseCampaignAudienceRowKey(audienceIds[0]);
+      const contact = findCampaignContact(contactId) || { contactId, displayName: contactId };
+      const ids = contactPlatformIds(contact);
+      const profileId = (platform && ids[platform]) || campaignContactMessagingId(contact);
+      return {
+        contact,
+        row: {},
+        profileId,
+        label: contact.displayName || "Sample contact",
+      };
+    }
+    const candidate = state.campaigns.contactCandidates[0];
+    if (candidate?.contact) {
+      return {
+        contact: candidate.contact,
+        row: {},
+        profileId: candidate.profileId || campaignContactMessagingId(candidate.contact),
+        label: candidate.contact.displayName || "Sample contact",
+      };
+    }
+    const contact = state.contacts[0] || null;
     if (!contact) return { contact: { displayName: "Sample contact" }, row: {}, profileId: "", label: "Sample contact" };
     return {
       contact,
@@ -9656,7 +9757,14 @@
     const audienceSource = state.campaigns.audienceSource === "upload" ? "upload" : "contacts";
     let recipients = [];
     if (audienceSource === "contacts") {
-      recipients = [...state.campaigns.audienceContactIds].map((contactId) => ({ contactId }));
+      const seen = new Set();
+      recipients = [];
+      for (const rowKey of state.campaigns.audienceContactIds) {
+        const { contactId } = parseCampaignAudienceRowKey(rowKey);
+        if (!contactId || seen.has(contactId)) continue;
+        seen.add(contactId);
+        recipients.push({ contactId });
+      }
       if (!recipients.length) { showToast("Add contacts", "Select contacts and add them to the campaign list.", true); return; }
     } else {
       if (!state.campaigns.uploadRows.length) { showToast("Upload contacts", "Upload a CSV or load a CSV URL first.", true); return; }
@@ -11648,7 +11756,8 @@
           return;
         }
         if (actionButton.dataset.action === "campaign-remove-contact") {
-          state.campaigns.audienceContactIds.delete(actionButton.dataset.contactId);
+          const key = actionButton.dataset.audienceKey || actionButton.dataset.contactId;
+          if (key) state.campaigns.audienceContactIds.delete(key);
           renderCampaignSelectedContacts();
           return;
         }
@@ -12158,16 +12267,18 @@
       renderCampaignSelectedContacts();
     });
     $("campaignContactSelectAll")?.addEventListener("change", (event) => {
-      const ids = (state.campaigns.contactCandidates || []).map((contact) => contact.contactId);
-      if (event.target.checked) ids.forEach((id) => state.campaigns.selectedContactIds.add(id));
-      else ids.forEach((id) => state.campaigns.selectedContactIds.delete(id));
+      const keys = (state.campaigns.contactCandidates || []).map((item) => item.rowKey || item.contactId).filter(Boolean);
+      if (event.target.checked) keys.forEach((key) => state.campaigns.selectedContactIds.add(key));
+      else keys.forEach((key) => state.campaigns.selectedContactIds.delete(key));
       renderCampaignContactPicker();
     });
     $("campaignContactList")?.addEventListener("change", (event) => {
-      const input = event.target.closest("[data-campaign-contact-id]");
+      const input = event.target.closest("[data-campaign-row-key]");
       if (!input) return;
-      if (input.checked) state.campaigns.selectedContactIds.add(input.dataset.campaignContactId);
-      else state.campaigns.selectedContactIds.delete(input.dataset.campaignContactId);
+      const key = input.dataset.campaignRowKey;
+      if (!key) return;
+      if (input.checked) state.campaigns.selectedContactIds.add(key);
+      else state.campaigns.selectedContactIds.delete(key);
       renderCampaignContactPicker();
     });
     $("campaignUploadFile")?.addEventListener("change", async (event) => {

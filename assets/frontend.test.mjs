@@ -582,7 +582,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261101-campaign-layout-3/);
+  assert.match(html, /app\.js\?v=20261101-campaign-platform-rows/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -943,8 +943,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261101-campaign-layout-3/);
-  assert.match(html, /assets\/styles\.css\?v=20261101-campaign-layout-3/);
+  assert.match(html, /assets\/app\.js\?v=20261101-campaign-platform-rows/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-campaign-platform-rows/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -1376,9 +1376,13 @@ test("Campaign page supports create flow, contact/upload audiences, and expandab
   assert.match(app, /function ensureCampaignContactCatalogue/);
   assert.match(app, /CAMPAIGN_CONTACT_PAGE_SIZE = 100/);
   assert.match(app, /CAMPAIGN_CATALOGUE_PAGE_SIZE = 200/);
+  assert.match(app, /function campaignContactPlatformRows/);
+  assert.match(app, /function filteredCampaignContactRows/);
   assert.match(app, /Add \$\{count\.toLocaleString\(\)\} Contact/);
   assert.match(app, /selected across all pages/);
   assert.match(app, /useCursor/);
+  assert.match(html, />Platform</);
+  assert.match(styles, /\.campaign-contact-platform/);
   assert.doesNotMatch(app, /MAX_CAMPAIGN_RECIPIENTS = 100/);
   assert.match(app, /requestConfirmation\(/);
   assert.match(app, /campaignSourceUsesContactField/);

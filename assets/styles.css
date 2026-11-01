@@ -1563,13 +1563,13 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-audience-head,
 .campaign-audience-row {
   display: grid;
-  grid-template-columns: 24px minmax(140px, 1.4fr) minmax(120px, 1.1fr) minmax(120px, 1fr) minmax(100px, 0.9fr);
-  gap: 6px; align-items: center; min-width: 680px;
+  grid-template-columns: 24px minmax(120px, 1.2fr) minmax(84px, 0.7fr) minmax(120px, 1.1fr) minmax(110px, 1fr) minmax(90px, 0.85fr);
+  gap: 6px; align-items: center; min-width: 760px;
 }
 .campaign-audience-head,
 .campaign-audience-row {
-  grid-template-columns: minmax(120px, 1.2fr) minmax(110px, 1fr) minmax(110px, 1fr) minmax(100px, 0.9fr) 64px;
-  min-width: 640px;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(84px, 0.7fr) minmax(120px, 1.1fr) minmax(110px, 1fr) minmax(90px, 0.85fr) 64px;
+  min-width: 720px;
 }
 .campaign-contact-head,
 .campaign-audience-head {
@@ -1596,10 +1596,12 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-contact-check input { width: 14px; height: 14px; margin: 0; cursor: pointer; }
 .campaign-contact-name { color: var(--ink); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .campaign-contact-id,
+.campaign-contact-platform,
 .campaign-contact-company,
 .campaign-contact-tags {
   color: #66746e; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.campaign-contact-platform { font-weight: 650; color: #53605d; }
 .campaign-empty-state { color: var(--muted); padding: 16px 12px; font-size: 11px; text-align: center; }
 .campaign-contact-footer {
   display: grid;
