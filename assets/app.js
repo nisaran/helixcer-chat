@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-layout-2";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-layout-3";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -8590,12 +8590,12 @@
     return String(setup.verifiedName || setup.verifiedUsername || channel.channelId || "").trim();
   }
 
-  function campaignChannelOptionContent(channel, { includeName = true } = {}) {
+  function campaignChannelOptionContent(channel, { includeName = true, inline = false } = {}) {
     const wrap = document.createElement("span");
     wrap.className = "campaign-channel-option-content";
     wrap.append(providerLogo(channel.connectorType, "campaign-channel-logo"));
     const copy = document.createElement("span");
-    copy.className = "campaign-channel-option-copy";
+    copy.className = inline ? "campaign-channel-option-copy is-inline" : "campaign-channel-option-copy";
     const profile = providerProfiles[channel.connectorType] || { label: channelStyle(channel).label || "Channel" };
     const identifier = campaignChannelIdentifier(channel);
     if (includeName) copy.append(element("strong", "", channel.name || channel.channelId || "Channel"));
@@ -8614,7 +8614,7 @@
     if (valueHost) {
       valueHost.hidden = !channel;
       valueHost.replaceChildren();
-      if (channel) valueHost.append(campaignChannelOptionContent(channel));
+      if (channel) valueHost.append(campaignChannelOptionContent(channel, { inline: true }));
     }
     return channel;
   }
@@ -12191,7 +12191,8 @@
       if (event.target.closest(".searchable-combobox-menu")) return;
       const menu = $("campaignTemplateOptions");
       const alreadyOpen = menu && !menu.hidden;
-      if (event.target.closest(".searchable-combobox-toggle") || event.target === $("campaignTemplateCombobox")) {
+      const onToggle = Boolean(event.target.closest(".searchable-combobox-toggle"));
+      if (onToggle) {
         event.preventDefault();
         if (alreadyOpen) {
           menu.hidden = true;
@@ -12201,9 +12202,13 @@
         }
         return;
       }
-      if (!alreadyOpen) openCampaignTemplateMenu();
+      // Always open when clicking the field, even if a template is already selected.
+      openCampaignTemplateMenu();
     });
     $("campaignTemplateSearch")?.addEventListener("focus", () => {
+      openCampaignTemplateMenu();
+    });
+    $("campaignTemplateSearch")?.addEventListener("click", () => {
       openCampaignTemplateMenu();
     });
     $("campaignTemplateSearch")?.addEventListener("input", () => {
