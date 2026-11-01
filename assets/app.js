@@ -3168,6 +3168,12 @@
     const changingConversation = state.selectedConversationId !== conversationId;
     if (changingConversation) {
       saveComposerDraft(state.selectedConversationId);
+      if (conversationStatusLeaveTimer) {
+        clearTimeout(conversationStatusLeaveTimer);
+        conversationStatusLeaveTimer = 0;
+      }
+      conversationStatusDeferClearId = "";
+      hideConversationStatusToast();
       closeConversationActionMenu();
       closeComposerRouteMenu();
       state.unreadMarker = markRead && unreadCount > 0 ? { conversationId, count: unreadCount } : null;
@@ -7713,7 +7719,13 @@
       else state.conversations.unshift(incoming);
       markConversationRealtimeMutation(incoming.conversationId);
       if (incoming.conversationId === state.selectedConversationId && ["pending", "closed"].includes(incoming.status)) {
-        clearSelectedConversation();
+        // Keep the chat open while a local status toast is anchored under the dropdown.
+        if (conversationStatusDeferClearId === incoming.conversationId) {
+          renderCounts();
+          renderConversationList();
+        } else {
+          clearSelectedConversation();
+        }
       } else {
         renderCounts();
         renderConversationList();
@@ -10161,6 +10173,39 @@
     setTimeout(() => toast.remove(), isError ? 12000 : 4500);
   }
 
+  let conversationStatusToastTimer = 0;
+  let conversationStatusLeaveTimer = 0;
+  let conversationStatusDeferClearId = "";
+
+  function hideConversationStatusToast() {
+    if (conversationStatusToastTimer) {
+      clearTimeout(conversationStatusToastTimer);
+      conversationStatusToastTimer = 0;
+    }
+    const host = $("conversationStatusToast");
+    if (!host) return;
+    host.hidden = true;
+    host.classList.remove("is-error");
+    host.replaceChildren();
+  }
+
+  function showConversationStatusToast(title, message = "", isError = false) {
+    const host = $("conversationStatusToast");
+    if (!host) {
+      showToast(title, message, isError);
+      return;
+    }
+    if (conversationStatusToastTimer) clearTimeout(conversationStatusToastTimer);
+    host.classList.toggle("is-error", Boolean(isError));
+    host.replaceChildren(element("strong", "", title));
+    if (message) host.append(element("span", "", message));
+    host.hidden = false;
+    conversationStatusToastTimer = setTimeout(() => {
+      hideConversationStatusToast();
+      conversationStatusToastTimer = 0;
+    }, isError ? 5000 : 2200);
+  }
+
   function openMobileMenu() {
     $("appShell").classList.add("menu-open");
     $("mobileScrim").hidden = false;
@@ -10208,6 +10253,12 @@
 
   function clearSelectedConversation({ updateUrl = true } = {}) {
     const conversationId = state.selectedConversationId;
+    if (conversationStatusLeaveTimer) {
+      clearTimeout(conversationStatusLeaveTimer);
+      conversationStatusLeaveTimer = 0;
+    }
+    conversationStatusDeferClearId = "";
+    hideConversationStatusToast();
     closeConversationActionMenu();
     closeComposerRouteMenu();
     saveComposerDraft(conversationId);
@@ -11207,16 +11258,42 @@
       if (!conversation) return;
       const previous = conversation.status;
       const next = event.target.value;
+      if (conversationStatusLeaveTimer) {
+        clearTimeout(conversationStatusLeaveTimer);
+        conversationStatusLeaveTimer = 0;
+      }
+      conversationStatusDeferClearId = "";
       event.target.disabled = true;
       try {
+        // Mark before the API call so realtime conversation.updated does not clear the chat
+        // before the toast under the status dropdown can be shown.
+        if (["pending", "closed"].includes(next)) conversationStatusDeferClearId = conversation.conversationId;
         await state.api.updateConversation(conversation.conversationId, { status: next });
         conversation.status = next;
         renderCounts();
-        if (["pending", "closed"].includes(next)) clearSelectedConversation();
-        else renderConversationList();
+        const label = next === "closed" ? "Chat closed" : next === "pending" ? "Chat marked pending" : "Chat reopened";
+        const detail = next === "closed"
+          ? "This conversation is now closed."
+          : next === "pending"
+            ? "This conversation is waiting for follow-up."
+            : "This conversation is open again.";
+        showConversationStatusToast(label, detail);
+        if (["pending", "closed"].includes(next)) {
+          // Keep the chat open briefly so the status toast under the dropdown is readable.
+          conversationStatusLeaveTimer = setTimeout(() => {
+            conversationStatusLeaveTimer = 0;
+            conversationStatusDeferClearId = "";
+            hideConversationStatusToast();
+            if (state.selectedConversationId === conversation.conversationId) clearSelectedConversation();
+            else renderConversationList();
+          }, 1600);
+        } else {
+          renderConversationList();
+        }
       } catch (error) {
+        conversationStatusDeferClearId = "";
         event.target.value = previous;
-        showToast("Status was not updated", error.message, true);
+        showConversationStatusToast("Status was not updated", error.message, true);
       } finally {
         event.target.disabled = false;
       }

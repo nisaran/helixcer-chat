@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaigns-api">
-  <script src="./assets/app.js?v=20261101-campaigns-api" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-status-toast">
+  <script src="./assets/app.js?v=20261101-status-toast" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -283,12 +283,15 @@
                   <select class="compact-select assignee-select" id="conversationAssignee" aria-label="Assigned agent">
                     <option value="">Unassigned</option>
                   </select>
-                  <label class="sr-only" for="conversationStatus">Conversation status</label>
-                  <select class="compact-select" id="conversationStatus">
-                    <option value="open">Open</option>
-                    <option value="pending">Pending</option>
-                    <option value="closed">Closed</option>
-                  </select>
+                  <div class="conversation-status-wrap">
+                    <label class="sr-only" for="conversationStatus">Conversation status</label>
+                    <select class="compact-select" id="conversationStatus">
+                      <option value="open">Open</option>
+                      <option value="pending">Pending</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                    <div class="conversation-status-toast" id="conversationStatusToast" role="status" aria-live="polite" hidden></div>
+                  </div>
                   <button class="icon-button" type="button" data-action="toggle-details" aria-label="View contact details" aria-controls="detailsPanel" aria-expanded="false">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.2v.1"/></svg>
                   </button>
