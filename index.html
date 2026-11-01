@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-contact-tag-chips">
-  <script src="./assets/app.js?v=20261101-contact-tag-chips" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaigns">
+  <script src="./assets/app.js?v=20261101-campaigns" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -68,6 +68,12 @@
             <svg viewBox="0 0 24 24"><path d="M16 20v-1.5A4.5 4.5 0 0 0 11.5 14h-5A4.5 4.5 0 0 0 2 18.5V20M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm9-1v6m3-3h-6"/></svg>
           </span>
           <span>Contacts</span>
+        </button>
+        <button class="nav-button" type="button" data-route="campaigns">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 10v4l12 5V5L4 10zm14 1.5h3M18 15h2"/></svg>
+          </span>
+          <span>Campaign</span>
         </button>
         <div class="nav-group" id="channelNavGroup" data-admin-only>
           <button class="nav-button nav-group-toggle" id="channelNavToggle" type="button" data-action="toggle-channel-nav" aria-expanded="false" aria-controls="channelNavChildren">
@@ -460,6 +466,147 @@
             </form>
           </aside>
         </div>
+      </section>
+
+      <section class="route content-route campaigns-route" id="campaignsRoute" data-route-panel="campaigns" aria-labelledby="campaignsTitle" hidden>
+        <div class="route-heading campaigns-heading">
+          <div>
+            <p class="eyebrow">Bulk messaging</p>
+            <h2 id="campaignsTitle">Campaign</h2>
+            <p>Send one message to many contacts, then track delivery in history.</p>
+          </div>
+          <div class="route-heading-actions">
+            <button class="secondary-button" type="button" data-action="campaign-show-history" id="campaignHistoryButton" hidden>Campaign history</button>
+            <button class="primary-button" type="button" data-action="campaign-show-create" id="campaignCreateButton"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create campaign</button>
+          </div>
+        </div>
+
+        <section class="surface campaign-history-surface" id="campaignHistoryPanel" aria-labelledby="campaignHistoryTitle">
+          <div class="surface-toolbar">
+            <div>
+              <strong id="campaignHistoryTitle">Campaign history</strong>
+              <span class="subtle">Totals show in each row. Expand a campaign for individual delivery details.</span>
+            </div>
+            <button class="secondary-button compact-button" type="button" data-action="refresh-campaigns">Refresh</button>
+          </div>
+          <div class="campaign-table-wrap">
+            <table class="campaign-table" id="campaignTable">
+              <thead>
+                <tr>
+                  <th class="campaign-expand-col"><span class="sr-only">Expand</span></th>
+                  <th>Campaign</th>
+                  <th>Channel</th>
+                  <th>Status</th>
+                  <th>Total</th>
+                  <th>Delivered</th>
+                  <th>Read</th>
+                  <th>Failed</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody id="campaignTableBody"></tbody>
+            </table>
+          </div>
+          <p class="subtle campaign-empty" id="campaignHistoryEmpty" hidden>No campaigns yet. Create one to send bulk messages.</p>
+        </section>
+
+        <section class="surface campaign-create-surface" id="campaignCreatePanel" aria-labelledby="campaignCreateTitle" hidden>
+          <div class="surface-toolbar">
+            <div>
+              <strong id="campaignCreateTitle">Create campaign</strong>
+              <span class="subtle">Choose a channel, build the audience, then compose the message.</span>
+            </div>
+          </div>
+          <form class="campaign-create-form" id="campaignCreateForm" autocomplete="off">
+            <div class="campaign-create-grid">
+              <label class="field-label" for="campaignName">
+                Campaign name
+                <input class="text-field" id="campaignName" name="name" required maxlength="120" placeholder="March outreach">
+              </label>
+              <label class="field-label" for="campaignChannel">
+                Channel
+                <select class="text-field" id="campaignChannel" name="channelId" required>
+                  <option value="">Select a channel…</option>
+                </select>
+              </label>
+            </div>
+
+            <fieldset class="campaign-fieldset">
+              <legend>Audience</legend>
+              <div class="campaign-choice-row" role="radiogroup" aria-label="Audience source">
+                <label class="campaign-choice"><input type="radio" name="campaignAudience" value="contacts" checked> Select from contacts</label>
+                <label class="campaign-choice"><input type="radio" name="campaignAudience" value="upload"> Upload contacts</label>
+              </div>
+
+              <div id="campaignContactsAudience">
+                <div class="campaign-audience-toolbar">
+                  <div class="search-wrap compact-search">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+                    <label class="sr-only" for="campaignContactSearch">Filter contacts</label>
+                    <input id="campaignContactSearch" type="search" placeholder="Filter contacts…">
+                  </div>
+                  <div class="campaign-audience-actions">
+                    <label class="bulk-select-all"><input type="checkbox" id="campaignContactSelectAll"><span>Select all</span></label>
+                    <button class="secondary-button compact-button" type="button" data-action="campaign-add-selected-contacts">Add to campaign</button>
+                  </div>
+                </div>
+                <div class="campaign-contact-list" id="campaignContactList"></div>
+                <div class="campaign-selected-list" id="campaignSelectedContacts"></div>
+              </div>
+
+              <div id="campaignUploadAudience" hidden>
+                <div class="campaign-choice-row" role="radiogroup" aria-label="Upload method">
+                  <label class="campaign-choice"><input type="radio" name="campaignUploadMode" value="file" checked> Upload file</label>
+                  <label class="campaign-choice"><input type="radio" name="campaignUploadMode" value="url"> Use URL</label>
+                </div>
+                <label class="field-label" id="campaignUploadFileLabel" for="campaignUploadFile">
+                  CSV file
+                  <input class="text-field" id="campaignUploadFile" type="file" accept=".csv,.txt,text/csv,text/plain">
+                </label>
+                <label class="field-label" id="campaignUploadUrlLabel" for="campaignUploadUrl" hidden>
+                  CSV URL
+                  <input class="text-field" id="campaignUploadUrl" type="url" placeholder="https://example.com/contacts.csv">
+                </label>
+                <button class="secondary-button compact-button" type="button" data-action="campaign-load-upload-url" id="campaignLoadUploadUrl" hidden>Load URL</button>
+                <p class="subtle" id="campaignUploadHelp">Export Excel as CSV. Map columns to contact fields below, then use headers as message variables.</p>
+                <div class="campaign-mapping" id="campaignFieldMapping" hidden></div>
+                <div class="campaign-upload-preview" id="campaignUploadPreview" hidden></div>
+              </div>
+            </fieldset>
+
+            <fieldset class="campaign-fieldset" id="campaignMessageFieldset">
+              <legend>Message</legend>
+              <div id="campaignWhatsAppComposer" hidden>
+                <label class="field-label" for="campaignTemplateSearch">
+                  WhatsApp template
+                  <span class="searchable-combobox" id="campaignTemplateCombobox">
+                    <input class="text-field searchable-combobox-input" id="campaignTemplateSearch" type="search" placeholder="Search or choose a template…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="campaignTemplateOptions">
+                    <input type="hidden" id="campaignTemplateSelect">
+                    <span class="searchable-combobox-menu" id="campaignTemplateOptions" role="listbox" aria-label="Approved templates" hidden></span>
+                  </span>
+                </label>
+                <div class="template-load-state" id="campaignTemplateStatus" role="status">Choose a WhatsApp channel to load templates.</div>
+                <div class="campaign-variable-fields" id="campaignVariableFields"></div>
+              </div>
+              <div id="campaignTextComposer" hidden>
+                <label class="field-label" for="campaignMessageText">
+                  Message
+                  <textarea class="text-field campaign-message-text" id="campaignMessageText" rows="5" maxlength="4096" placeholder="Hello {{name}}, …"></textarea>
+                </label>
+                <p class="subtle">Use {{variable}} placeholders. Map each variable to a contact field, CSV header, or constant below.</p>
+                <div class="campaign-variable-fields" id="campaignTextVariableFields"></div>
+              </div>
+            </fieldset>
+
+            <div class="campaign-create-actions">
+              <p class="subtle" id="campaignCreateHelp">Existing chats keep their open or closed status. New upload contacts stay closed in the inbox.</p>
+              <div class="campaign-create-action-buttons">
+                <button class="secondary-button" type="button" data-action="campaign-show-history">Cancel</button>
+                <button class="primary-button" id="campaignSubmit" type="submit">Send campaign</button>
+              </div>
+            </div>
+          </form>
+        </section>
       </section>
 
       <section class="route content-route" id="channelsRoute" data-route-panel="channels" aria-labelledby="channelsTitle" hidden>

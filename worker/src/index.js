@@ -49,6 +49,18 @@ import {
   normalizeFieldMapping,
   validateInteraktBatch
 } from './imports/interakt.js';
+import {
+  CAMPAIGN_AUDIENCE_SOURCES,
+  CAMPAIGN_MESSAGE_TYPES,
+  MAX_CAMPAIGN_RECIPIENTS,
+  applyTextVariables,
+  buildTemplateComponentsFromMappings,
+  campaignCountsFromRows,
+  campaignFinalStatus,
+  preferCampaignRecipientStatus,
+  serializeCampaign,
+  serializeCampaignRecipient
+} from './campaigns.js';
 
 const API_VERSION = '2026-10-26-chat-media';
 const MAX_TEXT_LENGTH = 4096;
@@ -495,6 +507,24 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       const result = await importChatHistory(env, workspaceId, principal, await readImportJson(request));
       await broadcast(env, workspaceId, { type: 'bootstrap.changed' });
       return withCors(json(result, 201), cors);
+    }
+    if (url.pathname === '/api/campaigns' && request.method === 'GET') {
+      return withCors(json({ items: await listCampaigns(env, workspaceId, principal) }), cors);
+    }
+    if (url.pathname === '/api/campaigns' && request.method === 'POST') {
+      const result = await createCampaign(env, workspaceId, await readJson(request), principal);
+      await broadcast(env, workspaceId, { type: 'campaign.updated', campaignId: result.campaignId, campaign: result.item });
+      ctx.waitUntil(processCampaign(env, workspaceId, result.campaignId, principal));
+      return withCors(json(result, 202), cors);
+    }
+    const campaignMediaMatch = url.pathname.match(/^\/api\/campaigns\/template-media$/);
+    if (campaignMediaMatch && request.method === 'POST') {
+      return withCors(json(await uploadCampaignTemplateMedia(env, workspaceId, request, principal), 201), cors);
+    }
+    const campaignMatch = url.pathname.match(/^\/api\/campaigns\/([^/]+)$/);
+    if (campaignMatch && request.method === 'GET') {
+      const campaignId = decodeURIComponent(campaignMatch[1]);
+      return withCors(json(await getCampaignDetail(env, workspaceId, campaignId, principal)), cors);
     }
     if (url.pathname === '/api/channels' && request.method === 'POST') {
       requireRole(principal, 'admin');
@@ -3699,7 +3729,8 @@ async function prepareIdentityBindingMutation(env, workspaceId, contactId, ident
   };
 }
 
-async function ensureIdentityConversation(env, workspaceId, contactId, identityId, channelId, assignedTo = '') {
+async function ensureIdentityConversation(env, workspaceId, contactId, identityId, channelId, assignedTo = '',
+  initialStatus = 'open') {
   const route = await env.DB.prepare(`SELECT ci.display_name,ct.display_name AS contact_name,ct.tags_json
     FROM contact_identities ci JOIN contacts ct ON ct.contact_id=ci.contact_id AND ct.workspace_id=ci.workspace_id
     JOIN channel_identity_bindings b ON b.identity_id=ci.identity_id AND b.workspace_id=ci.workspace_id
@@ -3707,10 +3738,11 @@ async function ensureIdentityConversation(env, workspaceId, contactId, identityI
     WHERE ci.workspace_id=?1 AND ci.contact_id=?2 AND ci.identity_id=?3 LIMIT 1`)
     .bind(workspaceId, contactId, identityId, channelId).first();
   if (!route) throw httpError(409, 'This identity is not routed through the selected channel.');
-  let conversation = await env.DB.prepare(`SELECT conversation_id FROM conversations
+  let conversation = await env.DB.prepare(`SELECT conversation_id,status FROM conversations
     WHERE workspace_id=?1 AND contact_id=?2 LIMIT 1`)
     .bind(workspaceId, contactId).first();
   if (conversation) {
+    // Existing chats keep their open/closed/pending status unchanged.
     await touchIdentityBinding(env, workspaceId, identityId, channelId, '', conversation.conversation_id);
     return conversation.conversation_id;
   }
@@ -3756,12 +3788,15 @@ async function ensureIdentityConversation(env, workspaceId, contactId, identityI
     }
   }
   const conversationId = crypto.randomUUID();
+  const status = ['open', 'pending', 'closed'].includes(String(initialStatus || ''))
+    ? String(initialStatus)
+    : 'open';
   try {
     await env.DB.prepare(`INSERT INTO conversations
         (conversation_id,contact_id,channel_id,identity_id,status,assigned_to,subject,last_message_at,
          unread_count,tags_json,created_at,updated_at,workspace_id)
-      VALUES (?1,?2,?3,?4,'open',?5,?6,?7,0,?8,?7,?7,?9)`)
-      .bind(conversationId, contactId, channelId, identityId, assignedTo,
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0,?9,?8,?8,?10)`)
+      .bind(conversationId, contactId, channelId, identityId, status, assignedTo,
         route.contact_name || route.display_name || '', now, route.tags_json || '[]', workspaceId).run();
     await touchIdentityBinding(env, workspaceId, identityId, channelId, '', conversationId, now);
     return conversationId;
@@ -6501,6 +6536,7 @@ async function broadcastMessageStatusChanges(env, workspaceId, changes) {
       channelMessageId: String(change.channelMessageId || ''),
       message: change
     });
+    await syncCampaignRecipientStatus(env, workspaceId, change.messageId, change.status, change.error || '');
   }
 }
 
@@ -6535,6 +6571,521 @@ async function seedDemo(env, workspaceId, principal) {
   ]);
   await audit(env, principal, 'seed', 'conversation', conversationId, { channelId });
   return { ok: true, channelId, contactId, conversationId };
+}
+
+async function listCampaigns(env, workspaceId, principal) {
+  const allowed = restrictedChannelIds(principal);
+  const rows = await env.DB.prepare(`SELECT c.*, ch.name AS channel_name, ch.connector_type, ch.provider_type
+    FROM campaigns c
+    LEFT JOIN channels ch ON ch.workspace_id=c.workspace_id AND ch.channel_id=c.channel_id
+    WHERE c.workspace_id=?1
+    ORDER BY c.created_at DESC
+    LIMIT 100`).bind(workspaceId).all();
+  return (rows.results || [])
+    .filter((row) => !allowed || allowed.includes(row.channel_id))
+    .map((row) => serializeCampaign(row));
+}
+
+async function getCampaignDetail(env, workspaceId, campaignId, principal) {
+  const id = cleanId(campaignId, 'Campaign ID');
+  const row = await env.DB.prepare(`SELECT c.*, ch.name AS channel_name, ch.connector_type, ch.provider_type
+    FROM campaigns c
+    LEFT JOIN channels ch ON ch.workspace_id=c.workspace_id AND ch.channel_id=c.channel_id
+    WHERE c.workspace_id=?1 AND c.campaign_id=?2`).bind(workspaceId, id).first();
+  if (!row) throw httpError(404, 'Campaign not found.');
+  assertPrincipalChannelAccess(principal, row.channel_id);
+  const recipients = await env.DB.prepare(`SELECT r.*, m.status AS message_status, m.text AS message_text, m.timestamp AS message_timestamp
+    FROM campaign_recipients r
+    LEFT JOIN messages m ON m.workspace_id=r.workspace_id AND m.message_id=r.message_id
+    WHERE r.workspace_id=?1 AND r.campaign_id=?2
+    ORDER BY r.created_at, r.recipient_id`).bind(workspaceId, id).all();
+  const items = (recipients.results || []).map((item) => {
+    const messageStatus = String(item.message_status || '');
+    const status = messageStatus
+      ? preferCampaignRecipientStatus(item.status, messageStatus)
+      : item.status;
+    return serializeCampaignRecipient({ ...item, status });
+  });
+  const counts = campaignCountsFromRows(items);
+  return { item: serializeCampaign(row, counts), recipients: items };
+}
+
+function validateCampaignPayload(payload) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Campaign must be a JSON object.');
+  rejectUnknownKeys(payload, new Set([
+    'name', 'channelId', 'audienceSource', 'recipients', 'fieldMapping',
+    'messageType', 'template', 'variableMappings', 'text', 'textVariables', 'previewText', 'mediaPreview'
+  ]), 'campaign');
+  const name = cleanRequired(payload.name, 'Campaign name', 120);
+  const channelId = cleanId(payload.channelId, 'Channel ID');
+  const audienceSource = String(payload.audienceSource || 'contacts').trim();
+  if (!CAMPAIGN_AUDIENCE_SOURCES.includes(audienceSource)) {
+    throw httpError(400, 'Audience source must be contacts or upload.');
+  }
+  const messageType = String(payload.messageType || '').trim();
+  if (!CAMPAIGN_MESSAGE_TYPES.includes(messageType)) {
+    throw httpError(400, 'Message type must be template or text.');
+  }
+  if (!Array.isArray(payload.recipients) || !payload.recipients.length) {
+    throw httpError(400, 'Select at least one recipient.');
+  }
+  if (payload.recipients.length > MAX_CAMPAIGN_RECIPIENTS) {
+    throw httpError(400, `Campaigns support at most ${MAX_CAMPAIGN_RECIPIENTS} recipients.`);
+  }
+  const fieldMapping = payload.fieldMapping === undefined ? {} : payload.fieldMapping;
+  if (!isPlainObject(fieldMapping)) throw httpError(400, 'Field mapping must be an object.');
+  const variableMappings = payload.variableMappings === undefined ? [] : payload.variableMappings;
+  if (!Array.isArray(variableMappings) || variableMappings.length > 100) {
+    throw httpError(400, 'Variable mappings must be an array with no more than 100 items.');
+  }
+  const textVariables = payload.textVariables === undefined ? [] : payload.textVariables;
+  if (!Array.isArray(textVariables) || textVariables.length > 100) {
+    throw httpError(400, 'Text variables must be an array with no more than 100 items.');
+  }
+  let template = null;
+  let text = '';
+  if (messageType === 'template') {
+    if (!isPlainObject(payload.template)) throw httpError(400, 'WhatsApp campaigns require a template.');
+    template = {
+      name: cleanRequired(payload.template.name, 'Template name', 512),
+      language: {
+        code: cleanRequired(payload.template.language?.code || payload.template.language, 'Template language', 35)
+      }
+    };
+  } else {
+    text = cleanRequired(payload.text, 'Message text', MAX_TEXT_LENGTH);
+  }
+  const previewText = payload.previewText === undefined
+    ? ''
+    : cleanOptionalText(payload.previewText, 'Preview text', MAX_TEMPLATE_PREVIEW_LENGTH);
+  const mediaPreview = payload.mediaPreview === undefined ? null : validateTemplateMediaPreview(payload.mediaPreview);
+  return {
+    name,
+    channelId,
+    audienceSource,
+    messageType,
+    recipients: payload.recipients,
+    fieldMapping,
+    variableMappings,
+    textVariables,
+    template,
+    text,
+    previewText,
+    mediaPreview
+  };
+}
+
+async function createCampaign(env, workspaceId, payload, principal) {
+  const input = validateCampaignPayload(payload);
+  const channel = await getChannel(env, input.channelId, '', workspaceId);
+  if (!channel) throw httpError(400, 'Unknown or disabled channel.');
+  assertPrincipalChannelAccess(principal, channel.channelId);
+  await assertChannelReadyForConversation(env, workspaceId, channel);
+  const connectorType = logicalConnectorType(channel);
+  if (input.messageType === 'template' && connectorType !== 'whatsapp_cloud') {
+    throw httpError(409, 'Template campaigns are available only for WhatsApp channels.');
+  }
+  if (input.messageType === 'text' && connectorType === 'whatsapp_cloud') {
+    throw httpError(409, 'WhatsApp campaigns must use an approved template.');
+  }
+
+  const now = new Date().toISOString();
+  const campaignId = crypto.randomUUID();
+  const recipientRows = [];
+  for (const [index, raw] of input.recipients.entries()) {
+    if (!isPlainObject(raw)) throw httpError(400, `Recipient ${index + 1} must be an object.`);
+    if (input.audienceSource === 'contacts') {
+      rejectUnknownKeys(raw, new Set(['contactId']), `recipient ${index + 1}`);
+      const contactId = cleanId(raw.contactId, 'Contact ID');
+      const contact = await env.DB.prepare(`SELECT contact_id,display_name,company,tags_json FROM contacts
+        WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, contactId).first();
+      if (!contact) throw httpError(404, `Contact not found for recipient ${index + 1}.`);
+      recipientRows.push({
+        recipientId: crypto.randomUUID(),
+        contactId,
+        displayName: contact.display_name || '',
+        profileId: '',
+        rowJson: '{}'
+      });
+    } else {
+      rejectUnknownKeys(raw, new Set(['row', 'displayName', 'profileId', 'company', 'tags']), `recipient ${index + 1}`);
+      const row = isPlainObject(raw.row) ? raw.row : {};
+      const mapped = mapUploadRecipient(row, input.fieldMapping, index);
+      recipientRows.push({
+        recipientId: crypto.randomUUID(),
+        contactId: '',
+        displayName: mapped.displayName,
+        profileId: mapped.profileId,
+        rowJson: JSON.stringify({
+          ...row,
+          __mapped: {
+            displayName: mapped.displayName,
+            profileId: mapped.profileId,
+            company: mapped.company,
+            tags: mapped.tags
+          }
+        })
+      });
+    }
+  }
+
+  const counts = campaignCountsFromRows(recipientRows.map(() => ({ status: 'pending' })));
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO campaigns
+        (campaign_id,workspace_id,name,channel_id,audience_source,message_type,template_name,template_language,
+         message_body,variable_mapping_json,field_mapping_json,status,total_count,pending_count,sent_count,
+         delivered_count,read_count,failed_count,created_by,created_at,updated_at,completed_at)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'queued',?12,?13,0,0,0,0,?14,?15,?15,'')`)
+      .bind(
+        campaignId, workspaceId, input.name, channel.channelId, input.audienceSource, input.messageType,
+        input.template?.name || '', input.template?.language?.code || '', input.text || '',
+        JSON.stringify({
+          variableMappings: input.variableMappings,
+          textVariables: input.textVariables,
+          previewText: input.previewText,
+          mediaPreview: input.mediaPreview
+        }),
+        JSON.stringify(input.fieldMapping || {}),
+        counts.totalCount, counts.pendingCount,
+        principal?.user?.email || principal?.user?.displayName || '', now
+      ),
+    ...recipientRows.map((recipient) => env.DB.prepare(`INSERT INTO campaign_recipients
+        (recipient_id,campaign_id,workspace_id,contact_id,conversation_id,message_id,display_name,profile_id,
+         row_json,status,error,created_at,updated_at)
+      VALUES (?1,?2,?3,?4,'','',?5,?6,?7,'pending','',?8,?8)`)
+      .bind(
+        recipient.recipientId, campaignId, workspaceId, recipient.contactId,
+        recipient.displayName, recipient.profileId, recipient.rowJson, now
+      ))
+  ]);
+  await audit(env, principal, 'create', 'campaign', campaignId, {
+    channelId: channel.channelId, totalCount: counts.totalCount, messageType: input.messageType
+  });
+  const item = (await getCampaignDetail(env, workspaceId, campaignId, principal)).item;
+  return { ok: true, campaignId, item };
+}
+
+function mapUploadRecipient(row, fieldMapping, index) {
+  if (!isPlainObject(fieldMapping)) throw httpError(400, 'Upload campaigns require a field mapping.');
+  const readMapped = (key) => {
+    const header = String(fieldMapping[key] || '').trim();
+    if (!header || header === '__skip') return '';
+    return String(row?.[header] ?? '').trim();
+  };
+  const profileId = readMapped('profileId');
+  if (!profileId) throw httpError(400, `Recipient ${index + 1} is missing a messaging ID / phone value.`);
+  const displayName = readMapped('displayName') || profileId;
+  const company = readMapped('company');
+  const tagsRaw = readMapped('tags');
+  const tags = tagsRaw
+    ? tagsRaw.split(/[,;|]/).map((item) => item.trim()).filter(Boolean).slice(0, 20)
+    : [];
+  return { displayName: displayName.slice(0, 120), profileId: profileId.slice(0, 512), company: company.slice(0, 160), tags };
+}
+
+async function uploadCampaignTemplateMedia(env, workspaceId, request, principal) {
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.toLowerCase().startsWith('multipart/form-data;')) {
+    throw httpError(415, 'Content-Type must be multipart/form-data.');
+  }
+  let form;
+  try { form = await request.formData(); } catch { throw httpError(400, 'Multipart media data is invalid.'); }
+  const channelId = cleanId(form.get('channelId'), 'Channel ID');
+  const channel = await getChannel(env, channelId, 'whatsapp_cloud', workspaceId);
+  if (!channel) throw httpError(404, 'WhatsApp channel not found.');
+  assertPrincipalChannelAccess(principal, channelId);
+  const file = form.get('file');
+  if (!file || typeof file !== 'object' || typeof file.arrayBuffer !== 'function') {
+    throw httpError(400, 'A file field is required.');
+  }
+  const mediaType = String(form.get('type') || '').toLowerCase();
+  const attachment = validateWhatsAppAttachment(file, '', 'whatsapp_cloud');
+  if (mediaType && mediaType !== attachment.type) {
+    throw httpError(400, `Expected a ${mediaType} file for this template header.`);
+  }
+  const mediaId = await uploadWhatsAppMedia(env, channel, file, attachment);
+  return {
+    ok: true,
+    mediaId,
+    filename: attachment.filename,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    type: attachment.type
+  };
+}
+
+async function processCampaign(env, workspaceId, campaignId, principal) {
+  const detail = await getCampaignDetail(env, workspaceId, campaignId, principal);
+  const campaign = detail.item;
+  const now = new Date().toISOString();
+  await env.DB.prepare(`UPDATE campaigns SET status='sending',updated_at=?3
+    WHERE workspace_id=?1 AND campaign_id=?2`).bind(workspaceId, campaignId, now).run();
+  await broadcast(env, workspaceId, { type: 'campaign.updated', campaignId, campaign: { ...campaign, status: 'sending' } });
+
+  const channel = await getChannel(env, campaign.channelId, '', workspaceId);
+  if (!channel) {
+    await failRemainingCampaignRecipients(env, workspaceId, campaignId, 'Channel is no longer available.');
+    return finalizeCampaign(env, workspaceId, campaignId, principal);
+  }
+  const platform = platformForChannel(channel);
+  const mappingPayload = campaign.variableMapping || {};
+  const variableMappings = Array.isArray(mappingPayload.variableMappings) ? mappingPayload.variableMappings : [];
+  const textVariables = Array.isArray(mappingPayload.textVariables) ? mappingPayload.textVariables : [];
+  const previewTextBase = String(mappingPayload.previewText || '');
+  const mediaPreview = mappingPayload.mediaPreview || null;
+
+  for (const recipient of detail.recipients) {
+    if (recipient.status !== 'pending' && recipient.status !== 'queued') continue;
+    try {
+      const prepared = await prepareCampaignRecipientTarget(env, workspaceId, channel, platform, campaign, recipient, principal);
+      const context = {
+        contact: prepared.contact,
+        row: recipient.row || {},
+        profileId: prepared.profileId
+      };
+      let sendResult;
+      if (campaign.messageType === 'template') {
+        const components = buildTemplateComponentsFromMappings(variableMappings, context);
+        const template = validateWhatsAppTemplate({
+          name: campaign.templateName,
+          language: { code: campaign.templateLanguage },
+          ...(components.length ? { components } : {})
+        });
+        const previewText = previewTextBase || applyTextVariables(campaign.messageBody || campaign.templateName, textVariables, context);
+        sendResult = await createConversationTemplateMessage(env, workspaceId, prepared.conversationId, {
+          name: template.name,
+          language: template.language,
+          components: template.components,
+          previewText,
+          ...(mediaPreview ? { mediaPreview } : {}),
+          channelId: channel.channelId,
+          identityId: prepared.identityId
+        }, principal);
+      } else {
+        const text = applyTextVariables(campaign.messageBody, textVariables, context);
+        if (!String(text || '').trim()) throw httpError(400, 'Resolved message text is empty.');
+        sendResult = await createOutboundMessage(env, workspaceId, prepared.conversationId, {
+          text,
+          channelId: channel.channelId,
+          identityId: prepared.identityId
+        }, principal);
+      }
+      const message = sendResult.message;
+      const updatedAt = new Date().toISOString();
+      await env.DB.prepare(`UPDATE campaign_recipients
+          SET contact_id=?4,conversation_id=?5,message_id=?6,display_name=?7,profile_id=?8,
+              status='queued',error='',updated_at=?9
+        WHERE workspace_id=?1 AND campaign_id=?2 AND recipient_id=?3`)
+        .bind(
+          workspaceId, campaignId, recipient.recipientId,
+          prepared.contactId, prepared.conversationId, message.messageId,
+          prepared.contact.displayName || recipient.displayName || '',
+          prepared.profileId, updatedAt
+        ).run();
+      await broadcast(env, workspaceId, {
+        type: 'message.created',
+        conversationId: prepared.conversationId,
+        messageId: message.messageId,
+        message,
+        conversation: await getConversationItem(env, workspaceId, prepared.conversationId)
+      });
+      await sendOrQueue(env, message.messageId);
+    } catch (error) {
+      const updatedAt = new Date().toISOString();
+      await env.DB.prepare(`UPDATE campaign_recipients
+          SET status='failed',error=?4,updated_at=?5
+        WHERE workspace_id=?1 AND campaign_id=?2 AND recipient_id=?3`)
+        .bind(workspaceId, campaignId, recipient.recipientId, cleanError(error), updatedAt).run();
+    }
+  }
+  return finalizeCampaign(env, workspaceId, campaignId, principal);
+}
+
+async function prepareCampaignRecipientTarget(env, workspaceId, channel, platform, campaign, recipient, principal) {
+  const now = new Date().toISOString();
+  if (campaign.audienceSource === 'contacts') {
+    const contactId = cleanId(recipient.contactId, 'Contact ID');
+    const contact = await getContactDetail(env, workspaceId, contactId);
+    const identity = pickCampaignIdentity(contact, platform, channel.channelId);
+    if (!identity) throw httpError(409, 'This contact has no matching identity for the selected channel.');
+    let binding = (identity.bindings || []).find((item) => item.channelId === channel.channelId && item.active !== false);
+    if (!binding) {
+      await ensureIdentityBinding(env, workspaceId, contactId, identity.identityId, {
+        platform,
+        profileId: identity.profileId,
+        channelId: channel.channelId,
+        scopedProfileId: identity.profileId,
+        displayName: contact.displayName || identity.displayName || '',
+        metadata: {}
+      }, now);
+    }
+    const conversationId = await ensureIdentityConversation(env, workspaceId, contactId, identity.identityId,
+      channel.channelId, principal?.user?.email || '', 'closed');
+    return {
+      contactId,
+      identityId: identity.identityId,
+      conversationId,
+      profileId: identity.profileId || '',
+      contact: {
+        displayName: contact.displayName || '',
+        company: contact.company || '',
+        tags: contact.tags || [],
+        profileId: identity.profileId || ''
+      }
+    };
+  }
+
+  const mapped = recipient.row?.__mapped || mapUploadRecipient(recipient.row || {}, campaign.fieldMapping, 0);
+  const profileId = normalizeIdentityProfileValue(platform, mapped.profileId || recipient.profileId, 'Messaging ID');
+  const displayName = String(mapped.displayName || recipient.displayName || profileId).slice(0, 120);
+  const company = String(mapped.company || '').slice(0, 160);
+  const tags = Array.isArray(mapped.tags) ? mapped.tags : [];
+
+  let identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,ci.display_name,c.display_name AS contact_name,
+      c.company,c.tags_json
+    FROM contact_identities ci
+    JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+    WHERE ci.workspace_id=?1 AND ci.platform=?2 AND ci.profile_id=?3
+    ORDER BY ci.created_at,ci.identity_id LIMIT 1`).bind(workspaceId, platform, profileId).first();
+
+  let contactId;
+  let identityId;
+  if (identity) {
+    contactId = identity.contact_id;
+    identityId = identity.identity_id;
+    await ensureIdentityBinding(env, workspaceId, contactId, identityId, {
+      platform, profileId, channelId: channel.channelId, scopedProfileId: profileId,
+      displayName, metadata: {}
+    }, now);
+  } else {
+    contactId = crypto.randomUUID();
+    await env.DB.prepare(`INSERT INTO contacts
+        (contact_id,display_name,company,tags_json,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,?3,?4,?5,?5,?6)`)
+      .bind(contactId, displayName, company, JSON.stringify(tags), now, workspaceId).run();
+    const created = await ensureContactIdentity(env, workspaceId, contactId, {
+      platform, profileId, channelId: channel.channelId, scopedProfileId: profileId,
+      phoneNumber: platform === 'whatsapp' ? profileId : '',
+      displayName, isPrimary: true
+    }, now);
+    identityId = created.identityId;
+    await broadcast(env, workspaceId, {
+      type: 'contact.created',
+      contactId,
+      contact: await getContactDetail(env, workspaceId, contactId)
+    });
+  }
+
+  // New chats from campaign uploads stay closed; existing chats keep their status.
+  const conversationId = await ensureIdentityConversation(env, workspaceId, contactId, identityId,
+    channel.channelId, '', 'closed');
+  const contact = await getContactDetail(env, workspaceId, contactId);
+  return {
+    contactId,
+    identityId,
+    conversationId,
+    profileId,
+    contact: {
+      displayName: contact.displayName || displayName,
+      company: contact.company || company,
+      tags: contact.tags || tags,
+      profileId
+    }
+  };
+}
+
+function pickCampaignIdentity(contact, platform, channelId) {
+  const identities = Array.isArray(contact?.identities) ? contact.identities : [];
+  const matching = identities.filter((identity) => String(identity.platform || '') === platform);
+  if (!matching.length) return null;
+  const bound = matching.find((identity) => (identity.bindings || [])
+    .some((binding) => binding.channelId === channelId));
+  return bound || matching[0];
+}
+
+async function failRemainingCampaignRecipients(env, workspaceId, campaignId, error) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(`UPDATE campaign_recipients SET status='failed',error=?4,updated_at=?3
+    WHERE workspace_id=?1 AND campaign_id=?2 AND status IN ('pending','queued')`)
+    .bind(workspaceId, campaignId, now, String(error || 'Campaign failed').slice(0, 500)).run();
+}
+
+async function finalizeCampaign(env, workspaceId, campaignId, principal) {
+  const detail = await getCampaignDetail(env, workspaceId, campaignId, principal);
+  const counts = campaignCountsFromRows(detail.recipients);
+  const status = campaignFinalStatus(counts);
+  const now = new Date().toISOString();
+  await env.DB.prepare(`UPDATE campaigns SET
+      status=?3,total_count=?4,pending_count=?5,sent_count=?6,delivered_count=?7,read_count=?8,failed_count=?9,
+      updated_at=?10,completed_at=CASE WHEN ?3 IN ('completed','completed_with_errors','failed','cancelled') THEN ?10 ELSE completed_at END
+    WHERE workspace_id=?1 AND campaign_id=?2`)
+    .bind(
+      workspaceId, campaignId, status,
+      counts.totalCount, counts.pendingCount, counts.sentCount, counts.deliveredCount, counts.readCount, counts.failedCount,
+      now
+    ).run();
+  const item = (await getCampaignDetail(env, workspaceId, campaignId, principal)).item;
+  await broadcast(env, workspaceId, { type: 'campaign.updated', campaignId, campaign: item });
+  return item;
+}
+
+async function syncCampaignRecipientStatus(env, workspaceId, messageId, status, error = '') {
+  if (!messageId) return null;
+  let recipient;
+  try {
+    recipient = await env.DB.prepare(`SELECT recipient_id,campaign_id,status FROM campaign_recipients
+      WHERE workspace_id=?1 AND message_id=?2 LIMIT 1`).bind(workspaceId, messageId).first();
+  } catch (queryError) {
+    // Campaign tables are added by migration 0020; older test DBs and mid-deploy
+    // workspaces should still deliver message status updates normally.
+    if (/no such table:\s*campaign_recipients/i.test(String(queryError?.message || queryError))) return null;
+    throw queryError;
+  }
+  if (!recipient) return null;
+  const nextStatus = preferCampaignRecipientStatus(recipient.status, status);
+  const now = new Date().toISOString();
+  await env.DB.prepare(`UPDATE campaign_recipients SET status=?4,error=?5,updated_at=?6
+    WHERE workspace_id=?1 AND recipient_id=?2 AND campaign_id=?3`)
+    .bind(
+      workspaceId, recipient.recipient_id, recipient.campaign_id, nextStatus,
+      nextStatus === 'failed' ? String(error || '').slice(0, 500) : '',
+      now
+    ).run();
+  const rows = await env.DB.prepare(`SELECT status FROM campaign_recipients
+    WHERE workspace_id=?1 AND campaign_id=?2`).bind(workspaceId, recipient.campaign_id).all();
+  const counts = campaignCountsFromRows(rows.results || []);
+  const finalStatus = campaignFinalStatus(counts);
+  await env.DB.prepare(`UPDATE campaigns SET
+      status=CASE
+        WHEN status IN ('queued','sending') AND ?3 IN ('completed','completed_with_errors','failed') THEN ?3
+        WHEN status IN ('queued','sending') THEN status
+        ELSE ?3
+      END,
+      total_count=?4,pending_count=?5,sent_count=?6,delivered_count=?7,read_count=?8,failed_count=?9,
+      updated_at=?10,
+      completed_at=CASE
+        WHEN ?3 IN ('completed','completed_with_errors','failed') AND completed_at='' THEN ?10
+        ELSE completed_at
+      END
+    WHERE workspace_id=?1 AND campaign_id=?2`)
+    .bind(
+      workspaceId, recipient.campaign_id, finalStatus,
+      counts.totalCount, counts.pendingCount, counts.sentCount, counts.deliveredCount, counts.readCount, counts.failedCount,
+      now
+    ).run();
+  const campaign = await env.DB.prepare(`SELECT c.*, ch.name AS channel_name, ch.connector_type, ch.provider_type
+    FROM campaigns c
+    LEFT JOIN channels ch ON ch.workspace_id=c.workspace_id AND ch.channel_id=c.channel_id
+    WHERE c.workspace_id=?1 AND c.campaign_id=?2`)
+    .bind(workspaceId, recipient.campaign_id).first();
+  if (campaign) {
+    await broadcast(env, workspaceId, {
+      type: 'campaign.updated',
+      campaignId: recipient.campaign_id,
+      campaign: serializeCampaign(campaign, counts)
+    });
+  }
+  return recipient.campaign_id;
 }
 
 async function importChatHistory(env, workspaceId, principal, payload) {
