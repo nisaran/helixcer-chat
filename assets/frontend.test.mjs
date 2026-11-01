@@ -574,7 +574,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261101-campaigns-full/);
+  assert.match(html, /app\.js\?v=20261101-campaigns-api/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -935,8 +935,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261101-campaigns-full/);
-  assert.match(html, /assets\/styles\.css\?v=20261101-campaigns-full/);
+  assert.match(html, /assets\/app\.js\?v=20261101-campaigns-api/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-campaigns-api/);
   assert.match(styles, /\.campaigns-route \.route-heading,\s*\.campaigns-route \.surface\s*\{[\s\S]*max-width:\s*none/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
