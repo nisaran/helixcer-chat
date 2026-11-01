@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-create-ux">
-  <script src="./assets/app.js?v=20261101-campaign-create-ux" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-create-polish">
+  <script src="./assets/app.js?v=20261101-campaign-create-polish" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -536,7 +536,11 @@
                       <span class="campaign-channel-option-content" id="campaignChannelTriggerValue" hidden></span>
                     </button>
                     <input type="hidden" id="campaignChannel" name="channelId" required value="">
-                    <div class="campaign-channel-menu" id="campaignChannelMenu" role="listbox" aria-label="Channels" hidden></div>
+                    <div class="campaign-channel-menu" id="campaignChannelMenu" hidden>
+                      <label class="sr-only" for="campaignChannelSearch">Search channels</label>
+                      <input class="text-field campaign-channel-search" id="campaignChannelSearch" type="search" placeholder="Search channel, platform, or number…" autocomplete="off">
+                      <div class="campaign-channel-options" id="campaignChannelOptions" role="listbox" aria-label="Channels"></div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -591,11 +595,12 @@
                     <button class="secondary-button compact-button" type="button" data-action="campaign-contact-next" id="campaignContactNext">Next</button>
                   </div>
                 </div>
-                <label class="field-label" for="campaignAudienceInput">
+                <div class="field-label">
                   Campaign sending list
-                  <input class="text-field campaign-audience-input" id="campaignAudienceInput" type="text" placeholder="Name &lt;ID&gt;, Name &lt;ID&gt;" spellcheck="false">
-                </label>
-                <p class="subtle" id="campaignAudienceHelp">Added contacts appear as Name &lt;messaging ID&gt;, separated by commas.</p>
+                  <div class="campaign-audience-tags" id="campaignAudienceTags" role="list" aria-live="polite" aria-label="Campaign sending list"></div>
+                  <input type="hidden" id="campaignAudienceInput" value="">
+                </div>
+                <p class="subtle" id="campaignAudienceHelp">Added contacts appear as tags with name and messaging ID.</p>
               </div>
 
               <div id="campaignUploadAudience" hidden>
@@ -620,34 +625,38 @@
 
             <fieldset class="campaign-fieldset campaign-card" id="campaignMessageFieldset">
               <legend>Message</legend>
-              <div id="campaignWhatsAppComposer" hidden>
-                <label class="field-label" for="campaignTemplateSearch">
-                  WhatsApp template
-                  <span class="searchable-combobox" id="campaignTemplateCombobox">
-                    <input class="text-field searchable-combobox-input" id="campaignTemplateSearch" type="search" placeholder="Search or choose a template…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="campaignTemplateOptions">
-                    <input type="hidden" id="campaignTemplateSelect">
-                    <span class="searchable-combobox-menu" id="campaignTemplateOptions" role="listbox" aria-label="Approved templates" hidden></span>
-                  </span>
-                </label>
-                <div class="template-load-state" id="campaignTemplateStatus" role="status">Choose a WhatsApp channel to load templates.</div>
-                <div class="campaign-variable-fields" id="campaignVariableFields"></div>
-              </div>
-              <div id="campaignTextComposer" hidden>
-                <label class="field-label" for="campaignMessageText">
-                  Message
-                  <textarea class="text-field campaign-message-text" id="campaignMessageText" rows="5" maxlength="4096" placeholder="Hello {{name}}, …"></textarea>
-                </label>
-                <p class="subtle">Use {{variable}} placeholders. Map each variable to a contact field, CSV header, or constant below.</p>
-                <div class="campaign-variable-fields" id="campaignTextVariableFields"></div>
-              </div>
-              <div class="campaign-message-preview" id="campaignMessagePreview" hidden>
-                <div class="campaign-message-preview-head">
-                  <strong>Message preview</strong>
-                  <span class="subtle" id="campaignMessagePreviewHint">Sample for the first recipient</span>
+              <div class="campaign-message-layout">
+                <div class="campaign-message-main">
+                  <div id="campaignWhatsAppComposer" hidden>
+                    <label class="field-label" for="campaignTemplateSearch">
+                      WhatsApp template
+                      <span class="searchable-combobox" id="campaignTemplateCombobox">
+                        <input class="text-field searchable-combobox-input" id="campaignTemplateSearch" type="search" placeholder="Search or choose a template…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="campaignTemplateOptions">
+                        <input type="hidden" id="campaignTemplateSelect">
+                        <span class="searchable-combobox-menu" id="campaignTemplateOptions" role="listbox" aria-label="Approved templates" hidden></span>
+                      </span>
+                    </label>
+                    <div class="template-load-state" id="campaignTemplateStatus" role="status">Choose a WhatsApp channel to load templates.</div>
+                    <div class="campaign-variable-fields" id="campaignVariableFields"></div>
+                  </div>
+                  <div id="campaignTextComposer" hidden>
+                    <label class="field-label" for="campaignMessageText">
+                      Message
+                      <textarea class="text-field campaign-message-text" id="campaignMessageText" rows="5" maxlength="4096" placeholder="Hello {{name}}, …"></textarea>
+                    </label>
+                    <p class="subtle">Use {{variable}} placeholders. Map each variable to a contact field, CSV header, or constant below.</p>
+                    <div class="campaign-variable-fields" id="campaignTextVariableFields"></div>
+                  </div>
                 </div>
-                <div class="campaign-message-preview-phone">
-                  <div class="campaign-message-preview-bubble" id="campaignMessagePreviewContent"></div>
-                </div>
+                <aside class="campaign-message-preview" id="campaignMessagePreview" hidden>
+                  <div class="campaign-message-preview-head">
+                    <strong>Message preview</strong>
+                    <span class="subtle" id="campaignMessagePreviewHint">Sample for the first recipient</span>
+                  </div>
+                  <div class="campaign-message-preview-phone">
+                    <div class="campaign-message-preview-bubble" id="campaignMessagePreviewContent"></div>
+                  </div>
+                </aside>
               </div>
             </fieldset>
 

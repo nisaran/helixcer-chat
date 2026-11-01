@@ -1460,11 +1460,15 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 }
 .campaign-channel-trigger-empty { color: var(--muted); font-size: 12px; font-weight: 650; }
 .campaign-channel-menu {
-  position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; left: 0; display: grid; gap: 4px;
-  max-height: 280px; overflow: auto; border: 1px solid #d9ddd9; border-radius: 12px; background: #fff;
-  box-shadow: 0 18px 40px rgba(24, 32, 29, .14); padding: 6px;
+  position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; left: 0; display: grid; gap: 6px;
+  border: 1px solid #d9ddd9; border-radius: 12px; background: #fff;
+  box-shadow: 0 18px 40px rgba(24, 32, 29, .14); padding: 8px;
 }
 .campaign-channel-menu[hidden] { display: none; }
+.campaign-channel-search { margin: 0; }
+.campaign-channel-options {
+  display: grid; gap: 4px; max-height: 240px; overflow: auto;
+}
 .campaign-channel-option {
   display: block; width: 100%; border: 0; border-radius: 10px; background: transparent;
   color: inherit; padding: 8px 10px; text-align: left; cursor: pointer;
@@ -1524,25 +1528,53 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
 }
 .campaign-contact-page-controls { display: inline-flex; align-items: center; gap: 8px; }
-.campaign-audience-input { font-family: inherit; }
+.campaign-audience-tags {
+  display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px;
+  min-height: 120px; max-height: 220px; overflow: auto;
+  margin-top: 6px; border: 1px solid #e2e6e3; border-radius: 12px; background: #fff; padding: 12px;
+}
+.campaign-audience-empty { color: var(--muted); font-size: 12px; font-weight: 650; align-self: center; }
+.campaign-audience-tag {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  border: 1px solid #d7e2dc; border-radius: 999px; background: #f3f8f5; color: var(--ink);
+  padding: 6px 8px 6px 12px;
+}
+.campaign-audience-tag-label { display: grid; gap: 1px; min-width: 0; }
+.campaign-audience-tag-label strong {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 750;
+}
+.campaign-audience-tag-label span {
+  overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 10px;
+}
+.campaign-audience-tag-remove {
+  display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 auto;
+  border: 0; border-radius: 999px; background: rgba(23, 24, 39, .06); color: #51615c;
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.campaign-audience-tag-remove:hover { background: rgba(23, 24, 39, .12); color: var(--ink); }
 .campaign-mapping { display: grid; gap: 10px; }
 .campaign-mapping-row {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, 220px); gap: 10px; align-items: center;
   padding-bottom: 10px; border-bottom: 1px solid #f0ece8;
 }
 .campaign-mapping-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.campaign-message-layout {
+  display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.85fr); gap: 16px; align-items: start;
+}
+.campaign-message-main { display: grid; gap: 12px; min-width: 0; }
 .campaign-variable-fields { display: grid; gap: 10px; }
 .campaign-variable-row {
-  display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: end;
+  display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 10px; align-items: end;
 }
 .campaign-message-text { min-height: 120px; resize: vertical; }
 .campaign-message-preview {
-  display: grid; gap: 10px; border: 1px solid #e2e8e4; border-radius: 14px; background: #f5f8f6; padding: 14px;
+  display: grid; gap: 10px; position: sticky; top: 12px;
+  border: 1px solid #e2e8e4; border-radius: 14px; background: #f5f8f6; padding: 14px;
 }
 .campaign-message-preview-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .campaign-message-preview-head strong { font-size: 12px; font-weight: 750; }
 .campaign-message-preview-phone { border-radius: 14px; background: linear-gradient(180deg, #e8f0eb, #dfe8e3); padding: 16px; }
-.campaign-message-preview-bubble { max-width: 420px; }
+.campaign-message-preview-bubble { max-width: 100%; }
 .campaign-preview-card, .campaign-text-preview-card {
   overflow: hidden; border: 1px solid #dce9e1; border-radius: 12px 12px 12px 4px; background: #edf8f2;
   box-shadow: 0 2px 5px rgba(17, 78, 55, .05);
@@ -1556,6 +1588,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-create-actions .subtle { margin: 0; max-width: 460px; line-height: 1.5; }
 @media (max-width: 980px) {
   .campaign-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .campaign-message-layout { grid-template-columns: 1fr; }
+  .campaign-message-preview { position: static; }
 }
 @media (max-width: 720px) {
   .campaign-create-grid, .campaign-mapping-row, .campaign-variable-row, .campaign-filter-grid { grid-template-columns: 1fr; }
@@ -1802,7 +1836,13 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .confirmation-card > .modal-copy { margin: 10px 0 0; }
 .confirmation-symbol { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: #fff0ec; color: #b54731; }
 .confirmation-symbol svg { width: 21px; height: 21px; }
-.confirmation-note { border: 1px solid #f0d2c9; border-radius: 10px; background: #fff7f4; color: #854333; margin: 13px 0 0; padding: 10px 11px; font-size: 10px; font-weight: 650; line-height: 1.5; }
+.confirmation-note {
+  border: 1px solid #f0d2c9; border-radius: 10px; background: #fff7f4; color: #854333;
+  margin: 13px 0 0; padding: 10px 11px; font-size: 10px; font-weight: 650; line-height: 1.55; white-space: pre-line;
+}
+.confirmation-note.is-info {
+  border-color: #d7e2dc; background: #f4f8f6; color: #35554a;
+}
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-top: 18px; }
 .form-span { grid-column: 1 / -1; }
 .channel-form-grid { margin-top: 15px; }

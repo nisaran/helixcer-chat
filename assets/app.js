@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-create-ux";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-create-polish";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -102,6 +102,7 @@
       contactPage: 1,
       contactCandidates: [],
       channelMenuOpen: false,
+      channelSearch: "",
       templates: [],
       templateKey: "",
       variableMappings: [],
@@ -8502,18 +8503,42 @@
     if (!silent) renderCampaignMessageComposer();
   }
 
+  function campaignChannelSearchHaystack(channel) {
+    const profile = providerProfiles[channel.connectorType] || { label: channelStyle(channel).label || "" };
+    return [
+      channel.name,
+      channel.channelId,
+      profile.label,
+      channelStyle(channel).label,
+      campaignChannelIdentifier(channel),
+      channel.setup?.verifiedName,
+      channel.setup?.verifiedUsername,
+      channel.setup?.verifiedPhoneNumber,
+    ].filter(Boolean).join(" ").toLocaleLowerCase();
+  }
+
   function renderCampaignChannelPicker() {
     const menu = $("campaignChannelMenu");
+    const optionsHost = $("campaignChannelOptions");
     const trigger = $("campaignChannelTrigger");
+    const search = $("campaignChannelSearch");
     if (!menu || !trigger) return;
+    const host = optionsHost || menu;
     const current = $("campaignChannel")?.value || "";
     const keepOpen = Boolean(state.campaigns.channelMenuOpen);
-    menu.replaceChildren();
+    const needle = String(state.campaigns.channelSearch || "").trim().toLocaleLowerCase();
+    if (search && search.value !== (state.campaigns.channelSearch || "")) {
+      search.value = state.campaigns.channelSearch || "";
+    }
+    host.replaceChildren();
     const channels = state.channels
       .slice()
-      .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }));
-    if (!channels.length) {
-      menu.append(element("div", "campaign-multi-filter-empty", "No channels connected yet."));
+      .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }))
+      .filter((channel) => !needle || campaignChannelSearchHaystack(channel).includes(needle));
+    if (!state.channels.length) {
+      host.append(element("div", "campaign-multi-filter-empty", "No channels connected yet."));
+    } else if (!channels.length) {
+      host.append(element("div", "campaign-multi-filter-empty", "No channels match this search."));
     } else {
       channels.forEach((channel) => {
         const option = document.createElement("button");
@@ -8526,9 +8551,11 @@
         option.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
+          state.campaigns.channelSearch = "";
+          if (search) search.value = "";
           setCampaignChannel(channel.channelId);
         });
-        menu.append(option);
+        host.append(option);
       });
     }
     updateCampaignChannelTrigger(current);
@@ -8791,50 +8818,51 @@
   }
 
   function renderCampaignSelectedContacts() {
+    const host = $("campaignAudienceTags");
     const input = $("campaignAudienceInput");
-    if (!input) return;
     const ids = [...state.campaigns.audienceContactIds];
-    const value = ids.map((contactId) => {
-      const contact = state.contacts.find((item) => item.contactId === contactId) || { contactId, displayName: contactId };
-      return formatCampaignAudienceEntry(contact);
-    }).join(", ");
-    state.campaigns.audienceInputSyncing = true;
-    input.value = value;
-    state.campaigns.audienceInputSyncing = false;
+    if (input) {
+      state.campaigns.audienceInputSyncing = true;
+      input.value = ids.map((contactId) => {
+        const contact = state.contacts.find((item) => item.contactId === contactId) || { contactId, displayName: contactId };
+        return formatCampaignAudienceEntry(contact);
+      }).join(", ");
+      state.campaigns.audienceInputSyncing = false;
+    }
+    if (host) {
+      host.replaceChildren();
+      if (!ids.length) {
+        host.append(element("span", "campaign-audience-empty", "No recipients added yet."));
+      } else {
+        ids.forEach((contactId) => {
+          const contact = state.contacts.find((item) => item.contactId === contactId) || { contactId, displayName: contactId };
+          const tag = document.createElement("span");
+          tag.className = "campaign-audience-tag";
+          tag.role = "listitem";
+          const label = document.createElement("span");
+          label.className = "campaign-audience-tag-label";
+          label.append(element("strong", "", contact.displayName || contactId));
+          const messagingId = campaignContactMessagingId(contact);
+          if (messagingId) label.append(element("span", "", messagingId));
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "campaign-audience-tag-remove";
+          remove.dataset.action = "campaign-remove-contact";
+          remove.dataset.contactId = contactId;
+          remove.setAttribute("aria-label", `Remove ${contact.displayName || contactId}`);
+          remove.textContent = "×";
+          tag.append(label, remove);
+          host.append(tag);
+        });
+      }
+    }
     const help = $("campaignAudienceHelp");
     if (help) {
       help.textContent = ids.length
         ? `${ids.length} recipient${ids.length === 1 ? "" : "s"} ready to send.`
-        : "Added contacts appear as Name <messaging ID>, separated by commas.";
+        : "Added contacts appear as tags with name and messaging ID.";
     }
     renderCampaignMessagePreview();
-  }
-
-  function parseCampaignAudienceInput(raw) {
-    const text = String(raw || "").trim();
-    if (!text) return new Set();
-    const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
-    const next = new Set();
-    for (const part of parts) {
-      const match = part.match(/^(.*?)\s*<([^<>]+)>\s*$/);
-      const name = String(match?.[1] || part).trim();
-      const id = String(match?.[2] || "").trim();
-      let contact = null;
-      if (id) {
-        contact = (state.contacts || []).find((item) => {
-          const messagingId = campaignContactMessagingId(item);
-          return messagingId === id
-            || item.contactId === id
-            || item.channelProfileId === id
-            || Object.values(contactPlatformIds(item)).includes(id);
-        }) || null;
-      }
-      if (!contact && name) {
-        contact = (state.contacts || []).find((item) => String(item.displayName || "").trim() === name) || null;
-      }
-      if (contact?.contactId) next.add(contact.contactId);
-    }
-    return next;
   }
 
   function renderCampaignFieldMapping() {
@@ -9169,8 +9197,7 @@
           ${descriptor.kind === "media" && source === "upload"
     ? `<input class="text-field campaign-variable-file" type="file" accept="image/*,video/*,.pdf,application/pdf">`
     : `<input class="text-field campaign-variable-value" type="text" value="${escapeHtml(current.value || "")}" placeholder="${descriptor.kind === "media" ? "https://…" : "Optional constant"}">`}
-        </label>
-        <span class="subtle">${descriptor.kind === "media" ? "Shared across every recipient" : "Mapped per recipient"}</span>`;
+        </label>`;
       host.append(row);
       nextMappings.push({
         id: descriptor.id,
@@ -9230,8 +9257,7 @@
         </label>
         <label class="field-label">Constant / override
           <input class="text-field campaign-text-value" type="text" value="${escapeHtml(current.value || "")}" placeholder="Used when source is constant">
-        </label>
-        <span class="subtle">Mapped per recipient</span>`;
+        </label>`;
       host.append(row);
       row.querySelector(".campaign-text-source")?.addEventListener("change", () => {
         const source = row.querySelector(".campaign-text-source")?.value || "";
@@ -9310,6 +9336,53 @@
     showToast("Contacts loaded", `${state.campaigns.uploadRows.length} rows from ${fileName}.`);
   }
 
+  function campaignAppliedFilterSummary() {
+    const filters = state.campaigns.contactFilters || {};
+    const lists = campaignFilterOptionLists();
+    const parts = [];
+    const labelFor = (key, value) => lists[key]?.find((item) => item.value === value)?.label || value;
+    [
+      ["channels", "Channel"],
+      ["platforms", "Platform"],
+      ["companies", "Company"],
+      ["tags", "Tags"],
+    ].forEach(([key, label]) => {
+      const selected = [...(filters[key] || [])];
+      if (!selected.length) return;
+      parts.push(`${label}: ${selected.map((value) => labelFor(key, value)).join(", ")}`);
+    });
+    const search = String(state.campaigns.contactFilter || "").trim();
+    if (search) parts.push(`Search: “${search}”`);
+    return parts;
+  }
+
+  function campaignSendConfirmationDetails({ name, channel, audienceSource, recipientCount }) {
+    const profile = providerProfiles[channel.connectorType] || { label: channelStyle(channel).label || "Channel" };
+    const identifier = campaignChannelIdentifier(channel);
+    const lines = [
+      `Campaign: ${name}`,
+      `Channel: ${channel.name || channel.channelId}${identifier ? ` · ${profile.label} ${identifier}` : ` · ${profile.label}`}`,
+      `Recipients: ${recipientCount}`,
+      `Audience: ${audienceSource === "upload" ? "Uploaded CSV contacts" : "Selected contacts"}`,
+    ];
+    if (audienceSource === "contacts") {
+      const filterLines = campaignAppliedFilterSummary();
+      lines.push(filterLines.length ? `Filters: ${filterLines.join(" · ")}` : "Filters: None");
+    } else {
+      lines.push(`CSV rows: ${state.campaigns.uploadRows.length}`);
+    }
+    if (isWhatsAppCampaignChannel(channel)) {
+      const template = selectedCampaignTemplate();
+      lines.push(template
+        ? `Message: Template ${template.name} (${template.language?.code || template.language || "en"})`
+        : "Message: WhatsApp template");
+    } else {
+      const text = String($("campaignMessageText")?.value || "").trim();
+      lines.push(text ? `Message: Text (${Math.min(text.length, 80)}${text.length > 80 ? "+" : ""} chars)` : "Message: Text");
+    }
+    return lines.join("\n");
+  }
+
   async function submitCampaign(event) {
     event.preventDefault();
     if (state.campaigns.submitting) return;
@@ -9331,6 +9404,21 @@
       }
       recipients = state.campaigns.uploadRows.map((row) => ({ row }));
     }
+
+    const confirmed = await requestConfirmation({
+      eyebrow: "Confirm campaign",
+      title: "Send this campaign?",
+      message: "Messages start sending immediately to every recipient in the list.",
+      note: campaignSendConfirmationDetails({
+        name,
+        channel,
+        audienceSource,
+        recipientCount: recipients.length,
+      }),
+      confirmLabel: "Send campaign",
+      danger: false,
+    });
+    if (!confirmed) return;
 
     const payload = {
       name,
@@ -10659,8 +10747,10 @@
     $("confirmationEyebrow").textContent = eyebrow;
     $("confirmationTitle").textContent = title;
     $("confirmationMessage").textContent = message;
-    $("confirmationNote").textContent = note;
-    $("confirmationNote").hidden = !note;
+    const noteEl = $("confirmationNote");
+    noteEl.textContent = note;
+    noteEl.hidden = !note;
+    noteEl.classList.toggle("is-info", !danger && Boolean(note));
     const submit = $("confirmationSubmit");
     submit.textContent = confirmLabel;
     submit.classList.toggle("danger-button", danger);
@@ -11711,6 +11801,30 @@
       });
       state.campaigns.channelMenuOpen = !state.campaigns.channelMenuOpen;
       renderCampaignChannelPicker();
+      if (state.campaigns.channelMenuOpen) {
+        queueMicrotask(() => $("campaignChannelSearch")?.focus());
+      }
+    });
+    $("campaignChannelSearch")?.addEventListener("input", (event) => {
+      state.campaigns.channelSearch = event.target.value || "";
+      state.campaigns.channelMenuOpen = true;
+      renderCampaignChannelPicker();
+      const search = $("campaignChannelSearch");
+      if (search) {
+        search.focus();
+        const end = search.value.length;
+        search.setSelectionRange(end, end);
+      }
+    });
+    $("campaignChannelSearch")?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeCampaignChannelMenu();
+        $("campaignChannelTrigger")?.focus();
+      }
+    });
+    $("campaignChannelMenu")?.addEventListener("click", (event) => {
+      event.stopPropagation();
     });
     document.querySelectorAll("[data-campaign-filter] .campaign-multi-filter-trigger").forEach((trigger) => {
       trigger.addEventListener("click", (event) => {
@@ -11783,16 +11897,6 @@
       if (input.checked) state.campaigns.selectedContactIds.add(input.dataset.campaignContactId);
       else state.campaigns.selectedContactIds.delete(input.dataset.campaignContactId);
       renderCampaignContactPicker();
-    });
-    $("campaignAudienceInput")?.addEventListener("change", (event) => {
-      if (state.campaigns.audienceInputSyncing) return;
-      state.campaigns.audienceContactIds = parseCampaignAudienceInput(event.target.value);
-      renderCampaignSelectedContacts();
-    });
-    $("campaignAudienceInput")?.addEventListener("blur", (event) => {
-      if (state.campaigns.audienceInputSyncing) return;
-      state.campaigns.audienceContactIds = parseCampaignAudienceInput(event.target.value);
-      renderCampaignSelectedContacts();
     });
     $("campaignUploadFile")?.addEventListener("change", async (event) => {
       const file = event.target.files?.[0];
