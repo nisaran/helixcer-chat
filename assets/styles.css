@@ -460,7 +460,14 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .filter-chip:hover, .filter-chip.is-active { border-color: #d7ccfb; background: var(--brand-soft); color: var(--brand-deep); }
 .filter-chip.is-active span { background: #e4dcff; }
 
-.conversation-list { flex: 1; min-height: 0; overflow: auto; scrollbar-color: #d8dcda transparent; }
+.conversation-list {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-color: #d8dcda transparent;
+}
 .conversation-load-more {
   display: grid;
   justify-items: center;
@@ -477,7 +484,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   grid-template-columns: 42px minmax(0, 1fr) auto;
   gap: 11px;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 72px;
+  box-sizing: border-box;
+  overflow: hidden;
   border: 0;
   border-bottom: 1px solid #eef0ed;
   background: white;
@@ -507,12 +518,35 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   font-weight: 800;
 }
 .provider-logo-fallback { background: var(--channel-color, #64706f); color: white; }
-.conversation-copy { min-width: 0; align-self: center; }
-.conversation-name-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.conversation-name-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.conversation-copy {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  align-self: center;
+}
+.conversation-name-row { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; overflow: hidden; }
+.conversation-name-row strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
 .priority-mark { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: #d08a21; }
-.conversation-preview { overflow: hidden; margin-top: 5px; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.conversation-side { display: grid; justify-items: end; align-content: space-between; gap: 6px; padding-top: 1px; }
+.conversation-preview {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  margin-top: 5px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.conversation-side { display: grid; justify-items: end; align-content: space-between; gap: 6px; min-width: 0; padding-top: 1px; }
 .conversation-time { color: #8a94a6; font-size: 11px; white-space: nowrap; }
 .unread-badge { display: grid; place-items: center; width: 20px; min-width: 20px; height: 20px; border-radius: 50%; background: var(--brand); color: white; padding: 0; text-align: center; font-size: 9px; font-weight: 750; }
 
