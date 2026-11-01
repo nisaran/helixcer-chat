@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-ui-v2">
-  <script src="./assets/app.js?v=20261101-campaign-ui-v2" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-layout-2">
+  <script src="./assets/app.js?v=20261101-campaign-layout-2" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -571,23 +571,22 @@
                       <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any tags</button>
                       <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
                     </div>
+                    <div class="campaign-filter-search">
+                      <span class="campaign-multi-filter-label">Search</span>
+                      <div class="search-wrap compact-search campaign-filter-search-wrap">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+                        <label class="sr-only" for="campaignContactSearch">Filter contacts</label>
+                        <input id="campaignContactSearch" type="search" placeholder="Search name, company, tags, or ID…">
+                      </div>
+                    </div>
                   </div>
                   <button class="secondary-button compact-button" type="button" data-action="campaign-clear-filters" id="campaignClearFilters">Clear filters</button>
                 </div>
-                <div class="campaign-audience-toolbar">
-                  <div class="search-wrap compact-search">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-                    <label class="sr-only" for="campaignContactSearch">Filter contacts</label>
-                    <input id="campaignContactSearch" type="search" placeholder="Search name, company, tags, or ID…">
-                  </div>
-                  <div class="campaign-audience-actions">
-                    <label class="bulk-select-all"><input type="checkbox" id="campaignContactSelectAll"><span id="campaignContactSelectAllLabel">Select all filtered</span></label>
-                    <button class="primary-button compact-button" type="button" data-action="campaign-add-selected-contacts" id="campaignAddSelected" disabled>Add to campaign</button>
-                  </div>
-                </div>
                 <div class="campaign-contact-table" id="campaignContactTable">
                   <div class="campaign-contact-head">
-                    <span class="campaign-contact-check" aria-hidden="true"></span>
+                    <span class="campaign-contact-check">
+                      <input type="checkbox" id="campaignContactSelectAll" aria-label="Select all filtered contacts">
+                    </span>
                     <span>Name</span>
                     <span>ID</span>
                     <span>Company</span>
@@ -596,21 +595,31 @@
                   <div class="campaign-contact-list" id="campaignContactList" role="list" aria-label="Filtered contacts"></div>
                 </div>
                 <div class="campaign-contact-footer">
-                  <p class="subtle" id="campaignContactListMeta"></p>
                   <div class="campaign-contact-pagination" id="campaignContactPagination" hidden>
                     <button class="secondary-button compact-button" type="button" data-action="campaign-contact-prev" id="campaignContactPrev">Prev</button>
                     <span class="campaign-page-chip" id="campaignContactPageLabel"></span>
                     <button class="secondary-button compact-button" type="button" data-action="campaign-contact-next" id="campaignContactNext">Next</button>
                   </div>
+                  <p class="subtle campaign-contact-meta" id="campaignContactListMeta"></p>
+                  <button class="primary-button compact-button" type="button" data-action="campaign-add-selected-contacts" id="campaignAddSelected" disabled>Add to campaign</button>
                 </div>
                 <div class="campaign-sending-list-head">
                   <span class="field-label-text">Campaign sending list</span>
-                  <button class="secondary-button compact-button" type="button" data-action="campaign-clear-audience" id="campaignClearAudience">Clear all</button>
+                  <div class="campaign-sending-list-tools">
+                    <div class="search-wrap compact-search campaign-sending-search-wrap">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+                      <label class="sr-only" for="campaignAudienceSearch">Search sending list</label>
+                      <input id="campaignAudienceSearch" type="search" placeholder="Search sending list…">
+                    </div>
+                    <button class="secondary-button compact-button" type="button" data-action="campaign-clear-audience" id="campaignClearAudience">Clear all</button>
+                  </div>
                 </div>
                 <div class="campaign-audience-table" id="campaignAudienceTable">
                   <div class="campaign-audience-head">
                     <span>Name</span>
                     <span>ID</span>
+                    <span>Company</span>
+                    <span>Tags</span>
                     <span class="campaign-audience-action-head">Action</span>
                   </div>
                   <div class="campaign-audience-rows" id="campaignAudienceTags" role="list" aria-live="polite" aria-label="Campaign sending list"></div>
@@ -635,7 +644,7 @@
                 <button class="secondary-button compact-button" type="button" data-action="campaign-load-upload-url" id="campaignLoadUploadUrl" hidden>Load URL</button>
                 <p class="subtle" id="campaignUploadHelp">Export Excel as CSV. Map columns to contact fields below, then use headers as message variables.</p>
                 <div class="campaign-mapping" id="campaignFieldMapping" hidden></div>
-                <div class="campaign-upload-preview" id="campaignUploadPreview" hidden></div>
+                <p class="subtle campaign-upload-count" id="campaignUploadPreview" hidden></p>
               </div>
             </fieldset>
 
@@ -646,8 +655,9 @@
                   <div id="campaignWhatsAppComposer" hidden>
                     <label class="field-label" for="campaignTemplateSearch">
                       WhatsApp template
-                      <span class="searchable-combobox" id="campaignTemplateCombobox">
+                      <span class="searchable-combobox is-clickable" id="campaignTemplateCombobox" data-campaign-template-combobox>
                         <input class="text-field searchable-combobox-input" id="campaignTemplateSearch" type="search" placeholder="Search or choose a template…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="campaignTemplateOptions">
+                        <button class="searchable-combobox-toggle" type="button" id="campaignTemplateToggle" aria-label="Show templates" tabindex="-1"></button>
                         <input type="hidden" id="campaignTemplateSelect">
                         <span class="searchable-combobox-menu" id="campaignTemplateOptions" role="listbox" aria-label="Approved templates" hidden></span>
                       </span>
