@@ -984,6 +984,12 @@ test("conversation filters are multi-selectable with responsive desktop and mobi
   assert.match(app, /clearConversationFilters\(\)/);
   assert.match(html, /data-action="clear-conversation-filters">None</);
   assert.doesNotMatch(html, /Show all conversations/);
+  const clearFiltersStart = app.indexOf('actionButton.dataset.action === "clear-conversation-filters"');
+  const clearFiltersEnd = app.indexOf("if (actionButton.dataset.action ===", clearFiltersStart + 1);
+  const clearFiltersBody = app.slice(clearFiltersStart, clearFiltersEnd);
+  assert.match(clearFiltersBody, /clearConversationFilters\(\)/);
+  assert.match(clearFiltersBody, /renderConversationList\(\)/);
+  assert.doesNotMatch(clearFiltersBody, /closeConversationFilterMenu/);
   assert.match(app, /if \(selected\.size === 0\) return \[\]/);
   assert.match(app, /input\.checked = input\.value === "all" \? showingAll : selected\.has\(input\.value\)/);
   assert.match(app, /const statusFilters = showingAll \? \[\] : \["open", "closed"\]\.filter/);
