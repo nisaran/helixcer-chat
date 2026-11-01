@@ -7750,6 +7750,44 @@
     return "Import finished";
   }
 
+  function importChatIssueRows(summary = state.importChat.lastSummary) {
+    return (Array.isArray(summary?.failed) ? summary.failed : [])
+      .map((item, index) => ({
+        index: index + 1,
+        phone: String(item?.phone || "").trim(),
+        externalId: String(item?.externalId || item?.external_id || "").trim(),
+        error: String(item?.error || item?.message || "Conversation import failed.").trim(),
+      }))
+      .filter((item) => item.phone || item.externalId || item.error);
+  }
+
+  function downloadImportChatIssues(summary = state.importChat.lastSummary) {
+    const issues = importChatIssueRows(summary);
+    if (!issues.length) {
+      showToast("No issues to download", "This import did not record any failed conversations.");
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      source: "import-chat-issues",
+      issueCount: issues.length,
+      batchesCompleted: Number(summary?.batchesCompleted || 0),
+      batchesTotal: Number(summary?.batchesTotal || 0),
+      cancelled: Boolean(summary?.cancelled),
+      issues,
+    };
+    const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `helixcer-import-issues-${stamp}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   function showImportChatResult(summary) {
     const host = $("importChatResult");
     if (!summary) {
@@ -7759,7 +7797,7 @@
     }
     state.importChat.lastSummary = summary;
     host.hidden = false;
-    const failed = Array.isArray(summary.failed) ? summary.failed : [];
+    const failed = importChatIssueRows(summary);
     host.innerHTML = "";
     const title = document.createElement("strong");
     title.textContent = importChatResultTitle(summary);
@@ -7795,6 +7833,34 @@
       stats.append(item);
     });
     host.append(title, status, stats);
+    if (!failed.length) return;
+
+    const issues = document.createElement("section");
+    issues.className = "import-chat-issues";
+    const head = document.createElement("div");
+    head.className = "import-chat-issues-head";
+    const heading = document.createElement("h3");
+    heading.textContent = `Failed conversations (${failed.length})`;
+    const download = document.createElement("button");
+    download.type = "button";
+    download.className = "secondary-button compact-button";
+    download.dataset.action = "download-import-issues";
+    download.textContent = "Download issues";
+    head.append(heading, download);
+    const list = document.createElement("ul");
+    list.className = "import-chat-issues-list";
+    failed.forEach((item) => {
+      const row = document.createElement("li");
+      const meta = [item.phone, item.externalId].filter(Boolean).join(" · ") || "Unknown contact";
+      const label = document.createElement("strong");
+      label.textContent = meta;
+      const error = document.createElement("span");
+      error.textContent = item.error;
+      row.append(label, error);
+      list.append(row);
+    });
+    issues.append(head, list);
+    host.append(issues);
   }
 
   function cancelImportChat() {
@@ -8939,6 +9005,10 @@
         }
         if (actionButton.dataset.action === "load-more-conversations") {
           loadMoreConversations();
+          return;
+        }
+        if (actionButton.dataset.action === "download-import-issues") {
+          downloadImportChatIssues();
           return;
         }
         if (actionButton.dataset.action === "clear-template-filter") {
