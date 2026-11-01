@@ -2924,7 +2924,6 @@
       closeConversationActionMenu();
       closeComposerRouteMenu();
       state.unreadMarker = markRead && unreadCount > 0 ? { conversationId, count: unreadCount } : null;
-      restoreComposerDraft(conversationId);
     }
     state.selectedConversationId = conversationId;
     state.pendingConversationId = null;
@@ -2939,6 +2938,10 @@
     }
     renderConversationList();
     renderSelectedConversation();
+    // Restore after #chatContent is shown so the first open does not measure a
+    // hidden textarea (scrollHeight 0) and collapse the compose field.
+    if (changingConversation) restoreComposerDraft(conversationId);
+    scheduleComposerResize();
     if (!state.messages.has(conversationId)) {
       renderMessageLoading();
       try {
@@ -3911,6 +3914,7 @@
     renderComposerRouteControl(conversation, route);
     renderAttachmentQueue();
     syncWhatsAppReplyCountdown(conversation);
+    scheduleComposerResize();
   }
 
   let contactIdentityDraftSequence = 0;
@@ -9342,8 +9346,21 @@
 
   function resizeComposer() {
     const input = $("messageInput");
+    if (!input) return;
     input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 150)}px`;
+    const next = Math.min(input.scrollHeight, 150);
+    // Measuring while the chat panel is still hidden yields scrollHeight 0 and
+    // collapses the field. Keep the natural rows="1" height until it is visible.
+    if (next > 0) input.style.height = `${next}px`;
+    else input.style.height = "";
+  }
+
+  function scheduleComposerResize() {
+    resizeComposer();
+    requestAnimationFrame(() => {
+      resizeComposer();
+      requestAnimationFrame(resizeComposer);
+    });
   }
 
   function usesMobileComposerKeyboard() {

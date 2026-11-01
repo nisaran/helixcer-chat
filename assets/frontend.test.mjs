@@ -930,6 +930,15 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.doesNotMatch(app, /discardAttachmentQueue\(conversationId\);\s*if \(state\.templateConversationId/);
 });
 
+test("the first opened chat restores the composer after the panel is visible", () => {
+  const selectHandler = app.slice(app.indexOf("async function selectConversation"), app.indexOf("function renderSelectedConversation"));
+  assert.ok(selectHandler.indexOf("renderSelectedConversation()") < selectHandler.indexOf("restoreComposerDraft(conversationId)"));
+  assert.match(app, /function scheduleComposerResize\(\)/);
+  assert.match(app, /if \(next > 0\) input\.style\.height = `\$\{next\}px`/);
+  assert.match(app, /scheduleComposerResize\(\)/);
+  assert.match(styles, /\.composer textarea\s*\{[^}]*min-height:\s*24px/);
+});
+
 test("message history opens at the latest message without an animated top-to-bottom flash", () => {
   const messageRenderer = app.slice(app.indexOf("function renderMessages"), app.indexOf("function isWhatsAppConversation"));
   assert.match(messageRenderer, /host\.scrollTop = stayAtBottom \? host\.scrollHeight/);
