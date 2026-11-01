@@ -569,7 +569,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261031-select-all-fix/);
+  assert.match(html, /app\.js\?v=20261101-import-running-result/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -910,8 +910,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261031-select-all-fix/);
-  assert.match(html, /assets\/styles\.css\?v=20261031-select-all-fix/);
+  assert.match(html, /assets\/app\.js\?v=20261101-import-running-result/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-import-running-result/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   // Inbound customer names must not render on the bubble; only outbound sender_name on the route line.
@@ -1151,6 +1151,33 @@ test("Import Chat lists failed conversations and downloads only issue cases", ()
   assert.match(app, /Failed conversations/);
   assert.match(styles, /\.import-chat-issues/);
   assert.match(styles, /\.import-chat-issues-list/);
+});
+
+test("Import Chat result stays in progress while batches are still running", () => {
+  const titleStart = app.indexOf("function importChatResultTitle");
+  const titleEnd = app.indexOf("function importChatIssueRows", titleStart);
+  assert.ok(titleStart >= 0 && titleEnd > titleStart);
+  const titleBody = app.slice(titleStart, titleEnd);
+  assert.match(titleBody, /state\.importChat\.importing/);
+  assert.match(titleBody, /Import in progress/);
+  assert.match(titleBody, /Import finished/);
+  assert.ok(titleBody.indexOf("Import in progress") < titleBody.indexOf("Import finished"));
+
+  const showStart = app.indexOf("function showImportChatResult");
+  const showEnd = app.indexOf("function cancelImportChat", showStart);
+  assert.ok(showStart >= 0 && showEnd > showStart);
+  const showBody = app.slice(showStart, showEnd);
+  assert.match(showBody, /state\.importChat\.lastSummary = null/);
+  assert.match(showBody, /Processed \$\{batchesDone\} of \$\{batchesTotal\} batches/);
+  assert.match(showBody, /Completed \$\{batchesDone\} of \$\{batchesTotal\} batches/);
+
+  const runStart = app.indexOf("async function runImportChat");
+  const runEnd = app.indexOf("function toggleSidebarNavigation", runStart);
+  assert.ok(runStart >= 0 && runEnd > runStart);
+  const runBody = app.slice(runStart, runEnd);
+  assert.match(runBody, /state\.importChat\.lastSummary = summary;\s*showImportChatResult\(summary\);\s*renderImportChatPage\(\);/);
+  assert.match(runBody, /summary\.batchesCompleted = index \+ 1;\s*state\.importChat\.lastSummary = summary;\s*showImportChatResult\(summary\);/);
+  assert.match(runBody, /state\.importChat\.importing = false;\s*if \(summary\.cancelled\)/);
 });
 
 test("Import Chat preserves Interakt delivered and read timestamps", () => {
