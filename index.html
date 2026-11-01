@@ -968,7 +968,7 @@
       <input type="hidden" name="channelId" id="channelIdInput">
       <input type="hidden" name="metaVerifyToken" id="channelMetaVerifyToken">
       <div class="form-grid channel-form-grid">
-        <label class="field-label">Provider<select class="text-field" name="connectorType" id="channelProvider" required><option value="whatsapp_cloud">WhatsApp Cloud</option><option value="telegram">Telegram Bot</option><option value="instagram">Instagram</option></select></label>
+        <label class="field-label">Provider<select class="text-field" name="connectorType" id="channelProvider" required><option value="whatsapp_cloud">WhatsApp Cloud</option><option value="telegram">Telegram Bot</option><option value="instagram">Instagram</option><option value="facebook_messenger">Facebook Messenger</option></select></label>
         <label class="field-label">Connection name<input class="text-field" name="name" id="channelNameInput" required maxlength="80" placeholder="Sales WhatsApp"></label>
       </div>
 
@@ -998,6 +998,17 @@
           <label class="field-label form-span"><span>Instagram username <span class="optional-label">Optional</span></span><input class="text-field" name="instagramUsername" maxlength="60" autocomplete="off" placeholder="your_business"></label>
           <label class="field-label form-span">Instagram User access token<input class="text-field secret-field" name="instagramAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a long-lived Instagram User access token" required><span class="field-help secret-help">A green masked value means the token is saved securely; focus the field only to replace it.</span></label>
           <label class="field-label form-span">Meta App Secret<input class="text-field secret-field" name="instagramAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">A green masked value means it is saved securely; focus the field only to replace it.</span></label>
+        </div>
+      </section>
+
+      <section class="provider-fields" data-provider-fields="facebook_messenger" hidden>
+        <div class="provider-form-head"><img class="provider-mark facebook" src="./assets/provider-facebook.svg" alt=""><div><strong>Facebook Messenger</strong><span>Connect a Facebook Page through its Meta app with the Messenger product.</span></div></div>
+        <div class="form-grid channel-form-grid">
+          <label class="field-label">Facebook Page ID<input class="text-field" name="messengerPageId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
+          <label class="field-label"><span>Meta App ID <span class="optional-label">Optional</span></span><input class="text-field" name="messengerAppId" inputmode="numeric" maxlength="40" placeholder="Your Meta app ID"></label>
+          <label class="field-label form-span"><span>Page name <span class="optional-label">Optional</span></span><input class="text-field" name="messengerPageName" maxlength="100" autocomplete="off" placeholder="Your Page name"></label>
+          <label class="field-label form-span">Page access token<input class="text-field secret-field" name="messengerAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a Page access token" required><span class="field-help secret-help">Use a Page token with pages_messaging. A green masked value means it is saved securely; focus the field only to replace it.</span></label>
+          <label class="field-label form-span">Meta App Secret<input class="text-field secret-field" name="messengerAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">Use App settings → Basic → App secret for this same Meta app. A green masked value means it is saved securely.</span></label>
         </div>
       </section>
 

@@ -161,6 +161,9 @@
     telegram_bot: "./assets/provider-telegram.svg",
     instagram: "./assets/provider-instagram.svg",
     instagram_messaging: "./assets/provider-instagram.svg",
+    facebook_messenger: "./assets/provider-facebook.svg",
+    facebook: "./assets/provider-facebook.svg",
+    messenger: "./assets/provider-facebook.svg",
   };
 
   const providerProfiles = {
@@ -180,6 +183,12 @@
       label: "Instagram", noun: "Instagram-scoped user ID", placeholder: "17890000000000001",
       help: "Use the Instagram-scoped ID supplied by the messaging webhook.",
       description: "Manage Instagram Business or Creator account messages from the inbox.",
+      setupUrl: "https://developers.facebook.com/apps/", setupLabel: "Open Meta",
+    },
+    facebook_messenger: {
+      label: "Messenger", noun: "Page-scoped user ID", placeholder: "1234567890123456",
+      help: "Use the Page-scoped ID (PSID) supplied by the Messenger webhook.",
+      description: "Send and receive Facebook Messenger conversations for a Page.",
       setupUrl: "https://developers.facebook.com/apps/", setupLabel: "Open Meta",
     },
   };
@@ -238,6 +247,7 @@
         { channelId: "wa-service", name: "Service WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", config: { wabaId: "123456789012347", phoneNumberId: "123456789012348" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(95), webhookVerifiedAt: ago(94), lastWebhookAt: ago(11), verifiedName: "Helixcer Service", verifiedPhoneNumber: "+91 91234 56780" } },
         { channelId: "telegram-support", name: "Support Bot", connectorType: "telegram", enabled: true, health: "connected", config: {}, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(160), webhookVerifiedAt: ago(158), lastWebhookAt: ago(18), verifiedName: "helixcer_support_bot" } },
         { channelId: "instagram-main", name: "Helixcer Instagram", connectorType: "instagram", enabled: true, health: "connected", config: { instagramAccountId: "17841400000000000", appId: "123456789012345", username: "helixcer", authMode: "instagram_login" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(200), webhookVerifiedAt: ago(198), lastWebhookAt: ago(57), verifiedName: "helixcer" } },
+        { channelId: "messenger-main", name: "Helixcer Messenger", connectorType: "facebook_messenger", enabled: true, health: "connected", config: { pageId: "109876543210987", appId: "123456789012345", pageName: "Helixcer", apiVersion: "v26.0" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(190), webhookVerifiedAt: ago(188), lastWebhookAt: ago(42), verifiedName: "Helixcer" } },
       ],
       contacts: [
         { contactId: "ct-ananya", displayName: "Ananya Sharma", company: "Northwind Retail", channelId: "wa-sales", channelProfileId: "+91 98••• 1402", phone: "+91 98••• 1402", email: "ananya@example.com", tags: ["Priority", "Returning"] },
@@ -293,6 +303,7 @@
       this.verifyTokens = new Map([
         ["wa-sales", "demo_whatsapp_verify_token"],
         ["instagram-main", "demo_instagram_verify_token"],
+        ["messenger-main", "demo_messenger_verify_token"],
       ]);
       // Pad the demo catalogue so inbox scroll and contacts pagination
       // are exercisable without a live workspace.
@@ -1406,12 +1417,19 @@
     webhookUrl(channel) {
       const channelId = typeof channel === "string" ? channel : channel?.channelId;
       const connectorType = typeof channel === "string" ? "whatsapp_cloud" : channel?.connectorType;
-      const provider = connectorType === "whatsapp_cloud" ? "whatsapp" : connectorType === "instagram_messaging" ? "instagram" : connectorType === "telegram_bot" ? "telegram" : connectorType;
+      const provider = connectorType === "whatsapp_cloud" ? "whatsapp"
+        : connectorType === "instagram_messaging" ? "instagram"
+          : connectorType === "telegram_bot" ? "telegram"
+            : connectorType === "facebook_messenger" ? "facebook-messenger"
+              : connectorType;
       const base = this.isDemo ? "https://api.chat.helixcer.com" : this.base;
       const sharedInstagramPath = connectorType === "instagram" && channel?.config?.appId
         ? `/webhooks/instagram-app/${encodeURIComponent(channel.config.appId)}`
         : "";
-      const callbackPath = channel?.setup?.callbackPath || sharedInstagramPath ||
+      const sharedMessengerPath = connectorType === "facebook_messenger" && channel?.config?.appId
+        ? `/webhooks/facebook-messenger-app/${encodeURIComponent(channel.config.appId)}`
+        : "";
+      const callbackPath = channel?.setup?.callbackPath || sharedInstagramPath || sharedMessengerPath ||
         `/webhooks/${encodeURIComponent(provider || "channel")}/${encodeURIComponent(channelId || "")}`;
       return `${base}${callbackPath.startsWith("/") ? callbackPath : `/${callbackPath}`}`;
     }
@@ -3785,7 +3803,7 @@
     if (!conversation) return false;
     const route = conversation.conversationId ? selectedComposerRoute(conversation) : conversation;
     const connectorType = route?.connectorType || channelFor(route?.channelId).connectorType;
-    return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot"].includes(connectorType);
+    return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot", "facebook_messenger", "messenger"].includes(connectorType);
   }
 
   function currentAttachmentQueue(conversation = selectedConversation()) {
@@ -4148,7 +4166,7 @@
       ? "The customer has not messaged on WhatsApp in the last 24 hours. You can only send approved WhatsApp message templates"
       : "Message...";
     $("messageForm").classList.toggle("is-window-closed", blocked);
-    attach.title = !attachmentSupported ? "Attachments are available for WhatsApp and Telegram conversations"
+    attach.title = !attachmentSupported ? "Attachments are available for WhatsApp, Telegram, and Messenger conversations"
       : blocked ? "Send an approved template to reopen the conversation" : "Attach files";
     renderComposerRouteControl(conversation, route);
     renderAttachmentQueue();
@@ -5593,7 +5611,7 @@
       empty.append(
         element("span", "channel-empty-icon", "+"),
         element("h3", "", "Connect your first messaging account"),
-        element("p", "", "Add WhatsApp, Telegram, or Instagram now. You can connect more accounts at any time.")
+        element("p", "", "Add WhatsApp, Telegram, Instagram, or Messenger now. You can connect more accounts at any time.")
       );
       const add = element("button", "primary-button", "Add channel");
       add.type = "button";
@@ -5708,7 +5726,8 @@
     callbackRow.append(copyButton);
     callbackBlock.append(callbackRow);
 
-    if (channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram") {
+    if (channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram" ||
+        channel.connectorType === "facebook_messenger") {
       const storedVerifyToken = Boolean(channel.setup?.credentialFields?.verifyToken || channel.setup?.credentialsPresent);
       const recentVerifyToken = state.recentVerifyTokens.get(channel.channelId) || "";
       const tokenBlock = element("div", "callback-token-block");
@@ -5761,10 +5780,13 @@
     actions.append(toggle, verify);
     setup.append(actions);
 
-    if ((channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram") && !webhookVerified) {
+    if ((channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram" ||
+        channel.connectorType === "facebook_messenger") && !webhookVerified) {
       const note = element("div", "meta-webhook-warning");
       if (channel.connectorType === "instagram" && channel.config?.appId) {
         note.append(element("strong", "", "Shared Meta app callback"), element("span", "", "Use this URL once for every Instagram account connected through the same Meta App ID. Helixcer routes messages by account ID."));
+      } else if (channel.connectorType === "facebook_messenger" && channel.config?.appId) {
+        note.append(element("strong", "", "Shared Meta app callback"), element("span", "", "Use this URL once for every Facebook Page connected through the same Meta App ID. Helixcer routes messages by Page ID."));
       } else {
         note.append(element("strong", "", "Meta callback"), element("span", "", "Meta allows one callback per app. Replace an existing callback only when this connection is ready."));
       }
@@ -9711,7 +9733,7 @@
 
   function openWebhookTokenDialog(channelId) {
     const channel = state.channels.find((item) => item.channelId === channelId);
-    if (!channel || !["whatsapp_cloud", "instagram"].includes(channel.connectorType)) return;
+    if (!channel || !["whatsapp_cloud", "instagram", "facebook_messenger"].includes(channel.connectorType)) return;
     const form = $("webhookTokenForm");
     form.reset();
     $("webhookTokenChannelId").value = channel.channelId;
@@ -9798,6 +9820,9 @@
     form.elements.instagramAccountId.value = channel?.config?.instagramAccountId || "";
     form.elements.instagramAppId.value = channel?.config?.appId || "";
     form.elements.instagramUsername.value = channel?.config?.username || "";
+    form.elements.messengerPageId.value = channel?.config?.pageId || "";
+    form.elements.messengerAppId.value = channel?.connectorType === "facebook_messenger" ? (channel?.config?.appId || "") : "";
+    form.elements.messengerPageName.value = channel?.config?.pageName || "";
     $("channelDialogTitle").textContent = channel ? `Edit ${channel.name}` : "Add a channel";
     $("channelSubmit").textContent = channel ? "Save changes" : "Save connection";
     $("channelDeleteButton").hidden = !channel;
@@ -9810,6 +9835,7 @@
       whatsappAccessToken: "accessToken", whatsappAppSecret: "appSecret",
       telegramBotToken: "botToken", telegramWebhookSecret: "webhookSecret",
       instagramAccessToken: "accessToken", instagramAppSecret: "appSecret",
+      messengerAccessToken: "accessToken", messengerAppSecret: "appSecret",
     };
     document.querySelectorAll("[data-provider-fields]").forEach((section) => {
       const active = section.dataset.providerFields === provider;
@@ -9860,12 +9886,16 @@
       ? { wabaId: String(values.get("wabaId") || "").trim(), phoneNumberId: String(values.get("phoneNumberId") || "").trim(), apiVersion: "v26.0" }
       : connectorType === "instagram"
         ? { instagramAccountId: String(values.get("instagramAccountId") || "").trim(), appId: String(values.get("instagramAppId") || "").trim(), username: String(values.get("instagramUsername") || "").trim(), authMode: "instagram_login", apiVersion: "v26.0" }
-        : {};
+        : connectorType === "facebook_messenger"
+          ? { pageId: String(values.get("messengerPageId") || "").trim(), appId: String(values.get("messengerAppId") || "").trim(), pageName: String(values.get("messengerPageName") || "").trim(), apiVersion: "v26.0" }
+          : {};
     const credentialMap = connectorType === "whatsapp_cloud"
       ? { accessToken: credentialValue("whatsappAccessToken"), appSecret: credentialValue("whatsappAppSecret"), verifyToken: credentialValue("metaVerifyToken") }
       : connectorType === "telegram"
         ? { botToken: credentialValue("telegramBotToken"), webhookSecret: credentialValue("telegramWebhookSecret") }
-        : { accessToken: credentialValue("instagramAccessToken"), appSecret: credentialValue("instagramAppSecret"), verifyToken: credentialValue("metaVerifyToken") };
+        : connectorType === "facebook_messenger"
+          ? { accessToken: credentialValue("messengerAccessToken"), appSecret: credentialValue("messengerAppSecret"), verifyToken: credentialValue("metaVerifyToken") }
+          : { accessToken: credentialValue("instagramAccessToken"), appSecret: credentialValue("instagramAppSecret"), verifyToken: credentialValue("metaVerifyToken") };
     const credentials = Object.fromEntries(Object.entries(credentialMap)
       .map(([key, value]) => [key, String(value || "").trim()])
       .filter(([, value]) => value));
@@ -9889,7 +9919,7 @@
       const result = await (channelId ? state.api.updateChannel(channelId, payload) : state.api.createChannel(payload));
       savedChannelId = channelId || String(result.channelId || "");
       if (!savedChannelId) throw new Error("The connection was saved, but its channel ID was not returned.");
-      const newVerifyToken = ["whatsapp_cloud", "instagram"].includes(payload.connectorType)
+      const newVerifyToken = ["whatsapp_cloud", "instagram", "facebook_messenger"].includes(payload.connectorType)
         ? String(payload.credentials?.verifyToken || "") : "";
       if (newVerifyToken) {
         state.recentVerifyTokens.set(savedChannelId, newVerifyToken);

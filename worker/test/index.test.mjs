@@ -15,6 +15,7 @@ import {
   isRetryableWhatsAppStatus,
   normalizeGeneric,
   normalizeGenericStatuses,
+  normalizeFacebookMessenger,
   normalizeInstagram,
   normalizeTelegram,
   normalizeWhatsApp,
@@ -395,6 +396,36 @@ test('normalizes Instagram messages, echoes, delivery receipts, and read waterma
   assert.deepEqual(result.recipientIds, ['17841400000000000']);
 });
 
+test('normalizes Messenger messages, attachments, echoes, and receipts', () => {
+  const result = normalizeFacebookMessenger({ object: 'page', entry: [{ id: '109876543210987', messaging: [
+    { sender: { id: 'psid-1' }, recipient: { id: '109876543210987' }, timestamp: 1761360000000,
+      message: { mid: 'm_mid-1', text: 'Hello from Messenger' } },
+    { sender: { id: 'psid-1' }, recipient: { id: '109876543210987' }, timestamp: 1761360000500,
+      message: { mid: 'm_mid-2', attachments: [{ type: 'image', payload: { url: 'https://cdn.fbsbx.com/v/sample.jpg' } }] } },
+    { sender: { id: '109876543210987' }, recipient: { id: 'psid-1' }, timestamp: 1761360001000,
+      message: { mid: 'm_echo', text: 'Reply', is_echo: true } },
+    { sender: { id: 'psid-1' }, recipient: { id: '109876543210987' }, timestamp: 1761360002000,
+      delivery: { mids: ['m_outbound-1'], watermark: 1761360002000 } },
+    { sender: { id: 'psid-1' }, recipient: { id: '109876543210987' }, timestamp: 1761360003000,
+      read: { watermark: 1761360003000 } }
+  ] }] });
+  assert.equal(result.messages.length, 2);
+  assert.equal(result.messages[0].channelProfileId, 'psid-1');
+  assert.equal(result.messages[0].providerMessageId, 'm_mid-1');
+  assert.equal(result.messages[0].text, 'Hello from Messenger');
+  assert.equal(result.messages[1].messageType, 'image');
+  assert.equal(result.messages[1].attachment?.type, 'image');
+  assert.equal(result.messages[1].attachment?.externalUrl, 'https://cdn.fbsbx.com/v/sample.jpg');
+  assert.deepEqual(result.statuses, [
+    { providerMessageId: 'm_echo', status: 'sent', timestamp: '2025-10-25T02:40:01.000Z' },
+    { providerMessageId: 'm_outbound-1', status: 'delivered', timestamp: '2025-10-25T02:40:02.000Z' }
+  ]);
+  assert.deepEqual(result.watermarkStatuses, [
+    { channelProfileId: 'psid-1', status: 'read', timestamp: '2025-10-25T02:40:03.000Z' }
+  ]);
+  assert.deepEqual(result.recipientIds, ['109876543210987']);
+});
+
 test('encrypts channel credentials with workspace and channel binding', async () => {
   const master = 'test-only-master-key-material-'.repeat(2);
   const encrypted = await encryptChannelCredential('provider-secret-value', master, 'ws-one', 'channel-one', 'accessToken');
@@ -526,6 +557,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   const contactIdentities = await readFile(new URL('../migrations/0012_contact_identities.sql', import.meta.url), 'utf8');
   const flatContactPlatformIds = await readFile(new URL('../migrations/0013_flat_contact_platform_ids.sql', import.meta.url), 'utf8');
   const unifiedContactConversations = await readFile(new URL('../migrations/0014_unified_contact_conversations.sql', import.meta.url), 'utf8');
+  const messengerPageIndex = await readFile(new URL('../migrations/0022_facebook_messenger_page.sql', import.meta.url), 'utf8');
   const database = new DatabaseSync(':memory:');
   database.exec(initial);
   database.exec(`
@@ -599,6 +631,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   database.exec(contactIdentities);
   database.exec(flatContactPlatformIds);
   database.exec(unifiedContactConversations);
+  database.exec(messengerPageIndex);
   const migratedWorkspaceId = database.prepare("SELECT workspace_id FROM workspaces WHERE slug='default'").get().workspace_id;
   assert.match(migratedWorkspaceId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(database.prepare("SELECT count(*) AS count FROM workspaces WHERE workspace_id='ws_default'").get().count, 0);
@@ -667,6 +700,7 @@ test('D1 migrations are valid SQLite, preserve rows, and create identity tables'
   for (const name of ['idx_channels_workspace', 'idx_conversations_workspace_activity', 'idx_messages_workspace_conversation',
     'idx_outbox_workspace_due', 'idx_channel_credentials_channel', 'idx_channels_workspace_provider',
     'idx_channels_workspace_whatsapp_phone', 'idx_channels_workspace_instagram_account', 'idx_channels_workspace_telegram_bot',
+    'idx_channels_workspace_facebook_messenger_page',
     'idx_api_keys_workspace_status', 'idx_outbound_payloads_workspace', 'idx_external_requests_message', 'idx_external_requests_expiry',
     'idx_conversations_workspace_contact_unique', 'idx_messages_workspace_conversation_route',
     'idx_push_subscriptions_workspace', 'idx_push_subscriptions_membership',

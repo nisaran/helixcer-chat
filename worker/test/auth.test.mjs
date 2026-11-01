@@ -133,6 +133,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0019_outbound_sender.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0020_user_profile.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0021_campaigns.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0022_facebook_messenger_page.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -1122,6 +1123,32 @@ test('managed channel CRUD encrypts credentials, preserves blank secrets, and ke
   }), env);
   assert.equal(removed.status, 200);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channel_credentials WHERE channel_id='instagram-main'").get().count, 0);
+
+  const messenger = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      channelId: 'messenger-main', name: 'Messenger', connectorType: 'facebook_messenger',
+      config: { pageId: '109876543210987', pageName: 'Helixcer', appId: '123456789012345', apiVersion: 'v26.0' },
+      credentials: { accessToken: 'messenger-page-access-token-123456',
+        appSecret: 'abcdef1234567890abcdef1234567890', verifyToken: 'messenger-verify-token' }
+    })
+  }), env);
+  assert.equal(messenger.status, 201);
+  const messengerRow = database.prepare("SELECT connector_type,provider_type,capabilities_json FROM channels WHERE channel_id='messenger-main'").get();
+  assert.equal(messengerRow.connector_type, 'generic_http');
+  assert.equal(messengerRow.provider_type, 'facebook_messenger');
+  assert.deepEqual(JSON.parse(messengerRow.capabilities_json), ['text', 'attachments']);
+  const duplicateMessenger = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({ channelId: 'messenger-duplicate', name: 'Duplicate Messenger', connectorType: 'facebook_messenger',
+      config: { pageId: '109876543210987', apiVersion: 'v26.0' } })
+  }), env);
+  assert.equal(duplicateMessenger.status, 409);
+  const removedMessenger = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/messenger-main', {
+    method: 'DELETE', headers
+  }), env);
+  assert.equal(removedMessenger.status, 200);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channel_credentials WHERE channel_id='messenger-main'").get().count, 0);
   database.close();
 });
 
@@ -1720,6 +1747,86 @@ test('Instagram verification uses /me and exposes sanitized credential errors', 
     }), env);
     assert.equal(rejected.status, 422);
     assert.match((await rejected.json()).error, /Invalid OAuth access token/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('Messenger verification uses Page Graph lookup and shared app webhooks route by page ID', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const appId = '123456789012399';
+  const appSecret = 'abcdef1234567890abcdef1234567890';
+  const verifyToken = 'shared-messenger-verify-token';
+  const pageId = '109876543210987';
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      channelId: 'messenger-page-one', name: 'Messenger Page', connectorType: 'facebook_messenger',
+      config: { pageId, appId, pageName: 'Helixcer', apiVersion: 'v26.0' },
+      credentials: { accessToken: 'messenger-page-access-token-123456', appSecret, verifyToken }
+    })
+  }), env);
+  assert.equal(created.status, 201);
+  const listed = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  const item = (await listed.json()).items.find(entry => entry.channelId === 'messenger-page-one');
+  assert.equal(item.setup.callbackPath, `/webhooks/facebook-messenger-app/${appId}`);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/v26.0/${pageId}` && url.searchParams.get('fields') === 'id,name') {
+      return new Response(JSON.stringify({ id: pageId, name: 'Helixcer' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (url.pathname === `/v26.0/${pageId}/subscribed_apps`) {
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return new Response('{}', { status: 404 });
+  };
+  try {
+    const verified = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/messenger-page-one/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(verified.status, 200);
+    assert.equal(database.prepare("SELECT json_extract(config_json,'$.verifiedProviderId') AS id FROM channels WHERE channel_id='messenger-page-one'").get().id, pageId);
+
+    const handshake = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/facebook-messenger-app/${appId}?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(verifyToken)}&hub.challenge=messenger-challenge`), env);
+    assert.equal(handshake.status, 200);
+    assert.equal(await handshake.text(), 'messenger-challenge');
+
+    const payload = {
+      object: 'page',
+      entry: [{ id: pageId, messaging: [
+        { sender: { id: '100200300400500' }, recipient: { id: pageId }, timestamp: Date.now(),
+          message: { mid: 'm.mid.1', text: 'Hello Messenger' } }
+      ] }]
+    };
+    const raw = JSON.stringify(payload);
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(appSecret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(raw));
+    const signature = `sha256=${Buffer.from(digest).toString('hex')}`;
+    const delivered = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/facebook-messenger-app/${appId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature },
+      body: raw
+    }), env);
+    assert.equal(delivered.status, 200);
+    assert.equal((await delivered.json()).received, 1);
+    const identity = database.prepare(`SELECT platform,profile_id FROM contact_identities
+      WHERE workspace_id=(SELECT workspace_id FROM channels WHERE channel_id='messenger-page-one')
+        AND profile_id='100200300400500'`).get();
+    assert.equal(identity.platform, 'facebook');
   } finally {
     globalThis.fetch = originalFetch;
     database.close();
