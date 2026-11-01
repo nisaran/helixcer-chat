@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-platform-rows";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-platform-rows-2";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -2253,12 +2253,16 @@
   function normalizeContact(raw) {
     const identitySource = asItems(raw.identities);
     if (!identitySource.length && (raw.channelId || raw.channelProfileId || raw.identity || raw.email || raw.phone)) {
+      const linkedChannel = (state.channels || []).find((item) => item.channelId === raw.channelId) || raw.channel || null;
+      const inferredPlatform = connectorPlatform(
+        raw.platform || raw.connectorType || linkedChannel?.connectorType || raw.channel?.connectorType
+      ) || (raw.email && raw.email !== "—" ? "email" : "");
       identitySource.push({
         identityId: raw.identityId || raw.contactIdentityId,
-        platform: raw.platform || raw.connectorType || raw.channel?.connectorType || (raw.email && raw.email !== "—" ? "email" : ""),
+        platform: inferredPlatform,
         channelId: raw.channelId,
-        channelName: raw.channelName || raw.channel?.name,
-        connectorType: raw.connectorType || raw.channel?.connectorType,
+        channelName: raw.channelName || linkedChannel?.name || raw.channel?.name,
+        connectorType: raw.connectorType || linkedChannel?.connectorType || raw.channel?.connectorType,
         profileId: raw.channelProfileId || raw.identity || (raw.email !== "—" ? raw.email : "") || (raw.phone !== "—" ? raw.phone : ""),
         username: raw.username,
         phoneNumber: raw.phone !== "—" ? raw.phone : "",
@@ -8761,6 +8765,13 @@
     return identityPlatforms[platform]?.label || capitalize(platform);
   }
 
+  function campaignContactInferredPlatform(contact = {}) {
+    const active = contactActivePlatforms(contact).find(Boolean);
+    if (active) return active;
+    const linkedChannel = (state.channels || []).find((item) => item.channelId === contact.channelId) || null;
+    return connectorPlatform(contact.connectorType || linkedChannel?.connectorType) || "";
+  }
+
   function campaignContactPlatformRows(contact) {
     if (!contact?.contactId) return [];
     const ids = contactPlatformIds(contact);
@@ -8775,13 +8786,18 @@
         rowKey: campaignAudienceRowKey(contact.contactId, platform),
       }));
     if (rows.length) return rows;
-    const fallbackId = campaignContactMessagingId(contact) || contact.contactId;
+    const inferredPlatform = campaignContactInferredPlatform(contact);
+    const fallbackId = (inferredPlatform && ids[inferredPlatform])
+      || String(contact.channelProfileId || "").trim()
+      || campaignContactMessagingId(contact)
+      || contact.contactId;
+    const profileId = String(fallbackId || "").trim();
     return [{
       contact,
       contactId: contact.contactId,
-      platform: "",
-      profileId: String(fallbackId || "").trim(),
-      rowKey: campaignAudienceRowKey(contact.contactId, ""),
+      platform: inferredPlatform,
+      profileId: profileId && profileId !== "—" ? profileId : String(contact.contactId || ""),
+      rowKey: campaignAudienceRowKey(contact.contactId, inferredPlatform),
     }];
   }
 
