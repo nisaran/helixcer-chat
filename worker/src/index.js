@@ -6868,6 +6868,8 @@ export function normalizeWhatsApp(payload) {
 }
 
 function whatsappInboundText(message) {
+  const type = String(message?.type || 'message').toLowerCase();
+  if (type === 'unsupported') return whatsappInboundUnsupportedText(message);
   const direct = message?.text?.body || message?.button?.text ||
     message?.interactive?.button_reply?.title || message?.interactive?.list_reply?.title;
   if (direct) return String(direct);
@@ -6877,11 +6879,23 @@ function whatsappInboundText(message) {
   // "[WhatsApp image received]" line duplicates that UI and is especially noisy
   // in conversation previews. An attachment without a customer caption should
   // therefore remain textless, just like Telegram media.
-  if (['image', 'video', 'audio', 'document', 'sticker'].includes(String(message?.type || '').toLowerCase())) {
+  if (['image', 'video', 'audio', 'document', 'sticker'].includes(type)) {
     return '';
   }
-  const type = String(message?.type || 'message').replace(/_/g, ' ');
-  return `[WhatsApp ${type} received]`;
+  return `[WhatsApp ${type.replace(/_/g, ' ')} received]`;
+}
+
+function whatsappInboundUnsupportedText(message) {
+  // Meta Cloud API webhook type "unsupported" (commonly error 131051) means the
+  // original content was not delivered. Frequent causes: another WhatsApp Business
+  // API / Cloud API number messaged this number, or the customer sent a type Cloud
+  // API cannot receive (polls, some native contact cards, etc.).
+  const primary = Array.isArray(message?.errors) ? message.errors[0] : null;
+  const code = Number(primary?.code || 0);
+  const detail = String(primary?.error_data?.details || primary?.title || primary?.message || '').trim();
+  const codeLabel = code ? ` Meta error ${code}.` : '';
+  const detailLabel = detail && !/^message type unknown$/i.test(detail) ? ` ${detail}` : '';
+  return `Unsupported WhatsApp message — original content was not delivered.${codeLabel}${detailLabel} This often happens when another WhatsApp Business API number messages this Cloud API number.`;
 }
 
 function whatsappInboundAttachment(message) {

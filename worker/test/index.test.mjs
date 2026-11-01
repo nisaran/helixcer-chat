@@ -262,6 +262,33 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
   assert.deepEqual(result.phoneNumberIds, ['123456789']);
 });
 
+test('explains Meta unsupported inbound webhooks from Business API peers', () => {
+  const result = normalizeWhatsApp({ entry: [{ changes: [{ value: {
+    metadata: { phone_number_id: '123456789' },
+    contacts: [{ wa_id: '917021512345', profile: { name: 'Biz Peer' } }],
+    messages: [{
+      id: 'wamid.unsupported',
+      from: '917021512345',
+      timestamp: '1761976860',
+      type: 'unsupported',
+      errors: [{
+        code: 131051,
+        title: 'Message type unknown',
+        message: 'Message type unknown',
+        error_data: { details: 'Message type is currently not supported.' }
+      }]
+    }]
+  } }] }] });
+  assert.equal(result.messages.length, 1);
+  assert.equal(result.messages[0].messageType, 'unsupported');
+  assert.equal(result.messages[0].channelProfileId, '917021512345');
+  assert.match(result.messages[0].text, /Unsupported WhatsApp message/i);
+  assert.match(result.messages[0].text, /131051/);
+  assert.match(result.messages[0].text, /Business API/i);
+  assert.match(result.messages[0].text, /Message type is currently not supported/i);
+  assert.equal(result.messages[0].attachment, undefined);
+});
+
 test('dashboard applies granular webhooks without flashing or clearing selected history', async () => {
   const appSource = await readFile(new URL('../../assets/app.js', import.meta.url), 'utf8');
   const start = appSource.indexOf('function handleRealtimeEvent(event)');
