@@ -86,7 +86,7 @@ const EXTERNAL_API_IDEMPOTENCY_DAYS = 7;
 const LEGACY_WORKSPACE_ID = 'ws_default';
 const WHATSAPP_TEMPLATE_CACHE_SECONDS = 5 * 60;
 const WHATSAPP_TEMPLATE_CACHE_ORIGIN = 'https://template-cache.helixcer.internal';
-const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram']);
+const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram', 'facebook_messenger']);
 const CONTACT_ID_PLATFORMS = Object.freeze(['whatsapp', 'telegram', 'instagram', 'facebook', 'email']);
 const CONTACT_ID_PLATFORM_SET = new Set(CONTACT_ID_PLATFORMS);
 // Only these providers expose an address that is portable between connected
@@ -98,17 +98,26 @@ const CONNECTOR_DEFINITIONS = {
   whatsapp_cloud: {
     label: 'WhatsApp Cloud API', webhookPath: 'whatsapp',
     configFields: ['wabaId', 'phoneNumberId', 'apiVersion'],
-    requiredConfig: ['wabaId', 'phoneNumberId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret']
+    requiredConfig: ['wabaId', 'phoneNumberId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret'],
+    capabilities: ['text', 'attachments']
   },
   telegram: {
     label: 'Telegram Bot', webhookPath: 'telegram',
     configFields: [],
-    requiredConfig: [], requiredCredentials: ['botToken', 'webhookSecret']
+    requiredConfig: [], requiredCredentials: ['botToken', 'webhookSecret'],
+    capabilities: ['text', 'attachments']
   },
   instagram: {
     label: 'Instagram Messaging', webhookPath: 'instagram',
     configFields: ['instagramAccountId', 'username', 'appId', 'apiVersion', 'authMode'],
-    requiredConfig: ['instagramAccountId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret']
+    requiredConfig: ['instagramAccountId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret'],
+    capabilities: ['text']
+  },
+  facebook_messenger: {
+    label: 'Facebook Messenger', webhookPath: 'facebook-messenger',
+    configFields: ['pageId', 'pageName', 'appId', 'apiVersion'],
+    requiredConfig: ['pageId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret'],
+    capabilities: ['text', 'attachments']
   }
 };
 
@@ -314,6 +323,10 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (instagramAppMatch) return await handleInstagramAppWebhook(request, env, decodeURIComponent(instagramAppMatch[1]), ctx);
     const instagramMatch = url.pathname.match(/^\/webhooks\/instagram\/([^/]+)$/);
     if (instagramMatch) return await handleInstagramWebhook(request, env, decodeURIComponent(instagramMatch[1]), ctx);
+    const messengerAppMatch = url.pathname.match(/^\/webhooks\/facebook-messenger-app\/([^/]+)$/);
+    if (messengerAppMatch) return await handleFacebookMessengerAppWebhook(request, env, decodeURIComponent(messengerAppMatch[1]), ctx);
+    const messengerMatch = url.pathname.match(/^\/webhooks\/facebook-messenger\/([^/]+)$/);
+    if (messengerMatch) return await handleFacebookMessengerWebhook(request, env, decodeURIComponent(messengerMatch[1]), ctx);
     const genericMatch = url.pathname.match(/^\/webhooks\/generic\/([^/]+)$/);
     if (genericMatch && request.method === 'POST') return await handleGenericWebhook(request, env, decodeURIComponent(genericMatch[1]), ctx);
 
@@ -477,9 +490,10 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         workspace,
         me: principalView(principal),
         connectorTypes: [
-          { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: ['text'] },
-          { value: 'telegram', label: 'Telegram Bot', capabilities: ['text'] },
-          { value: 'instagram', label: 'Instagram Messaging', capabilities: ['text'] }
+          { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: CONNECTOR_DEFINITIONS.whatsapp_cloud.capabilities },
+          { value: 'telegram', label: 'Telegram Bot', capabilities: CONNECTOR_DEFINITIONS.telegram.capabilities },
+          { value: 'instagram', label: 'Instagram Messaging', capabilities: CONNECTOR_DEFINITIONS.instagram.capabilities },
+          { value: 'facebook_messenger', label: 'Facebook Messenger', capabilities: CONNECTOR_DEFINITIONS.facebook_messenger.capabilities }
         ]
       }), cors);
     }
@@ -1826,6 +1840,162 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
   return json({ ok: true, received, channels: routes.length });
 }
 
+async function handleFacebookMessengerWebhook(request, env, channelId, ctx) {
+  const channel = await getChannel(env, channelId, 'facebook_messenger');
+  if (!channel) return json({ ok: false, error: 'Unknown or disabled channel.' }, 404);
+  const credentials = await readChannelCredentials(env, channel);
+  if (request.method === 'GET') {
+    const url = new URL(request.url);
+    const expected = credentials.verifyToken;
+    if (url.searchParams.get('hub.mode') === 'subscribe' && expected &&
+        timingSafeEqual(url.searchParams.get('hub.verify_token') || '', expected)) {
+      await updateChannelRuntimeConfig(env, channel, { webhookVerifiedAt: new Date().toISOString() });
+      await broadcast(env, channel.workspaceId, { type: 'channel.updated', channelId });
+      return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
+    }
+    return new Response('Forbidden', { status: 403 });
+  }
+  if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed.' }, 405);
+  const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
+  if (!credentials.appSecret) return json({ ok: false, error: 'Webhook secret is not configured.' }, 503);
+  if (!await verifyMetaSignature(raw, request.headers.get('X-Hub-Signature-256') || '', credentials.appSecret)) {
+    return json({ ok: false, error: 'Invalid signature.' }, 401);
+  }
+  const payload = safeJsonParse(raw, null);
+  if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
+  const normalized = normalizeFacebookMessenger(payload);
+  const expectedPageId = String(channel.config?.pageId || '');
+  const hasEvents = normalized.messages.length || normalized.statuses.length || normalized.watermarkStatuses.length;
+  if (hasEvents && (!expectedPageId || normalized.recipientIds.length === 0 ||
+      normalized.recipientIds.some(id => id !== expectedPageId))) {
+    return json({ ok: false, error: 'Webhook Facebook Page does not match this channel.' }, 403);
+  }
+  let received = 0;
+  let latestInbound = null;
+  for (const event of normalized.messages) {
+    const stored = await storeInbound(env, channel, event, payload);
+    if (stored) {
+      received++;
+      latestInbound = stored;
+      await broadcastStoredInbound(env, channel, stored);
+    }
+  }
+  let updatedStatuses = 0;
+  const statusChanges = [];
+  for (const status of normalized.statuses) {
+    const changes = await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload);
+    updatedStatuses += changes.length;
+    statusChanges.push(...changes);
+  }
+  for (const status of normalized.watermarkStatuses) {
+    const changes = await applyProviderWatermarkStatus(env, channel.workspaceId, channel.channelId, status, payload);
+    updatedStatuses += changes.length;
+    statusChanges.push(...changes);
+  }
+  await updateChannelRuntimeConfig(env, channel, { lastWebhookAt: new Date().toISOString() });
+  await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
+  if (received || updatedStatuses) {
+    await broadcast(env, channel.workspaceId, {
+      type: 'webhook.received', channelId, received, statuses: updatedStatuses, granular: true
+    });
+  }
+  if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
+  return json({ ok: true, received });
+}
+
+async function handleFacebookMessengerAppWebhook(request, env, requestedAppId, ctx) {
+  const appId = cleanMetaIdentifier(requestedAppId, 'Meta App ID');
+  const channels = await findFacebookMessengerAppChannels(env, appId);
+  if (!channels.length) return json({ ok: false, error: 'Unknown Messenger app webhook.' }, 404);
+
+  if (request.method === 'GET') {
+    const url = new URL(request.url);
+    if (url.searchParams.get('hub.mode') !== 'subscribe') return new Response('Forbidden', { status: 403 });
+    const supplied = url.searchParams.get('hub.verify_token') || '';
+    const matches = [];
+    for (const channel of channels) {
+      const credentials = await readChannelCredentials(env, channel);
+      if (credentials.verifyToken && timingSafeEqual(supplied, credentials.verifyToken)) matches.push(channel);
+    }
+    if (!matches.length) return new Response('Forbidden', { status: 403 });
+    const verifiedAt = new Date().toISOString();
+    for (const channel of matches) {
+      await updateChannelRuntimeConfig(env, channel, { webhookVerifiedAt: verifiedAt });
+      await broadcast(env, channel.workspaceId, { type: 'channel.updated', channelId: channel.channelId });
+    }
+    return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
+  }
+
+  if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed.' }, 405);
+  const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
+  const payload = safeJsonParse(raw, null);
+  if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
+  const groups = partitionFacebookMessengerAppPayload(payload);
+  const channelsByPage = new Map();
+  for (const channel of channels) {
+    const pageId = String(channel.config?.pageId || '');
+    if (!channelsByPage.has(pageId)) channelsByPage.set(pageId, []);
+    channelsByPage.get(pageId).push(channel);
+  }
+  const routes = [];
+  for (const [pageId, groupedPayload] of groups) {
+    const matches = channelsByPage.get(pageId) || [];
+    if (!matches.length) throw httpError(404, 'No enabled Messenger connection matches this app webhook.');
+    if (matches.length !== 1) throw httpError(409, 'Messenger app webhook routing is ambiguous.');
+    routes.push({ pageId, payload: groupedPayload, channel: matches[0] });
+  }
+
+  const suppliedSignature = request.headers.get('X-Hub-Signature-256') || '';
+  for (const route of routes) {
+    const credentials = await readChannelCredentials(env, route.channel);
+    if (!credentials.appSecret || !await verifyMetaSignature(raw, suppliedSignature, credentials.appSecret)) {
+      return json({ ok: false, error: 'Invalid signature.' }, 401);
+    }
+  }
+
+  let received = 0;
+  const now = new Date().toISOString();
+  for (const route of routes) {
+    const normalized = normalizeFacebookMessenger(route.payload);
+    if (normalized.recipientIds.some(id => id !== route.pageId)) {
+      throw httpError(400, 'Messenger app webhook page routing is inconsistent.');
+    }
+    let channelReceived = 0;
+    let latestInbound = null;
+    for (const event of normalized.messages) {
+      const stored = await storeInbound(env, route.channel, event, route.payload);
+      if (stored) {
+        received++;
+        channelReceived++;
+        latestInbound = stored;
+        await broadcastStoredInbound(env, route.channel, stored);
+      }
+    }
+    let channelStatuses = 0;
+    const statusChanges = [];
+    for (const status of normalized.statuses) {
+      const changes = await applyProviderStatus(env, route.channel.workspaceId, route.channel.channelId, status, route.payload);
+      channelStatuses += changes.length;
+      statusChanges.push(...changes);
+    }
+    for (const status of normalized.watermarkStatuses) {
+      const changes = await applyProviderWatermarkStatus(env, route.channel.workspaceId, route.channel.channelId, status, route.payload);
+      channelStatuses += changes.length;
+      statusChanges.push(...changes);
+    }
+    await updateChannelRuntimeConfig(env, route.channel, { lastWebhookAt: now });
+    await broadcastMessageStatusChanges(env, route.channel.workspaceId, statusChanges);
+    if (channelReceived || channelStatuses) {
+      await broadcast(env, route.channel.workspaceId, {
+        type: 'webhook.received', channelId: route.channel.channelId, received: channelReceived,
+        statuses: channelStatuses, granular: true
+      });
+    }
+    if (latestInbound) scheduleInboundPush(ctx, env, route.channel, latestInbound);
+  }
+  return json({ ok: true, received, channels: routes.length });
+}
+
 function scheduleInboundPush(ctx, env, channel, inbound) {
   const delivery = (async () => {
     // Badge enrichment must never suppress the customer-message alert if the
@@ -1879,7 +2049,7 @@ async function broadcastStoredInbound(env, channel, stored) {
 export function inboundPushNotification(channel, inbound = {}) {
   const title = compactNotificationText(inbound.senderName, 120) || 'Customer';
   const preview = compactNotificationText(inbound.preview, 240);
-  const syntheticPreview = /^\[(?:WhatsApp|Instagram) .+ received\]$/i.test(preview);
+  const syntheticPreview = /^\[(?:WhatsApp|Instagram|Facebook) .+ received\]$/i.test(preview);
   const body = preview && !syntheticPreview ? preview : inboundMessageTypeLabel(inbound.messageType);
   const rawConversationId = String(inbound.conversationId || '');
   const conversationId = /^[A-Za-z0-9_-]{1,100}$/.test(rawConversationId) ? rawConversationId : '';
@@ -1940,6 +2110,23 @@ async function findInstagramAppChannels(env, appId) {
   }));
 }
 
+async function findFacebookMessengerAppChannels(env, appId) {
+  const result = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled,
+      capabilities_json,config_json,secret_key,workspace_id
+    FROM channels
+    WHERE enabled=1 AND provider_type='facebook_messenger' AND json_extract(config_json,'$.appId')=?1
+    ORDER BY workspace_id,channel_id`).bind(appId).all();
+  return (result.results || []).map(row => ({
+    channelId: row.channel_id,
+    name: row.name,
+    connectorType: logicalConnectorType(row),
+    capabilities: safeJsonParse(row.capabilities_json, []),
+    config: safeJsonParse(row.config_json, {}),
+    secretKey: row.secret_key,
+    workspaceId: row.workspace_id
+  }));
+}
+
 function partitionInstagramAppPayload(payload) {
   if (payload?.object && payload.object !== 'instagram') throw httpError(400, 'Unexpected Instagram webhook object.');
   if (!Array.isArray(payload?.entry) || !payload.entry.length) throw httpError(400, 'Instagram webhook has no entries.');
@@ -1971,6 +2158,40 @@ function partitionInstagramAppPayload(payload) {
     for (const [accountId, groupedEvents] of eventsByAccount) addEntry(accountId, entry, groupedEvents);
   }
   if (!groups.size) throw httpError(400, 'Instagram webhook could not be routed.');
+  return groups;
+}
+
+function partitionFacebookMessengerAppPayload(payload) {
+  if (payload?.object && payload.object !== 'page') throw httpError(400, 'Unexpected Messenger webhook object.');
+  if (!Array.isArray(payload?.entry) || !payload.entry.length) throw httpError(400, 'Messenger webhook has no entries.');
+  const groups = new Map();
+  const addEntry = (pageId, entry, messaging) => {
+    if (!groups.has(pageId)) groups.set(pageId, { ...payload, entry: [] });
+    groups.get(pageId).entry.push({ ...entry, id: pageId, messaging });
+  };
+  for (const entry of payload.entry) {
+    const entryId = entry?.id ? cleanMetaIdentifier(entry.id, 'Messenger entry page ID') : '';
+    const events = Array.isArray(entry?.messaging) ? entry.messaging : [];
+    if (!events.length) {
+      if (!entryId) throw httpError(400, 'Messenger webhook entry has no page ID.');
+      addEntry(entryId, entry, []);
+      continue;
+    }
+    const eventsByPage = new Map();
+    for (const event of events) {
+      const recipientId = event?.recipient?.id ? cleanMetaIdentifier(event.recipient.id, 'Messenger recipient page ID') : '';
+      const isEcho = Boolean(event?.message?.is_echo);
+      if (!isEcho && entryId && recipientId && entryId !== recipientId) {
+        throw httpError(400, 'Messenger webhook entry and recipient pages do not match.');
+      }
+      const pageId = entryId || recipientId;
+      if (!pageId) throw httpError(400, 'Messenger webhook event has no page ID.');
+      if (!eventsByPage.has(pageId)) eventsByPage.set(pageId, []);
+      eventsByPage.get(pageId).push(event);
+    }
+    for (const [pageId, groupedEvents] of eventsByPage) addEntry(pageId, entry, groupedEvents);
+  }
+  if (!groups.size) throw httpError(400, 'Messenger webhook could not be routed.');
   return groups;
 }
 
@@ -2117,7 +2338,9 @@ function channelSetupView(row, config = safeJsonParse(row.config_json, {}), cred
   const presence = Object.fromEntries(definition.requiredCredentials.map(key => [key, credentialFields.has(key)]));
   const callbackPath = connectorType === 'instagram' && config.appId
     ? `/webhooks/instagram-app/${encodeURIComponent(config.appId)}`
-    : `/webhooks/${definition.webhookPath}/${encodeURIComponent(row.channel_id)}`;
+    : connectorType === 'facebook_messenger' && config.appId
+      ? `/webhooks/facebook-messenger-app/${encodeURIComponent(config.appId)}`
+      : `/webhooks/${definition.webhookPath}/${encodeURIComponent(row.channel_id)}`;
   return {
     credentialsPresent: definition.requiredConfig.every(key => Boolean(config[key])) && Object.values(presence).every(Boolean),
     credentialFields: presence,
@@ -2151,6 +2374,7 @@ async function verifyChannel(env, workspaceId, channelId, request) {
   if (channel.connectorType === 'whatsapp_cloud') return verifyWhatsAppChannel(env, channel);
   if (channel.connectorType === 'telegram') return verifyTelegramChannel(env, channel, request);
   if (channel.connectorType === 'instagram') return verifyInstagramChannel(env, channel);
+  if (channel.connectorType === 'facebook_messenger') return verifyFacebookMessengerChannel(env, channel);
   throw httpError(400, 'This connector cannot be verified automatically.');
 }
 
@@ -2160,7 +2384,7 @@ async function getChannelVerifyToken(env, workspaceId, channelId, principal) {
     FROM channels WHERE channel_id=?1 AND workspace_id=?2`).bind(id, workspaceId).first();
   if (!row) throw httpError(404, 'Channel not found.');
   const connectorType = logicalConnectorType(row);
-  if (!['whatsapp_cloud', 'instagram'].includes(connectorType)) {
+  if (!['whatsapp_cloud', 'instagram', 'facebook_messenger'].includes(connectorType)) {
     throw httpError(400, 'This channel does not use a webhook verify token.');
   }
   const channel = {
@@ -2293,6 +2517,49 @@ async function verifyInstagramChannel(env, channel) {
     credentialsVerifiedAt: now, webhookVerifiedAt: config.webhookVerifiedAt || '' };
 }
 
+async function verifyFacebookMessengerChannel(env, channel) {
+  const credentials = await readChannelCredentials(env, channel);
+  const pageId = String(channel.config?.pageId || '');
+  if (!credentials.accessToken || !credentials.verifyToken || !credentials.appSecret || !pageId) {
+    throw httpError(409, 'Secure Messenger credentials have not been fully configured.');
+  }
+  assertMetaAppSecret(credentials.appSecret, 422);
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(pageId)}`);
+  endpoint.searchParams.set('fields', 'id,name');
+  const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${credentials.accessToken}` } });
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) throw httpError(422, `Meta could not verify this Facebook Page: ${providerError(data, response.status)}`);
+  if (String(data.id || '') !== pageId) throw httpError(422, 'Meta returned a different Facebook Page.');
+  const subscriptionEndpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(pageId)}/subscribed_apps`);
+  subscriptionEndpoint.searchParams.set('subscribed_fields', 'messages,messaging_postbacks,message_deliveries,message_reads');
+  const subscriptionResponse = await fetch(subscriptionEndpoint, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${credentials.accessToken}` }
+  });
+  const subscriptionData = safeJsonParse(await subscriptionResponse.text(), {});
+  if (!subscriptionResponse.ok || subscriptionData.success === false) {
+    throw httpError(422, `Meta could not subscribe this app to the Facebook Page: ${providerError(subscriptionData, subscriptionResponse.status)}`);
+  }
+  const now = new Date().toISOString();
+  const config = await updateChannelRuntimeConfig(env, channel, {
+    apiVersion: version,
+    credentialsVerifiedAt: now,
+    subscribedAppsAt: now,
+    verifiedProviderId: pageId,
+    verifiedName: String(data.name || channel.config?.pageName || '')
+  });
+  return {
+    ok: true,
+    channelId: channel.channelId,
+    health: config.webhookVerifiedAt ? 'connected' : 'webhook_required',
+    verifiedName: config.verifiedName,
+    credentialsVerifiedAt: now,
+    subscribedAppsAt: config.subscribedAppsAt,
+    webhookVerifiedAt: config.webhookVerifiedAt || ''
+  };
+}
+
 async function updateChannelRuntimeConfig(env, channel, patch) {
   const config = { ...(channel.config || {}) };
   for (const [key, value] of Object.entries(patch || {})) {
@@ -2339,7 +2606,8 @@ async function saveChannel(env, workspaceId, payload, principal, forcedChannelId
   invalidateChannelVerification(connectorType, config, changedConfigFields, Object.keys(credentialUpdates));
   const collision = await env.DB.prepare('SELECT workspace_id FROM channels WHERE channel_id=?1').bind(channelId).first();
   if (collision && collision.workspace_id !== workspaceId) throw httpError(409, 'Channel ID is already used by another workspace.');
-  const storageType = connectorType === 'instagram' ? 'generic_http' : connectorType;
+  const storageType = ['instagram', 'facebook_messenger'].includes(connectorType) ? 'generic_http' : connectorType;
+  const capabilities = CONNECTOR_DEFINITIONS[connectorType]?.capabilities || ['text'];
   const enabled = payload.enabled === undefined ? (existing ? Boolean(existing.enabled) : true) : payload.enabled !== false;
   let saved;
   try {
@@ -2350,7 +2618,7 @@ async function saveChannel(env, workspaceId, payload, principal, forcedChannelId
         provider_type=excluded.provider_type,enabled=excluded.enabled,capabilities_json=excluded.capabilities_json,
         config_json=excluded.config_json,secret_key='DATABASE',updated_at=excluded.updated_at
         WHERE channels.workspace_id=excluded.workspace_id`)
-      .bind(channelId, name, storageType, connectorType, enabled ? 1 : 0, JSON.stringify(['text']), JSON.stringify(config), now, workspaceId).run();
+      .bind(channelId, name, storageType, connectorType, enabled ? 1 : 0, JSON.stringify(capabilities), JSON.stringify(config), now, workspaceId).run();
   } catch (error) {
     if (isUniqueConstraintError(error)) throw httpError(409, 'This provider identity is already connected in the workspace.');
     throw error;
@@ -2469,7 +2737,8 @@ function mergeChannelConfig(connectorType, previous = {}, supplied) {
       else delete config[key];
     }
   }
-  if ((connectorType === 'whatsapp_cloud' || connectorType === 'instagram') && !config.apiVersion) config.apiVersion = 'v26.0';
+  if ((connectorType === 'whatsapp_cloud' || connectorType === 'instagram' || connectorType === 'facebook_messenger') &&
+      !config.apiVersion) config.apiVersion = 'v26.0';
   if (connectorType === 'instagram' && !config.authMode) config.authMode = 'instagram_login';
   if (JSON.stringify(publicChannelConfig(connectorType, config)).length > 4096) throw httpError(400, 'Channel configuration is too large.');
   return config;
@@ -2484,6 +2753,10 @@ function normalizeChannelConfigValue(key, value) {
   if (key === 'username') {
     if (!/^[A-Za-z0-9._]{1,30}$/.test(text)) throw httpError(400, 'Instagram username is invalid.');
     return text;
+  }
+  if (key === 'pageName') {
+    if (text.length > 100 || /[\u0000-\u001f\u007f]/.test(text)) throw httpError(400, 'Facebook Page name is invalid.');
+    return text.slice(0, 100);
   }
   if (key === 'authMode') {
     if (text !== 'instagram_login') throw httpError(400, 'Instagram authentication mode is invalid.');
@@ -2503,7 +2776,9 @@ async function assertProviderIdentityConfigMutable(env, workspaceId, existing, c
     ? new Set(['wabaId', 'phoneNumberId'])
     : connectorType === 'instagram'
       ? new Set(['instagramAccountId', 'appId'])
-      : new Set();
+      : connectorType === 'facebook_messenger'
+        ? new Set(['pageId', 'appId'])
+        : new Set();
   if (!changedConfigFields.some(key => providerIdentityFields.has(key))) return;
   const usage = await env.DB.prepare(`SELECT
       EXISTS(SELECT 1 FROM channel_identity_bindings WHERE workspace_id=?1 AND channel_id=?2) AS has_bindings,
@@ -2518,7 +2793,8 @@ async function assertProviderIdentityConfigMutable(env, workspaceId, existing, c
 }
 
 function invalidateChannelVerification(connectorType, config, changedConfigFields = [], changedCredentialFields = []) {
-  const providerCredentialChanged = connectorType === 'whatsapp_cloud' || connectorType === 'instagram'
+  const providerCredentialChanged = connectorType === 'whatsapp_cloud' || connectorType === 'instagram' ||
+    connectorType === 'facebook_messenger'
     ? changedCredentialFields.some(key => key !== 'verifyToken')
     : changedCredentialFields.length > 0;
   if (changedConfigFields.length || providerCredentialChanged) {
@@ -2535,21 +2811,29 @@ function invalidateChannelVerification(connectorType, config, changedConfigField
     ? new Set(['wabaId', 'phoneNumberId'])
     : connectorType === 'instagram'
       ? new Set(['instagramAccountId', 'appId'])
-      : new Set();
+      : connectorType === 'facebook_messenger'
+        ? new Set(['pageId', 'appId'])
+        : new Set();
   if (changedConfigFields.some(key => providerIdentityFields.has(key))) delete config.lastWebhookAt;
 }
 
 async function assertUniqueManagedConfig(env, workspaceId, connectorType, channelId, config) {
   const field = connectorType === 'whatsapp_cloud' ? 'phoneNumberId'
-    : connectorType === 'instagram' ? 'instagramAccountId' : '';
+    : connectorType === 'instagram' ? 'instagramAccountId'
+      : connectorType === 'facebook_messenger' ? 'pageId' : '';
   const value = field ? String(config[field] || '') : '';
   if (!value) return;
-  const jsonPath = field === 'phoneNumberId' ? '$.phoneNumberId' : '$.instagramAccountId';
+  const jsonPath = field === 'phoneNumberId' ? '$.phoneNumberId'
+    : field === 'instagramAccountId' ? '$.instagramAccountId' : '$.pageId';
   const duplicate = await env.DB.prepare(`SELECT channel_id FROM channels
     WHERE workspace_id=?1 AND channel_id<>?2 AND provider_type=?3
       AND json_extract(config_json,?4)=?5 LIMIT 1`)
     .bind(workspaceId, channelId, connectorType, jsonPath, value).first();
-  if (duplicate) throw httpError(409, `This ${connectorType === 'whatsapp_cloud' ? 'WhatsApp phone number' : 'Instagram account'} is already connected in the workspace.`);
+  if (duplicate) {
+    const label = connectorType === 'whatsapp_cloud' ? 'WhatsApp phone number'
+      : connectorType === 'instagram' ? 'Instagram account' : 'Facebook Page';
+    throw httpError(409, `This ${label} is already connected in the workspace.`);
+  }
 }
 
 async function assertUniqueVerifiedProviderId(env, workspaceId, connectorType, channelId, providerId) {
@@ -3000,15 +3284,18 @@ async function getConversationReplyWindow(env, workspaceId, conversationId) {
 }
 
 export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Date.now()) {
-  if (connectorType !== 'whatsapp_cloud') {
+  if (connectorType !== 'whatsapp_cloud' && connectorType !== 'facebook_messenger') {
     return { freeformAllowed: true, replyWindowExpiresAt: '', replyWindowReason: '' };
   }
+  const providerLabel = connectorType === 'facebook_messenger' ? 'Messenger' : 'WhatsApp';
   const inboundTime = new Date(String(lastInboundAt || '')).valueOf();
   if (!Number.isFinite(inboundTime)) {
     return {
       freeformAllowed: false,
       replyWindowExpiresAt: '',
-      replyWindowReason: 'No customer message has opened the WhatsApp 24-hour service window. Send an approved template.'
+      replyWindowReason: connectorType === 'facebook_messenger'
+        ? 'No customer message has opened the Messenger 24-hour messaging window.'
+        : 'No customer message has opened the WhatsApp 24-hour service window. Send an approved template.'
     };
   }
   const expiresAt = inboundTime + WHATSAPP_REPLY_WINDOW_MS;
@@ -3018,7 +3305,9 @@ export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Dat
     replyWindowExpiresAt: new Date(expiresAt).toISOString(),
     replyWindowReason: freeformAllowed
       ? ''
-      : 'The WhatsApp 24-hour service window has closed. Send an approved template to continue.'
+      : connectorType === 'facebook_messenger'
+        ? `The ${providerLabel} 24-hour messaging window has closed.`
+        : 'The WhatsApp 24-hour service window has closed. Send an approved template to continue.'
   };
 }
 
@@ -3132,7 +3421,9 @@ async function exportContactsCsv(env, workspaceId) {
 
 function canonicalIdentityPlatform(value) {
   const raw = String(value || '').trim().toLowerCase();
-  const platform = raw === 'whatsapp_cloud' ? 'whatsapp' : raw;
+  const platform = raw === 'whatsapp_cloud' ? 'whatsapp'
+    : (raw === 'facebook_messenger' || raw === 'messenger') ? 'facebook'
+      : raw;
   if (!/^[a-z][a-z0-9_-]{1,39}$/.test(platform)) throw httpError(400, 'Identity platform is invalid.');
   return platform;
 }
@@ -5433,8 +5724,8 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
     replyToMessageId: form.get('replyToMessageId')
   });
   assertPrincipalChannelAccess(principal, target.channel_id);
-  if (!['whatsapp_cloud', 'telegram'].includes(target.connectorType)) {
-    throw httpError(409, 'Attachments are currently available for WhatsApp and Telegram conversations.');
+  if (!['whatsapp_cloud', 'telegram', 'facebook_messenger'].includes(target.connectorType)) {
+    throw httpError(409, 'Attachments are currently available for WhatsApp, Telegram, and Messenger conversations.');
   }
   if (!target.enabled) throw httpError(409, 'The channel is disabled.');
   assertFreeformReplyAllowed(target.connectorType, target.last_inbound_at);
@@ -5454,7 +5745,7 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   const attachmentPayload = (safeAttachment) => ({
     attachment: safeAttachment, senderName, ...(reply ? { reply } : {})
   });
-  if (target.connectorType === 'telegram') {
+  if (target.connectorType === 'telegram' || target.connectorType === 'facebook_messenger') {
     let safeAttachment = { ...attachment };
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
@@ -5469,9 +5760,17 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
     await touchIdentityBinding(env, workspaceId, target.identity_id, target.channel_id, 'outbound', conversationId, now);
     let sent;
     try {
-      sent = await sendTelegramMedia(env, target.channel, target.channel_profile_id, file, attachment,
-        reply?.channelMessageId || '');
-      safeAttachment = { ...attachment, providerFileId: sent.providerFileId };
+      if (target.connectorType === 'telegram') {
+        sent = await sendTelegramMedia(env, target.channel, target.channel_profile_id, file, attachment,
+          reply?.channelMessageId || '');
+        safeAttachment = { ...attachment, providerFileId: sent.providerFileId };
+      } else {
+        sent = await sendFacebookMessengerMedia(env, target.channel, target.channel_profile_id, file, attachment);
+        safeAttachment = {
+          ...attachment,
+          ...(sent.providerAttachmentId ? { providerAttachmentId: sent.providerAttachmentId } : {})
+        };
+      }
       await persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, safeAttachment, reply, senderName);
     } catch (error) {
       const failure = cleanError(error);
@@ -5481,8 +5780,8 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
           .bind(messageId, failure, workspaceId).run();
         failurePersisted = true;
       } catch (persistenceError) {
-        console.error('telegram_attachment_failure_persist_failed', {
-          messageId, workspaceId, error: cleanError(persistenceError)
+        console.error('attachment_failure_persist_failed', {
+          messageId, workspaceId, connectorType: target.connectorType, error: cleanError(persistenceError)
         });
       }
       if (!failurePersisted) throw error;
@@ -5598,7 +5897,8 @@ function validateWhatsAppAttachment(file, captionValue, connectorType = 'whatsap
   const maximum = connectorType === 'whatsapp_cloud' && type === 'image'
     ? WHATSAPP_IMAGE_MAX_BYTES : MAX_ATTACHMENT_BYTES;
   if (size > maximum) {
-    const provider = connectorType === 'telegram' ? 'Telegram' : 'WhatsApp';
+    const provider = connectorType === 'telegram' ? 'Telegram'
+      : connectorType === 'facebook_messenger' ? 'Messenger' : 'WhatsApp';
     throw httpError(413, `${provider} ${type} attachments may not exceed ${Math.round(maximum / (1024 * 1024))} MB.`);
   }
   const rawName = String(file.name || `attachment.${mimeType.split('/')[1] || 'bin'}`)
@@ -5892,6 +6192,9 @@ async function dispatchOutbound(env, messageId) {
   } else if (channel.connectorType === 'telegram') {
     result = await sendTelegram(env, channel, row.channel_profile_id, row.text, replyChannelMessageId);
   } else if (channel.connectorType === 'instagram') result = await sendInstagram(env, channel, row.channel_profile_id, row.text);
+  else if (channel.connectorType === 'facebook_messenger') {
+    result = await sendFacebookMessenger(env, channel, row.channel_profile_id, row.text);
+  }
   else if (channel.connectorType === 'generic_http') result = await sendGeneric(env, channel, row);
   else if (channel.connectorType === 'web_chat') result = { status: 'sent', providerMessageId: row.message_id, httpStatus: 200 };
   else throw new Error(`Outbound connector ${channel.connectorType} is not implemented yet.`);
@@ -5910,7 +6213,9 @@ function assertManagedOutboundVerified(channel) {
     ? String(config.phoneNumberId || '').trim()
     : channel.connectorType === 'instagram'
       ? String(config.instagramAccountId || '').trim()
-      : '';
+      : channel.connectorType === 'facebook_messenger'
+        ? String(config.pageId || '').trim()
+        : '';
   if (configuredProviderId && configuredProviderId !== verifiedProviderId) {
     throw nonRetryableError('The verified provider identity does not match the channel configuration.');
   }
@@ -6109,6 +6414,75 @@ async function sendInstagram(env, channel, recipient, text) {
   return {
     status: 'submitted',
     providerMessageId: String(data.message_id || data.id || ''),
+    httpStatus: response.status
+  };
+}
+
+async function sendFacebookMessenger(env, channel, recipient, text) {
+  const credentials = await readChannelCredentials(env, channel);
+  const pageId = String(channel.config?.pageId || '');
+  if (!credentials.accessToken || !pageId) throw nonRetryableError('Messenger credentials are not configured.');
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const response = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(pageId)}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${credentials.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipient: { id: String(recipient) },
+      messaging_type: 'RESPONSE',
+      message: { text }
+    })
+  });
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) {
+    const error = new Error(`Messenger API: ${providerError(data, response.status)}`);
+    error.retryable = isRetryableProviderStatus(response.status);
+    throw error;
+  }
+  return {
+    status: 'submitted',
+    providerMessageId: String(data.message_id || data.id || ''),
+    httpStatus: response.status
+  };
+}
+
+async function sendFacebookMessengerMedia(env, channel, recipient, file, attachment) {
+  const credentials = await readChannelCredentials(env, channel);
+  const pageId = String(channel.config?.pageId || '');
+  if (!credentials.accessToken || !pageId) throw nonRetryableError('Messenger credentials are not configured.');
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const type = attachment.type === 'document' ? 'file' : attachment.type;
+  if (!['image', 'video', 'audio', 'file'].includes(type)) {
+    throw nonRetryableError('This attachment type is not supported for Messenger.');
+  }
+  const body = new FormData();
+  body.set('recipient', JSON.stringify({ id: String(recipient) }));
+  body.set('messaging_type', 'RESPONSE');
+  const message = {
+    attachment: {
+      type,
+      payload: { is_reusable: true }
+    }
+  };
+  if (attachment.caption && type !== 'audio') {
+    // Messenger Send API does not attach captions to media the same way WhatsApp does;
+    // keep caption only in Helixcer inbox metadata.
+  }
+  body.set('message', JSON.stringify(message));
+  body.set('filedata', file, attachment.filename);
+  const response = await fetch(
+    `https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(pageId)}/messages`,
+    { method: 'POST', headers: { Authorization: `Bearer ${credentials.accessToken}` }, body }
+  );
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) {
+    const error = new Error(`Messenger API: ${providerError(data, response.status)}`);
+    error.retryable = isRetryableProviderStatus(response.status);
+    throw error;
+  }
+  return {
+    status: 'submitted',
+    providerMessageId: String(data.message_id || data.id || ''),
+    providerAttachmentId: String(data.attachment_id || ''),
     httpStatus: response.status
   };
 }
@@ -7660,6 +8034,90 @@ export function normalizeInstagram(payload) {
     }
   }
   return { messages, statuses, watermarkStatuses, recipientIds: [...recipientIds] };
+}
+
+export function normalizeFacebookMessenger(payload) {
+  const messages = [];
+  const statuses = [];
+  const watermarkStatuses = [];
+  const recipientIds = new Set();
+  for (const entry of payload?.entry || []) {
+    for (const event of entry?.messaging || []) {
+      const senderId = String(event?.sender?.id || '');
+      const recipientId = String(event?.recipient?.id || entry?.id || '');
+      const message = event?.message || null;
+      const postback = event?.postback || null;
+      const timestamp = providerEpochTimestamp(event?.timestamp);
+      if (message?.is_echo) {
+        const pageId = String(entry?.id || event?.sender?.id || '');
+        if (pageId) recipientIds.add(pageId);
+        if (message.mid) statuses.push({ providerMessageId: String(message.mid), status: 'sent', timestamp });
+        continue;
+      }
+      if (event?.delivery) {
+        if (recipientId) recipientIds.add(recipientId);
+        const deliveryTimestamp = providerEpochTimestamp(event.delivery.watermark) || timestamp;
+        const messageIds = Array.isArray(event.delivery.mids) ? event.delivery.mids : [];
+        for (const messageId of messageIds) {
+          if (messageId) statuses.push({ providerMessageId: String(messageId), status: 'delivered', timestamp: deliveryTimestamp });
+        }
+        if (!messageIds.length && senderId && deliveryTimestamp) {
+          watermarkStatuses.push({ channelProfileId: senderId, status: 'delivered', timestamp: deliveryTimestamp });
+        }
+        continue;
+      }
+      if (event?.read) {
+        if (recipientId) recipientIds.add(recipientId);
+        const readTimestamp = providerEpochTimestamp(event.read.watermark) || timestamp;
+        if (event.read.mid) statuses.push({ providerMessageId: String(event.read.mid), status: 'read', timestamp: readTimestamp });
+        else if (senderId && readTimestamp) watermarkStatuses.push({ channelProfileId: senderId, status: 'read', timestamp: readTimestamp });
+        continue;
+      }
+      if (!senderId || (!message && !postback)) continue;
+      if (recipientId) recipientIds.add(recipientId);
+      const attachment = messengerInboundAttachment(message);
+      const text = String(message?.text || postback?.title || postback?.payload ||
+        (attachment ? `[Facebook ${attachment.type} received]`
+          : `[Facebook ${String(message?.attachments?.[0]?.type || 'message').replace(/_/g, ' ')} received]`));
+      messages.push({
+        channelProfileId: senderId,
+        displayName: senderId,
+        text,
+        providerMessageId: String(message?.mid || postback?.mid || `${entry?.id || recipientId}:${event?.timestamp || ''}:${senderId}`),
+        timestamp,
+        messageType: attachment?.type || (message?.text || postback ? 'text' : String(message?.attachments?.[0]?.type || 'message')),
+        ...(attachment ? { attachment } : {})
+      });
+    }
+  }
+  return { messages, statuses, watermarkStatuses, recipientIds: [...recipientIds] };
+}
+
+function messengerInboundAttachment(message) {
+  const first = Array.isArray(message?.attachments) ? message.attachments[0] : null;
+  if (!first || typeof first !== 'object') return null;
+  const rawType = String(first.type || '').toLowerCase();
+  const type = rawType === 'file' ? 'document' : rawType === 'sticker' ? 'image' : rawType;
+  if (!['image', 'video', 'audio', 'document'].includes(type)) return null;
+  const url = String(first.payload?.url || '').trim();
+  let externalUrl = '';
+  if (url) {
+    try {
+      validatePublicHttpsMediaUrl(url, 'messenger attachment');
+      externalUrl = new URL(url).toString();
+    } catch {
+      externalUrl = '';
+    }
+  }
+  const extension = type === 'image' ? 'jpg' : type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : 'bin';
+  return {
+    type,
+    filename: String(first.payload?.title || `${type}-${String(message?.mid || 'attachment').slice(-12)}.${extension}`).slice(0, 240),
+    mimeType: '',
+    size: 0,
+    caption: String(message?.text || '').slice(0, MAX_ATTACHMENT_CAPTION_LENGTH),
+    ...(externalUrl ? { externalUrl } : {})
+  };
 }
 
 function providerEpochTimestamp(value) {

@@ -1681,6 +1681,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .provider-mark.whatsapp { background: #e7f6ef; color: #168f66; }
 .provider-mark.telegram { background: #e8f4fa; color: #2d8bc0; }
 .provider-mark.instagram { background: #f9eaf2; color: #b6427b; }
+.provider-mark.facebook { background: #eaf2fb; color: #1877f2; }
 .secret-field { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .02em; }
 .secret-field.is-saved { border-color: #bcdcca; background: #f1faf5; color: #317058; letter-spacing: .08em; }
 .secret-help { color: #697b75; }

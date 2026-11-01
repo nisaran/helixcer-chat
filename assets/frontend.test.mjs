@@ -101,9 +101,11 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /<option value="whatsapp_cloud">WhatsApp Cloud<\/option>/);
   assert.match(html, /<option value="telegram">Telegram Bot<\/option>/);
   assert.match(html, /<option value="instagram">Instagram<\/option>/);
+  assert.match(html, /<option value="facebook_messenger">Facebook Messenger<\/option>/);
   assert.match(html, /Instagram Business or Creator account/);
   assert.match(html, /Instagram User access token/);
-  assert.doesNotMatch(html, /Facebook Page ID|Page access token/);
+  assert.match(html, /Facebook Page ID/);
+  assert.match(html, /Page access token/);
   assert.match(html, /id="contactCreatePlatformIds"/);
   assert.doesNotMatch(html, /data-action="add-contact-create-identity"/);
   assert.match(app, /request\("\/api\/channels", \{ method: "POST"/);
@@ -112,12 +114,15 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(app, /whatsapp_cloud:\s*\{/);
   assert.match(app, /telegram:\s*\{/);
   assert.match(app, /instagram:\s*\{/);
+  assert.match(app, /facebook_messenger:\s*\{/);
   assert.match(app, /apiVersion:\s*"v26\.0"/);
   assert.match(app, /authMode:\s*"instagram_login"/);
   assert.match(app, /data\.action = "verify-channel"|dataset\.action = "verify-channel"/);
   assert.match(app, /copy-webhook-callback/);
   assert.match(app, /\/webhooks\/instagram-app\/\$\{encodeURIComponent\(channel\.config\.appId\)\}/);
+  assert.match(app, /\/webhooks\/facebook-messenger-app\/\$\{encodeURIComponent\(channel\.config\.appId\)\}/);
   assert.match(app, /Helixcer routes messages by account ID/);
+  assert.match(app, /Helixcer routes messages by Page ID/);
   assert.match(app, /function identityChannels\(platform, bindings = \[\]\)/);
   assert.match(app, /connectorPlatform\(channel\.connectorType\) === platform/);
   assert.doesNotMatch(app, /channelId:\s*"wa-main"/);
@@ -180,6 +185,8 @@ test("channel secrets are masked, optional on edit, and never prefilled", () => 
   assert.match(html, /name="telegramWebhookSecret" type="password"/);
   assert.match(html, /name="instagramAccessToken" type="password"/);
   assert.match(html, /name="instagramAppSecret" type="password"/);
+  assert.match(html, /name="messengerAccessToken" type="password"/);
+  assert.match(html, /name="messengerAppSecret" type="password"/);
   assert.match(html, /data-generate-secret="telegramWebhookSecret"/);
   assert.doesNotMatch(html, /name="(?:whatsapp|instagram)VerifyToken"/);
   assert.match(html, /id="webhookTokenDialog"/);
@@ -496,6 +503,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(app, /provider-whatsapp\.svg/);
   assert.match(app, /provider-telegram\.svg/);
   assert.match(app, /provider-instagram\.svg/);
+  assert.match(app, /provider-facebook\.svg/);
   assert.match(html, /id="chatChannelProfileId"[^>]*hidden/);
   assert.match(html, /id="chatChannelBadge"[^>]*hidden/);
   assert.match(html, /class="chat-contact-card"[^>]*data-action="toggle-details"/);
