@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-flow";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-create-ux";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -87,12 +87,27 @@
       selectedContactIds: new Set(),
       audienceContactIds: new Set(),
       contactFilter: "",
+      contactFilters: {
+        channels: new Set(),
+        platforms: new Set(),
+        companies: new Set(),
+        tags: new Set(),
+      },
+      contactFilterQueries: {
+        channels: "",
+        platforms: "",
+        companies: "",
+        tags: "",
+      },
+      contactPage: 1,
       contactCandidates: [],
+      channelMenuOpen: false,
       templates: [],
       templateKey: "",
       variableMappings: [],
       textVariables: [],
       submitting: false,
+      audienceInputSyncing: false,
     },
     pendingConversationId: null,
     unreadMarker: null,
@@ -8418,17 +8433,269 @@
     return channel?.connectorType === "whatsapp_cloud" || channel?.connectorType === "whatsapp";
   }
 
-  function renderCampaignCreateForm() {
-    const select = $("campaignChannel");
-    if (select) {
-      const current = select.value;
-      select.replaceChildren(new Option("Select a channel…", ""));
-      state.channels
-        .slice()
-        .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }))
-        .forEach((channel) => select.append(new Option(channel.name || channel.channelId, channel.channelId)));
-      if ([...select.options].some((option) => option.value === current)) select.value = current;
+  function campaignChannelIdentifier(channel) {
+    if (!channel) return "";
+    const setup = channel.setup || {};
+    const config = channel.config || {};
+    const type = String(channel.connectorType || "");
+    if (type === "whatsapp_cloud" || type === "whatsapp") {
+      return String(setup.verifiedPhoneNumber || config.verifiedPhoneNumber || config.phoneNumberId || "").trim();
     }
+    if (type === "telegram" || type === "telegram_bot") {
+      const username = String(setup.verifiedUsername || config.verifiedUsername || "").trim();
+      if (username) return username.startsWith("@") ? username : `@${username}`;
+      return String(setup.verifiedProviderId || setup.verifiedName || config.botId || "").trim();
+    }
+    if (type === "instagram" || type === "instagram_messaging") {
+      return String(setup.verifiedUsername || setup.verifiedName || config.username || config.instagramAccountId || "").trim();
+    }
+    if (type === "facebook_messenger" || type === "facebook" || type === "messenger") {
+      return String(setup.verifiedName || config.pageName || config.pageId || "").trim();
+    }
+    return String(setup.verifiedName || setup.verifiedUsername || channel.channelId || "").trim();
+  }
+
+  function campaignChannelOptionContent(channel, { includeName = true } = {}) {
+    const wrap = document.createElement("span");
+    wrap.className = "campaign-channel-option-content";
+    wrap.append(providerLogo(channel.connectorType, "campaign-channel-logo"));
+    const copy = document.createElement("span");
+    copy.className = "campaign-channel-option-copy";
+    const profile = providerProfiles[channel.connectorType] || { label: channelStyle(channel).label || "Channel" };
+    const identifier = campaignChannelIdentifier(channel);
+    if (includeName) copy.append(element("strong", "", channel.name || channel.channelId || "Channel"));
+    copy.append(element("span", "", [profile.label || channelStyle(channel).label, identifier].filter(Boolean).join(" · ") || "No identifier"));
+    wrap.append(copy);
+    return wrap;
+  }
+
+  function setCampaignChannel(channelId, { silent = false } = {}) {
+    const input = $("campaignChannel");
+    const trigger = $("campaignChannelTrigger");
+    const empty = $("campaignChannelTriggerEmpty");
+    const valueHost = $("campaignChannelTriggerValue");
+    const menu = $("campaignChannelMenu");
+    const channel = state.channels.find((item) => item.channelId === channelId) || null;
+    if (input) input.value = channel?.channelId || "";
+    if (empty) empty.hidden = Boolean(channel);
+    if (valueHost) {
+      valueHost.hidden = !channel;
+      valueHost.replaceChildren();
+      if (channel) valueHost.append(campaignChannelOptionContent(channel));
+    }
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+    if (menu) menu.hidden = true;
+    state.campaigns.channelMenuOpen = false;
+    if (!silent) renderCampaignMessageComposer();
+  }
+
+  function renderCampaignChannelPicker() {
+    const menu = $("campaignChannelMenu");
+    const trigger = $("campaignChannelTrigger");
+    if (!menu || !trigger) return;
+    const current = $("campaignChannel")?.value || "";
+    menu.replaceChildren();
+    const channels = state.channels
+      .slice()
+      .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }));
+    if (!channels.length) {
+      menu.append(element("div", "campaign-multi-filter-empty", "No channels connected yet."));
+    } else {
+      channels.forEach((channel) => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = `campaign-channel-option${channel.channelId === current ? " is-selected" : ""}`;
+        option.role = "option";
+        option.dataset.channelId = channel.channelId;
+        option.setAttribute("aria-selected", String(channel.channelId === current));
+        option.append(campaignChannelOptionContent(channel));
+        option.addEventListener("click", () => setCampaignChannel(channel.channelId));
+        menu.append(option);
+      });
+    }
+    setCampaignChannel(current, { silent: true });
+    menu.hidden = !state.campaigns.channelMenuOpen;
+    trigger.setAttribute("aria-expanded", String(Boolean(state.campaigns.channelMenuOpen)));
+  }
+
+  function contactBoundChannelIds(contact = {}) {
+    const ids = new Set();
+    if (contact.channelId) ids.add(String(contact.channelId));
+    asItems(contact.identities).forEach((identity) => {
+      if (identity.channelId) ids.add(String(identity.channelId));
+      asItems(identity.bindings).forEach((binding) => {
+        if (binding?.channelId) ids.add(String(binding.channelId));
+      });
+    });
+    return [...ids];
+  }
+
+  function contactActivePlatforms(contact = {}) {
+    return Object.entries(contactPlatformIds(contact))
+      .filter(([, value]) => value)
+      .map(([platform]) => platform);
+  }
+
+  function campaignContactMessagingId(contact, channel = selectedCampaignChannel()) {
+    if (!contact) return "";
+    const platform = connectorPlatform(channel?.connectorType);
+    const ids = contactPlatformIds(contact);
+    if (platform && ids[platform]) return String(ids[platform]);
+    const preferred = Object.entries(ids).find(([, value]) => value);
+    if (preferred?.[1]) return String(preferred[1]);
+    const profile = String(contact.channelProfileId || "").trim();
+    if (profile && profile !== "—") return profile;
+    const phone = String(contact.phone || "").trim();
+    if (phone && phone !== "—") return phone;
+    return String(contact.contactId || "").trim();
+  }
+
+  function formatCampaignAudienceEntry(contact) {
+    const name = String(contact?.displayName || contact?.contactId || "Contact").trim();
+    const id = campaignContactMessagingId(contact);
+    return id ? `${name} <${id}>` : name;
+  }
+
+  function campaignFilterOptionLists() {
+    const channels = state.channels
+      .slice()
+      .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }))
+      .map((channel) => ({
+        value: channel.channelId,
+        label: [channel.name, campaignChannelIdentifier(channel)].filter(Boolean).join(" · "),
+      }));
+    const platforms = Object.keys(identityPlatforms)
+      .filter((platform) => platform !== "email")
+      .map((platform) => ({ value: platform, label: identityPlatforms[platform].label }));
+    const companies = [...new Set((state.contacts || [])
+      .map((contact) => String(contact.company || "").trim())
+      .filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))
+      .map((company) => ({ value: company, label: company }));
+    const tags = [...new Set([
+      ...(state.workspaceTags || []),
+      ...(state.contacts || []).flatMap((contact) => contact.tags || []),
+    ].map((tag) => String(tag || "").trim()).filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))
+      .map((tag) => ({ value: tag, label: tag }));
+    return { channels, platforms, companies, tags };
+  }
+
+  function filteredCampaignContacts() {
+    const needle = String(state.campaigns.contactFilter || "").trim().toLocaleLowerCase();
+    const filters = state.campaigns.contactFilters || {};
+    const selectedChannels = filters.channels || new Set();
+    const selectedPlatforms = filters.platforms || new Set();
+    const selectedCompanies = filters.companies || new Set();
+    const selectedTags = filters.tags || new Set();
+    return (state.contacts || []).filter((contact) => {
+      if (selectedChannels.size) {
+        const bound = new Set(contactBoundChannelIds(contact));
+        if (![...selectedChannels].some((channelId) => bound.has(channelId))) return false;
+      }
+      if (selectedPlatforms.size) {
+        const platforms = new Set(contactActivePlatforms(contact));
+        if (![...selectedPlatforms].some((platform) => platforms.has(platform))) return false;
+      }
+      if (selectedCompanies.size) {
+        if (!selectedCompanies.has(String(contact.company || "").trim())) return false;
+      }
+      if (selectedTags.size) {
+        const tags = new Set((contact.tags || []).map((tag) => String(tag || "").trim()));
+        if (![...selectedTags].some((tag) => tags.has(tag))) return false;
+      }
+      if (!needle) return true;
+      const ids = contactPlatformIds(contact);
+      const haystack = [
+        contact.displayName,
+        contact.company,
+        ...(contact.tags || []),
+        contact.channelProfileId,
+        contact.phone,
+        contact.email,
+        ...Object.values(ids),
+        ...contactBoundChannelIds(contact).map((channelId) => state.channels.find((channel) => channel.channelId === channelId)?.name || channelId),
+      ].join(" ").toLocaleLowerCase();
+      return haystack.includes(needle);
+    });
+  }
+
+  function renderCampaignMultiFilters() {
+    const lists = campaignFilterOptionLists();
+    document.querySelectorAll("[data-campaign-filter]").forEach((host) => {
+      const key = host.dataset.campaignFilter;
+      const selected = state.campaigns.contactFilters[key] || new Set();
+      const trigger = host.querySelector(".campaign-multi-filter-trigger");
+      const menu = host.querySelector(".campaign-multi-filter-menu");
+      if (!trigger || !menu) return;
+      const count = selected.size;
+      const anyLabel = {
+        channels: "Any channel",
+        platforms: "Any platform",
+        companies: "Any company",
+        tags: "Any tags",
+      }[key] || "Any";
+      trigger.textContent = count
+        ? `${count} selected`
+        : anyLabel;
+      trigger.classList.toggle("has-selection", count > 0);
+      const query = String(state.campaigns.contactFilterQueries[key] || "").trim().toLocaleLowerCase();
+      const options = (lists[key] || []).filter((option) => !query || option.label.toLocaleLowerCase().includes(query));
+      menu.replaceChildren();
+      const search = document.createElement("input");
+      search.className = "text-field campaign-multi-filter-search";
+      search.type = "search";
+      search.placeholder = "Search…";
+      search.value = state.campaigns.contactFilterQueries[key] || "";
+      search.addEventListener("input", (event) => {
+        state.campaigns.contactFilterQueries[key] = event.target.value || "";
+        renderCampaignMultiFilters();
+        const nextHost = document.querySelector(`[data-campaign-filter="${key}"]`);
+        const nextMenu = nextHost?.querySelector(".campaign-multi-filter-menu");
+        const nextSearch = nextMenu?.querySelector(".campaign-multi-filter-search");
+        if (nextMenu) nextMenu.hidden = false;
+        if (nextHost) nextHost.classList.add("is-open");
+        if (nextSearch) {
+          nextSearch.focus();
+          const end = nextSearch.value.length;
+          nextSearch.setSelectionRange(end, end);
+        }
+      });
+      menu.append(search);
+      if (!options.length) {
+        menu.append(element("div", "campaign-multi-filter-empty", "No matching options"));
+        return;
+      }
+      options.forEach((option) => {
+        const row = document.createElement("label");
+        row.className = "campaign-multi-filter-option";
+        const checked = selected.has(option.value);
+        row.innerHTML = `<input type="checkbox" data-campaign-filter-value="${escapeHtml(option.value)}" ${checked ? "checked" : ""}>
+          <span>${escapeHtml(option.label)}</span>`;
+        row.querySelector("input")?.addEventListener("change", (event) => {
+          const next = new Set(state.campaigns.contactFilters[key] || []);
+          if (event.target.checked) next.add(option.value);
+          else next.delete(option.value);
+          state.campaigns.contactFilters[key] = next;
+          state.campaigns.contactPage = 1;
+          renderCampaignMultiFilters();
+          renderCampaignContactPicker();
+          const openHost = document.querySelector(`[data-campaign-filter="${key}"]`);
+          if (openHost) {
+            openHost.classList.add("is-open");
+            const openMenu = openHost.querySelector(".campaign-multi-filter-menu");
+            const openTrigger = openHost.querySelector(".campaign-multi-filter-trigger");
+            if (openMenu) openMenu.hidden = false;
+            if (openTrigger) openTrigger.setAttribute("aria-expanded", "true");
+          }
+        });
+        menu.append(row);
+      });
+    });
+  }
+
+  function renderCampaignCreateForm() {
+    renderCampaignChannelPicker();
     const audience = state.campaigns.audienceSource === "upload" ? "upload" : "contacts";
     document.querySelectorAll('input[name="campaignAudience"]').forEach((input) => {
       input.checked = input.value === audience;
@@ -8442,6 +8709,7 @@
     $("campaignUploadFileLabel").hidden = uploadMode !== "file";
     $("campaignUploadUrlLabel").hidden = uploadMode !== "url";
     $("campaignLoadUploadUrl").hidden = uploadMode !== "url";
+    renderCampaignMultiFilters();
     renderCampaignContactPicker();
     renderCampaignSelectedContacts();
     renderCampaignFieldMapping();
@@ -8452,25 +8720,29 @@
   function renderCampaignContactPicker() {
     const host = $("campaignContactList");
     if (!host) return;
-    const needle = String(state.campaigns.contactFilter || "").trim().toLocaleLowerCase();
-    const contacts = (state.contacts || []).filter((contact) => {
-      if (!needle) return true;
-      const haystack = `${contact.displayName || ""} ${contact.company || ""} ${(contact.tags || []).join(" ")}`.toLocaleLowerCase();
-      return haystack.includes(needle);
-    });
+    const contacts = filteredCampaignContacts();
     state.campaigns.contactCandidates = contacts;
+    const pageSize = CONTACT_PAGE_SIZE;
+    const totalPages = Math.max(1, Math.ceil(contacts.length / pageSize) || 1);
+    if (state.campaigns.contactPage > totalPages) state.campaigns.contactPage = totalPages;
+    if (state.campaigns.contactPage < 1) state.campaigns.contactPage = 1;
+    const page = state.campaigns.contactPage;
+    const start = (page - 1) * pageSize;
+    const pageItems = contacts.slice(start, start + pageSize);
     host.replaceChildren();
     if (!contacts.length) {
-      host.innerHTML = `<div class="subtle" style="padding:12px">No contacts match this filter.</div>`;
-      return;
-    }
-    for (const contact of contacts.slice(0, 200)) {
-      const row = document.createElement("label");
-      row.className = "campaign-contact-item";
-      const checked = state.campaigns.selectedContactIds.has(contact.contactId);
-      row.innerHTML = `<input type="checkbox" data-campaign-contact-id="${escapeHtml(contact.contactId)}" ${checked ? "checked" : ""}>
-        <span><strong>${escapeHtml(contact.displayName || "Contact")}</strong><span>${escapeHtml(contact.company || contactPlatformSummary(contact))}</span></span>`;
-      host.append(row);
+      host.innerHTML = `<div class="campaign-empty-state">No contacts match these filters.</div>`;
+    } else {
+      for (const contact of pageItems) {
+        const row = document.createElement("label");
+        row.className = "campaign-contact-item";
+        const checked = state.campaigns.selectedContactIds.has(contact.contactId);
+        const messagingId = campaignContactMessagingId(contact);
+        const meta = [contact.company, messagingId || contactPlatformSummary(contact)].filter(Boolean).join(" · ");
+        row.innerHTML = `<input type="checkbox" data-campaign-contact-id="${escapeHtml(contact.contactId)}" ${checked ? "checked" : ""}>
+          <span><strong>${escapeHtml(contact.displayName || "Contact")}</strong><span>${escapeHtml(meta || "No messaging ID")}</span></span>`;
+        host.append(row);
+      }
     }
     const selectAll = $("campaignContactSelectAll");
     if (selectAll) {
@@ -8478,6 +8750,20 @@
       selectAll.checked = visibleIds.length > 0 && visibleIds.every((id) => state.campaigns.selectedContactIds.has(id));
       selectAll.indeterminate = !selectAll.checked && visibleIds.some((id) => state.campaigns.selectedContactIds.has(id));
     }
+    const pagination = $("campaignContactPagination");
+    const meta = $("campaignContactPageMeta");
+    const prev = $("campaignContactPrev");
+    const next = $("campaignContactNext");
+    if (pagination) pagination.hidden = contacts.length <= pageSize;
+    if (meta) {
+      const from = contacts.length ? start + 1 : 0;
+      const to = Math.min(start + pageSize, contacts.length);
+      meta.textContent = contacts.length
+        ? `Showing ${from}–${to} of ${contacts.length} · 100 per page`
+        : "0 contacts";
+    }
+    if (prev) prev.disabled = page <= 1;
+    if (next) next.disabled = page >= totalPages || !contacts.length;
   }
 
   function contactPlatformSummary(contact) {
@@ -8486,22 +8772,50 @@
   }
 
   function renderCampaignSelectedContacts() {
-    const host = $("campaignSelectedContacts");
-    if (!host) return;
-    host.replaceChildren();
+    const input = $("campaignAudienceInput");
+    if (!input) return;
     const ids = [...state.campaigns.audienceContactIds];
-    if (!ids.length) {
-      host.innerHTML = `<div class="subtle" style="padding:12px">No contacts added to this campaign yet.</div>`;
-      return;
-    }
-    for (const contactId of ids) {
+    const value = ids.map((contactId) => {
       const contact = state.contacts.find((item) => item.contactId === contactId) || { contactId, displayName: contactId };
-      const row = document.createElement("div");
-      row.className = "campaign-selected-item";
-      row.innerHTML = `<span></span><span><strong>${escapeHtml(contact.displayName || contactId)}</strong><span>${escapeHtml(contact.company || contactId)}</span></span>
-        <button class="secondary-button compact-button" type="button" data-action="campaign-remove-contact" data-contact-id="${escapeHtml(contactId)}">Remove</button>`;
-      host.append(row);
+      return formatCampaignAudienceEntry(contact);
+    }).join(", ");
+    state.campaigns.audienceInputSyncing = true;
+    input.value = value;
+    state.campaigns.audienceInputSyncing = false;
+    const help = $("campaignAudienceHelp");
+    if (help) {
+      help.textContent = ids.length
+        ? `${ids.length} recipient${ids.length === 1 ? "" : "s"} ready to send.`
+        : "Added contacts appear as Name <messaging ID>, separated by commas.";
     }
+    renderCampaignMessagePreview();
+  }
+
+  function parseCampaignAudienceInput(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return new Set();
+    const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
+    const next = new Set();
+    for (const part of parts) {
+      const match = part.match(/^(.*?)\s*<([^<>]+)>\s*$/);
+      const name = String(match?.[1] || part).trim();
+      const id = String(match?.[2] || "").trim();
+      let contact = null;
+      if (id) {
+        contact = (state.contacts || []).find((item) => {
+          const messagingId = campaignContactMessagingId(item);
+          return messagingId === id
+            || item.contactId === id
+            || item.channelProfileId === id
+            || Object.values(contactPlatformIds(item)).includes(id);
+        }) || null;
+      }
+      if (!contact && name) {
+        contact = (state.contacts || []).find((item) => String(item.displayName || "").trim() === name) || null;
+      }
+      if (contact?.contactId) next.add(contact.contactId);
+    }
+    return next;
   }
 
   function renderCampaignFieldMapping() {
@@ -8567,7 +8881,145 @@
       renderCampaignTemplateVariables();
     } else if (channel) {
       renderCampaignTextVariables();
+    } else {
+      renderCampaignMessagePreview();
     }
+  }
+
+  function campaignPreviewSampleContext() {
+    const audienceIds = [...state.campaigns.audienceContactIds];
+    if (state.campaigns.audienceSource === "upload" && state.campaigns.uploadRows?.length) {
+      const row = state.campaigns.uploadRows[0] || {};
+      const profileHeader = state.campaigns.fieldMapping.profileId;
+      const nameHeader = state.campaigns.fieldMapping.displayName;
+      const companyHeader = state.campaigns.fieldMapping.company;
+      const tagsHeader = state.campaigns.fieldMapping.tags;
+      const contact = {
+        displayName: String(row[nameHeader] || row[profileHeader] || "Sample contact"),
+        company: String(row[companyHeader] || ""),
+        tags: String(row[tagsHeader] || "").split(/[,;]/).map((tag) => tag.trim()).filter(Boolean),
+        channelProfileId: String(row[profileHeader] || ""),
+        profileId: String(row[profileHeader] || ""),
+      };
+      return { contact, row, profileId: contact.channelProfileId, label: contact.displayName };
+    }
+    const contact = audienceIds.length
+      ? (state.contacts.find((item) => item.contactId === audienceIds[0]) || null)
+      : (state.campaigns.contactCandidates[0] || state.contacts[0] || null);
+    if (!contact) return { contact: { displayName: "Sample contact" }, row: {}, profileId: "", label: "Sample contact" };
+    return {
+      contact,
+      row: {},
+      profileId: campaignContactMessagingId(contact),
+      label: contact.displayName || "Sample contact",
+    };
+  }
+
+  function resolveCampaignPreviewValue(mapping, context) {
+    const source = String(mapping?.source || "").trim();
+    const value = String(mapping?.value ?? "").trim();
+    if (!source || source === "constant" || source === "manual") return value;
+    if (source === "upload" || source === "url") return value;
+    if (source.startsWith("field.")) return String(context.row?.[source.slice(6)] ?? "").trim();
+    if (source.startsWith("contact.")) {
+      const key = source.slice("contact.".length);
+      if (key === "displayName" || key === "name") return String(context.contact?.displayName || "").trim();
+      if (key === "company") return String(context.contact?.company || "").trim();
+      if (key === "tags") return Array.isArray(context.contact?.tags) ? context.contact.tags.join(", ") : "";
+      if (key === "profileId" || key === "channelProfileId") {
+        return String(context.profileId || context.contact?.channelProfileId || "").trim();
+      }
+      return String(context.contact?.[key] ?? "").trim();
+    }
+    return value;
+  }
+
+  function fillTemplatePreviewText(text, values) {
+    return String(text || "").replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, rawKey) => {
+      const key = String(rawKey || "").trim();
+      if (Object.prototype.hasOwnProperty.call(values, key)) return values[key] || "";
+      const index = Number(key);
+      if (Number.isInteger(index) && Object.prototype.hasOwnProperty.call(values, String(index))) {
+        return values[String(index)] || "";
+      }
+      return match;
+    });
+  }
+
+  function renderCampaignMessagePreview() {
+    const section = $("campaignMessagePreview");
+    const host = $("campaignMessagePreviewContent");
+    const hint = $("campaignMessagePreviewHint");
+    if (!section || !host) return;
+    const channel = selectedCampaignChannel();
+    host.replaceChildren();
+    if (!channel) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    const sample = campaignPreviewSampleContext();
+    if (hint) hint.textContent = `Preview for ${sample.label}`;
+    const whatsapp = isWhatsAppCampaignChannel(channel);
+    if (whatsapp) {
+      const template = selectedCampaignTemplate();
+      if (!template) {
+        host.append(element("p", "campaign-message-preview-empty", "Choose a WhatsApp template to preview the message."));
+        return;
+      }
+      syncCampaignVariableMappingsFromDom();
+      const values = {};
+      for (const mapping of state.campaigns.variableMappings || []) {
+        if (mapping.kind === "media") continue;
+        const resolved = resolveCampaignPreviewValue(mapping, sample);
+        if (mapping.parameterName) values[mapping.parameterName] = resolved;
+        if (mapping.parameterIndex != null) values[String(mapping.parameterIndex + 1)] = resolved;
+        values[mapping.id] = resolved;
+      }
+      const preview = element("div", "whatsapp-template-preview campaign-preview-card");
+      const header = templateLibraryComponent(template, "HEADER");
+      if (header) {
+        const format = String(header.format || "TEXT").toUpperCase();
+        if (format === "TEXT" && header.text) {
+          preview.append(element("strong", "template-preview-header", fillTemplatePreviewText(header.text, values)));
+        } else {
+          const media = element("div", "template-preview-media");
+          media.append(
+            element("span", "", format === "VIDEO" ? "▶" : format === "DOCUMENT" ? "▤" : "▧"),
+            element("small", "", `${capitalize(format.toLocaleLowerCase())} header`)
+          );
+          preview.append(media);
+        }
+      }
+      const bodyText = fillTemplatePreviewText(String(templateLibraryComponent(template, "BODY")?.text || ""), values)
+        || "No body text provided.";
+      preview.append(element("p", "template-preview-body", bodyText));
+      const footerText = String(templateLibraryComponent(template, "FOOTER")?.text || "").trim();
+      if (footerText) preview.append(element("small", "template-preview-footer", footerText));
+      const buttons = templateLibraryButtons(template);
+      if (buttons.length) {
+        const buttonHost = element("div", "template-preview-buttons");
+        buttons.forEach((button) => buttonHost.append(element("span", "", String(button?.text || button?.type || "Action"))));
+        preview.append(buttonHost);
+      }
+      host.append(preview);
+      return;
+    }
+    const text = $("campaignMessageText")?.value || "";
+    if (!text.trim()) {
+      host.append(element("p", "campaign-message-preview-empty", "Compose a message to see the preview."));
+      return;
+    }
+    const variables = [...($("campaignTextVariableFields")?.querySelectorAll("[data-text-variable]") || [])].map((row) => ({
+      key: row.dataset.textVariable,
+      source: row.querySelector(".campaign-text-source")?.value || "",
+      value: row.querySelector(".campaign-text-value")?.value?.trim() || "",
+    }));
+    const map = Object.fromEntries(variables.map((item) => [item.key, resolveCampaignPreviewValue(item, sample)]));
+    const rendered = fillTemplatePreviewText(text, map);
+    const bubble = element("div", "campaign-text-preview-card");
+    bubble.append(element("p", "template-preview-body", rendered));
+    host.append(bubble);
   }
 
   async function loadCampaignTemplates() {
@@ -8615,6 +9067,7 @@
         menu.hidden = true;
         search.setAttribute("aria-expanded", "false");
         renderCampaignTemplateVariables();
+        renderCampaignMessagePreview();
       });
       menu.append(option);
     });
@@ -8641,12 +9094,33 @@
     return options;
   }
 
+  function bindCampaignConstantAutoSelect(row, sourceSelector, valueSelector) {
+    const source = row.querySelector(sourceSelector);
+    const value = row.querySelector(valueSelector);
+    if (!source || !value) return;
+    value.addEventListener("input", () => {
+      if (!String(value.value || "").trim()) {
+        syncCampaignVariableMappingsFromDom();
+        renderCampaignMessagePreview();
+        return;
+      }
+      if (source.value !== "constant") {
+        if ([...source.options].some((option) => option.value === "constant")) source.value = "constant";
+      }
+      syncCampaignVariableMappingsFromDom();
+      renderCampaignMessagePreview();
+    });
+  }
+
   function renderCampaignTemplateVariables() {
     const host = $("campaignVariableFields");
     if (!host) return;
     host.replaceChildren();
     const template = selectedCampaignTemplate();
-    if (!template) return;
+    if (!template) {
+      renderCampaignMessagePreview();
+      return;
+    }
     const descriptors = templateVariableDescriptors(template);
     const existing = new Map((state.campaigns.variableMappings || []).map((item) => [item.id, item]));
     const nextMappings = [];
@@ -8661,7 +9135,13 @@
           { value: "url", label: "Use URL" },
         ]
         : campaignVariableSourceOptions();
-      const source = current.source || (descriptor.kind === "media" ? "upload" : "");
+      let source = current.source || (descriptor.kind === "media" ? "upload" : "");
+      if (descriptor.kind !== "media" && String(current.value || "").trim() && (!source || source === "contact.displayName")) {
+        // Keep explicit source; typing a value elsewhere auto-switches to constant.
+      }
+      if (descriptor.kind !== "media" && String(current.value || "").trim() && source === "constant") {
+        source = "constant";
+      }
       row.innerHTML = `
         <label class="field-label">${escapeHtml(descriptor.label)}
           <select class="text-field campaign-variable-source">${sourceOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === source ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>
@@ -8690,8 +9170,10 @@
         syncCampaignVariableMappingsFromDom();
         renderCampaignTemplateVariables();
       });
+      bindCampaignConstantAutoSelect(row, ".campaign-variable-source", ".campaign-variable-value");
     }
     state.campaigns.variableMappings = nextMappings;
+    renderCampaignMessagePreview();
   }
 
   function syncCampaignVariableMappingsFromDom() {
@@ -8716,6 +9198,9 @@
     const next = [];
     for (const key of keys) {
       const current = existing.get(key) || { key, source: "", value: "" };
+      if (String(current.value || "").trim() && (!current.source || current.source === "constant")) {
+        current.source = "constant";
+      }
       const row = document.createElement("div");
       row.className = "campaign-variable-row";
       row.dataset.textVariable = key;
@@ -8729,9 +9214,24 @@
         </label>
         <span class="subtle">Mapped per recipient</span>`;
       host.append(row);
+      row.querySelector(".campaign-text-source")?.addEventListener("change", () => {
+        const source = row.querySelector(".campaign-text-source")?.value || "";
+        const value = row.querySelector(".campaign-text-value")?.value?.trim() || "";
+        const item = state.campaigns.textVariables.find((entry) => entry.key === key);
+        if (item) Object.assign(item, { source, value });
+        renderCampaignMessagePreview();
+      });
+      bindCampaignConstantAutoSelect(row, ".campaign-text-source", ".campaign-text-value");
+      row.querySelector(".campaign-text-value")?.addEventListener("input", () => {
+        const source = row.querySelector(".campaign-text-source")?.value || "";
+        const value = row.querySelector(".campaign-text-value")?.value?.trim() || "";
+        const item = state.campaigns.textVariables.find((entry) => entry.key === key);
+        if (item) Object.assign(item, { source, value });
+      });
       next.push(current);
     }
     state.campaigns.textVariables = next;
+    renderCampaignMessagePreview();
   }
 
   function parseCampaignCsv(text) {
@@ -10774,14 +11274,27 @@
           return;
         }
         if (actionButton.dataset.action === "campaign-add-selected-contacts") {
+          const added = state.campaigns.selectedContactIds.size;
           for (const contactId of state.campaigns.selectedContactIds) state.campaigns.audienceContactIds.add(contactId);
+          state.campaigns.selectedContactIds = new Set();
+          renderCampaignContactPicker();
           renderCampaignSelectedContacts();
-          showToast("Contacts added", `${state.campaigns.selectedContactIds.size || 0} selected contact(s) added to the campaign.`);
+          showToast("Contacts added", `${added || 0} selected contact(s) added to the campaign.`);
           return;
         }
         if (actionButton.dataset.action === "campaign-remove-contact") {
           state.campaigns.audienceContactIds.delete(actionButton.dataset.contactId);
           renderCampaignSelectedContacts();
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-contact-prev") {
+          state.campaigns.contactPage = Math.max(1, (state.campaigns.contactPage || 1) - 1);
+          renderCampaignContactPicker();
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-contact-next") {
+          state.campaigns.contactPage = (state.campaigns.contactPage || 1) + 1;
+          renderCampaignContactPicker();
           return;
         }
         if (actionButton.dataset.action === "campaign-load-upload-url") {
@@ -11168,8 +11681,62 @@
     });
     $("importChatForm").addEventListener("submit", runImportChat);
     $("campaignCreateForm")?.addEventListener("submit", submitCampaign);
-    $("campaignChannel")?.addEventListener("change", () => {
-      renderCampaignMessageComposer();
+    $("campaignChannelTrigger")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      document.querySelectorAll("[data-campaign-filter]").forEach((host) => {
+        host.classList.remove("is-open");
+        const menu = host.querySelector(".campaign-multi-filter-menu");
+        const filterTrigger = host.querySelector(".campaign-multi-filter-trigger");
+        if (menu) menu.hidden = true;
+        if (filterTrigger) filterTrigger.setAttribute("aria-expanded", "false");
+      });
+      state.campaigns.channelMenuOpen = !state.campaigns.channelMenuOpen;
+      renderCampaignChannelPicker();
+    });
+    document.querySelectorAll("[data-campaign-filter] .campaign-multi-filter-trigger").forEach((trigger) => {
+      trigger.addEventListener("click", (event) => {
+        event.preventDefault();
+        const host = trigger.closest("[data-campaign-filter]");
+        const menu = host?.querySelector(".campaign-multi-filter-menu");
+        if (!host || !menu) return;
+        const willOpen = menu.hidden;
+        document.querySelectorAll("[data-campaign-filter]").forEach((other) => {
+          other.classList.remove("is-open");
+          const otherMenu = other.querySelector(".campaign-multi-filter-menu");
+          const otherTrigger = other.querySelector(".campaign-multi-filter-trigger");
+          if (otherMenu) otherMenu.hidden = true;
+          if (otherTrigger) otherTrigger.setAttribute("aria-expanded", "false");
+        });
+        state.campaigns.channelMenuOpen = false;
+        const channelMenu = $("campaignChannelMenu");
+        if (channelMenu) channelMenu.hidden = true;
+        $("campaignChannelTrigger")?.setAttribute("aria-expanded", "false");
+        if (willOpen) {
+          host.classList.add("is-open");
+          menu.hidden = false;
+          trigger.setAttribute("aria-expanded", "true");
+          menu.querySelector(".campaign-multi-filter-search")?.focus();
+        }
+      });
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest("#campaignChannelPicker")) {
+        if (state.campaigns.channelMenuOpen) {
+          state.campaigns.channelMenuOpen = false;
+          const menu = $("campaignChannelMenu");
+          if (menu) menu.hidden = true;
+          $("campaignChannelTrigger")?.setAttribute("aria-expanded", "false");
+        }
+      }
+      if (!event.target.closest("[data-campaign-filter]")) {
+        document.querySelectorAll("[data-campaign-filter]").forEach((host) => {
+          host.classList.remove("is-open");
+          const menu = host.querySelector(".campaign-multi-filter-menu");
+          const trigger = host.querySelector(".campaign-multi-filter-trigger");
+          if (menu) menu.hidden = true;
+          if (trigger) trigger.setAttribute("aria-expanded", "false");
+        });
+      }
     });
     document.querySelectorAll('input[name="campaignAudience"]').forEach((input) => {
       input.addEventListener("change", () => {
@@ -11187,6 +11754,7 @@
     });
     $("campaignContactSearch")?.addEventListener("input", (event) => {
       state.campaigns.contactFilter = event.target.value || "";
+      state.campaigns.contactPage = 1;
       renderCampaignContactPicker();
     });
     $("campaignContactSelectAll")?.addEventListener("change", (event) => {
@@ -11201,6 +11769,16 @@
       if (input.checked) state.campaigns.selectedContactIds.add(input.dataset.campaignContactId);
       else state.campaigns.selectedContactIds.delete(input.dataset.campaignContactId);
       renderCampaignContactPicker();
+    });
+    $("campaignAudienceInput")?.addEventListener("change", (event) => {
+      if (state.campaigns.audienceInputSyncing) return;
+      state.campaigns.audienceContactIds = parseCampaignAudienceInput(event.target.value);
+      renderCampaignSelectedContacts();
+    });
+    $("campaignAudienceInput")?.addEventListener("blur", (event) => {
+      if (state.campaigns.audienceInputSyncing) return;
+      state.campaigns.audienceContactIds = parseCampaignAudienceInput(event.target.value);
+      renderCampaignSelectedContacts();
     });
     $("campaignUploadFile")?.addEventListener("change", async (event) => {
       const file = event.target.files?.[0];
@@ -11232,6 +11810,7 @@
     });
     $("campaignMessageText")?.addEventListener("input", () => {
       renderCampaignTextVariables();
+      renderCampaignMessagePreview();
     });
     $("importChatCancel").addEventListener("click", cancelImportChat);
     $("importChatSource").addEventListener("change", (event) => {

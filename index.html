@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-flow">
-  <script src="./assets/app.js?v=20261101-campaign-flow" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-create-ux">
+  <script src="./assets/app.js?v=20261101-campaign-create-ux" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -521,20 +521,28 @@
             </div>
           </div>
           <form class="campaign-create-form" id="campaignCreateForm" autocomplete="off">
-            <div class="campaign-create-grid">
-              <label class="field-label" for="campaignName">
-                Campaign name
-                <input class="text-field" id="campaignName" name="name" required maxlength="120" placeholder="March outreach">
-              </label>
-              <label class="field-label" for="campaignChannel">
-                Channel
-                <select class="text-field" id="campaignChannel" name="channelId" required>
-                  <option value="">Select a channel…</option>
-                </select>
-              </label>
-            </div>
+            <fieldset class="campaign-fieldset campaign-card">
+              <legend>Campaign settings</legend>
+              <div class="campaign-create-grid">
+                <label class="field-label" for="campaignName">
+                  Campaign name
+                  <input class="text-field" id="campaignName" name="name" required maxlength="120" placeholder="March outreach">
+                </label>
+                <div class="field-label" id="campaignChannelField">
+                  Channel
+                  <div class="campaign-channel-picker" id="campaignChannelPicker">
+                    <button class="campaign-channel-trigger text-field" type="button" id="campaignChannelTrigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="campaignChannelMenu">
+                      <span class="campaign-channel-trigger-empty" id="campaignChannelTriggerEmpty">Select a channel…</span>
+                      <span class="campaign-channel-option-content" id="campaignChannelTriggerValue" hidden></span>
+                    </button>
+                    <input type="hidden" id="campaignChannel" name="channelId" required value="">
+                    <div class="campaign-channel-menu" id="campaignChannelMenu" role="listbox" aria-label="Channels" hidden></div>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
 
-            <fieldset class="campaign-fieldset">
+            <fieldset class="campaign-fieldset campaign-card">
               <legend>Audience</legend>
               <div class="campaign-choice-row" role="radiogroup" aria-label="Audience source">
                 <label class="campaign-choice"><input type="radio" name="campaignAudience" value="contacts" checked> Select from contacts</label>
@@ -542,19 +550,52 @@
               </div>
 
               <div id="campaignContactsAudience">
+                <div class="campaign-filter-grid" id="campaignContactFilterGrid">
+                  <div class="campaign-multi-filter" data-campaign-filter="channels">
+                    <span class="campaign-multi-filter-label">Channel</span>
+                    <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any channel</button>
+                    <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+                  </div>
+                  <div class="campaign-multi-filter" data-campaign-filter="platforms">
+                    <span class="campaign-multi-filter-label">Platform</span>
+                    <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any platform</button>
+                    <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+                  </div>
+                  <div class="campaign-multi-filter" data-campaign-filter="companies">
+                    <span class="campaign-multi-filter-label">Company</span>
+                    <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any company</button>
+                    <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+                  </div>
+                  <div class="campaign-multi-filter" data-campaign-filter="tags">
+                    <span class="campaign-multi-filter-label">Tags</span>
+                    <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any tags</button>
+                    <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+                  </div>
+                </div>
                 <div class="campaign-audience-toolbar">
                   <div class="search-wrap compact-search">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
                     <label class="sr-only" for="campaignContactSearch">Filter contacts</label>
-                    <input id="campaignContactSearch" type="search" placeholder="Filter contacts…">
+                    <input id="campaignContactSearch" type="search" placeholder="Search name, company, tags, or ID…">
                   </div>
                   <div class="campaign-audience-actions">
-                    <label class="bulk-select-all"><input type="checkbox" id="campaignContactSelectAll"><span>Select all</span></label>
+                    <label class="bulk-select-all"><input type="checkbox" id="campaignContactSelectAll"><span>Select all filtered</span></label>
                     <button class="secondary-button compact-button" type="button" data-action="campaign-add-selected-contacts">Add to campaign</button>
                   </div>
                 </div>
                 <div class="campaign-contact-list" id="campaignContactList"></div>
-                <div class="campaign-selected-list" id="campaignSelectedContacts"></div>
+                <div class="campaign-contact-pagination" id="campaignContactPagination" hidden>
+                  <span class="subtle" id="campaignContactPageMeta"></span>
+                  <div class="campaign-contact-page-controls">
+                    <button class="secondary-button compact-button" type="button" data-action="campaign-contact-prev" id="campaignContactPrev">Previous</button>
+                    <button class="secondary-button compact-button" type="button" data-action="campaign-contact-next" id="campaignContactNext">Next</button>
+                  </div>
+                </div>
+                <label class="field-label" for="campaignAudienceInput">
+                  Campaign sending list
+                  <input class="text-field campaign-audience-input" id="campaignAudienceInput" type="text" placeholder="Name &lt;ID&gt;, Name &lt;ID&gt;" spellcheck="false">
+                </label>
+                <p class="subtle" id="campaignAudienceHelp">Added contacts appear as Name &lt;messaging ID&gt;, separated by commas.</p>
               </div>
 
               <div id="campaignUploadAudience" hidden>
@@ -577,7 +618,7 @@
               </div>
             </fieldset>
 
-            <fieldset class="campaign-fieldset" id="campaignMessageFieldset">
+            <fieldset class="campaign-fieldset campaign-card" id="campaignMessageFieldset">
               <legend>Message</legend>
               <div id="campaignWhatsAppComposer" hidden>
                 <label class="field-label" for="campaignTemplateSearch">
@@ -598,6 +639,15 @@
                 </label>
                 <p class="subtle">Use {{variable}} placeholders. Map each variable to a contact field, CSV header, or constant below.</p>
                 <div class="campaign-variable-fields" id="campaignTextVariableFields"></div>
+              </div>
+              <div class="campaign-message-preview" id="campaignMessagePreview" hidden>
+                <div class="campaign-message-preview-head">
+                  <strong>Message preview</strong>
+                  <span class="subtle" id="campaignMessagePreviewHint">Sample for the first recipient</span>
+                </div>
+                <div class="campaign-message-preview-phone">
+                  <div class="campaign-message-preview-bubble" id="campaignMessagePreviewContent"></div>
+                </div>
               </div>
             </fieldset>
 
