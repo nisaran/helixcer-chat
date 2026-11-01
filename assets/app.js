@@ -4,8 +4,9 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-pages";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-ui-v2";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
+  const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -106,6 +107,8 @@
       catalogueLoaded: false,
       catalogueLoading: false,
       catalogueError: "",
+      catalogueExpectedTotal: 0,
+      catalogueLoadedCount: 0,
       channelMenuOpen: false,
       channelSearch: "",
       templates: [],
@@ -8337,30 +8340,95 @@
     if (state.campaigns.catalogueLoading) return;
     state.campaigns.catalogueLoading = true;
     state.campaigns.catalogueError = "";
+    const byId = new Map();
+    (state.campaigns.catalogue || []).forEach((contact) => {
+      if (contact?.contactId) byId.set(contact.contactId, contact);
+    });
+    (state.contacts || []).forEach((contact) => {
+      if (contact?.contactId && !byId.has(contact.contactId)) byId.set(contact.contactId, contact);
+    });
+    state.campaigns.catalogue = [...byId.values()];
+    state.campaigns.catalogueLoadedCount = byId.size;
+    state.campaigns.catalogueExpectedTotal = Math.max(
+      Number(state.campaigns.catalogueExpectedTotal) || 0,
+      Number(state.contactTotal) || 0,
+      byId.size,
+    );
     renderCampaignContactPicker();
     try {
-      const byId = new Map();
       let page = 1;
-      let total = Infinity;
-      const pageSize = 500;
-      while (page <= 40) {
-        const data = await state.api.listContacts({ page, limit: pageSize, q: "" });
+      let cursor = "";
+      let useCursor = false;
+      let total = state.campaigns.catalogueExpectedTotal || Infinity;
+      let requestLimit = CAMPAIGN_CATALOGUE_PAGE_SIZE;
+      let stagnantPages = 0;
+      while (page <= 80) {
+        let data;
+        try {
+          data = await state.api.listContacts({
+            page: useCursor ? 1 : page,
+            limit: requestLimit,
+            q: "",
+            cursor: useCursor ? cursor : "",
+          });
+        } catch (error) {
+          if (requestLimit > 100) {
+            requestLimit = 100;
+            continue;
+          }
+          throw error;
+        }
         const items = asItems(data?.items || data).map(normalizeContact);
+        const beforeCount = byId.size;
         items.forEach((contact) => {
           if (contact?.contactId) byId.set(contact.contactId, contact);
         });
-        total = Number(data?.total ?? data?.contactTotal ?? byId.size);
+        const apiTotal = Number(data?.total ?? data?.contactTotal);
+        if (Number.isFinite(apiTotal) && apiTotal >= 0) total = apiTotal;
+        const effectivePageSize = Math.max(
+          1,
+          Number(data?.pageSize) || items.length || requestLimit,
+        );
+        const nextCursor = String(data?.nextCursor || "");
+        state.campaigns.catalogue = [...byId.values()];
+        state.campaigns.catalogueLoadedCount = byId.size;
+        state.campaigns.catalogueExpectedTotal = Math.max(total, byId.size);
+        if (byId.size !== beforeCount) {
+          stagnantPages = 0;
+          renderCampaignMultiFilters();
+          renderCampaignContactPicker();
+        } else {
+          stagnantPages += 1;
+        }
         if (!items.length) break;
         if (byId.size >= total) break;
-        if (items.length < pageSize && !data?.nextCursor) break;
-        page += 1;
+        if (!useCursor && stagnantPages >= 1 && nextCursor) {
+          useCursor = true;
+          cursor = nextCursor;
+          stagnantPages = 0;
+          continue;
+        }
+        if (items.length < effectivePageSize && !nextCursor) break;
+        if (stagnantPages >= 2) break;
+        if (useCursor) {
+          if (!nextCursor) break;
+          cursor = nextCursor;
+        } else {
+          page += 1;
+        }
       }
       state.campaigns.catalogue = [...byId.values()];
+      state.campaigns.catalogueLoadedCount = byId.size;
+      state.campaigns.catalogueExpectedTotal = Math.max(
+        Number(state.campaigns.catalogueExpectedTotal) || 0,
+        byId.size,
+      );
       state.campaigns.catalogueLoaded = true;
     } catch (error) {
       state.campaigns.catalogueError = error.message || "Could not load contacts.";
       if (!state.campaigns.catalogue.length && state.contacts?.length) {
         state.campaigns.catalogue = state.contacts.slice();
+        state.campaigns.catalogueLoadedCount = state.campaigns.catalogue.length;
       }
       throw error;
     } finally {
@@ -8834,10 +8902,11 @@
     const button = $("campaignAddSelected");
     if (!button) return;
     const count = state.campaigns.selectedContactIds.size;
-    button.disabled = count < 1;
-    button.textContent = count
-      ? `Add ${count.toLocaleString()} Contact${count === 1 ? "" : "s"}`
-      : "Add to campaign";
+    const loading = state.campaigns.catalogueLoading && !state.campaigns.catalogueLoaded;
+    button.disabled = count < 1 || loading;
+    if (loading && count < 1) button.textContent = "Loading contacts…";
+    else if (count) button.textContent = `Add ${count.toLocaleString()} Contact${count === 1 ? "" : "s"}`;
+    else button.textContent = "Add to campaign";
   }
 
   function renderCampaignContactPicker() {
@@ -8852,8 +8921,14 @@
     const page = state.campaigns.contactPage;
     const start = (page - 1) * pageSize;
     const pageItems = contacts.slice(start, start + pageSize);
+    const loading = state.campaigns.catalogueLoading && !state.campaigns.catalogueLoaded;
+    const expectedTotal = Math.max(
+      Number(state.campaigns.catalogueExpectedTotal) || 0,
+      Number(state.contactTotal) || 0,
+      contacts.length,
+    );
     host.replaceChildren();
-    if (state.campaigns.catalogueLoading && !contacts.length) {
+    if (loading && !contacts.length) {
       host.innerHTML = `<div class="campaign-empty-state">Loading contacts…</div>`;
     } else if (state.campaigns.catalogueError && !contacts.length) {
       host.innerHTML = `<div class="campaign-empty-state">${escapeHtml(state.campaigns.catalogueError)}</div>`;
@@ -8876,30 +8951,44 @@
       }
     }
     const selectAll = $("campaignContactSelectAll");
+    const selectAllLabel = $("campaignContactSelectAllLabel");
     if (selectAll) {
       const filteredIds = contacts.map((contact) => contact.contactId);
-      selectAll.checked = filteredIds.length > 0 && filteredIds.every((id) => state.campaigns.selectedContactIds.has(id));
+      selectAll.disabled = loading || filteredIds.length < 1;
+      selectAll.checked = !loading && filteredIds.length > 0 && filteredIds.every((id) => state.campaigns.selectedContactIds.has(id));
       selectAll.indeterminate = !selectAll.checked && filteredIds.some((id) => state.campaigns.selectedContactIds.has(id));
+    }
+    if (selectAllLabel) {
+      selectAllLabel.textContent = loading
+        ? "Loading all contacts…"
+        : "Select all filtered";
     }
     const meta = $("campaignContactListMeta");
     if (meta) {
       const selected = state.campaigns.selectedContactIds.size;
-      if (state.campaigns.catalogueLoading && !contacts.length) meta.textContent = "Loading contacts…";
-      else if (!contacts.length) meta.textContent = "0 contacts";
+      if (loading && !contacts.length) meta.textContent = "Loading contacts…";
+      else if (loading) {
+        meta.textContent = `Loading contacts… ${contacts.length.toLocaleString()}${expectedTotal > contacts.length ? ` of ${expectedTotal.toLocaleString()}` : ""} loaded`;
+      } else if (!contacts.length) meta.textContent = "0 contacts";
       else {
         const from = start + 1;
         const to = Math.min(start + pageSize, contacts.length);
-        meta.textContent = `${from}–${to} of ${contacts.length.toLocaleString()} · ${selected.toLocaleString()} selected across all pages`;
+        meta.textContent = `${from.toLocaleString()}–${to.toLocaleString()} of ${contacts.length.toLocaleString()} · ${selected.toLocaleString()} selected across all pages`;
       }
     }
     const pagination = $("campaignContactPagination");
     const pageLabel = $("campaignContactPageLabel");
     const prev = $("campaignContactPrev");
     const next = $("campaignContactNext");
-    if (pagination) pagination.hidden = contacts.length <= pageSize;
-    if (pageLabel) pageLabel.textContent = `Page ${page} of ${totalPages}`;
-    if (prev) prev.disabled = page <= 1 || state.campaigns.catalogueLoading;
-    if (next) next.disabled = page >= totalPages || !contacts.length || state.campaigns.catalogueLoading;
+    const showPagination = contacts.length > pageSize || expectedTotal > pageSize;
+    if (pagination) pagination.hidden = !showPagination;
+    if (pageLabel) {
+      pageLabel.textContent = loading && expectedTotal > contacts.length
+        ? `Page ${page} · loading…`
+        : `Page ${page} of ${totalPages}`;
+    }
+    if (prev) prev.disabled = page <= 1;
+    if (next) next.disabled = page >= totalPages || !contacts.length;
     updateCampaignAddSelectedButton();
   }
 

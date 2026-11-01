@@ -1530,66 +1530,83 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-multi-filter-option:hover { background: #f3f5f4; }
 .campaign-multi-filter-empty { color: var(--muted); padding: 8px; font-size: 11px; }
 .campaign-audience-toolbar {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
 }
 .campaign-audience-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.campaign-audience-actions .bulk-select-all {
+  display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-size: 11px; font-weight: 650;
+}
+.campaign-audience-actions #campaignAddSelected {
+  min-width: 148px; justify-content: center;
+}
 .campaign-contact-table,
 .campaign-audience-table {
-  overflow: hidden; border: 1px solid #e3e7e4; border-radius: 10px; background: #fff;
+  overflow: auto; border: 1px solid #dce2de; border-radius: 8px; background: #fff;
 }
 .campaign-contact-head,
 .campaign-contact-item,
 .campaign-audience-head,
 .campaign-audience-row {
   display: grid;
-  grid-template-columns: 28px minmax(120px, 1.3fr) minmax(120px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr);
-  gap: 8px; align-items: center; min-width: 720px;
+  grid-template-columns: 24px minmax(140px, 1.4fr) minmax(120px, 1.1fr) minmax(120px, 1fr) minmax(100px, 0.9fr);
+  gap: 6px; align-items: center; min-width: 680px;
 }
 .campaign-audience-head,
 .campaign-audience-row {
-  grid-template-columns: minmax(140px, 1.2fr) minmax(140px, 1fr) 72px;
+  grid-template-columns: minmax(160px, 1.3fr) minmax(150px, 1fr) 64px;
   min-width: 0;
 }
 .campaign-contact-head,
 .campaign-audience-head {
-  border-bottom: 1px solid #e8ebe9; background: #f7f9f8; padding: 7px 10px;
-  color: #60706b; font-size: 10px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase;
+  position: sticky; top: 0; z-index: 1;
+  border-bottom: 1px solid #e2e7e4; background: #f4f7f5; padding: 6px 10px;
+  color: #5b6a65; font-size: 10px; font-weight: 760; letter-spacing: .05em; text-transform: uppercase;
 }
+.campaign-audience-action-head { text-align: right; }
 .campaign-contact-list,
 .campaign-audience-rows {
-  max-height: 280px; overflow: auto;
+  max-height: 260px; overflow: auto;
 }
 .campaign-upload-preview {
   max-height: 240px; overflow: auto;
   border: 1px solid #e6e9e6; border-radius: 10px; background: #fff;
 }
 .campaign-contact-item, .campaign-selected-item, .campaign-upload-row, .campaign-audience-row {
-  padding: 6px 10px; border-bottom: 1px solid #eef1ef;
+  padding: 5px 10px; border-bottom: 1px solid #eef1ef;
 }
 .campaign-contact-item:last-child, .campaign-selected-item:last-child, .campaign-upload-row:last-child,
 .campaign-audience-row:last-child { border-bottom: 0; }
-.campaign-contact-item:hover, .campaign-audience-row:hover { background: #fafbfa; }
+.campaign-contact-item:hover, .campaign-audience-row:hover { background: #f7faf8; }
+.campaign-contact-item:has(input:checked) { background: #f1f7f3; }
 .campaign-contact-check { display: grid; place-items: center; }
+.campaign-contact-check input { width: 14px; height: 14px; margin: 0; }
 .campaign-contact-name { color: var(--ink); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .campaign-contact-id,
 .campaign-contact-company,
 .campaign-contact-tags {
-  color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #66746e; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.campaign-empty-state { color: var(--muted); padding: 14px 12px; font-size: 11px; }
+.campaign-empty-state { color: var(--muted); padding: 16px 12px; font-size: 11px; text-align: center; }
 .campaign-contact-footer {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  min-height: 28px;
 }
+.campaign-contact-footer .subtle { margin: 0; font-size: 11px; }
 .campaign-contact-pagination {
-  display: inline-flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.campaign-page-chip {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 84px;
+  border: 1px solid #e0e5e2; border-radius: 999px; background: #f7f9f8;
+  color: #4f5d58; padding: 4px 10px; font-size: 10px; font-weight: 700;
 }
 .campaign-sending-list-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 2px;
 }
-.campaign-sending-list-head .field-label-text { color: var(--ink); font-size: 11px; font-weight: 700; }
+.campaign-sending-list-head .field-label-text { color: var(--ink); font-size: 11px; font-weight: 740; }
 .campaign-audience-remove {
   justify-self: end; border: 0; border-radius: 6px; background: transparent; color: #7a8782;
-  padding: 4px 6px; font-size: 10px; font-weight: 700; cursor: pointer;
+  padding: 3px 6px; font-size: 10px; font-weight: 700; cursor: pointer;
 }
 .campaign-audience-remove:hover { background: #f2f4f3; color: var(--ink); }
 .campaign-mapping { display: grid; gap: 10px; }

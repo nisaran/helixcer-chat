@@ -582,7 +582,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261101-campaign-pages/);
+  assert.match(html, /app\.js\?v=20261101-campaign-ui-v2/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -943,8 +943,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261101-campaign-pages/);
-  assert.match(html, /assets\/styles\.css\?v=20261101-campaign-pages/);
+  assert.match(html, /assets\/app\.js\?v=20261101-campaign-ui-v2/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-campaign-ui-v2/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -955,8 +955,10 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(styles, /\.campaign-filter-toolbar/);
   assert.match(html, /class="campaign-panel campaign-create-panel"/);
   assert.match(styles, /\.campaign-panel\s*\{[\s\S]*background:\s*transparent/);
-  assert.match(styles, /\.campaign-contact-list,\s*\.campaign-audience-rows\s*\{[\s\S]*max-height:\s*280px/);
+  assert.match(styles, /\.campaign-contact-list,\s*\.campaign-audience-rows\s*\{[\s\S]*max-height:\s*260px/);
   assert.match(styles, /\.campaign-contact-list,\s*\.campaign-audience-rows\s*\{[\s\S]*overflow:\s*auto/);
+  assert.match(styles, /\.campaign-page-chip/);
+  assert.match(styles, /\.campaign-contact-item:has\(input:checked\)/);
   assert.match(styles, /\.campaign-fieldset\s*\{[\s\S]*border:\s*1px solid/);
   assert.match(styles, /\.campaign-channel-picker/);
   assert.match(styles, /\.campaign-channel-search/);
@@ -1347,7 +1349,9 @@ test("Campaign page supports create flow, contact/upload audiences, and expandab
   assert.match(html, /id="campaignMessagePreview"/);
   assert.match(html, /id="campaignContactPagination"/);
   assert.match(html, /id="campaignAddSelected"/);
+  assert.match(html, /id="campaignContactSelectAllLabel"/);
   assert.match(html, /campaign-contact-head/);
+  assert.match(html, /campaign-audience-action-head/);
   assert.match(html, /data-action="campaign-clear-filters"/);
   assert.match(html, /data-action="campaign-clear-audience"/);
   assert.match(html, /data-campaign-filter="platforms"[\s\S]*data-campaign-filter="channels"/);
@@ -1368,7 +1372,10 @@ test("Campaign page supports create flow, contact/upload audiences, and expandab
   assert.match(app, /function addSelectedContactsToCampaign/);
   assert.match(app, /function ensureCampaignContactCatalogue/);
   assert.match(app, /CAMPAIGN_CONTACT_PAGE_SIZE = 100/);
+  assert.match(app, /CAMPAIGN_CATALOGUE_PAGE_SIZE = 200/);
   assert.match(app, /Add \$\{count\.toLocaleString\(\)\} Contact/);
+  assert.match(app, /selected across all pages/);
+  assert.match(app, /useCursor/);
   assert.doesNotMatch(app, /MAX_CAMPAIGN_RECIPIENTS = 100/);
   assert.match(app, /requestConfirmation\(/);
   assert.match(app, /campaignSourceUsesContactField/);
