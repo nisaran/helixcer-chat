@@ -12,7 +12,8 @@ import {
   restrictedChannelIds,
   startGoogleOAuth,
   updateInvitation,
-  updateMembership
+  updateMembership,
+  updateUserProfile
 } from './auth.js';
 import {
   mobilePushStatus,
@@ -389,6 +390,10 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/me' && request.method === 'GET') {
       return withCors(json(principalView(principal)), cors);
+    }
+    if (url.pathname === '/api/me' && request.method === 'PATCH') {
+      const updated = await updateUserProfile(env, principal, await readJson(request));
+      return withCors(json({ ok: true, ...principalView(updated) }), cors);
     }
     if (url.pathname === '/api/push/config' && request.method === 'GET') {
       if (principal.authType !== 'session') return withCors(json({ ok: false, error: 'A verified browser session is required.' }, 403), cors);
