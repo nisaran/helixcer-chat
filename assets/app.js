@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261031-bulk-select";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261031-select-all-fix";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -2657,7 +2657,7 @@
   }
 
   function visibleConversationIds(items = filteredConversations()) {
-    return items.map((item) => item.conversationId).filter(Boolean);
+    return items.map((item) => String(item.conversationId || "")).filter(Boolean);
   }
 
   function renderInboxBulkBar(items = filteredConversations()) {
@@ -2681,10 +2681,17 @@
     const visibleIds = visibleConversationIds(items);
     const selectedVisible = visibleIds.filter((id) => state.selectedConversationIds.has(id));
     const selectedCount = state.selectedConversationIds.size;
+    const allSelected = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
     if (selectAll) {
-      selectAll.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
-      selectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
       selectAll.disabled = state.bulkActionBusy || !visibleIds.length;
+      selectAll.checked = allSelected;
+      selectAll.indeterminate = false;
+      selectAll.setAttribute("aria-checked", allSelected ? "true" : selectedVisible.length ? "mixed" : "false");
+    }
+    const selectAllLabel = selectAll?.closest("label");
+    if (selectAllLabel) {
+      const copy = selectAllLabel.querySelector("span");
+      if (copy) copy.textContent = allSelected ? "Clear all" : "Select all";
     }
     if (countNode) countNode.textContent = selectedCount === 1 ? "1 selected" : `${selectedCount} selected`;
     if (closeButton) closeButton.disabled = state.bulkActionBusy || !selectedCount;
@@ -2692,6 +2699,14 @@
       deleteButton.hidden = !canAdmin();
       deleteButton.disabled = state.bulkActionBusy || !selectedCount || !canAdmin();
     }
+  }
+
+  function toggleInboxSelectAll() {
+    if (state.bulkActionBusy) return;
+    const visibleIds = visibleConversationIds();
+    if (!visibleIds.length) return;
+    const allSelected = visibleIds.every((id) => state.selectedConversationIds.has(id));
+    setInboxSelectAll(!allSelected);
   }
 
   function setInboxSelectMode(enabled) {
@@ -4440,6 +4455,10 @@
     });
   }
 
+  function visibleContactIds(contacts = state.contacts) {
+    return contacts.map((contact) => String(contact.contactId || "")).filter(Boolean);
+  }
+
   function renderContactBulkBar(contacts = state.contacts) {
     const bar = $("contactBulkBar");
     const toggle = $("contactSelectToggle");
@@ -4454,13 +4473,23 @@
     if (!bar) return;
     bar.hidden = !state.contactSelectMode || !canAdmin();
     if (!state.contactSelectMode) return;
-    const visibleIds = contacts.map((contact) => contact.contactId).filter(Boolean);
+    const visibleIds = visibleContactIds(contacts);
     const selectedVisible = visibleIds.filter((id) => state.selectedContactIds.has(id));
     const selectedCount = state.selectedContactIds.size;
+    const allSelected = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
     if (selectAll) {
-      selectAll.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
-      selectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
+      // Keep the control enabled whenever rows exist. Indeterminate-looking
+      // native checkboxes can feel "disabled"; click handling selects/clears
+      // from selection state instead of trusting the toggled checked value.
       selectAll.disabled = state.bulkActionBusy || !visibleIds.length;
+      selectAll.checked = allSelected;
+      selectAll.indeterminate = false;
+      selectAll.setAttribute("aria-checked", allSelected ? "true" : selectedVisible.length ? "mixed" : "false");
+    }
+    const selectAllLabel = selectAll?.closest("label");
+    if (selectAllLabel) {
+      const copy = selectAllLabel.querySelector("span");
+      if (copy) copy.textContent = allSelected ? "Clear all" : "Select all";
     }
     if (countNode) countNode.textContent = selectedCount === 1 ? "1 selected" : `${selectedCount} selected`;
     if (deleteButton) deleteButton.disabled = state.bulkActionBusy || !selectedCount;
@@ -4491,13 +4520,20 @@
 
   function setContactSelectAll(checked) {
     const next = new Set(state.selectedContactIds);
-    state.contacts.forEach((contact) => {
-      if (!contact.contactId) return;
-      if (checked) next.add(contact.contactId);
-      else next.delete(contact.contactId);
+    visibleContactIds().forEach((id) => {
+      if (checked) next.add(id);
+      else next.delete(id);
     });
     state.selectedContactIds = next;
     renderContacts();
+  }
+
+  function toggleContactSelectAll() {
+    if (state.bulkActionBusy) return;
+    const visibleIds = visibleContactIds();
+    if (!visibleIds.length) return;
+    const allSelected = visibleIds.every((id) => state.selectedContactIds.has(id));
+    setContactSelectAll(!allSelected);
   }
 
   async function loadContactsPage(page = 1, { keepSelection = true } = {}) {
@@ -9540,11 +9576,13 @@
       }
       selectConversation(item.dataset.conversationId);
     });
-    $("inboxSelectAll")?.addEventListener("change", (event) => {
-      setInboxSelectAll(Boolean(event.target.checked));
+    $("inboxSelectAll")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      toggleInboxSelectAll();
     });
-    $("contactSelectAll")?.addEventListener("change", (event) => {
-      setContactSelectAll(Boolean(event.target.checked));
+    $("contactSelectAll")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      toggleContactSelectAll();
     });
     $("conversationList").addEventListener("scroll", () => {
       // Resume auto-load after a tab-focus pause once the user scrolls again.
