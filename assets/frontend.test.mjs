@@ -979,8 +979,13 @@ test("conversation filters are multi-selectable with responsive desktop and mobi
   assert.match(app, /conversationFilterOptions = \["mine", "unassigned", "open", "unread", "closed"\]/);
   assert.match(app, /function isAllConversationFilters/);
   assert.match(app, /function selectAllConversationFilters/);
+  assert.match(app, /function clearConversationFilters/);
   assert.match(app, /if \(filter === "all"\) selectAllConversationFilters\(\)/);
-  assert.match(app, /showingAll \|\| selected\.has\(input\.value\)/);
+  assert.match(app, /clearConversationFilters\(\)/);
+  assert.match(html, /data-action="clear-conversation-filters">None</);
+  assert.doesNotMatch(html, /Show all conversations/);
+  assert.match(app, /if \(selected\.size === 0\) return \[\]/);
+  assert.match(app, /input\.checked = input\.value === "all" \? showingAll : selected\.has\(input\.value\)/);
   assert.match(app, /const statusFilters = showingAll \? \[\] : \["open", "closed"\]\.filter/);
   assert.match(app, /const assignmentFilters = showingAll \? \[\] : \["mine", "unassigned"\]\.filter/);
   assert.match(app, /!showingAll && selected\.has\("unread"\)/);
