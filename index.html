@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-status-toast">
-  <script src="./assets/app.js?v=20261101-status-toast" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-flow">
+  <script src="./assets/app.js?v=20261101-campaign-flow" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -484,8 +484,8 @@
           </div>
         </div>
 
-        <section class="surface campaign-history-surface" id="campaignHistoryPanel" aria-labelledby="campaignHistoryTitle">
-          <div class="surface-toolbar">
+        <section class="campaign-panel campaign-history-panel" id="campaignHistoryPanel" aria-labelledby="campaignHistoryTitle">
+          <div class="campaign-panel-toolbar">
             <div>
               <strong id="campaignHistoryTitle">Campaign history</strong>
               <span class="subtle">Totals show in each row. Expand a campaign for individual delivery details.</span>
@@ -513,8 +513,8 @@
           <p class="subtle campaign-empty" id="campaignHistoryEmpty" hidden>No campaigns yet. Create one to send bulk messages.</p>
         </section>
 
-        <section class="surface campaign-create-surface" id="campaignCreatePanel" aria-labelledby="campaignCreateTitle" hidden>
-          <div class="surface-toolbar">
+        <section class="campaign-panel campaign-create-panel" id="campaignCreatePanel" aria-labelledby="campaignCreateTitle" hidden>
+          <div class="campaign-panel-toolbar">
             <div>
               <strong id="campaignCreateTitle">Create campaign</strong>
               <span class="subtle">Choose a channel, build the audience, then compose the message.</span>
