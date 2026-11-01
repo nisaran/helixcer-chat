@@ -571,7 +571,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261101-preview-ellipsis/);
+  assert.match(html, /app\.js\?v=20261101-deeplink-filters-none/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -919,8 +919,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261101-preview-ellipsis/);
-  assert.match(html, /assets\/styles\.css\?v=20261101-preview-ellipsis/);
+  assert.match(html, /assets\/app\.js\?v=20261101-deeplink-filters-none/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-deeplink-filters-none/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   // Inbound customer names must not render on the bubble; only outbound sender_name on the route line.
@@ -1009,7 +1009,7 @@ test("conversation filters are multi-selectable with responsive desktop and mobi
   assert.match(clearFiltersBody, /renderConversationList\(\)/);
   assert.doesNotMatch(clearFiltersBody, /closeConversationFilterMenu/);
   assert.match(app, /if \(selected\.size === 0\) return \[\]/);
-  assert.match(app, /input\.checked = input\.value === "all" \? showingAll : showingAll \|\| selected\.has\(input\.value\)/);
+  assert.match(app, /input\.checked = input\.value === "all" \? showingAll : selected\.has\(input\.value\)/);
   assert.match(app, /const statusFilters = showingAll \? \[\] : \["open", "closed"\]\.filter/);
   assert.match(app, /const assignmentFilters = showingAll \? \[\] : \["mine", "unassigned"\]\.filter/);
   assert.match(app, /!showingAll && selected\.has\("unread"\)/);
@@ -1047,7 +1047,12 @@ test("direct chat URLs show only the visited conversation with filters cleared",
   assert.match(app, /function clearDeepLinkedConversationList/);
   const applyRoute = app.slice(app.indexOf("async function applyLocationRoute"), app.indexOf("function setRoute"));
   assert.match(applyRoute, /enterDeepLinkedConversationList\(target\.conversationId\)/);
-  assert.match(applyRoute, /selectAllConversationFilters|enterDeepLinkedConversationList/);
+  const enterFocus = app.slice(
+    app.indexOf("function enterDeepLinkedConversationList"),
+    app.indexOf("function clearDeepLinkedConversationList"),
+  );
+  assert.match(enterFocus, /state\.filters = new Set\(\)/);
+  assert.doesNotMatch(enterFocus, /selectAllConversationFilters/);
   assert.match(app, /if \(state\.inboxFocusConversationId\) \{[\s\S]*?item\.conversationId === state\.inboxFocusConversationId/);
   assert.match(app, /toggleConversationFilter\(filter\) \{[\s\S]*?clearDeepLinkedConversationList\(\)/);
   assert.match(app, /conversationSearch[\s\S]*?clearDeepLinkedConversationList\(\)/);
