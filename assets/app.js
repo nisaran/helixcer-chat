@@ -2589,7 +2589,8 @@
     state.conversationSearchActive = false;
     const searchInput = $("conversationSearch");
     if (searchInput) searchInput.value = "";
-    selectAllConversationFilters();
+    // Direct visits keep the solo chat visible without any filter chips selected.
+    state.filters = new Set();
   }
 
   function clearDeepLinkedConversationList() {
@@ -2598,8 +2599,8 @@
 
   function renderConversationFilterControls() {
     const selected = state.filters;
-    const showingAll = isAllConversationFilters(selected) || Boolean(state.inboxFocusConversationId);
-    const showingNone = !showingAll && selected.size === 0;
+    const showingAll = isAllConversationFilters(selected);
+    const showingNone = selected.size === 0;
     const activeLabels = [...selected].map((filter) => conversationFilterLabels[filter]).filter(Boolean);
     $("conversationFilterSummary").textContent = showingAll
       ? "All conversations"
@@ -2607,12 +2608,12 @@
     $("conversationFilterCount").textContent = String(showingAll ? conversationFilterOptions.length : selected.size);
     $("conversationFilterCount").hidden = showingAll || showingNone;
     document.querySelectorAll("[data-conversation-filter-option]").forEach((input) => {
-      input.checked = input.value === "all" ? showingAll : showingAll || selected.has(input.value);
+      input.checked = input.value === "all" ? showingAll : selected.has(input.value);
     });
     document.querySelectorAll("#conversationFilters [data-filter]").forEach((button) => {
       button.classList.toggle(
         "is-active",
-        button.dataset.filter === "all" ? showingAll : showingAll || selected.has(button.dataset.filter),
+        button.dataset.filter === "all" ? showingAll : selected.has(button.dataset.filter),
       );
       button.setAttribute("aria-pressed", String(button.classList.contains("is-active")));
     });
