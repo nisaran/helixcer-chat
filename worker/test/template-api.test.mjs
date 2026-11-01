@@ -262,6 +262,50 @@ test('external template API accepts requests without an Idempotency-Key', async 
   }
 });
 
+test('external template API preserves existing conversation status on send', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_statuskeep.${'s'.repeat(43)}`;
+  await insertKey(database, token, 'key-status-keep', 'hxc_live_statuskeep');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ messages: [{ id: crypto.randomUUID() }] }), {
+    status: 200, headers: { 'Content-Type': 'application/json' }
+  });
+  const body = {
+    channelId: 'wa-sales', to: '+91 98765 43210',
+    template: { name: 'order_update', language: { code: 'en_US' } }
+  };
+  try {
+    const send = async () => {
+      const waits = [];
+      const response = await handleRequest(postTemplate(token, null, body), env, {
+        waitUntil(promise) { waits.push(promise); }
+      });
+      assert.equal(response.status, 202);
+      await Promise.all(waits);
+      return response;
+    };
+
+    await send();
+    const conversation = database.prepare('SELECT conversation_id,status FROM conversations').get();
+    assert.equal(conversation.status, 'open');
+
+    for (const status of ['closed', 'pending', 'open']) {
+      database.prepare('UPDATE conversations SET status=? WHERE conversation_id=?')
+        .run(status, conversation.conversation_id);
+      await send();
+      assert.equal(
+        database.prepare('SELECT status FROM conversations WHERE conversation_id=?')
+          .get(conversation.conversation_id).status,
+        status,
+        `API send should keep conversation status ${status}`,
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
 test('external template API updates contact fields only when supplied and keeps omitted values', async () => {
   const { database, env } = await fixture();
   const token = `hxc_live_contact1.${'c'.repeat(43)}`;
