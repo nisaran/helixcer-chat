@@ -2497,27 +2497,34 @@
   };
 
   function isAllConversationFilters(selected = state.filters) {
-    return selected.size === 0 || conversationFilterOptions.every((filter) => selected.has(filter));
+    return conversationFilterOptions.every((filter) => selected.has(filter));
   }
 
   function selectAllConversationFilters() {
     state.filters = new Set(conversationFilterOptions);
   }
 
+  function clearConversationFilters() {
+    state.filters = new Set();
+  }
+
   function renderConversationFilterControls() {
     const selected = state.filters;
     const showingAll = isAllConversationFilters(selected);
+    const showingNone = selected.size === 0;
     const activeLabels = [...selected].map((filter) => conversationFilterLabels[filter]).filter(Boolean);
-    $("conversationFilterSummary").textContent = showingAll ? "All conversations" : activeLabels.join(" · ");
+    $("conversationFilterSummary").textContent = showingAll
+      ? "All conversations"
+      : showingNone ? "None" : activeLabels.join(" · ");
     $("conversationFilterCount").textContent = String(showingAll ? conversationFilterOptions.length : selected.size);
-    $("conversationFilterCount").hidden = showingAll;
+    $("conversationFilterCount").hidden = showingAll || showingNone;
     document.querySelectorAll("[data-conversation-filter-option]").forEach((input) => {
-      input.checked = input.value === "all" ? showingAll : showingAll || selected.has(input.value);
+      input.checked = input.value === "all" ? showingAll : selected.has(input.value);
     });
     document.querySelectorAll("#conversationFilters [data-filter]").forEach((button) => {
       button.classList.toggle(
         "is-active",
-        button.dataset.filter === "all" ? showingAll : showingAll || selected.has(button.dataset.filter),
+        button.dataset.filter === "all" ? showingAll : selected.has(button.dataset.filter),
       );
       button.setAttribute("aria-pressed", String(button.classList.contains("is-active")));
     });
@@ -2552,6 +2559,7 @@
 
   function filteredConversations() {
     const selected = state.filters;
+    if (selected.size === 0) return [];
     const showingAll = isAllConversationFilters(selected);
     const statusFilters = showingAll ? [] : ["open", "closed"].filter((filter) => selected.has(filter));
     const assignmentFilters = showingAll ? [] : ["mine", "unassigned"].filter((filter) => selected.has(filter));
@@ -9400,7 +9408,7 @@
           return;
         }
         if (actionButton.dataset.action === "clear-conversation-filters") {
-          selectAllConversationFilters();
+          clearConversationFilters();
           renderConversationFilterControls();
           renderConversationList();
           closeConversationFilterMenu({ restoreFocus: true });
