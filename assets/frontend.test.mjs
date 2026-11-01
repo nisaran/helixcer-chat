@@ -1125,6 +1125,24 @@ test("Import Chat shows post-import stats and supports cancel mid-run", () => {
   assert.match(styles, /\.import-chat-action-buttons/);
 });
 
+test("Import Chat lists failed conversations and downloads only issue cases", () => {
+  const downloadStart = app.indexOf("function downloadImportChatIssues");
+  const downloadEnd = app.indexOf("function showImportChatResult", downloadStart);
+  assert.ok(downloadStart >= 0 && downloadEnd > downloadStart);
+  const downloadBody = app.slice(downloadStart, downloadEnd);
+  assert.match(app, /function importChatIssueRows/);
+  assert.match(downloadBody, /helixcer-import-issues-/);
+  assert.match(downloadBody, /source: "import-chat-issues"/);
+  assert.match(downloadBody, /issueCount: issues\.length/);
+  assert.match(downloadBody, /issues,/);
+  assert.doesNotMatch(downloadBody, /messagesImported|contactsCreated|conversationsCreated/);
+  assert.match(app, /download-import-issues/);
+  assert.match(app, /Download issues/);
+  assert.match(app, /Failed conversations/);
+  assert.match(styles, /\.import-chat-issues/);
+  assert.match(styles, /\.import-chat-issues-list/);
+});
+
 test("Import Chat preserves Interakt delivered and read timestamps", () => {
   assert.match(app, /delivered_at_utc/);
   assert.match(app, /seen_at_utc/);

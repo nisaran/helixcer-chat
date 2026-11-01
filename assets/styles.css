@@ -1071,6 +1071,55 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   color: #a43f2b;
 }
 .import-chat-result .import-chat-stats { margin-top: 4px; }
+.import-chat-issues {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border-top: 1px solid #eadad4;
+  padding-top: 12px;
+}
+.import-chat-issues-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.import-chat-issues-head h3 {
+  margin: 0;
+  color: #8a3a2c;
+  font-size: 12px;
+  font-weight: 750;
+}
+.import-chat-issues-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 0;
+  list-style: none;
+}
+.import-chat-issues-list li {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #f0e2dd;
+  border-radius: 10px;
+  background: #fffaf8;
+  padding: 9px 11px;
+}
+.import-chat-issues-list strong {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+.import-chat-issues-list span {
+  color: #8a4a3c;
+  font-size: 11px;
+  line-height: 1.45;
+  word-break: break-word;
+}
 .import-chat-action-buttons { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .import-chat-actions {
   display: flex;
