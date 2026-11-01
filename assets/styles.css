@@ -1428,10 +1428,16 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-panel-toolbar .subtle { display: block; margin-top: 3px; }
 .campaign-history-filters {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(2, minmax(160px, 1fr)) repeat(2, minmax(140px, 1fr)) auto;
   gap: 10px;
   align-items: end;
   margin: 0 0 12px;
+  position: relative;
+  z-index: 5;
+}
+.campaign-history-filters .campaign-multi-filter { min-width: 0; }
+.campaign-history-filters .campaign-multi-filter-trigger {
+  min-height: 34px; height: 34px; padding: 0 10px; font-size: 12px;
 }
 .campaign-history-filter { display: grid; gap: 4px; margin: 0; min-width: 0; }
 .campaign-history-filter .text-field { min-height: 34px; padding: 6px 10px; font-size: 12px; }

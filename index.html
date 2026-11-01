@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-history-ux">
-  <script src="./assets/app.js?v=20261101-campaign-history-ux" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261102-campaign-history-filters">
+  <script src="./assets/app.js?v=20261102-campaign-history-filters" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -489,18 +489,16 @@
             <button class="secondary-button compact-button" type="button" data-action="refresh-campaigns">Refresh</button>
           </div>
           <div class="campaign-history-filters" id="campaignHistoryFilters">
-            <label class="field-label campaign-history-filter" for="campaignHistoryPlatform">
-              Platform
-              <select class="text-field" id="campaignHistoryPlatform">
-                <option value="">Any platform</option>
-              </select>
-            </label>
-            <label class="field-label campaign-history-filter" for="campaignHistoryChannel">
-              Channel
-              <select class="text-field" id="campaignHistoryChannel">
-                <option value="">Any channel</option>
-              </select>
-            </label>
+            <div class="campaign-multi-filter" data-campaign-history-filter="platforms">
+              <span class="campaign-multi-filter-label">Platform</span>
+              <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any platform</button>
+              <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+            </div>
+            <div class="campaign-multi-filter" data-campaign-history-filter="channels">
+              <span class="campaign-multi-filter-label">Channel</span>
+              <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any channel</button>
+              <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+            </div>
             <label class="field-label campaign-history-filter" for="campaignHistoryCreatedFrom">
               Created from
               <input class="text-field" id="campaignHistoryCreatedFrom" type="date">

@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-history-ux";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261102-campaign-history-filters";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -84,10 +84,14 @@
       historyPage: 1,
       historyPageSize: 20,
       historyFilters: {
-        platform: "",
-        channelId: "",
+        platforms: new Set(),
+        channels: new Set(),
         createdFrom: "",
         createdTo: "",
+      },
+      historyFilterQueries: {
+        platforms: "",
+        channels: "",
       },
       recipientPage: 1,
       recipientPageSize: 20,
@@ -8536,15 +8540,28 @@
     return `${year}-${month}-${day}`;
   }
 
+  function campaignHistoryFilterOptionLists() {
+    const items = state.campaigns.items || [];
+    const platforms = [...new Set(items.map((item) => campaignHistoryPlatform(item)).filter(Boolean))]
+      .sort((a, b) => campaignPlatformLabel(a).localeCompare(campaignPlatformLabel(b)))
+      .map((value) => ({ value, label: campaignPlatformLabel(value) }));
+    const channels = [...new Map(items
+      .filter((item) => item.channelId)
+      .map((item) => [item.channelId, item.channelName || item.channelId]))]
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
+      .map(([value, label]) => ({ value, label }));
+    return { platforms, channels };
+  }
+
   function filteredCampaignHistory() {
     const filters = state.campaigns.historyFilters || {};
-    const platform = String(filters.platform || "").trim();
-    const channelId = String(filters.channelId || "").trim();
+    const platforms = filters.platforms instanceof Set ? filters.platforms : new Set();
+    const channels = filters.channels instanceof Set ? filters.channels : new Set();
     const createdFrom = String(filters.createdFrom || "").trim();
     const createdTo = String(filters.createdTo || "").trim();
     return (state.campaigns.items || []).filter((campaign) => {
-      if (platform && campaignHistoryPlatform(campaign) !== platform) return false;
-      if (channelId && String(campaign.channelId || "") !== channelId) return false;
+      if (platforms.size && !platforms.has(campaignHistoryPlatform(campaign))) return false;
+      if (channels.size && !channels.has(String(campaign.channelId || ""))) return false;
       const createdDay = campaignCreatedDay(campaign.createdAt);
       if (createdFrom && (!createdDay || createdDay < createdFrom)) return false;
       if (createdTo && (!createdDay || createdDay > createdTo)) return false;
@@ -8552,35 +8569,98 @@
     });
   }
 
+  function closeCampaignHistoryFilterMenus(exceptKey = "") {
+    document.querySelectorAll("[data-campaign-history-filter]").forEach((host) => {
+      if (exceptKey && host.dataset.campaignHistoryFilter === exceptKey) return;
+      host.classList.remove("is-open");
+      const menu = host.querySelector(".campaign-multi-filter-menu");
+      const trigger = host.querySelector(".campaign-multi-filter-trigger");
+      if (menu) menu.hidden = true;
+      if (trigger) trigger.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function keepCampaignHistoryFilterOpen(key) {
+    const host = document.querySelector(`[data-campaign-history-filter="${key}"]`);
+    if (!host) return;
+    host.classList.add("is-open");
+    const menu = host.querySelector(".campaign-multi-filter-menu");
+    const trigger = host.querySelector(".campaign-multi-filter-trigger");
+    const search = menu?.querySelector(".campaign-multi-filter-search");
+    if (menu) menu.hidden = false;
+    if (trigger) trigger.setAttribute("aria-expanded", "true");
+    if (search) {
+      search.focus();
+      const end = search.value.length;
+      search.setSelectionRange(end, end);
+    }
+  }
+
+  function renderCampaignHistoryMultiFilters({ keepOpen = "" } = {}) {
+    const lists = campaignHistoryFilterOptionLists();
+    const filters = state.campaigns.historyFilters || {};
+    const queries = state.campaigns.historyFilterQueries || {};
+    document.querySelectorAll("[data-campaign-history-filter]").forEach((host) => {
+      const key = host.dataset.campaignHistoryFilter;
+      const selected = filters[key] instanceof Set ? filters[key] : new Set();
+      const trigger = host.querySelector(".campaign-multi-filter-trigger");
+      const menu = host.querySelector(".campaign-multi-filter-menu");
+      if (!trigger || !menu) return;
+      const count = selected.size;
+      const anyLabel = key === "channels" ? "Any channel" : "Any platform";
+      trigger.textContent = count ? `${count} selected` : anyLabel;
+      trigger.classList.toggle("has-selection", count > 0);
+      const query = String(queries[key] || "").trim().toLocaleLowerCase();
+      const options = (lists[key] || []).filter((option) => !query || option.label.toLocaleLowerCase().includes(query));
+      const wasOpen = keepOpen === key || (!menu.hidden && host.classList.contains("is-open"));
+      menu.replaceChildren();
+      const search = document.createElement("input");
+      search.className = "text-field campaign-multi-filter-search";
+      search.type = "search";
+      search.placeholder = "Search…";
+      search.value = queries[key] || "";
+      search.addEventListener("input", (event) => {
+        state.campaigns.historyFilterQueries[key] = event.target.value || "";
+        renderCampaignHistoryMultiFilters({ keepOpen: key });
+      });
+      menu.append(search);
+      if (!options.length) {
+        menu.append(element("div", "campaign-multi-filter-empty", lists[key]?.length ? "No matching options" : "No options yet"));
+      } else {
+        options.forEach((option) => {
+          const row = document.createElement("label");
+          row.className = "campaign-multi-filter-option";
+          const checked = selected.has(option.value);
+          row.innerHTML = `<input type="checkbox" data-campaign-history-filter-value="${escapeHtml(option.value)}" ${checked ? "checked" : ""}>
+            <span>${escapeHtml(option.label)}</span>`;
+          row.querySelector("input")?.addEventListener("change", (event) => {
+            const next = new Set(state.campaigns.historyFilters[key] || []);
+            if (event.target.checked) next.add(option.value);
+            else next.delete(option.value);
+            state.campaigns.historyFilters[key] = next;
+            state.campaigns.historyPage = 1;
+            renderCampaignHistory({ keepHistoryFilterOpen: key });
+          });
+          menu.append(row);
+        });
+      }
+      if (wasOpen) {
+        host.classList.add("is-open");
+        menu.hidden = false;
+        trigger.setAttribute("aria-expanded", "true");
+      } else {
+        host.classList.remove("is-open");
+        menu.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
+
   function syncCampaignHistoryFilterControls() {
     const filters = state.campaigns.historyFilters || {};
-    const platformSelect = $("campaignHistoryPlatform");
-    const channelSelect = $("campaignHistoryChannel");
     const fromInput = $("campaignHistoryCreatedFrom");
     const toInput = $("campaignHistoryCreatedTo");
     const pageSizeSelect = $("campaignHistoryPageSize");
-    const items = state.campaigns.items || [];
-    const platforms = [...new Set(items.map((item) => campaignHistoryPlatform(item)).filter(Boolean))]
-      .sort((a, b) => campaignPlatformLabel(a).localeCompare(campaignPlatformLabel(b)));
-    const channels = [...new Map(items
-      .filter((item) => item.channelId)
-      .map((item) => [item.channelId, item.channelName || item.channelId]))]
-      .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
-
-    if (platformSelect) {
-      const current = String(filters.platform || "");
-      platformSelect.replaceChildren(new Option("Any platform", ""));
-      for (const value of platforms) platformSelect.append(new Option(campaignPlatformLabel(value), value));
-      platformSelect.value = platforms.includes(current) ? current : "";
-      if (platformSelect.value !== current) state.campaigns.historyFilters.platform = platformSelect.value;
-    }
-    if (channelSelect) {
-      const current = String(filters.channelId || "");
-      channelSelect.replaceChildren(new Option("Any channel", ""));
-      for (const [id, name] of channels) channelSelect.append(new Option(name, id));
-      channelSelect.value = channels.some(([id]) => id === current) ? current : "";
-      if (channelSelect.value !== current) state.campaigns.historyFilters.channelId = channelSelect.value;
-    }
     if (fromInput && fromInput.value !== String(filters.createdFrom || "")) {
       fromInput.value = filters.createdFrom || "";
     }
@@ -8595,16 +8675,21 @@
 
   function clearCampaignHistoryFilters() {
     state.campaigns.historyFilters = {
-      platform: "",
-      channelId: "",
+      platforms: new Set(),
+      channels: new Set(),
       createdFrom: "",
       createdTo: "",
     };
+    state.campaigns.historyFilterQueries = {
+      platforms: "",
+      channels: "",
+    };
     state.campaigns.historyPage = 1;
+    closeCampaignHistoryFilterMenus();
     renderCampaignHistory();
   }
 
-  function renderCampaignHistory() {
+  function renderCampaignHistory({ keepHistoryFilterOpen = "" } = {}) {
     const body = $("campaignTableBody");
     const empty = $("campaignHistoryEmpty");
     const loading = $("campaignHistoryLoading");
@@ -8617,6 +8702,8 @@
     if (!body) return;
 
     syncCampaignHistoryFilterControls();
+    renderCampaignHistoryMultiFilters({ keepOpen: keepHistoryFilterOpen });
+    if (keepHistoryFilterOpen) keepCampaignHistoryFilterOpen(keepHistoryFilterOpen);
     body.replaceChildren();
 
     const isLoading = Boolean(state.campaigns.loading);
@@ -12400,7 +12487,7 @@
     $("campaignCreateForm")?.addEventListener("submit", submitCampaign);
     $("campaignChannelTrigger")?.addEventListener("click", (event) => {
       event.preventDefault();
-      document.querySelectorAll("[data-campaign-filter]").forEach((host) => {
+      document.querySelectorAll("[data-campaign-filter], [data-campaign-history-filter]").forEach((host) => {
         host.classList.remove("is-open");
         const menu = host.querySelector(".campaign-multi-filter-menu");
         const filterTrigger = host.querySelector(".campaign-multi-filter-trigger");
@@ -12434,14 +12521,14 @@
     $("campaignChannelMenu")?.addEventListener("click", (event) => {
       event.stopPropagation();
     });
-    document.querySelectorAll("[data-campaign-filter] .campaign-multi-filter-trigger").forEach((trigger) => {
+    document.querySelectorAll("[data-campaign-filter] .campaign-multi-filter-trigger, [data-campaign-history-filter] .campaign-multi-filter-trigger").forEach((trigger) => {
       trigger.addEventListener("click", (event) => {
         event.preventDefault();
-        const host = trigger.closest("[data-campaign-filter]");
+        const host = trigger.closest("[data-campaign-filter], [data-campaign-history-filter]");
         const menu = host?.querySelector(".campaign-multi-filter-menu");
         if (!host || !menu) return;
         const willOpen = menu.hidden;
-        document.querySelectorAll("[data-campaign-filter]").forEach((other) => {
+        document.querySelectorAll("[data-campaign-filter], [data-campaign-history-filter]").forEach((other) => {
           other.classList.remove("is-open");
           const otherMenu = other.querySelector(".campaign-multi-filter-menu");
           const otherTrigger = other.querySelector(".campaign-multi-filter-trigger");
@@ -12464,13 +12551,13 @@
       if (!event.target.closest("#campaignChannelPicker") && state.campaigns.channelMenuOpen) {
         closeCampaignChannelMenu();
       }
-      if (!event.target.closest("[data-campaign-filter]")) {
-        document.querySelectorAll("[data-campaign-filter]").forEach((host) => {
+      if (!event.target.closest("[data-campaign-filter], [data-campaign-history-filter]")) {
+        document.querySelectorAll("[data-campaign-filter], [data-campaign-history-filter]").forEach((host) => {
           host.classList.remove("is-open");
           const menu = host.querySelector(".campaign-multi-filter-menu");
-          const trigger = host.querySelector(".campaign-multi-filter-trigger");
+          const filterTrigger = host.querySelector(".campaign-multi-filter-trigger");
           if (menu) menu.hidden = true;
-          if (trigger) trigger.setAttribute("aria-expanded", "false");
+          if (filterTrigger) filterTrigger.setAttribute("aria-expanded", "false");
         });
       }
     });
@@ -12487,16 +12574,6 @@
         state.campaigns.uploadMode = input.value === "url" ? "url" : "file";
         renderCampaignCreateForm();
       });
-    });
-    $("campaignHistoryPlatform")?.addEventListener("change", (event) => {
-      state.campaigns.historyFilters.platform = event.target.value || "";
-      state.campaigns.historyPage = 1;
-      renderCampaignHistory();
-    });
-    $("campaignHistoryChannel")?.addEventListener("change", (event) => {
-      state.campaigns.historyFilters.channelId = event.target.value || "";
-      state.campaigns.historyPage = 1;
-      renderCampaignHistory();
     });
     $("campaignHistoryCreatedFrom")?.addEventListener("change", (event) => {
       state.campaigns.historyFilters.createdFrom = event.target.value || "";
