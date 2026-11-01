@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-layout">
-  <script src="./assets/app.js?v=20261101-campaign-layout" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-campaign-audience">
+  <script src="./assets/app.js?v=20261101-campaign-audience" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -549,27 +549,30 @@
               </div>
 
               <div id="campaignContactsAudience">
-                <div class="campaign-filter-grid" id="campaignContactFilterGrid">
-                  <div class="campaign-multi-filter" data-campaign-filter="channels">
-                    <span class="campaign-multi-filter-label">Channel</span>
-                    <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any channel</button>
-                    <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+                <div class="campaign-filter-toolbar">
+                  <div class="campaign-filter-grid" id="campaignContactFilterGrid">
+                    <div class="campaign-multi-filter" data-campaign-filter="platforms">
+                      <span class="campaign-multi-filter-label">Platform</span>
+                      <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any platform</button>
+                      <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+                    </div>
+                    <div class="campaign-multi-filter" data-campaign-filter="channels">
+                      <span class="campaign-multi-filter-label">Channel</span>
+                      <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any channel</button>
+                      <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+                    </div>
+                    <div class="campaign-multi-filter" data-campaign-filter="companies">
+                      <span class="campaign-multi-filter-label">Company</span>
+                      <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any company</button>
+                      <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+                    </div>
+                    <div class="campaign-multi-filter" data-campaign-filter="tags">
+                      <span class="campaign-multi-filter-label">Tags</span>
+                      <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any tags</button>
+                      <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
+                    </div>
                   </div>
-                  <div class="campaign-multi-filter" data-campaign-filter="platforms">
-                    <span class="campaign-multi-filter-label">Platform</span>
-                    <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any platform</button>
-                    <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
-                  </div>
-                  <div class="campaign-multi-filter" data-campaign-filter="companies">
-                    <span class="campaign-multi-filter-label">Company</span>
-                    <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any company</button>
-                    <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
-                  </div>
-                  <div class="campaign-multi-filter" data-campaign-filter="tags">
-                    <span class="campaign-multi-filter-label">Tags</span>
-                    <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any tags</button>
-                    <div class="campaign-multi-filter-menu" role="listbox" aria-multiselectable="true" hidden></div>
-                  </div>
+                  <button class="secondary-button compact-button" type="button" data-action="campaign-clear-filters" id="campaignClearFilters">Clear filters</button>
                 </div>
                 <div class="campaign-audience-toolbar">
                   <div class="search-wrap compact-search">
@@ -583,19 +586,14 @@
                   </div>
                 </div>
                 <div class="campaign-contact-list" id="campaignContactList"></div>
-                <div class="campaign-contact-pagination" id="campaignContactPagination" hidden>
-                  <span class="subtle" id="campaignContactPageMeta"></span>
-                  <div class="campaign-contact-page-controls">
-                    <button class="secondary-button compact-button" type="button" data-action="campaign-contact-prev" id="campaignContactPrev">Previous</button>
-                    <button class="secondary-button compact-button" type="button" data-action="campaign-contact-next" id="campaignContactNext">Next</button>
-                  </div>
+                <p class="subtle" id="campaignContactListMeta"></p>
+                <div class="campaign-sending-list-head">
+                  <span class="field-label-text">Campaign sending list</span>
+                  <button class="secondary-button compact-button" type="button" data-action="campaign-clear-audience" id="campaignClearAudience">Clear all</button>
                 </div>
-                <div class="field-label">
-                  Campaign sending list
-                  <div class="campaign-audience-tags" id="campaignAudienceTags" role="list" aria-live="polite" aria-label="Campaign sending list"></div>
-                  <input type="hidden" id="campaignAudienceInput" value="">
-                </div>
-                <p class="subtle" id="campaignAudienceHelp">Added contacts appear as tags with name and messaging ID.</p>
+                <div class="campaign-audience-tags" id="campaignAudienceTags" role="list" aria-live="polite" aria-label="Campaign sending list"></div>
+                <input type="hidden" id="campaignAudienceInput" value="">
+                <p class="subtle" id="campaignAudienceHelp">Up to 100 recipients. Added contacts appear as tags.</p>
               </div>
 
               <div id="campaignUploadAudience" hidden>

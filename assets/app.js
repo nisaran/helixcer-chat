@@ -4,10 +4,11 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-layout";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-audience";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+  const MAX_CAMPAIGN_RECIPIENTS = 100;
 
   const $ = (id) => document.getElementById(id);
   const CONVERSATION_PAGE_SIZE = 100;
@@ -8763,30 +8764,34 @@
     renderCampaignMessageComposer();
   }
 
+  function campaignContactTagsLabel(contact) {
+    const tags = Array.isArray(contact?.tags) ? contact.tags.map((tag) => String(tag || "").trim()).filter(Boolean) : [];
+    return tags.length ? tags.join(", ") : "—";
+  }
+
   function renderCampaignContactPicker() {
     const host = $("campaignContactList");
     if (!host) return;
     const contacts = filteredCampaignContacts();
     state.campaigns.contactCandidates = contacts;
-    const pageSize = CONTACT_PAGE_SIZE;
-    const totalPages = Math.max(1, Math.ceil(contacts.length / pageSize) || 1);
-    if (state.campaigns.contactPage > totalPages) state.campaigns.contactPage = totalPages;
-    if (state.campaigns.contactPage < 1) state.campaigns.contactPage = 1;
-    const page = state.campaigns.contactPage;
-    const start = (page - 1) * pageSize;
-    const pageItems = contacts.slice(start, start + pageSize);
     host.replaceChildren();
     if (!contacts.length) {
       host.innerHTML = `<div class="campaign-empty-state">No contacts match these filters.</div>`;
     } else {
-      for (const contact of pageItems) {
+      for (const contact of contacts) {
         const row = document.createElement("label");
         row.className = "campaign-contact-item";
         const checked = state.campaigns.selectedContactIds.has(contact.contactId);
-        const messagingId = campaignContactMessagingId(contact);
-        const meta = [contact.company, messagingId || contactPlatformSummary(contact)].filter(Boolean).join(" · ");
+        const messagingId = campaignContactMessagingId(contact) || "—";
+        const company = String(contact.company || "").trim() || "—";
+        const tags = campaignContactTagsLabel(contact);
         row.innerHTML = `<input type="checkbox" data-campaign-contact-id="${escapeHtml(contact.contactId)}" ${checked ? "checked" : ""}>
-          <span><strong>${escapeHtml(contact.displayName || "Contact")}</strong><span>${escapeHtml(meta || "No messaging ID")}</span></span>`;
+          <span class="campaign-contact-cols">
+            <span class="campaign-contact-name">${escapeHtml(contact.displayName || "Contact")}</span>
+            <span class="campaign-contact-id">${escapeHtml(messagingId)}</span>
+            <span class="campaign-contact-company">${escapeHtml(company)}</span>
+            <span class="campaign-contact-tags">${escapeHtml(tags)}</span>
+          </span>`;
         host.append(row);
       }
     }
@@ -8796,20 +8801,61 @@
       selectAll.checked = visibleIds.length > 0 && visibleIds.every((id) => state.campaigns.selectedContactIds.has(id));
       selectAll.indeterminate = !selectAll.checked && visibleIds.some((id) => state.campaigns.selectedContactIds.has(id));
     }
-    const pagination = $("campaignContactPagination");
-    const meta = $("campaignContactPageMeta");
-    const prev = $("campaignContactPrev");
-    const next = $("campaignContactNext");
-    if (pagination) pagination.hidden = contacts.length <= pageSize;
+    const meta = $("campaignContactListMeta");
     if (meta) {
-      const from = contacts.length ? start + 1 : 0;
-      const to = Math.min(start + pageSize, contacts.length);
+      const selected = state.campaigns.selectedContactIds.size;
       meta.textContent = contacts.length
-        ? `Showing ${from}–${to} of ${contacts.length} · 100 per page`
-        : "0 contacts";
+        ? `${contacts.length} contact${contacts.length === 1 ? "" : "s"} · ${selected} selected · max ${MAX_CAMPAIGN_RECIPIENTS} recipients`
+        : `0 contacts · max ${MAX_CAMPAIGN_RECIPIENTS} recipients`;
     }
-    if (prev) prev.disabled = page <= 1;
-    if (next) next.disabled = page >= totalPages || !contacts.length;
+  }
+
+  function clearCampaignContactFilters() {
+    state.campaigns.contactFilters = {
+      channels: new Set(),
+      platforms: new Set(),
+      companies: new Set(),
+      tags: new Set(),
+    };
+    state.campaigns.contactFilterQueries = {
+      channels: "",
+      platforms: "",
+      companies: "",
+      tags: "",
+    };
+    state.campaigns.contactFilter = "";
+    state.campaigns.contactPage = 1;
+    const search = $("campaignContactSearch");
+    if (search) search.value = "";
+    renderCampaignMultiFilters();
+    renderCampaignContactPicker();
+  }
+
+  function addSelectedContactsToCampaign() {
+    const remaining = Math.max(0, MAX_CAMPAIGN_RECIPIENTS - state.campaigns.audienceContactIds.size);
+    if (!remaining) {
+      showToast("Recipient limit", `Campaigns support at most ${MAX_CAMPAIGN_RECIPIENTS} recipients.`, true);
+      return;
+    }
+    let added = 0;
+    let skipped = 0;
+    for (const contactId of state.campaigns.selectedContactIds) {
+      if (state.campaigns.audienceContactIds.has(contactId)) continue;
+      if (added >= remaining) {
+        skipped += 1;
+        continue;
+      }
+      state.campaigns.audienceContactIds.add(contactId);
+      added += 1;
+    }
+    state.campaigns.selectedContactIds = new Set();
+    renderCampaignContactPicker();
+    renderCampaignSelectedContacts();
+    if (skipped) {
+      showToast("Recipient limit", `Added ${added}. ${skipped} contact(s) skipped because the ${MAX_CAMPAIGN_RECIPIENTS} recipient limit was reached.`, true);
+      return;
+    }
+    showToast("Contacts added", `${added} contact(s) added to the campaign.`);
   }
 
   function contactPlatformSummary(contact) {
@@ -8859,9 +8905,11 @@
     const help = $("campaignAudienceHelp");
     if (help) {
       help.textContent = ids.length
-        ? `${ids.length} recipient${ids.length === 1 ? "" : "s"} ready to send.`
-        : "Added contacts appear as tags with name and messaging ID.";
+        ? `${ids.length} / ${MAX_CAMPAIGN_RECIPIENTS} recipients ready to send.`
+        : `Up to ${MAX_CAMPAIGN_RECIPIENTS} recipients. Added contacts appear as tags.`;
     }
+    const clearAudience = $("campaignClearAudience");
+    if (clearAudience) clearAudience.disabled = !ids.length;
     renderCampaignMessagePreview();
   }
 
@@ -9141,11 +9189,37 @@
     return options;
   }
 
+  function campaignSourceUsesContactField(source) {
+    const value = String(source || "").trim();
+    return value.startsWith("contact.") || value.startsWith("field.");
+  }
+
+  function applyCampaignVariableValueState(row, sourceSelector, valueSelector) {
+    const source = row.querySelector(sourceSelector);
+    const value = row.querySelector(valueSelector);
+    if (!source || !value) return;
+    const locked = campaignSourceUsesContactField(source.value);
+    if (locked) {
+      value.value = "";
+      value.readOnly = true;
+      value.placeholder = "Mapped from contact";
+      value.classList.add("is-readonly");
+    } else {
+      value.readOnly = false;
+      value.classList.remove("is-readonly");
+      if (!value.placeholder || value.placeholder === "Mapped from contact") {
+        value.placeholder = sourceSelector.includes("text") ? "Used when source is constant" : "Optional constant";
+      }
+    }
+  }
+
   function bindCampaignConstantAutoSelect(row, sourceSelector, valueSelector) {
     const source = row.querySelector(sourceSelector);
     const value = row.querySelector(valueSelector);
     if (!source || !value) return;
+    applyCampaignVariableValueState(row, sourceSelector, valueSelector);
     value.addEventListener("input", () => {
+      if (value.readOnly) return;
       if (!String(value.value || "").trim()) {
         syncCampaignVariableMappingsFromDom();
         renderCampaignMessagePreview();
@@ -9183,12 +9257,11 @@
         ]
         : campaignVariableSourceOptions();
       let source = current.source || (descriptor.kind === "media" ? "upload" : "");
-      if (descriptor.kind !== "media" && String(current.value || "").trim() && (!source || source === "contact.displayName")) {
-        // Keep explicit source; typing a value elsewhere auto-switches to constant.
-      }
       if (descriptor.kind !== "media" && String(current.value || "").trim() && source === "constant") {
         source = "constant";
       }
+      const locked = descriptor.kind !== "media" && campaignSourceUsesContactField(source);
+      const valueText = locked ? "" : (current.value || "");
       row.innerHTML = `
         <label class="field-label">${escapeHtml(descriptor.label)}
           <select class="text-field campaign-variable-source">${sourceOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === source ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>
@@ -9196,7 +9269,7 @@
         <label class="field-label campaign-variable-value-label">${descriptor.kind === "media" && source === "upload" ? "File" : "Value"}
           ${descriptor.kind === "media" && source === "upload"
     ? `<input class="text-field campaign-variable-file" type="file" accept="image/*,video/*,.pdf,application/pdf">`
-    : `<input class="text-field campaign-variable-value" type="text" value="${escapeHtml(current.value || "")}" placeholder="${descriptor.kind === "media" ? "https://…" : "Optional constant"}">`}
+    : `<input class="text-field campaign-variable-value${locked ? " is-readonly" : ""}" type="text" value="${escapeHtml(valueText)}" placeholder="${descriptor.kind === "media" ? "https://…" : locked ? "Mapped from contact" : "Optional constant"}" ${locked ? "readonly" : ""}>`}
         </label>`;
       host.append(row);
       nextMappings.push({
@@ -9210,9 +9283,14 @@
         kind: descriptor.kind,
         mediaType: descriptor.mediaType || "",
         source,
-        value: current.value || "",
+        value: valueText,
       });
       row.querySelector(".campaign-variable-source")?.addEventListener("change", () => {
+        const nextSource = row.querySelector(".campaign-variable-source")?.value || "";
+        if (campaignSourceUsesContactField(nextSource)) {
+          const valueInput = row.querySelector(".campaign-variable-value");
+          if (valueInput) valueInput.value = "";
+        }
         syncCampaignVariableMappingsFromDom();
         renderCampaignTemplateVariables();
       });
@@ -9229,7 +9307,8 @@
       const id = row.dataset.variableId;
       const previous = state.campaigns.variableMappings.find((item) => item.id === id) || {};
       const source = row.querySelector(".campaign-variable-source")?.value || previous.source || "";
-      const value = row.querySelector(".campaign-variable-value")?.value?.trim() || previous.value || "";
+      let value = row.querySelector(".campaign-variable-value")?.value?.trim() || previous.value || "";
+      if (campaignSourceUsesContactField(source)) value = "";
       return { ...previous, id, source, value };
     });
   }
@@ -9247,6 +9326,8 @@
       if (String(current.value || "").trim() && (!current.source || current.source === "constant")) {
         current.source = "constant";
       }
+      if (campaignSourceUsesContactField(current.source)) current.value = "";
+      const locked = campaignSourceUsesContactField(current.source);
       const row = document.createElement("div");
       row.className = "campaign-variable-row";
       row.dataset.textVariable = key;
@@ -9256,12 +9337,15 @@
           <select class="text-field campaign-text-source">${options.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === current.source ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>
         </label>
         <label class="field-label">Constant / override
-          <input class="text-field campaign-text-value" type="text" value="${escapeHtml(current.value || "")}" placeholder="Used when source is constant">
+          <input class="text-field campaign-text-value${locked ? " is-readonly" : ""}" type="text" value="${escapeHtml(current.value || "")}" placeholder="${locked ? "Mapped from contact" : "Used when source is constant"}" ${locked ? "readonly" : ""}>
         </label>`;
       host.append(row);
       row.querySelector(".campaign-text-source")?.addEventListener("change", () => {
         const source = row.querySelector(".campaign-text-source")?.value || "";
-        const value = row.querySelector(".campaign-text-value")?.value?.trim() || "";
+        const valueInput = row.querySelector(".campaign-text-value");
+        if (campaignSourceUsesContactField(source) && valueInput) valueInput.value = "";
+        applyCampaignVariableValueState(row, ".campaign-text-source", ".campaign-text-value");
+        const value = valueInput?.value?.trim() || "";
         const item = state.campaigns.textVariables.find((entry) => entry.key === key);
         if (item) Object.assign(item, { source, value });
         renderCampaignMessagePreview();
@@ -9321,7 +9405,7 @@
     const parsed = parseCampaignCsv(text);
     if (!parsed.headers.length) throw new Error("The CSV file has no header row.");
     state.campaigns.uploadHeaders = parsed.headers;
-    state.campaigns.uploadRows = parsed.records.slice(0, 500);
+    state.campaigns.uploadRows = parsed.records.slice(0, MAX_CAMPAIGN_RECIPIENTS);
     const lower = Object.fromEntries(parsed.headers.map((header) => [header.toLocaleLowerCase(), header]));
     state.campaigns.fieldMapping = {
       displayName: lower.name || lower.display_name || lower.fullname || "",
@@ -9403,6 +9487,10 @@
         return;
       }
       recipients = state.campaigns.uploadRows.map((row) => ({ row }));
+    }
+    if (recipients.length > MAX_CAMPAIGN_RECIPIENTS) {
+      showToast("Recipient limit", `Campaigns support at most ${MAX_CAMPAIGN_RECIPIENTS} recipients.`, true);
+      return;
     }
 
     const confirmed = await requestConfirmation({
@@ -11383,12 +11471,7 @@
           return;
         }
         if (actionButton.dataset.action === "campaign-add-selected-contacts") {
-          const added = state.campaigns.selectedContactIds.size;
-          for (const contactId of state.campaigns.selectedContactIds) state.campaigns.audienceContactIds.add(contactId);
-          state.campaigns.selectedContactIds = new Set();
-          renderCampaignContactPicker();
-          renderCampaignSelectedContacts();
-          showToast("Contacts added", `${added || 0} selected contact(s) added to the campaign.`);
+          addSelectedContactsToCampaign();
           return;
         }
         if (actionButton.dataset.action === "campaign-remove-contact") {
@@ -11396,14 +11479,13 @@
           renderCampaignSelectedContacts();
           return;
         }
-        if (actionButton.dataset.action === "campaign-contact-prev") {
-          state.campaigns.contactPage = Math.max(1, (state.campaigns.contactPage || 1) - 1);
-          renderCampaignContactPicker();
+        if (actionButton.dataset.action === "campaign-clear-filters") {
+          clearCampaignContactFilters();
           return;
         }
-        if (actionButton.dataset.action === "campaign-contact-next") {
-          state.campaigns.contactPage = (state.campaigns.contactPage || 1) + 1;
-          renderCampaignContactPicker();
+        if (actionButton.dataset.action === "campaign-clear-audience") {
+          state.campaigns.audienceContactIds = new Set();
+          renderCampaignSelectedContacts();
           return;
         }
         if (actionButton.dataset.action === "campaign-load-upload-url") {
