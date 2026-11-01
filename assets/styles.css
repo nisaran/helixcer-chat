@@ -1351,6 +1351,11 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 }
 
 .campaigns-route { display: grid; gap: 16px; align-content: start; }
+.campaigns-route .route-heading,
+.campaigns-route .surface {
+  max-width: none;
+  width: 100%;
+}
 .campaign-history-surface, .campaign-create-surface { min-width: 0; }
 .campaign-table-wrap { overflow: auto; padding: 0 4px 12px; }
 .campaign-table { width: 100%; border-collapse: collapse; font-size: 12px; }
