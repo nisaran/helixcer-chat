@@ -132,7 +132,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0017_agent_channel_access.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0019_outbound_sender.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0020_user_profile.sql', import.meta.url), 'utf8'));
-  database.exec(await readFile(new URL('../migrations/0020_campaigns.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0021_campaigns.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
