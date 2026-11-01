@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261031-select-all-fix";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-import-running-result";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -7958,6 +7958,11 @@
   function importChatResultTitle(summary) {
     if (summary?.cancelled) return "Import cancelled";
     const failed = Array.isArray(summary?.failed) ? summary.failed.length : 0;
+    const inProgress = Boolean(state.importChat.importing);
+    if (inProgress) {
+      if (failed) return `Import in progress · ${failed} conversation issue${failed === 1 ? "" : "s"}`;
+      return "Import in progress";
+    }
     if (failed) return `Import finished with ${failed} conversation issue${failed === 1 ? "" : "s"}`;
     return "Import finished";
   }
@@ -8003,6 +8008,7 @@
   function showImportChatResult(summary) {
     const host = $("importChatResult");
     if (!summary) {
+      state.importChat.lastSummary = null;
       host.hidden = true;
       host.innerHTML = "";
       return;
@@ -8010,6 +8016,7 @@
     state.importChat.lastSummary = summary;
     host.hidden = false;
     const failed = importChatIssueRows(summary);
+    const inProgress = Boolean(state.importChat.importing) && !summary.cancelled;
     host.innerHTML = "";
     const title = document.createElement("strong");
     title.textContent = importChatResultTitle(summary);
@@ -8023,7 +8030,11 @@
       ? (batchesTotal
         ? `Stopped after ${batchesDone} of ${batchesTotal} batches`
         : "Stopped before any batch completed")
-      : (batchesTotal ? `Completed ${batchesDone} of ${batchesTotal} batches` : "Completed");
+      : inProgress
+        ? (batchesTotal
+          ? `Processed ${batchesDone} of ${batchesTotal} batches`
+          : "Starting…")
+        : (batchesTotal ? `Completed ${batchesDone} of ${batchesTotal} batches` : "Completed");
     const stats = document.createElement("dl");
     stats.className = "import-chat-stats";
     [
@@ -8297,7 +8308,7 @@
       cancelled: false,
     };
     state.importChat.lastSummary = summary;
-    showImportChatResult(null);
+    showImportChatResult(summary);
     renderImportChatPage();
     let shouldReload = false;
     try {
@@ -8323,9 +8334,11 @@
         if (Array.isArray(result.failed)) summary.failed.push(...result.failed);
         summary.batchesCompleted = index + 1;
         state.importChat.lastSummary = summary;
+        showImportChatResult(summary);
         shouldReload = true;
       }
       if (abortController.signal.aborted) summary.cancelled = true;
+      state.importChat.importing = false;
       if (summary.cancelled) {
         setImportChatProgress(summary.batchesCompleted, batches.length || 1, "Import cancelled");
         showImportChatResult(summary);
@@ -8344,6 +8357,7 @@
       }
       if (shouldReload) await loadAll({ preserveSelection: true });
     } catch (error) {
+      state.importChat.importing = false;
       if (isImportAbortError(error) || abortController.signal.aborted) {
         summary.cancelled = true;
         setImportChatProgress(summary.batchesCompleted, batches.length || 1, "Import cancelled");
