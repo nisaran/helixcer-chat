@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261101-compose-taller">
-  <script src="./assets/app.js?v=20261101-compose-taller" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261101-contact-tag-chips">
+  <script src="./assets/app.js?v=20261101-contact-tag-chips" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -347,6 +347,7 @@
               <span class="avatar profile-avatar" id="detailsAvatar">—</span>
               <h3 id="detailsName">Unknown contact</h3>
               <span class="subtle" id="detailsIdentity">No identity</span>
+              <button class="secondary-button compact-button details-edit-contact" id="detailsEditContact" type="button" data-action="edit-contact-from-details" hidden>Edit contact</button>
             </div>
             <dl class="details-list">
               <div><dt>Email</dt><dd id="detailsEmail">—</dd></div>
@@ -429,8 +430,18 @@
                 <input type="hidden" name="contactId" id="contactEditId">
                 <label class="field-label">Name<input class="text-field" id="contactEditName" name="displayName" required maxlength="100"></label>
                 <label class="field-label">Company<input class="text-field" id="contactEditCompany" name="company" maxlength="160" placeholder="Optional company"></label>
-                <label class="field-label">Tags<input class="text-field" id="contactEditTags" name="tags" maxlength="500" placeholder="Priority, Customer"></label>
-                <span class="field-help">Separate tags with commas.</span>
+                <div class="field-label">
+                  <span>Tags</span>
+                  <div class="tag-input" id="contactEditTagInput" data-tag-input="edit">
+                    <div class="tag-input-shell">
+                      <div class="tag-input-chips" id="contactEditTagChips"></div>
+                      <input class="tag-input-field" id="contactEditTagField" type="text" maxlength="40" placeholder="Add or create a tag" autocomplete="off" aria-autocomplete="list" aria-controls="contactEditTagMenu" aria-expanded="false">
+                    </div>
+                    <div class="tag-input-menu" id="contactEditTagMenu" role="listbox" hidden></div>
+                    <input type="hidden" name="tags" id="contactEditTags" value="">
+                  </div>
+                  <span class="field-help">Select an existing tag, or type a new one and press comma.</span>
+                </div>
                 <section class="contact-identities" aria-labelledby="contactEditPlatformIdsTitle">
                   <div class="contact-identities-head">
                     <div><strong id="contactEditPlatformIdsTitle">Messaging IDs</strong><span>One ID per platform. Add at least one ID to keep this contact reachable.</span></div>
@@ -894,7 +905,18 @@
       <div class="form-grid">
         <label class="field-label">Name<input class="text-field" name="displayName" required maxlength="100" placeholder="Customer name"></label>
         <label class="field-label">Company<input class="text-field" name="company" maxlength="160" placeholder="Optional company"></label>
-        <label class="field-label form-span">Tags<input class="text-field" name="tags" maxlength="500" placeholder="Priority, Customer"><span class="field-help">Separate tags with commas.</span></label>
+        <div class="field-label form-span">
+          <span>Tags</span>
+          <div class="tag-input" id="contactCreateTagInput" data-tag-input="create">
+            <div class="tag-input-shell">
+              <div class="tag-input-chips" id="contactCreateTagChips"></div>
+              <input class="tag-input-field" id="contactCreateTagField" type="text" maxlength="40" placeholder="Add or create a tag" autocomplete="off" aria-autocomplete="list" aria-controls="contactCreateTagMenu" aria-expanded="false">
+            </div>
+            <div class="tag-input-menu" id="contactCreateTagMenu" role="listbox" hidden></div>
+            <input type="hidden" name="tags" id="contactCreateTags" value="">
+          </div>
+          <span class="field-help">Select an existing tag, or type a new one and press comma.</span>
+        </div>
       </div>
       <section class="contact-identities contact-create-identities" aria-labelledby="contactCreatePlatformIdsTitle">
         <div class="contact-identities-head">
