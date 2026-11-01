@@ -25,6 +25,9 @@
     conversationSearchRequestId: 0,
     conversationSearchActive: false,
     conversationObserverPaused: false,
+    // When set by a direct #inbox/<id> visit, the left list shows only this chat
+    // with filters cleared. In-app navigation clears it.
+    inboxFocusConversationId: null,
     inboxSelectMode: false,
     selectedConversationIds: new Set(),
     contactSelectMode: false,
@@ -2575,13 +2578,28 @@
   }
 
   function clearConversationFilters() {
+    clearDeepLinkedConversationList();
     state.filters = new Set();
+  }
+
+  function enterDeepLinkedConversationList(conversationId) {
+    if (!validConversationId(conversationId)) return;
+    state.inboxFocusConversationId = conversationId;
+    state.search = "";
+    state.conversationSearchActive = false;
+    const searchInput = $("conversationSearch");
+    if (searchInput) searchInput.value = "";
+    selectAllConversationFilters();
+  }
+
+  function clearDeepLinkedConversationList() {
+    state.inboxFocusConversationId = null;
   }
 
   function renderConversationFilterControls() {
     const selected = state.filters;
-    const showingAll = isAllConversationFilters(selected);
-    const showingNone = selected.size === 0;
+    const showingAll = isAllConversationFilters(selected) || Boolean(state.inboxFocusConversationId);
+    const showingNone = !showingAll && selected.size === 0;
     const activeLabels = [...selected].map((filter) => conversationFilterLabels[filter]).filter(Boolean);
     $("conversationFilterSummary").textContent = showingAll
       ? "All conversations"
@@ -2589,18 +2607,19 @@
     $("conversationFilterCount").textContent = String(showingAll ? conversationFilterOptions.length : selected.size);
     $("conversationFilterCount").hidden = showingAll || showingNone;
     document.querySelectorAll("[data-conversation-filter-option]").forEach((input) => {
-      input.checked = input.value === "all" ? showingAll : selected.has(input.value);
+      input.checked = input.value === "all" ? showingAll : showingAll || selected.has(input.value);
     });
     document.querySelectorAll("#conversationFilters [data-filter]").forEach((button) => {
       button.classList.toggle(
         "is-active",
-        button.dataset.filter === "all" ? showingAll : selected.has(button.dataset.filter),
+        button.dataset.filter === "all" ? showingAll : showingAll || selected.has(button.dataset.filter),
       );
       button.setAttribute("aria-pressed", String(button.classList.contains("is-active")));
     });
   }
 
   function toggleConversationFilter(filter) {
+    clearDeepLinkedConversationList();
     if (filter === "all") selectAllConversationFilters();
     else if (isAllConversationFilters()) {
       state.filters = new Set(conversationFilterOptions.filter((item) => item !== filter));
@@ -2628,6 +2647,11 @@
   }
 
   function filteredConversations() {
+    if (state.inboxFocusConversationId) {
+      return unifiedConversations()
+        .filter((item) => item.conversationId === state.inboxFocusConversationId)
+        .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
+    }
     const selected = state.filters;
     if (selected.size === 0) return [];
     const showingAll = isAllConversationFilters(selected);
@@ -2692,7 +2716,8 @@
       }
       host.append(empty);
       // Keep paging when filters hide the current page but more server pages remain.
-      if (!state.conversationsSearching
+      if (!state.inboxFocusConversationId
+        && !state.conversationsSearching
         && state.conversationNextCursor
         && (state.conversationsLoadError || !state.search.trim())) {
         appendConversationLoadSentinel(host);
@@ -2747,7 +2772,8 @@
       host.append(row);
     });
     renderInboxBulkBar(items);
-    if (!state.conversationsSearching
+    if (!state.inboxFocusConversationId
+      && !state.conversationsSearching
       && (state.conversationNextCursor || state.conversationsLoadingMore || state.conversationsLoadError)) {
       appendConversationLoadSentinel(host);
     }
@@ -2994,6 +3020,10 @@
       closeConversationActionMenu();
       closeComposerRouteMenu();
       state.unreadMarker = markRead && unreadCount > 0 ? { conversationId, count: unreadCount } : null;
+    }
+    // In-app navigation leaves deep-link solo-list mode; hash-driven opens keep it.
+    if (updateUrl && state.inboxFocusConversationId && state.inboxFocusConversationId !== conversationId) {
+      clearDeepLinkedConversationList();
     }
     state.selectedConversationId = conversationId;
     state.pendingConversationId = null;
@@ -7732,8 +7762,16 @@
     state.pendingConversationId = target.conversationId || null;
     setRoute(target.route, { preserveLocation: true });
     if (target.route !== "inbox" || state.authStatus !== "authenticated") return;
-    if (target.conversationId) await openPendingConversation({ refreshIfMissing: true });
-    else {
+    if (target.conversationId) {
+      enterDeepLinkedConversationList(target.conversationId);
+      await openPendingConversation({ refreshIfMissing: true });
+      renderConversationFilterControls();
+      renderConversationList();
+    } else {
+      if (state.inboxFocusConversationId) {
+        clearDeepLinkedConversationList();
+        state.filters = new Set(["open"]);
+      }
       clearSelectedConversation({ updateUrl: false });
       replaceAppHash("#inbox");
     }
@@ -9093,6 +9131,10 @@
     closeComposerRouteMenu();
     saveComposerDraft(conversationId);
     if (state.templateConversationId === conversationId) closeTemplateDialog();
+    if (state.inboxFocusConversationId) {
+      clearDeepLinkedConversationList();
+      state.filters = new Set(["open"]);
+    }
     state.selectedConversationId = null;
     state.pendingConversationId = null;
     state.unreadMarker = null;
@@ -9100,6 +9142,7 @@
     state.replyingTo = null;
     state.detailsOpen = false;
     $("inboxGrid").classList.remove("chat-open", "has-details");
+    renderConversationFilterControls();
     renderConversationList();
     renderSelectedConversation();
     if (updateUrl && state.route === "inbox") replaceAppHash("#inbox");
@@ -9875,6 +9918,10 @@
     let conversationSearchTimer = 0;
     $("conversationSearch").addEventListener("input", (event) => {
       state.search = event.target.value;
+      if (state.inboxFocusConversationId) {
+        clearDeepLinkedConversationList();
+        renderConversationFilterControls();
+      }
       window.clearTimeout(conversationSearchTimer);
       conversationSearchTimer = window.setTimeout(() => {
         refreshInboxCatalogue({ reset: true });
