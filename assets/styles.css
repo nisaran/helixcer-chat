@@ -272,7 +272,6 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .user-menu .logout-button { color: #a63e2d; }
 .phone-fields { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
 .phone-country-code { text-align: center; }
-.profile-modal .modal-card { width: min(520px, calc(100vw - 28px)); }
 .profile-save-state { flex: 1; color: var(--muted); font-size: 11px; align-self: center; }
 
 .connection-pill {
@@ -1373,6 +1372,25 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .modal::backdrop { background: rgba(17,25,25,.54); backdrop-filter: blur(3px); }
 .modal-card { border: 1px solid rgba(255,255,255,.45); border-radius: 18px; background: white; padding: 21px; }
 .contact-modal { width: min(780px, calc(100vw - 28px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.modal.profile-modal {
+  width: min(520px, calc(100vw - 28px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.modal.profile-modal .modal-card { width: auto; }
+.modal.profile-modal .modal-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: 16px;
+  margin-inline: -21px;
+  margin-bottom: -21px;
+  border-top: 1px solid var(--line);
+  background: white;
+  padding: 14px 21px 21px;
+}
 .contact-route-menu { position: fixed; z-index: 90; display: grid; gap: 3px; max-height: min(380px, calc(100dvh - 16px)); overflow-y: auto; border: 1px solid #d9dfdb; border-radius: 13px; background: white; padding: 6px; box-shadow: 0 16px 44px rgba(27,37,33,.2), 0 2px 8px rgba(27,37,33,.1); }
 .contact-route-menu-title { color: #66716e; padding: 6px 8px 5px; font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .contact-route-menu-option { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; width: 100%; min-height: 52px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); padding: 7px 8px; text-align: left; }
@@ -1653,6 +1671,9 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .contact-platform-id-row .identity-message-split { grid-column: 2; justify-self: start; }
   .contact-modal { max-height: calc(100dvh - 16px); }
   .contact-modal .modal-card { padding: 18px 15px; }
+  .modal.profile-modal { max-height: calc(100dvh - 16px); }
+  .modal.profile-modal .modal-card { padding: 18px 15px; }
+  .modal.profile-modal .modal-actions { margin-inline: -15px; margin-bottom: -18px; padding: 14px 15px 18px; }
   .channel-modal { max-height: calc(100dvh - 16px); }
   .channel-modal .modal-card { padding: 18px 15px; }
   .channel-modal .modal-actions { flex-wrap: wrap; }
