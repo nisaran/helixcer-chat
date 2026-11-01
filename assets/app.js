@@ -2674,6 +2674,10 @@
     if (!bar) return;
     bar.hidden = !state.inboxSelectMode;
     if (!state.inboxSelectMode) return;
+    const knownIds = new Set(state.conversations.map((item) => item.conversationId));
+    if ([...state.selectedConversationIds].some((id) => !knownIds.has(id))) {
+      state.selectedConversationIds = new Set([...state.selectedConversationIds].filter((id) => knownIds.has(id)));
+    }
     const visibleIds = visibleConversationIds(items);
     const selectedVisible = visibleIds.filter((id) => state.selectedConversationIds.has(id));
     const selectedCount = state.selectedConversationIds.size;
