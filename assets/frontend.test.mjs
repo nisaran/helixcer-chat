@@ -571,7 +571,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261101-import-issues-csv/);
+  assert.match(html, /app\.js\?v=20261101-preview-ellipsis/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -711,6 +711,13 @@ test("conversation and contact lists provide compact press feedback and breathin
   assert.match(styles, /\.conversation-item:active\s*\{[^}]*background:\s*#edf0ed/s);
   assert.match(styles, /\.contact-table td\s*\{[^}]*padding:\s*7px 14px/s);
   assert.match(styles, /\.contact-table tbody tr:active\s*\{[^}]*background:\s*#edf0ed/s);
+});
+
+test("conversation previews truncate to the panel width without a horizontal scrollbar", () => {
+  assert.match(styles, /\.conversation-list\s*\{[^}]*overflow-x:\s*hidden[^}]*overflow-y:\s*auto/s);
+  assert.match(styles, /\.conversation-item\s*\{[^}]*min-width:\s*0[^}]*overflow:\s*hidden/s);
+  assert.match(styles, /\.conversation-copy\s*\{[^}]*min-width:\s*0[^}]*overflow:\s*hidden/s);
+  assert.match(styles, /\.conversation-preview\s*\{[^}]*display:\s*block[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s);
 });
 
 test("every message carries an exact local date and time without date-divider pills", () => {
@@ -912,8 +919,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261101-import-issues-csv/);
-  assert.match(html, /assets\/styles\.css\?v=20261101-import-issues-csv/);
+  assert.match(html, /assets\/app\.js\?v=20261101-preview-ellipsis/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-preview-ellipsis/);
   assert.match(app, /stripOutboundSenderAttribution/);
   assert.match(app, /is-outbound-sender/);
   // Inbound customer names must not render on the bubble; only outbound sender_name on the route line.
