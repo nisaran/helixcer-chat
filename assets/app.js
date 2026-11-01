@@ -4,11 +4,10 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-audience";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261101-campaign-uncap";
   const DEFAULT_WORKSPACE = "Helixcer workspace";
   const SAVED_SECRET_MASK = "••••••••••••••••";
   const WHATSAPP_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
-  const MAX_CAMPAIGN_RECIPIENTS = 100;
 
   const $ = (id) => document.getElementById(id);
   const CONVERSATION_PAGE_SIZE = 100;
@@ -8805,8 +8804,8 @@
     if (meta) {
       const selected = state.campaigns.selectedContactIds.size;
       meta.textContent = contacts.length
-        ? `${contacts.length} contact${contacts.length === 1 ? "" : "s"} · ${selected} selected · max ${MAX_CAMPAIGN_RECIPIENTS} recipients`
-        : `0 contacts · max ${MAX_CAMPAIGN_RECIPIENTS} recipients`;
+        ? `${contacts.length} contact${contacts.length === 1 ? "" : "s"} · ${selected} selected`
+        : "0 contacts";
     }
   }
 
@@ -8832,29 +8831,15 @@
   }
 
   function addSelectedContactsToCampaign() {
-    const remaining = Math.max(0, MAX_CAMPAIGN_RECIPIENTS - state.campaigns.audienceContactIds.size);
-    if (!remaining) {
-      showToast("Recipient limit", `Campaigns support at most ${MAX_CAMPAIGN_RECIPIENTS} recipients.`, true);
-      return;
-    }
     let added = 0;
-    let skipped = 0;
     for (const contactId of state.campaigns.selectedContactIds) {
       if (state.campaigns.audienceContactIds.has(contactId)) continue;
-      if (added >= remaining) {
-        skipped += 1;
-        continue;
-      }
       state.campaigns.audienceContactIds.add(contactId);
       added += 1;
     }
     state.campaigns.selectedContactIds = new Set();
     renderCampaignContactPicker();
     renderCampaignSelectedContacts();
-    if (skipped) {
-      showToast("Recipient limit", `Added ${added}. ${skipped} contact(s) skipped because the ${MAX_CAMPAIGN_RECIPIENTS} recipient limit was reached.`, true);
-      return;
-    }
     showToast("Contacts added", `${added} contact(s) added to the campaign.`);
   }
 
@@ -8905,8 +8890,8 @@
     const help = $("campaignAudienceHelp");
     if (help) {
       help.textContent = ids.length
-        ? `${ids.length} / ${MAX_CAMPAIGN_RECIPIENTS} recipients ready to send.`
-        : `Up to ${MAX_CAMPAIGN_RECIPIENTS} recipients. Added contacts appear as tags.`;
+        ? `${ids.length} recipient${ids.length === 1 ? "" : "s"} ready to send.`
+        : "Added contacts appear as tags.";
     }
     const clearAudience = $("campaignClearAudience");
     if (clearAudience) clearAudience.disabled = !ids.length;
@@ -9405,7 +9390,7 @@
     const parsed = parseCampaignCsv(text);
     if (!parsed.headers.length) throw new Error("The CSV file has no header row.");
     state.campaigns.uploadHeaders = parsed.headers;
-    state.campaigns.uploadRows = parsed.records.slice(0, MAX_CAMPAIGN_RECIPIENTS);
+    state.campaigns.uploadRows = parsed.records.slice(0, 500);
     const lower = Object.fromEntries(parsed.headers.map((header) => [header.toLocaleLowerCase(), header]));
     state.campaigns.fieldMapping = {
       displayName: lower.name || lower.display_name || lower.fullname || "",
@@ -9488,11 +9473,6 @@
       }
       recipients = state.campaigns.uploadRows.map((row) => ({ row }));
     }
-    if (recipients.length > MAX_CAMPAIGN_RECIPIENTS) {
-      showToast("Recipient limit", `Campaigns support at most ${MAX_CAMPAIGN_RECIPIENTS} recipients.`, true);
-      return;
-    }
-
     const confirmed = await requestConfirmation({
       eyebrow: "Confirm campaign",
       title: "Send this campaign?",

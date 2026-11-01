@@ -8,7 +8,7 @@ export const CAMPAIGN_STATUSES = Object.freeze([
 export const CAMPAIGN_RECIPIENT_STATUSES = Object.freeze([
   'pending', 'queued', 'sent', 'delivered', 'read', 'failed'
 ]);
-export const MAX_CAMPAIGN_RECIPIENTS = 100;
+export const MAX_CAMPAIGN_RECIPIENTS = 500;
 
 export const CAMPAIGN_CONTACT_FIELD_TARGETS = Object.freeze([
   { key: 'displayName', label: 'Name', required: false },

@@ -582,7 +582,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261101-campaign-audience/);
+  assert.match(html, /app\.js\?v=20261101-campaign-uncap/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -943,8 +943,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261101-campaign-audience/);
-  assert.match(html, /assets\/styles\.css\?v=20261101-campaign-audience/);
+  assert.match(html, /assets\/app\.js\?v=20261101-campaign-uncap/);
+  assert.match(html, /assets\/styles\.css\?v=20261101-campaign-uncap/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -1363,7 +1363,7 @@ test("Campaign page supports create flow, contact/upload audiences, and expandab
   assert.match(app, /function campaignSendConfirmationDetails/);
   assert.match(app, /function clearCampaignContactFilters/);
   assert.match(app, /function addSelectedContactsToCampaign/);
-  assert.match(app, /MAX_CAMPAIGN_RECIPIENTS = 100/);
+  assert.doesNotMatch(app, /MAX_CAMPAIGN_RECIPIENTS = 100/);
   assert.match(app, /requestConfirmation\(/);
   assert.match(app, /campaignSourceUsesContactField/);
   assert.match(html, /Select all filtered/);
