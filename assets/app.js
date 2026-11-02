@@ -4084,15 +4084,17 @@
     row.dataset.messageTimestamp = String(new Date(message.timestamp).getTime() || 0);
     const name = String(message.event?.assignedToName || "").trim();
     const text = String(message.text || "").trim() || (name ? `Chat assigned to ${name}` : "Chat assigned");
-    row.append(element("span", "message-event-text", text));
+    const copy = element("span", "message-event-copy");
+    copy.append(element("span", "message-event-text", text));
     const stamp = formatClock(message.timestamp);
     if (stamp) {
       const time = document.createElement("time");
       time.className = "message-event-time";
       time.dateTime = String(message.timestamp || "");
       time.textContent = stamp;
-      row.append(time);
+      copy.append(time);
     }
+    row.append(copy);
     return row;
   }
 

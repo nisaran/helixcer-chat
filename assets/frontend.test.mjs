@@ -1491,7 +1491,7 @@ test("Campaign page supports create flow, contact/upload audiences, and expandab
   assert.match(styles, /\.campaign-contact-footer\s*\{[\s\S]*margin-top:\s*14px/);
 });
 
-test("assignment events render as distinguished timeline rows with date and time", () => {
+test("assignment events render as dashed divider text with date and time", () => {
   assert.match(app, /function createAssignmentEventRow/);
   assert.match(app, /className = "message-event-time"/);
   assert.match(app, /formatClock\(message\.timestamp\)/);
@@ -1501,11 +1501,17 @@ test("assignment events render as distinguished timeline rows with date and time
   assert.match(app, /function applyLocalAssignment/);
   assert.match(app, /showAssignmentNotification/);
   assert.match(styles, /\.message-event\s*\{/);
-  assert.match(styles, /\.message-event-text\s*\{/);
-  assert.match(styles, /\.message-event-time\s*\{/);
-  assert.match(styles, /#0f766e/);
+  assert.match(styles, /\.message-event::before/);
+  assert.match(styles, /\.message-event::after/);
+  assert.match(styles, /border-top:\s*1px dashed/);
+  assert.match(styles, /\.message-event-copy\s*\{/);
+  assert.match(styles, /\.message-event-text\s*\{[^}]*font-size:\s*10px/);
+  assert.match(styles, /\.message-event-time\s*\{[^}]*font-size:\s*9px/);
+  assert.doesNotMatch(styles, /\.message-event\s*\{[^}]*border-radius:\s*999px/);
+  assert.doesNotMatch(styles, /\.message-event\s*\{[^}]*background:\s*linear-gradient/);
   const eventBody = app.slice(app.indexOf("function createAssignmentEventRow"), app.indexOf("function applyLocalAssignment"));
   assert.match(eventBody, /message-event/);
+  assert.match(eventBody, /message-event-copy/);
   assert.match(eventBody, /message-event-text/);
   assert.match(eventBody, /message-event-time/);
   const assignedHandler = app.slice(app.indexOf('if (type === "conversation.assigned")'),
