@@ -363,7 +363,8 @@ async function createSession(env, principal, options = {}) {
 }
 
 export async function listTeam(env, principal) {
-  requireRole(principal, 'admin');
+  const { requirePermission } = await import('./roles.js');
+  requirePermission(principal, 'team.manage');
   const [members, invitations] = await Promise.all([
     env.DB.prepare(`SELECT m.membership_id,m.user_id,m.role,m.status,m.created_at,m.allowed_channel_ids_json,
         u.email,u.display_name,u.avatar_url
@@ -380,15 +381,19 @@ export async function listTeam(env, principal) {
 }
 
 export async function createInvitation(request, env, principal, payload) {
-  requireRole(principal, 'admin');
+  const { assertAssignableRole, requirePermission } = await import('./roles.js');
+  requirePermission(principal, 'team.manage');
   const email = normalizeEmail(payload.email);
   if (!email || !email.includes('@') || email.length > 254) throw authError(400, 'A valid email is required.');
   const role = String(payload.role || 'agent');
-  if (!['admin', 'agent'].includes(role)) throw authError(400, 'Invitation role must be admin or agent.');
-  if (principal.membership.role === 'admin' && role !== 'agent') throw authError(403, 'Only an owner can invite an administrator.');
+  const assignable = await assertAssignableRole(env, principal.workspace.workspaceId, role, { allowOwner: false });
+  if (principal.membership.role !== 'owner' && assignable.isElevated) {
+    throw authError(403, 'Only an owner can invite members with elevated workspace access.');
+  }
   const allowedChannelIds = await resolveAllowedChannelIds(env, principal.workspace.workspaceId, role, payload, {
     // Chat UI always sends a selection. Omitting the field keeps legacy/API invites unrestricted.
-    required: false
+    required: false,
+    permissions: assignable.permissions
   });
   const existing = await env.DB.prepare(`SELECT m.membership_id FROM memberships m JOIN users u ON u.user_id=m.user_id
     WHERE m.workspace_id=?1 AND lower(u.email)=?2 AND m.status='active'`).bind(principal.workspace.workspaceId, email).first();
@@ -424,7 +429,8 @@ export async function createInvitation(request, env, principal, payload) {
 }
 
 export async function updateMembership(env, principal, membershipId, payload) {
-  requireRole(principal, 'admin');
+  const { assertAssignableRole, requirePermission } = await import('./roles.js');
+  requirePermission(principal, 'team.manage');
   const target = await env.DB.prepare(`SELECT m.membership_id,m.user_id,m.role,m.status,m.created_at,m.allowed_channel_ids_json,
       u.email,u.display_name,u.avatar_url
     FROM memberships m JOIN users u ON u.user_id=m.user_id WHERE m.membership_id=?1 AND m.workspace_id=?2`)
@@ -432,10 +438,17 @@ export async function updateMembership(env, principal, membershipId, payload) {
   if (!target) throw authError(404, 'Team member not found.');
   const nextRole = payload.role === undefined ? target.role : String(payload.role);
   const nextStatus = payload.status === undefined ? target.status : String(payload.status);
-  if (!['owner', 'admin', 'agent'].includes(nextRole)) throw authError(400, 'Invalid member role.');
   if (!['active', 'disabled'].includes(nextStatus)) throw authError(400, 'Invalid member status.');
-  if (principal.membership.role === 'admin') {
-    if (target.role !== 'agent' || nextRole !== 'agent') throw authError(403, 'Administrators can only enable or disable agents.');
+  const nextAssignable = await assertAssignableRole(env, principal.workspace.workspaceId, nextRole, {
+    allowOwner: nextRole === 'owner'
+  });
+  const targetAssignable = await assertAssignableRole(env, principal.workspace.workspaceId, target.role, {
+    allowOwner: target.role === 'owner'
+  });
+  if (principal.membership.role !== 'owner') {
+    if (targetAssignable.isElevated || nextAssignable.isElevated || nextRole === 'owner' || target.role === 'owner') {
+      throw authError(403, 'Administrators can only manage non-elevated team members.');
+    }
   }
   const removesOwner = target.role === 'owner' && (nextRole !== 'owner' || nextStatus !== 'active');
   if (removesOwner) {
@@ -444,11 +457,13 @@ export async function updateMembership(env, principal, membershipId, payload) {
     if (Number(owners?.count || 0) <= 1) throw authError(409, 'The workspace must retain at least one active owner.');
   }
   let nextAllowedJson = target.allowed_channel_ids_json || '[]';
-  if (nextRole !== 'agent') {
+  const usesChannelAllowList = roleUsesChannelAllowList(nextRole, nextAssignable.permissions);
+  if (!usesChannelAllowList) {
     nextAllowedJson = '[]';
   } else if (payload.allowedChannelIds !== undefined || payload.allowed_channel_ids !== undefined) {
     const allowedChannelIds = await resolveAllowedChannelIds(env, principal.workspace.workspaceId, nextRole, payload, {
-      required: true
+      required: true,
+      permissions: nextAssignable.permissions
     });
     nextAllowedJson = JSON.stringify(allowedChannelIds);
   }
@@ -473,12 +488,16 @@ export async function updateMembership(env, principal, membershipId, payload) {
 }
 
 export async function updateInvitation(env, principal, invitationId, payload) {
-  requireRole(principal, 'admin');
+  const { assertAssignableRole, requirePermission } = await import('./roles.js');
+  requirePermission(principal, 'team.manage');
   if (payload.status !== 'cancelled') throw authError(400, 'Only cancellation is supported for pending invitations.');
   const invitation = await env.DB.prepare(`SELECT invitation_id,role,status FROM invitations
     WHERE invitation_id=?1 AND workspace_id=?2`).bind(invitationId, principal.workspace.workspaceId).first();
   if (!invitation || invitation.status !== 'pending') throw authError(404, 'Pending invitation not found.');
-  if (principal.membership.role === 'admin' && invitation.role !== 'agent') throw authError(403, 'Only an owner can cancel an administrator invitation.');
+  const inviteRole = await assertAssignableRole(env, principal.workspace.workspaceId, invitation.role, { allowOwner: false });
+  if (principal.membership.role !== 'owner' && inviteRole.isElevated) {
+    throw authError(403, 'Only an owner can cancel an elevated invitation.');
+  }
   await env.DB.prepare("UPDATE invitations SET status='cancelled',updated_at=?3 WHERE invitation_id=?1 AND workspace_id=?2")
     .bind(invitationId, principal.workspace.workspaceId, new Date().toISOString()).run();
   await auditAuthAction(env, principal, 'cancel', 'invitation', invitationId, {});
@@ -492,15 +511,23 @@ export function requireRole(principal, minimumRole) {
 }
 
 /**
- * Returns the channel IDs an agent may use, or null when access is unrestricted
- * (owners, admins, and legacy agents with an empty allow-list).
+ * Returns the channel IDs a restricted member may use, or null when access is unrestricted
+ * (owners, admins, elevated roles, and legacy agents with an empty allow-list).
  */
 export function restrictedChannelIds(principal) {
-  if (!principal?.membership || principal.membership.role !== 'agent') return null;
+  if (!principal?.membership) return null;
+  if (!roleUsesChannelAllowList(principal.membership.role, principal.permissions)) return null;
   const ids = Array.isArray(principal.membership.allowedChannelIds)
     ? principal.membership.allowedChannelIds
     : parseAllowedChannelIds(principal.membership.allowedChannelIdsJson);
   return ids.length ? ids : null;
+}
+
+export function roleUsesChannelAllowList(role, permissions = null) {
+  const key = String(role || '');
+  if (!key || key === 'owner' || key === 'admin') return false;
+  if (permissions?.channels?.manage) return false;
+  return true;
 }
 
 export function parseAllowedChannelIds(value) {
@@ -513,7 +540,7 @@ export function parseAllowedChannelIds(value) {
 }
 
 export async function resolveAllowedChannelIds(env, workspaceId, role, payload = {}, options = {}) {
-  if (role !== 'agent') return [];
+  if (!roleUsesChannelAllowList(role, options.permissions)) return [];
   const raw = payload.allowedChannelIds ?? payload.allowed_channel_ids;
   if (raw === undefined || raw === null) {
     if (options.required) throw authError(400, 'Select at least one messaging channel for this agent.');
@@ -546,7 +573,8 @@ export function principalView(principal) {
       allowedChannelIds: Array.isArray(principal.membership?.allowedChannelIds)
         ? principal.membership.allowedChannelIds
         : []
-    }
+    },
+    permissions: principal.permissions || null
   };
 }
 

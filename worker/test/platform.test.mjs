@@ -59,7 +59,8 @@ const MIGRATIONS = [
   '0011_mobile_push_devices.sql', '0012_contact_identities.sql', '0013_flat_contact_platform_ids.sql',
   '0014_unified_contact_conversations.sql', '0015_saas_clients.sql',
   '0016_internal_slug.sql', '0017_agent_channel_access.sql', '0019_outbound_sender.sql',
-  '0020_user_profile.sql', '0021_campaigns.sql', '0022_facebook_messenger_page.sql'
+  '0020_user_profile.sql', '0021_campaigns.sql', '0022_facebook_messenger_page.sql',
+  '0023_workspace_roles.sql'
 ];
 
 const ADMIN_ORIGIN = 'https://admin.chat.helixcer.com';

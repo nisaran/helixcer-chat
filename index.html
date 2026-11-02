@@ -63,19 +63,19 @@
           <span>Inbox</span>
           <span class="nav-count" id="sidebarUnread" aria-label="Unread conversations">0</span>
         </button>
-        <button class="nav-button" type="button" data-route="contacts">
+        <button class="nav-button" type="button" data-route="contacts" data-permission="contacts.view">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M16 20v-1.5A4.5 4.5 0 0 0 11.5 14h-5A4.5 4.5 0 0 0 2 18.5V20M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm9-1v6m3-3h-6"/></svg>
           </span>
           <span>Contacts</span>
         </button>
-        <button class="nav-button" type="button" data-route="campaigns">
+        <button class="nav-button" type="button" data-route="campaigns" data-permission="campaigns.view">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M4 10v4l12 5V5L4 10zm14 1.5h3M18 15h2"/></svg>
           </span>
           <span>Campaign</span>
         </button>
-        <div class="nav-group" id="channelNavGroup" data-admin-only>
+        <div class="nav-group" id="channelNavGroup" data-permission="channels.manage">
           <button class="nav-button nav-group-toggle" id="channelNavToggle" type="button" data-action="toggle-channel-nav" aria-expanded="false" aria-controls="channelNavChildren">
             <span class="nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8m12.8 0a9 9 0 0 0 0-12.8M8.5 8.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7"/></svg>
@@ -84,7 +84,7 @@
             <svg class="nav-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
           </button>
           <div class="nav-submenu" id="channelNavChildren" hidden>
-            <button class="nav-button nav-subitem" type="button" data-route="channels" data-admin-only>
+            <button class="nav-button nav-subitem" type="button" data-route="channels" data-permission="channels.manage">
               <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg></span>
               <span>Channels</span>
             </button>
@@ -93,28 +93,34 @@
               <svg class="nav-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
             </button>
             <div class="nav-submenu nav-submenu-nested" id="channelDataNavChildren" hidden>
-              <button class="nav-button nav-subitem" type="button" data-route="whatsapp-templates">
+              <button class="nav-button nav-subitem" type="button" data-route="whatsapp-templates" data-permission="channels.manage">
                 <span class="nav-icon nav-provider-icon" aria-hidden="true"><img src="./assets/provider-whatsapp.svg" alt=""></span>
                 <span>WhatsApp Templates</span>
               </button>
-              <button class="nav-button nav-subitem" type="button" data-route="import-chat" data-admin-only>
+              <button class="nav-button nav-subitem" type="button" data-route="import-chat" data-permission="channels.manage">
                 <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg></span>
                 <span>Import Chat</span>
               </button>
             </div>
           </div>
         </div>
-        <button class="nav-button" type="button" data-route="developer" data-admin-only>
+        <button class="nav-button" type="button" data-route="developer" data-permission="developer.manage">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="m8 5-6 7 6 7m8-14 6 7-6 7M14 3l-4 18"/></svg>
           </span>
           <span>Developer API</span>
         </button>
-        <button class="nav-button" type="button" data-route="team" data-admin-only>
+        <button class="nav-button" type="button" data-route="team" data-permission="team.manage">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M16 20v-1.6a4.4 4.4 0 0 0-4.4-4.4H6.4A4.4 4.4 0 0 0 2 18.4V20M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8-1a3 3 0 1 0 0-6m5 17v-1.6a4.4 4.4 0 0 0-3.3-4.3"/></svg>
           </span>
           <span>Team</span>
+        </button>
+        <button class="nav-button" type="button" data-route="roles" data-permission="roles.manage">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8.4 8 9 4.6-.6 8-4 8-9V7l-8-4zm0 5.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zm0 6.8c1.8 0 3.4.7 4.2 1.7-.9.8-2.4 1.4-4.2 1.4s-3.3-.6-4.2-1.4c.8-1 2.4-1.7 4.2-1.7z"/></svg>
+          </span>
+          <span>Roles</span>
         </button>
         <button class="nav-button" type="button" data-route="workspace">
           <span class="nav-icon" aria-hidden="true">
@@ -209,7 +215,7 @@
               <span class="subtle" id="inboxSelectedCount">0 selected</span>
               <div class="bulk-action-buttons">
                 <button class="secondary-button compact-button" type="button" data-action="bulk-close-conversations" id="inboxBulkClose">Close chat</button>
-                <button class="danger-button compact-button" type="button" data-action="bulk-delete-conversations" id="inboxBulkDelete" data-admin-only>Delete</button>
+                <button class="danger-button compact-button" type="button" data-action="bulk-delete-conversations" id="inboxBulkDelete" data-permission="chats.delete">Delete</button>
               </div>
             </div>
 
@@ -271,7 +277,7 @@
                     <img src="./assets/whatsapp-window-timer.png" alt="" aria-hidden="true">
                     <span id="whatsappReplyCountdownText"></span>
                   </span>
-                  <div class="conversation-menu-wrap" data-admin-only>
+                  <div class="conversation-menu-wrap" data-permission="chats.delete">
                     <button class="conversation-more-button" id="conversationMenuButton" type="button" data-action="toggle-conversation-menu" aria-label="Conversation options" aria-haspopup="menu" aria-expanded="false" aria-controls="conversationActionMenu">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="6.5" r="1.35"/><circle cx="12" cy="12" r="1.35"/><circle cx="12" cy="17.5" r="1.35"/></svg>
                     </button>
@@ -377,7 +383,7 @@
           <div><h2 id="contactsTitle">Contacts</h2></div>
           <div class="route-heading-actions">
             <button class="secondary-button" type="button" data-action="export-contacts">Export contacts</button>
-            <button class="primary-button" type="button" data-action="new-contact"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add contact</button>
+            <button class="primary-button" type="button" data-action="new-contact" data-permission="contacts.create"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add contact</button>
           </div>
         </div>
         <div class="contacts-workspace" id="contactsWorkspace">
@@ -389,7 +395,7 @@
                   <label class="sr-only" for="contactSearch">Search contacts</label>
                   <input id="contactSearch" type="search" placeholder="Search contacts…">
                 </div>
-                <button class="icon-button select-mode-toggle" id="contactSelectToggle" type="button" data-action="toggle-contact-select" data-admin-only aria-pressed="false" aria-label="Select contacts" title="Select contacts">
+                <button class="icon-button select-mode-toggle" id="contactSelectToggle" type="button" data-action="toggle-contact-select" data-permission="contacts.delete" aria-pressed="false" aria-label="Select contacts" title="Select contacts">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M7.2 8.4 8.5 9.7 10.8 7.4"/>
                     <path d="M12.2 8.6h4.2"/>
@@ -933,6 +939,42 @@
         </div>
       </section>
 
+      <section class="route content-route" id="rolesRoute" data-route-panel="roles" aria-labelledby="rolesTitle" hidden>
+        <div class="route-heading">
+          <div><p class="eyebrow">Access control</p><h2 id="rolesTitle">User roles</h2><p>Define what Admins, Agents, and custom roles can view, edit, and manage.</p></div>
+          <button class="primary-button" type="button" data-action="open-create-role"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create role</button>
+        </div>
+        <div class="roles-layout">
+          <aside class="surface roles-list-surface" aria-label="Roles">
+            <div class="surface-toolbar">
+              <div><strong>Roles</strong><span class="subtle" id="rolesCount">0 roles</span></div>
+            </div>
+            <div class="roles-list" id="rolesList" role="list"></div>
+          </aside>
+          <section class="surface roles-editor-surface" aria-labelledby="roleEditorTitle">
+            <div class="surface-toolbar roles-editor-toolbar">
+              <div>
+                <strong id="roleEditorTitle">Select a role</strong>
+                <span class="subtle" id="roleEditorMeta">Choose a role to review or change its permissions.</span>
+              </div>
+              <div class="roles-editor-actions">
+                <button class="danger-button compact-button" type="button" id="deleteRoleButton" data-action="delete-role" hidden>Delete</button>
+                <button class="primary-button compact-button" type="button" id="saveRoleButton" data-action="save-role" disabled>Save changes</button>
+              </div>
+            </div>
+            <form class="roles-editor-form" id="roleEditorForm">
+              <div class="roles-editor-identity">
+                <label class="field-label">Role name<input class="text-field" id="roleNameInput" name="name" maxlength="60" required placeholder="Agent"></label>
+                <label class="field-label form-span"><span>Description <span class="field-optional">Optional</span></span><input class="text-field" id="roleDescriptionInput" name="description" maxlength="240" placeholder="What this role is for"></label>
+              </div>
+              <div class="role-locked-note" id="roleLockedNote" hidden>Owner permissions are fixed and always include full workspace access.</div>
+              <div class="roles-permission-matrix" id="rolesPermissionMatrix"></div>
+              <p class="roles-empty-hint" id="rolesEmptyHint">Select a role from the list to edit chats, contacts, developer access, and more.</p>
+            </form>
+          </section>
+        </div>
+      </section>
+
       <section class="route content-route workspace-route" id="workspaceRoute" data-route-panel="workspace" aria-labelledby="workspaceTitle" hidden>
         <div class="route-heading">
           <div><p class="eyebrow">Organisation profile</p><h2 id="workspaceTitle">Workspace</h2><p>Keep the business identity used across this single Helixcer workspace up to date.</p></div>
@@ -972,7 +1014,7 @@
             </fieldset>
             <div class="workspace-form-actions">
               <p class="workspace-readonly-note" id="workspaceReadonlyNote" hidden>Only workspace owners and admins can edit these details.</p>
-              <button class="primary-button" id="workspaceSaveButton" type="submit" data-admin-only>Save workspace</button>
+              <button class="primary-button" id="workspaceSaveButton" type="submit" data-permission="workspace.edit">Save workspace</button>
             </div>
           </form>
         </section>
@@ -1025,6 +1067,24 @@
         <span class="profile-save-state" id="profileSaveState" role="status" aria-live="polite"></span>
         <button class="secondary-button" type="button" data-action="close-profile">Cancel</button>
         <button class="primary-button" id="profileSaveButton" type="submit">Save profile</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="createRoleDialog" aria-labelledby="createRoleTitle">
+    <form class="modal-card" id="createRoleForm">
+      <div class="modal-head">
+        <div><p class="eyebrow">Access control</p><h2 id="createRoleTitle">Create a role</h2></div>
+        <button class="icon-button" type="button" data-action="close-create-role" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="modal-copy">Start from Agent-level access, then adjust chats, contacts, and admin permissions on the Roles page.</p>
+      <div class="form-grid">
+        <label class="field-label form-span">Role name<input class="text-field" name="name" required maxlength="60" placeholder="Supervisor"></label>
+        <label class="field-label form-span"><span>Description <span class="field-optional">Optional</span></span><input class="text-field" name="description" maxlength="240" placeholder="Can view all chats but not manage channels"></label>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-create-role">Cancel</button>
+        <button class="primary-button" type="submit">Create role</button>
       </div>
     </form>
   </dialog>

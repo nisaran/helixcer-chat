@@ -134,6 +134,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0020_user_profile.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0021_campaigns.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0022_facebook_messenger_page.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0023_workspace_roles.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -608,7 +609,7 @@ test('team invitations are hashed and role changes protect the last owner', asyn
   ), /Only an owner/);
   await assert.rejects(() => updateMembership(
     env, adminPrincipal, principal.membership.membershipId, { role: 'agent' }
-  ), /only enable or disable agents/i);
+  ), /only manage non-elevated team members/i);
 
   database.prepare(`INSERT INTO users
       (user_id,google_sub,email,display_name,email_verified,last_login_at,created_at,updated_at)
@@ -620,7 +621,7 @@ test('team invitations are hashed and role changes protect the last owner', asyn
   assert.equal(disabled.item.status, 'disabled');
   await assert.rejects(() => updateMembership(
     env, adminPrincipal, 'second-agent-membership', { role: 'admin', status: 'active' }
-  ), /only enable or disable agents/i);
+  ), /only manage non-elevated team members/i);
 
   const promoted = await updateMembership(env, principal, 'agent-membership', { role: 'owner' });
   assert.equal(promoted.item.role, 'owner');

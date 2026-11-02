@@ -52,15 +52,21 @@ test("technical connection and recovery controls are not exposed in the UI", () 
 
 test("role-aware single-workspace UI includes team management and no billing surface", () => {
   assert.match(html, /data-route="team"/);
-  assert.match(html, /data-route="developer" data-admin-only/);
+  assert.match(html, /data-route="roles"/);
+  assert.match(html, /data-route="developer" data-permission="developer\.manage"/);
   assert.match(html, /id="teamTableBody"/);
+  assert.match(html, /id="rolesPermissionMatrix"/);
   assert.match(html, /id="inviteForm"/);
   assert.match(html, /id="inviteChannelAccess"/);
   assert.match(html, /id="inviteChannelOptions"/);
   assert.match(html, /data-action="invite-select-all-channels"/);
+  assert.match(html, /id="createRoleForm"/);
   assert.match(app, /allowedChannelIds/);
   assert.match(app, /renderInviteChannelOptions/);
   assert.match(app, /selectedInviteChannelIds/);
+  assert.match(app, /hasPermission\("roles\.manage"\)/);
+  assert.match(app, /chatPermissionScope\("view"\)/);
+  assert.match(app, /hasChatReplyAccess/);
   assert.doesNotMatch(html, /id="inviteRole"[^>]*>[\s\S]*?<option value="owner"/);
   assert.doesNotMatch(html, /data-route="billing"/i);
 });
@@ -85,9 +91,9 @@ test("single workspace profile stores organisation, address, and GST details", (
   assert.match(app, /loadWorkspaceProfile\(\)/);
   assert.match(app, /type === "workspace\.updated"[\s\S]*?updateWorkspaceIdentity/);
   assert.match(app, /if \(data\.workspace\)[\s\S]*?state\.workspaceProfileLoaded = true/);
-  assert.match(app, /const editable = admin && state\.workspaceProfileLoaded/);
+  assert.match(app, /const editable = editablePermission && state\.workspaceProfileLoaded/);
   assert.match(html, /Only workspace owners and admins can edit these details/);
-  assert.match(app, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"\]/);
+  assert.match(app, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"\]/);
   assert.match(styles, /\.workspace-form-grid \{[^}]*grid-template-columns: repeat\(2/);
   assert.match(styles, /\.workspace-profile-form \.text-field\[readonly\]/);
   assert.doesNotMatch(`${html}\n${app}`, /createWorkspace|deleteWorkspace|workspaceSwitcher/i);
@@ -132,7 +138,7 @@ test("channel management supports multiple provider accounts without hardcoded c
 
 test("Channel navigation is collapsed by default and nests the WhatsApp template library", () => {
   const channelNav = html.match(/<div class="nav-group" id="channelNavGroup"[\s\S]*?<button class="nav-button" type="button" data-route="developer"/)?.[0] || "";
-  assert.match(channelNav, /data-admin-only/);
+  assert.match(channelNav, /data-permission="channels\.manage"/);
   assert.match(channelNav, />Channel<\/span>/);
   assert.match(channelNav, /id="channelNavToggle"[^>]*aria-expanded="false"/);
   assert.match(channelNav, /id="channelNavChildren" hidden/);
@@ -143,7 +149,10 @@ test("Channel navigation is collapsed by default and nests the WhatsApp template
   assert.match(channelNav, /data-route="whatsapp-templates"[\s\S]*?>WhatsApp Templates<\/span>/);
   assert.match(html, /id="whatsappTemplatesRoute" data-route-panel="whatsapp-templates"/);
   assert.match(app, /"whatsapp-templates": "WhatsApp Templates"/);
-  assert.match(app, /\["channels", "whatsapp-templates", "import-chat", "developer", "team"\]/);
+  assert.match(app, /if \(!hasPermission\("channels\.manage"\) && \["channels", "whatsapp-templates", "import-chat"\]\.includes\(route\)\)/);
+  assert.match(app, /if \(!hasPermission\("developer\.manage"\) && route === "developer"\)/);
+  assert.match(app, /if \(!hasPermission\("team\.manage"\) && route === "team"\)/);
+  assert.match(app, /if \(!hasPermission\("roles\.manage"\) && route === "roles"\)/);
   assert.match(app, /if \(channelSectionActive\)[\s\S]*?channelNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
   assert.match(app, /if \(route === "whatsapp-templates" \|\| route === "import-chat"\)[\s\S]*?channelDataNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
   assert.match(styles, /\.nav-submenu/);
@@ -839,7 +848,9 @@ test("desktop Enter sends while mobile Enter and Shift+Enter insert a newline", 
 test("pending and closed status updates clear the selected chat only after the server accepts them", () => {
   const statusHandler = app.slice(app.indexOf('$("conversationStatus").addEventListener'), app.indexOf('$("conversationAssignee").addEventListener'));
   assert.match(statusHandler, /await state\.api\.updateConversation/);
-  assert.match(statusHandler, /\["pending", "closed"\]\.includes\(next\)\) clearSelectedConversation\(\)/);
+  assert.match(statusHandler, /\["pending", "closed"\]\.includes\(next\)\) conversationStatusDeferClearId = conversation\.conversationId/);
+  assert.match(statusHandler, /await state\.api\.updateConversation/);
+  assert.match(statusHandler, /clearSelectedConversation\(\)/);
   assert.ok(statusHandler.indexOf("await state.api.updateConversation") < statusHandler.indexOf("clearSelectedConversation()"));
   assert.match(app, /state\.selectedConversationId = null;[\s\S]*?classList\.remove\("chat-open", "has-details"\)/);
   assert.match(app, /event\.conversationId \|\| rawConversation\.conversationId/);
@@ -1061,7 +1072,7 @@ test("conversation filters are multi-selectable with responsive desktop and mobi
   assert.match(clearFiltersBody, /clearConversationFilters\(\)/);
   assert.match(clearFiltersBody, /renderConversationList\(\)/);
   assert.doesNotMatch(clearFiltersBody, /closeConversationFilterMenu/);
-  assert.match(app, /if \(selected\.size === 0\) return \[\]/);
+  assert.match(app, /if \(selected\.size === 0 \|\| viewScope === "none"\) return \[\]/);
   assert.match(app, /input\.checked = input\.value === "all" \? showingAll : selected\.has\(input\.value\)/);
   assert.match(app, /const statusFilters = showingAll \? \[\] : \["open", "closed"\]\.filter/);
   assert.match(app, /const assignmentFilters = showingAll \? \[\] : \["mine", "unassigned"\]\.filter/);
@@ -1144,7 +1155,7 @@ test("Developer API keys are managed by admins and shown only once", () => {
 test("destructive workspace actions use one in-app confirmation dialog", () => {
   assert.match(html, /id="confirmationDialog"[^>]*aria-labelledby="confirmationTitle"/);
   assert.match(html, /id="confirmationForm"/);
-  assert.match(html, /class="conversation-menu-wrap"[^>]*data-admin-only/);
+  assert.match(html, /class="conversation-menu-wrap"[^>]*data-permission="chats\.delete"/);
   assert.match(html, /id="conversationMenuButton"[^>]*aria-controls="conversationActionMenu"/);
   assert.match(html, /id="conversationActionMenu"[^>]*role="menu"[^>]*hidden/);
   assert.match(html, /data-action="delete-conversation"/);

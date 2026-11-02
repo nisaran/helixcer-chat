@@ -155,6 +155,7 @@
     workspaceProfileLoaded: false,
     workspaceProfileLoading: false,
     team: { members: [], invitations: [] },
+    roles: { items: [], catalog: [], selectedKey: "", draft: null, dirty: false, loading: false, saving: false },
     apiKeys: [],
     authStatus: "checking",
     api: null,
@@ -248,6 +249,161 @@
     ["#f3ead7", "#8c672e"],
   ];
 
+  const ROLE_PERMISSION_CATALOG = [
+    {
+      key: "chats",
+      label: "Chats / Inbox",
+      fields: [
+        { key: "view", label: "View chats", type: "scope", options: [
+          { value: "all", label: "All conversations" },
+          { value: "assigned", label: "Assigned to me only" },
+          { value: "none", label: "No access" },
+        ]},
+        { key: "reply", label: "Reply to chats", type: "scope", options: [
+          { value: "all", label: "Reply to all" },
+          { value: "assigned", label: "Reply to assigned only" },
+          { value: "none", label: "Cannot reply" },
+        ]},
+        { key: "assign", label: "Assign conversations", type: "boolean" },
+        { key: "delete", label: "Delete conversations", type: "boolean" },
+      ],
+    },
+    {
+      key: "contacts",
+      label: "Contacts",
+      fields: [
+        { key: "view", label: "View contacts", type: "boolean" },
+        { key: "create", label: "Add contacts", type: "boolean" },
+        { key: "edit", label: "Edit contacts", type: "boolean" },
+        { key: "delete", label: "Delete contacts", type: "boolean" },
+      ],
+    },
+    {
+      key: "campaigns",
+      label: "Campaigns",
+      fields: [
+        { key: "view", label: "View campaigns", type: "boolean" },
+        { key: "manage", label: "Create and manage campaigns", type: "boolean" },
+      ],
+    },
+    {
+      key: "channels",
+      label: "Channels",
+      fields: [{ key: "manage", label: "Manage channels, templates, and imports", type: "boolean" }],
+    },
+    {
+      key: "developer",
+      label: "Developer API",
+      fields: [{ key: "manage", label: "Manage developer API keys", type: "boolean" }],
+    },
+    {
+      key: "team",
+      label: "Team",
+      fields: [{ key: "manage", label: "Invite and manage team members", type: "boolean" }],
+    },
+    {
+      key: "roles",
+      label: "User roles",
+      fields: [{ key: "manage", label: "Create and edit roles and permissions", type: "boolean" }],
+    },
+    {
+      key: "workspace",
+      label: "Workspace",
+      fields: [{ key: "edit", label: "Edit workspace profile", type: "boolean" }],
+    },
+  ];
+
+  function defaultRolePermissions(roleKey = "agent") {
+    if (roleKey === "owner" || roleKey === "admin") {
+      return {
+        chats: { view: "all", reply: "all", assign: true, delete: true },
+        contacts: { view: true, create: true, edit: true, delete: true },
+        campaigns: { view: true, manage: true },
+        channels: { manage: true },
+        developer: { manage: true },
+        team: { manage: true },
+        roles: { manage: true },
+        workspace: { edit: true },
+      };
+    }
+    return {
+      chats: { view: "all", reply: "all", assign: true, delete: false },
+      contacts: { view: true, create: true, edit: true, delete: false },
+      campaigns: { view: true, manage: true },
+      channels: { manage: false },
+      developer: { manage: false },
+      team: { manage: false },
+      roles: { manage: false },
+      workspace: { edit: false },
+    };
+  }
+
+  function normalizeRolePermissions(raw, roleKey = "agent") {
+    const defaults = defaultRolePermissions(roleKey);
+    const source = raw && typeof raw === "object" ? raw : {};
+    const chats = source.chats && typeof source.chats === "object" ? source.chats : {};
+    const contacts = source.contacts && typeof source.contacts === "object" ? source.contacts : {};
+    const campaigns = source.campaigns && typeof source.campaigns === "object" ? source.campaigns : {};
+    const channels = source.channels && typeof source.channels === "object" ? source.channels : {};
+    const developer = source.developer && typeof source.developer === "object" ? source.developer : {};
+    const team = source.team && typeof source.team === "object" ? source.team : {};
+    const roles = source.roles && typeof source.roles === "object" ? source.roles : {};
+    const workspace = source.workspace && typeof source.workspace === "object" ? source.workspace : {};
+    const scopes = new Set(["all", "assigned", "none"]);
+    const view = scopes.has(chats.view) ? chats.view : defaults.chats.view;
+    let reply = scopes.has(chats.reply) ? chats.reply : defaults.chats.reply;
+    if (view === "none") reply = "none";
+    else if (view === "assigned" && reply === "all") reply = "assigned";
+    const asBool = (value, fallback) => (typeof value === "boolean" ? value : Boolean(fallback));
+    return {
+      chats: {
+        view,
+        reply,
+        assign: view === "none" ? false : asBool(chats.assign, defaults.chats.assign),
+        delete: view === "none" ? false : asBool(chats.delete, defaults.chats.delete),
+      },
+      contacts: {
+        view: asBool(contacts.view, defaults.contacts.view),
+        create: asBool(contacts.create, defaults.contacts.create),
+        edit: asBool(contacts.edit, defaults.contacts.edit),
+        delete: asBool(contacts.delete, defaults.contacts.delete),
+      },
+      campaigns: {
+        view: asBool(campaigns.view, defaults.campaigns.view),
+        manage: asBool(campaigns.manage, defaults.campaigns.manage),
+      },
+      channels: { manage: asBool(channels.manage, defaults.channels.manage) },
+      developer: { manage: asBool(developer.manage, defaults.developer.manage) },
+      team: { manage: asBool(team.manage, defaults.team.manage) },
+      roles: { manage: asBool(roles.manage, defaults.roles.manage) },
+      workspace: { edit: asBool(workspace.edit, defaults.workspace.edit) },
+    };
+  }
+
+  function demoRolesSeed() {
+    const now = new Date().toISOString();
+    return [
+      {
+        roleId: "role-owner", roleKey: "owner", name: "Owner",
+        description: "Full control of the workspace. Permissions cannot be reduced.",
+        isSystem: true, isLocked: true, sortOrder: 1, memberCount: 1,
+        permissions: defaultRolePermissions("owner"), createdAt: now, updatedAt: now,
+      },
+      {
+        roleId: "role-admin", roleKey: "admin", name: "Admin",
+        description: "Manage team, channels, developer access, and customer conversations.",
+        isSystem: true, isLocked: false, sortOrder: 2, memberCount: 1,
+        permissions: defaultRolePermissions("admin"), createdAt: now, updatedAt: now,
+      },
+      {
+        roleId: "role-agent", roleKey: "agent", name: "Agent",
+        description: "Handle assigned customer chats and contacts without admin settings.",
+        isSystem: true, isLocked: false, sortOrder: 3, memberCount: 1,
+        permissions: defaultRolePermissions("agent"), createdAt: now, updatedAt: now,
+      },
+    ];
+  }
+
   const demoSeed = () => {
     const now = Date.now();
     const ago = (minutes) => new Date(now - minutes * 60_000).toISOString();
@@ -266,8 +422,10 @@
         },
         workspace: { ...workspaceProfile, name: workspaceProfile.displayName, slug: "helixcer" },
         membership: { membershipId: "demo-membership-owner", role: "owner", status: "active" },
+        permissions: defaultRolePermissions("owner"),
       },
       workspaceProfile,
+      roles: demoRolesSeed(),
       team: {
         members: [
           { membershipId: "demo-membership-owner", userId: "demo-owner", email: "owner@helixcer.example", displayName: "Nisar", avatarUrl: "", role: "owner", status: "active", createdAt: ago(43200) },
@@ -561,6 +719,60 @@
       return clone(this.data.team);
     }
 
+    async getRoles() {
+      await smallDelay(120);
+      return { items: clone(this.data.roles), catalog: ROLE_PERMISSION_CATALOG };
+    }
+
+    async createRole(payload) {
+      await smallDelay(140);
+      const name = String(payload.name || "").trim();
+      if (!name) throw new Error("Role name is required.");
+      const roleKey = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "role";
+      if (this.data.roles.some((role) => role.roleKey === roleKey)) throw new Error("A role with that name already exists.");
+      const now = new Date().toISOString();
+      const item = {
+        roleId: `role-${Date.now().toString(36)}`,
+        roleKey,
+        name,
+        description: String(payload.description || "").trim(),
+        isSystem: false,
+        isLocked: false,
+        sortOrder: this.data.roles.length + 1,
+        memberCount: 0,
+        permissions: normalizeRolePermissions(payload.permissions, roleKey),
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.data.roles.push(item);
+      return { ok: true, item: clone(item) };
+    }
+
+    async updateRole(roleKey, payload) {
+      await smallDelay(140);
+      const item = this.data.roles.find((role) => role.roleKey === roleKey);
+      if (!item) throw new Error("Role not found.");
+      if (item.isLocked || item.roleKey === "owner") throw new Error("The owner role permissions cannot be changed.");
+      if (payload.name !== undefined) item.name = String(payload.name || "").trim() || item.name;
+      if (payload.description !== undefined) item.description = String(payload.description || "").trim();
+      if (payload.permissions !== undefined) item.permissions = normalizeRolePermissions(payload.permissions, item.roleKey);
+      item.updatedAt = new Date().toISOString();
+      return { ok: true, item: clone(item) };
+    }
+
+    async deleteRole(roleKey) {
+      await smallDelay(100);
+      const index = this.data.roles.findIndex((role) => role.roleKey === roleKey);
+      if (index < 0) throw new Error("Role not found.");
+      const item = this.data.roles[index];
+      if (item.isSystem) throw new Error("System roles cannot be deleted.");
+      if (this.data.team.members.some((member) => member.role === roleKey)) {
+        throw new Error("Reassign members before deleting this role.");
+      }
+      this.data.roles.splice(index, 1);
+      return { ok: true, roleKey };
+    }
+
     async getApiKeys() {
       await smallDelay(100);
       return { items: clone(this.data.apiKeys) };
@@ -600,7 +812,9 @@
         status: "pending",
         createdAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + 7 * 86400_000).toISOString(),
-        allowedChannelIds: payload.role === "agent" ? asItems(payload.allowedChannelIds).map(String) : [],
+        allowedChannelIds: ["agent"].includes(payload.role) || (payload.role !== "admin" && payload.role !== "owner")
+          ? asItems(payload.allowedChannelIds).map(String)
+          : [],
       };
       this.data.team.invitations.unshift(invitation);
       return { ok: true, invitation: clone(invitation), inviteUrl: `${location.origin}${location.pathname}?invite=${suffix}` };
@@ -1493,6 +1707,28 @@
       return this.isDemo ? this.demo.getTeam() : this.request("/api/team");
     }
 
+    getRoles() {
+      return this.isDemo ? this.demo.getRoles() : this.request("/api/roles");
+    }
+
+    createRole(payload) {
+      return this.isDemo
+        ? this.demo.createRole(payload)
+        : this.request("/api/roles", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    updateRole(roleKey, payload) {
+      return this.isDemo
+        ? this.demo.updateRole(roleKey, payload)
+        : this.request(`/api/roles/${encodeURIComponent(roleKey)}`, { method: "PATCH", body: JSON.stringify(payload) });
+    }
+
+    deleteRole(roleKey) {
+      return this.isDemo
+        ? this.demo.deleteRole(roleKey)
+        : this.request(`/api/roles/${encodeURIComponent(roleKey)}`, { method: "DELETE" });
+    }
+
     getApiKeys() {
       return this.isDemo ? this.demo.getApiKeys() : this.request("/api/developer/api-keys");
     }
@@ -1651,6 +1887,7 @@
     const source = payload?.me || payload || {};
     const user = source.user || {};
     const membership = source.membership || {};
+    const role = String(membership.role || "agent");
     return {
       authenticated: source.authenticated !== false,
       userId: String(user.userId || user.id || ""),
@@ -1665,9 +1902,10 @@
       postalCode: String(user.postalCode || ""),
       country: String(user.country || ""),
       membershipId: String(membership.membershipId || membership.id || ""),
-      role: ["owner", "admin", "agent"].includes(membership.role) ? membership.role : "agent",
+      role: role || "agent",
       status: membership.status || "active",
       allowedChannelIds: normalizeAllowedChannelIds(membership.allowedChannelIds ?? membership.allowed_channel_ids),
+      permissions: normalizeRolePermissions(source.permissions || membership.permissions, role),
       workspace: source.workspace || { workspaceId: "default", name: DEFAULT_WORKSPACE, slug: "helixcer" },
     };
   }
@@ -1706,11 +1944,43 @@
   }
 
   function canAdmin() {
-    return state.currentUser && ["owner", "admin"].includes(state.currentUser.role);
+    return hasPermission("team.manage")
+      || hasPermission("channels.manage")
+      || hasPermission("developer.manage")
+      || hasPermission("roles.manage")
+      || hasPermission("workspace.edit");
   }
 
   function isOwner() {
     return state.currentUser?.role === "owner";
+  }
+
+  function hasPermission(path) {
+    if (!state.currentUser) return false;
+    if (state.currentUser.role === "owner") return true;
+    const [group, field] = String(path || "").split(".");
+    const value = state.currentUser.permissions?.[group]?.[field];
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") return value !== "none";
+    if (["channels.manage", "developer.manage", "team.manage", "roles.manage", "workspace.edit",
+      "contacts.delete", "chats.delete"].includes(path)) {
+      return ["owner", "admin"].includes(state.currentUser.role);
+    }
+    return true;
+  }
+
+  function chatPermissionScope(action = "view") {
+    if (!state.currentUser) return "none";
+    if (state.currentUser.role === "owner") return "all";
+    const value = state.currentUser.permissions?.chats?.[action];
+    return ["all", "assigned", "none"].includes(value) ? value : "all";
+  }
+
+  function hasChatReplyAccess(conversation) {
+    const scope = chatPermissionScope("reply");
+    if (scope === "none") return false;
+    if (scope === "assigned") return isAssignedToCurrentUser(conversation);
+    return true;
   }
 
   function updateWorkspaceIdentity(profile = state.workspaceProfile || normalizeWorkspaceProfile(state.workspace)) {
@@ -1722,15 +1992,15 @@
 
   function setWorkspaceFormBusy(busy) {
     state.workspaceProfileLoading = busy;
-    const admin = canAdmin();
-    const editable = admin && state.workspaceProfileLoaded;
+    const editablePermission = hasPermission("workspace.edit");
+    const editable = editablePermission && state.workspaceProfileLoaded;
     $("workspaceProfileForm").querySelectorAll("input, textarea").forEach((field) => {
       const readOnly = field.hasAttribute("data-workspace-immutable") || busy || !editable;
       field.readOnly = readOnly;
       field.setAttribute("aria-readonly", String(readOnly));
     });
     $("workspaceSaveButton").disabled = busy || !editable;
-    $("workspaceReadonlyNote").hidden = admin;
+    $("workspaceReadonlyNote").hidden = editablePermission;
   }
 
   function renderWorkspaceProfile() {
@@ -1775,7 +2045,7 @@
   }
 
   async function saveWorkspaceProfile(form) {
-    if (!canAdmin() || state.workspaceProfileLoading) return;
+    if (!hasPermission("workspace.edit") || state.workspaceProfileLoading) return;
     const gstinField = $("workspaceGstin");
     const gstin = gstinField.value.trim().toUpperCase();
     gstinField.value = gstin;
@@ -1869,11 +2139,21 @@
   }
 
   function applyPermissions() {
-    const admin = canAdmin();
-    document.querySelectorAll("[data-admin-only]").forEach((node) => { node.hidden = !admin; });
+    document.querySelectorAll("[data-admin-only]").forEach((node) => { node.hidden = !canAdmin(); });
+    document.querySelectorAll("[data-permission]").forEach((node) => {
+      node.hidden = !hasPermission(node.dataset.permission);
+    });
     document.querySelectorAll("[data-owner-only]").forEach((node) => { node.hidden = !isOwner(); node.disabled = !isOwner(); });
     setWorkspaceFormBusy(state.workspaceProfileLoading);
-    if (!admin && ["channels", "whatsapp-templates", "import-chat", "developer", "team"].includes(state.route)) setRoute("inbox");
+    const blockedRoutes = [];
+    if (!hasPermission("contacts.view")) blockedRoutes.push("contacts");
+    if (!hasPermission("campaigns.view")) blockedRoutes.push("campaigns");
+    if (!hasPermission("channels.manage")) blockedRoutes.push("channels", "whatsapp-templates", "import-chat");
+    if (!hasPermission("developer.manage")) blockedRoutes.push("developer");
+    if (!hasPermission("team.manage")) blockedRoutes.push("team");
+    if (!hasPermission("roles.manage")) blockedRoutes.push("roles");
+    if (chatPermissionScope("view") === "none") blockedRoutes.push("inbox");
+    if (blockedRoutes.includes(state.route)) setRoute(chatPermissionScope("view") === "none" ? "settings" : "inbox");
   }
 
   async function initializeSession() {
@@ -1907,8 +2187,9 @@
       showApplication(auth);
       await Promise.all([
         loadAll({ preserveSelection: false }),
-        canAdmin() ? loadTeam() : Promise.resolve(),
-        canAdmin() ? loadApiKeys() : Promise.resolve(),
+        hasPermission("team.manage") ? loadTeam() : Promise.resolve(),
+        hasPermission("roles.manage") ? loadRoles() : Promise.resolve(),
+        hasPermission("developer.manage") ? loadApiKeys() : Promise.resolve(),
         prepareBrowserPush(),
       ]);
       await applyLocationRoute();
@@ -2752,7 +3033,7 @@
     renderContacts();
     renderChannels();
     populateAssigneeSelect();
-    if (canAdmin()) renderApiKeys();
+    if (hasPermission("developer.manage")) renderApiKeys();
     renderNotificationSetting();
     renderSelectedConversation();
   }
@@ -2857,19 +3138,22 @@
   }
 
   function filteredConversations() {
+    const viewScope = chatPermissionScope("view");
     if (state.inboxFocusConversationId) {
       return unifiedConversations()
         .filter((item) => item.conversationId === state.inboxFocusConversationId)
+        .filter((item) => viewScope !== "assigned" || isAssignedToCurrentUser(item))
         .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
     }
     const selected = state.filters;
-    if (selected.size === 0) return [];
+    if (selected.size === 0 || viewScope === "none") return [];
     const showingAll = isAllConversationFilters(selected);
     const statusFilters = showingAll ? [] : ["open", "closed"].filter((filter) => selected.has(filter));
     const assignmentFilters = showingAll ? [] : ["mine", "unassigned"].filter((filter) => selected.has(filter));
     // Text search is server-side (`refreshInboxCatalogue` / load-more with q).
     return unifiedConversations()
       .filter((item) => {
+        if (viewScope === "assigned" && !isAssignedToCurrentUser(item)) return false;
         if (statusFilters.length && !statusFilters.some((filter) => filter === "open" ? item.status !== "closed" : item.status === "closed")) return false;
         if (assignmentFilters.length && !assignmentFilters.some((filter) => filter === "mine"
           ? isAssignedToCurrentUser(item)
@@ -3029,8 +3313,8 @@
     if (countNode) countNode.textContent = selectedCount === 1 ? "1 selected" : `${selectedCount} selected`;
     if (closeButton) closeButton.disabled = state.bulkActionBusy || !selectedCount;
     if (deleteButton) {
-      deleteButton.hidden = !canAdmin();
-      deleteButton.disabled = state.bulkActionBusy || !selectedCount || !canAdmin();
+      deleteButton.hidden = !hasPermission("chats.delete");
+      deleteButton.disabled = state.bulkActionBusy || !selectedCount || !hasPermission("chats.delete");
     }
   }
 
@@ -4218,25 +4502,32 @@
     const route = selectedComposerRoute(conversation);
     const whatsapp = isWhatsAppRoute(route);
     const windowState = whatsappReplyWindow(conversation, route);
-    const blocked = Boolean(conversation && whatsapp && !windowState.allowed);
+    const permissionBlocked = Boolean(conversation && !hasChatReplyAccess(conversation));
+    const windowBlocked = Boolean(conversation && whatsapp && !windowState.allowed);
+    const blocked = permissionBlocked || windowBlocked;
     const input = $("messageInput");
     const send = $("sendButton");
     const attach = $("attachmentButton");
     const greeting = document.querySelector('#messageForm [data-action="insert-greeting"]');
     const template = $("templateButton");
     renderComposerReply();
-    template.hidden = !whatsapp;
+    template.hidden = !whatsapp || permissionBlocked;
     input.disabled = blocked;
     send.disabled = blocked;
     const attachmentSupported = supportsChatAttachments(conversation);
     attach.disabled = blocked || !attachmentSupported;
     greeting.disabled = blocked;
-    input.placeholder = blocked
-      ? "The customer has not messaged on WhatsApp in the last 24 hours. You can only send approved WhatsApp message templates"
-      : "Message...";
+    input.placeholder = permissionBlocked
+      ? (chatPermissionScope("reply") === "assigned"
+        ? "You can only reply to conversations assigned to you"
+        : "You do not have permission to reply")
+      : windowBlocked
+        ? "The customer has not messaged on WhatsApp in the last 24 hours. You can only send approved WhatsApp message templates"
+        : "Message...";
     $("messageForm").classList.toggle("is-window-closed", blocked);
-    attach.title = !attachmentSupported ? "Attachments are available for WhatsApp, Telegram, Messenger, and Instagram conversations"
-      : blocked ? "Send an approved template to reopen the conversation" : "Attach files";
+    attach.title = permissionBlocked ? "You cannot reply in this conversation"
+      : !attachmentSupported ? "Attachments are available for WhatsApp, Telegram, Messenger, and Instagram conversations"
+      : windowBlocked ? "Send an approved template to reopen the conversation" : "Attach files";
     renderComposerRouteControl(conversation, route);
     renderAttachmentQueue();
     syncWhatsAppReplyCountdown(conversation);
@@ -4823,12 +5114,12 @@
     const countNode = $("contactSelectedCount");
     const deleteButton = $("contactBulkDelete");
     if (toggle) {
-      toggle.hidden = !canAdmin();
+      toggle.hidden = !hasPermission("contacts.delete");
       toggle.setAttribute("aria-pressed", String(state.contactSelectMode));
       toggle.classList.toggle("is-active", state.contactSelectMode);
     }
     if (!bar) return;
-    bar.hidden = !state.contactSelectMode || !canAdmin();
+    bar.hidden = !state.contactSelectMode || !hasPermission("contacts.delete");
     if (!state.contactSelectMode) return;
     const visibleIds = visibleContactIds(contacts);
     const selectedVisible = visibleIds.filter((id) => state.selectedContactIds.has(id));
@@ -4853,7 +5144,7 @@
   }
 
   function setContactSelectMode(enabled) {
-    if (!canAdmin()) {
+    if (!hasPermission("contacts.delete")) {
       state.contactSelectMode = false;
       state.selectedContactIds = new Set();
       renderContacts();
@@ -5490,7 +5781,7 @@
     $("contactEditorStatus").textContent = loading ? "Loading contact details…" : error || "Choose a contact to view the details.";
     fields.hidden = !contact || loading || Boolean(error);
     actions.hidden = fields.hidden;
-    $("contactDeleteButton").hidden = !canAdmin();
+    $("contactDeleteButton").hidden = !hasPermission("contacts.delete");
     if (!contact || fields.hidden) return;
     const normalized = normalizeContact(contact);
     $("contactEditorTitle").textContent = normalized.displayName;
@@ -5632,7 +5923,7 @@
   async function deleteSelectedContact() {
     const contactId = String(state.selectedContactId || "");
     const contact = state.contacts.find((item) => item.contactId === contactId);
-    if (!canAdmin() || !contact) return;
+    if (!hasPermission("contacts.delete") || !contact) return;
     const relatedConversations = state.conversations.filter((conversation) => conversation.contactId === contactId);
     const confirmed = await requestConfirmation({
       title: `Delete ${contact.displayName}?`,
@@ -6214,6 +6505,7 @@
   }
 
   function normalizeMember(raw) {
+    const role = String(raw.role || "agent").trim() || "agent";
     return {
       ...raw,
       membershipId: String(raw.membershipId || raw.id || ""),
@@ -6221,7 +6513,7 @@
       email: String(raw.email || raw.user?.email || ""),
       displayName: raw.displayName || raw.user?.displayName || raw.email?.split("@")[0] || "Team member",
       avatarUrl: raw.avatarUrl || raw.user?.avatarUrl || "",
-      role: ["owner", "admin", "agent"].includes(raw.role) ? raw.role : "agent",
+      role,
       status: raw.status || "active",
       createdAt: raw.createdAt || new Date().toISOString(),
       allowedChannelIds: normalizeAllowedChannelIds(raw.allowedChannelIds ?? raw.allowed_channel_ids),
@@ -6233,7 +6525,7 @@
       ...raw,
       invitationId: String(raw.invitationId || raw.id || ""),
       email: String(raw.email || ""),
-      role: ["owner", "admin", "agent"].includes(raw.role) ? raw.role : "agent",
+      role: String(raw.role || "agent").trim() || "agent",
       status: raw.status || "pending",
       createdAt: raw.createdAt || new Date().toISOString(),
       expiresAt: raw.expiresAt || "",
@@ -6267,7 +6559,7 @@
   }
 
   async function loadApiKeys() {
-    if (!canAdmin()) {
+    if (!hasPermission("developer.manage")) {
       state.apiKeys = [];
       renderApiKeys();
       return;
@@ -6367,7 +6659,7 @@
 
   async function deleteDeveloperApiKey(apiKeyId, button) {
     const apiKey = state.apiKeys.find((item) => item.apiKeyId === apiKeyId);
-    if (!canAdmin() || !apiKey) return;
+    if (!hasPermission("developer.manage") || !apiKey) return;
     const confirmed = await requestConfirmation({
       title: `Delete ${apiKey.name}?`,
       message: "This permanently deletes this API key from Helixcer. Any app using it will lose access immediately.",
@@ -6398,7 +6690,7 @@
   }
 
   async function loadTeam() {
-    if (!canAdmin()) {
+    if (!hasPermission("team.manage")) {
       state.team = { members: [], invitations: [] };
       renderTeam();
       return;
@@ -6412,6 +6704,34 @@
     } catch (error) {
       if (error.status !== 403) showToast("Team could not be loaded", error.message, true);
     }
+  }
+
+  function roleOptionLabel(roleKey) {
+    const role = state.roles.items.find((item) => item.roleKey === roleKey);
+    return role?.name || capitalize(roleKey);
+  }
+
+  function isElevatedRoleKey(roleKey) {
+    if (roleKey === "owner" || roleKey === "admin") return true;
+    const role = state.roles.items.find((item) => item.roleKey === roleKey);
+    const permissions = role?.permissions || defaultRolePermissions(roleKey);
+    return Boolean(permissions.team?.manage || permissions.roles?.manage
+      || permissions.channels?.manage || permissions.developer?.manage || permissions.workspace?.edit);
+  }
+
+  function roleUsesChannelPicker(roleKey) {
+    if (roleKey === "owner" || roleKey === "admin") return false;
+    const role = state.roles.items.find((item) => item.roleKey === roleKey);
+    if (role?.permissions?.channels?.manage) return false;
+    return true;
+  }
+
+  function assignableRoleKeys({ includeOwner = false } = {}) {
+    const keys = state.roles.items
+      .map((role) => role.roleKey)
+      .filter((key) => includeOwner || key !== "owner");
+    if (!keys.length) return includeOwner ? ["owner", "admin", "agent"] : ["admin", "agent"];
+    return keys;
   }
 
   function renderTeam() {
@@ -6438,7 +6758,7 @@
       avatar.style.color = palette[1];
       const copy = document.createElement("div");
       copy.append(element("strong", "", member.displayName), element("span", "", member.email));
-      if (member.role === "agent") {
+      if (roleUsesChannelPicker(member.role)) {
         copy.append(element("span", "subtle", agentChannelAccessLabel(member.allowedChannelIds)));
       }
       identity.append(avatar, copy);
@@ -6448,16 +6768,17 @@
       const roleCell = document.createElement("td");
       const roleSelect = element("select", "compact-select role-select");
       roleSelect.dataset.memberRole = member.membershipId;
-      ["owner", "admin", "agent"].forEach((role) => {
+      const roleKeys = new Set(["owner", ...assignableRoleKeys({ includeOwner: true }), member.role]);
+      [...roleKeys].forEach((role) => {
         const option = document.createElement("option");
         option.value = role;
-        option.textContent = capitalize(role);
+        option.textContent = roleOptionLabel(role);
         option.disabled = role === "owner" && !isOwner();
         roleSelect.append(option);
       });
       roleSelect.value = member.role;
       const isCurrentOwner = member.membershipId === state.currentUser?.membershipId && member.role === "owner";
-      roleSelect.disabled = !isOwner() && member.role === "owner" || isCurrentOwner;
+      roleSelect.disabled = !isOwner() && (member.role === "owner" || isElevatedRoleKey(member.role)) || isCurrentOwner;
       roleCell.append(roleSelect);
       row.append(roleCell);
 
@@ -6475,10 +6796,10 @@
       remove.type = "button";
       remove.dataset.deleteMember = member.membershipId;
       const deletingSelf = member.membershipId === state.currentUser?.membershipId;
-      const outsideAdminScope = !isOwner() && member.role !== "agent";
+      const outsideAdminScope = !isOwner() && isElevatedRoleKey(member.role);
       remove.disabled = deletingSelf || outsideAdminScope;
       if (deletingSelf) remove.title = "You cannot delete your own workspace membership.";
-      else if (outsideAdminScope) remove.title = "Only an owner can delete an administrator or owner.";
+      else if (outsideAdminScope) remove.title = "Only an owner can delete an elevated role.";
       actionWrap.append(toggle, remove);
       actionCell.append(actionWrap);
       row.append(actionCell);
@@ -6493,12 +6814,12 @@
     invitations.forEach((invitation) => {
       const item = element("div", "invitation-item");
       const copy = document.createElement("div");
-      const channelSummary = invitation.role === "agent"
+      const channelSummary = roleUsesChannelPicker(invitation.role)
         ? agentChannelAccessLabel(invitation.allowedChannelIds)
         : "All channels";
       copy.append(
         element("strong", "", invitation.email),
-        element("span", "", `${capitalize(invitation.role)} · waiting for sign-in · ${channelSummary}`)
+        element("span", "", `${roleOptionLabel(invitation.role)} · waiting for sign-in · ${channelSummary}`)
       );
       const time = document.createElement("time");
       time.dateTime = invitation.expiresAt;
@@ -6511,6 +6832,244 @@
     });
   }
 
+  async function loadRoles() {
+    if (!hasPermission("roles.manage")) {
+      state.roles = { ...state.roles, items: [], catalog: ROLE_PERMISSION_CATALOG, draft: null, dirty: false };
+      renderRolesPage();
+      return;
+    }
+    state.roles.loading = true;
+    try {
+      const data = await state.api.getRoles();
+      state.roles.items = asItems(data.items).map((role) => ({
+        ...role,
+        permissions: normalizeRolePermissions(role.permissions, role.roleKey),
+      }));
+      state.roles.catalog = asItems(data.catalog).length ? data.catalog : ROLE_PERMISSION_CATALOG;
+      if (!state.roles.selectedKey || !state.roles.items.some((role) => role.roleKey === state.roles.selectedKey)) {
+        state.roles.selectedKey = state.roles.items[0]?.roleKey || "";
+      }
+      selectRoleDraft(state.roles.selectedKey, { force: true });
+      renderRolesPage();
+      if (state.route === "team") renderTeam();
+    } catch (error) {
+      if (error.status !== 403) showToast("Roles could not be loaded", error.message, true);
+    } finally {
+      state.roles.loading = false;
+    }
+  }
+
+  function selectRoleDraft(roleKey, { force = false } = {}) {
+    const role = state.roles.items.find((item) => item.roleKey === roleKey);
+    if (!role) {
+      state.roles.selectedKey = "";
+      state.roles.draft = null;
+      state.roles.dirty = false;
+      return;
+    }
+    if (!force && state.roles.dirty && state.roles.selectedKey && state.roles.selectedKey !== roleKey) {
+      // Keep unsaved edits until the operator saves or switches intentionally.
+    }
+    state.roles.selectedKey = role.roleKey;
+    state.roles.draft = {
+      roleKey: role.roleKey,
+      name: role.name,
+      description: role.description || "",
+      isLocked: Boolean(role.isLocked || role.roleKey === "owner"),
+      isSystem: Boolean(role.isSystem),
+      permissions: normalizeRolePermissions(role.permissions, role.roleKey),
+    };
+    state.roles.dirty = false;
+  }
+
+  function renderRolesPage() {
+    const list = $("rolesList");
+    const matrix = $("rolesPermissionMatrix");
+    const emptyHint = $("rolesEmptyHint");
+    if (!list || !matrix) return;
+    $("rolesCount").textContent = `${state.roles.items.length} role${state.roles.items.length === 1 ? "" : "s"}`;
+    list.replaceChildren();
+    state.roles.items.forEach((role) => {
+      const button = element("button", `role-list-item${role.roleKey === state.roles.selectedKey ? " is-active" : ""}`);
+      button.type = "button";
+      button.dataset.selectRole = role.roleKey;
+      button.setAttribute("role", "listitem");
+      button.append(
+        element("strong", "", role.name),
+        element("span", "", role.description || `${role.memberCount || 0} member${Number(role.memberCount || 0) === 1 ? "" : "s"}`)
+      );
+      if (role.isSystem) button.append(element("em", "", role.isLocked ? "System · locked" : "System"));
+      list.append(button);
+    });
+
+    const draft = state.roles.draft;
+    const locked = Boolean(draft?.isLocked);
+    $("roleEditorTitle").textContent = draft ? draft.name : "Select a role";
+    $("roleEditorMeta").textContent = draft
+      ? (locked ? "Owner access is always full and cannot be reduced." : "Adjust what this role can view, edit, and manage.")
+      : "Choose a role to review or change its permissions.";
+    $("roleNameInput").value = draft?.name || "";
+    $("roleDescriptionInput").value = draft?.description || "";
+    $("roleNameInput").disabled = !draft || locked;
+    $("roleDescriptionInput").disabled = !draft || locked;
+    $("roleLockedNote").hidden = !locked;
+    $("deleteRoleButton").hidden = !draft || draft.isSystem || locked;
+    $("saveRoleButton").disabled = !draft || locked || !state.roles.dirty || state.roles.saving;
+    emptyHint.hidden = Boolean(draft);
+    matrix.replaceChildren();
+    if (!draft) return;
+
+    const catalog = state.roles.catalog.length ? state.roles.catalog : ROLE_PERMISSION_CATALOG;
+    catalog.forEach((group) => {
+      const section = element("section", "role-permission-group");
+      const header = document.createElement("header");
+      header.append(element("strong", "", group.label), element("span", "", `${group.fields.length} setting${group.fields.length === 1 ? "" : "s"}`));
+      const rows = element("div", "role-permission-rows");
+      group.fields.forEach((field) => {
+        const row = element("div", "role-permission-row");
+        const label = document.createElement("label");
+        label.append(element("strong", "", field.label));
+        const controlWrap = element("div", "role-permission-control");
+        const current = draft.permissions?.[group.key]?.[field.key];
+        if (field.type === "scope") {
+          const select = element("select", "compact-select");
+          select.dataset.permissionGroup = group.key;
+          select.dataset.permissionField = field.key;
+          select.disabled = locked;
+          asItems(field.options).forEach((option) => {
+            const node = document.createElement("option");
+            node.value = option.value;
+            node.textContent = option.label;
+            select.append(node);
+          });
+          select.value = current;
+          controlWrap.append(select);
+        } else {
+          const toggle = document.createElement("label");
+          toggle.className = "switch-control";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = Boolean(current);
+          input.disabled = locked;
+          input.dataset.permissionGroup = group.key;
+          input.dataset.permissionField = field.key;
+          toggle.append(input, document.createElement("span"), Object.assign(document.createElement("em"), { textContent: "Allow" }));
+          controlWrap.append(toggle);
+        }
+        row.append(label, controlWrap);
+        rows.append(row);
+      });
+      section.append(header, rows);
+      matrix.append(section);
+    });
+  }
+
+  function markRoleDraftDirty() {
+    state.roles.dirty = true;
+    $("saveRoleButton").disabled = Boolean(state.roles.draft?.isLocked) || state.roles.saving;
+  }
+
+  function updateRoleDraftFromControls(target) {
+    if (!state.roles.draft || !target?.dataset?.permissionGroup) return;
+    const group = target.dataset.permissionGroup;
+    const field = target.dataset.permissionField;
+    if (!state.roles.draft.permissions[group]) state.roles.draft.permissions[group] = {};
+    if (target.type === "checkbox") state.roles.draft.permissions[group][field] = target.checked;
+    else state.roles.draft.permissions[group][field] = target.value;
+    state.roles.draft.permissions = normalizeRolePermissions(state.roles.draft.permissions, state.roles.draft.roleKey);
+    markRoleDraftDirty();
+    renderRolesPage();
+  }
+
+  async function saveSelectedRole() {
+    const draft = state.roles.draft;
+    if (!draft || draft.isLocked || state.roles.saving) return;
+    state.roles.saving = true;
+    $("saveRoleButton").disabled = true;
+    try {
+      const result = await state.api.updateRole(draft.roleKey, {
+        name: $("roleNameInput").value.trim(),
+        description: $("roleDescriptionInput").value.trim(),
+        permissions: draft.permissions,
+      });
+      const item = {
+        ...result.item,
+        permissions: normalizeRolePermissions(result.item.permissions, result.item.roleKey),
+      };
+      state.roles.items = state.roles.items.map((role) => role.roleKey === item.roleKey ? item : role);
+      selectRoleDraft(item.roleKey, { force: true });
+      renderRolesPage();
+      showToast("Role saved", `${item.name} permissions are up to date.`);
+    } catch (error) {
+      showToast("Role was not saved", error.message, true);
+    } finally {
+      state.roles.saving = false;
+      $("saveRoleButton").disabled = !state.roles.dirty || Boolean(state.roles.draft?.isLocked);
+    }
+  }
+
+  async function createRoleFromForm(form) {
+    const data = new FormData(form);
+    const payload = {
+      name: String(data.get("name") || "").trim(),
+      description: String(data.get("description") || "").trim(),
+      permissions: defaultRolePermissions("agent"),
+    };
+    if (!payload.name) return;
+    try {
+      const result = await state.api.createRole(payload);
+      const item = {
+        ...result.item,
+        permissions: normalizeRolePermissions(result.item.permissions, result.item.roleKey),
+      };
+      state.roles.items.push(item);
+      state.roles.items.sort((left, right) => (left.sortOrder || 100) - (right.sortOrder || 100) || left.name.localeCompare(right.name));
+      selectRoleDraft(item.roleKey, { force: true });
+      renderRolesPage();
+      $("createRoleDialog").close();
+      form.reset();
+      showToast("Role created", item.name);
+    } catch (error) {
+      showToast("Role was not created", error.message, true);
+    }
+  }
+
+  async function deleteSelectedRole() {
+    const draft = state.roles.draft;
+    if (!draft || draft.isSystem || draft.isLocked) return;
+    const confirmed = await requestConfirmation({
+      title: `Delete ${draft.name}?`,
+      message: "This removes the custom role. Members must be reassigned first.",
+      note: "System roles like Owner, Admin, and Agent cannot be deleted.",
+      confirmLabel: "Delete role",
+    });
+    if (!confirmed) return;
+    try {
+      await state.api.deleteRole(draft.roleKey);
+      state.roles.items = state.roles.items.filter((role) => role.roleKey !== draft.roleKey);
+      selectRoleDraft(state.roles.items[0]?.roleKey || "", { force: true });
+      renderRolesPage();
+      showToast("Role deleted", draft.name);
+    } catch (error) {
+      showToast("Role was not deleted", error.message, true);
+    }
+  }
+
+  function populateInviteRoleOptions() {
+    const select = $("inviteRole");
+    if (!select) return;
+    const previous = select.value || "agent";
+    const options = assignableRoleKeys().filter((key) => isOwner() || !isElevatedRoleKey(key));
+    select.replaceChildren();
+    (options.length ? options : ["agent"]).forEach((roleKey) => {
+      const option = document.createElement("option");
+      option.value = roleKey;
+      option.textContent = roleOptionLabel(roleKey);
+      select.append(option);
+    });
+    select.value = options.includes(previous) ? previous : (options.includes("agent") ? "agent" : options[0]);
+  }
+
   function openInviteDialog() {
     const form = $("inviteForm");
     form.reset();
@@ -6518,6 +7077,7 @@
     $("inviteResult").hidden = true;
     $("inviteSubmit").hidden = false;
     applyPermissions();
+    populateInviteRoleOptions();
     renderInviteChannelOptions(state.channels.map((channel) => channel.channelId));
     updateInviteRoleHelp();
     $("inviteDialog").showModal();
@@ -6588,13 +7148,17 @@
 
   function updateInviteRoleHelp() {
     const role = $("inviteRole").value;
+    const roleMeta = state.roles.items.find((item) => item.roleKey === role);
     const descriptions = {
       admin: "Admins can manage channels, contacts, conversations, and team members. They have access to every messaging channel.",
       agent: "Agents can manage customer conversations on the channels you select below, but cannot change channels or team access.",
     };
-    $("inviteRoleHelp").textContent = descriptions[role] || descriptions.agent;
+    $("inviteRoleHelp").textContent = roleMeta?.description || descriptions[role]
+      || (isElevatedRoleKey(role)
+        ? `${roleOptionLabel(role)} has elevated workspace access across every messaging channel.`
+        : `${roleOptionLabel(role)} can work on the channels you select below.`);
     const channelAccess = $("inviteChannelAccess");
-    if (channelAccess) channelAccess.hidden = role !== "agent";
+    if (channelAccess) channelAccess.hidden = !roleUsesChannelPicker(role);
   }
 
   async function inviteMember(form) {
@@ -6605,9 +7169,10 @@
       form.elements.email.reportValidity();
       return;
     }
-    const allowedChannelIds = role === "agent" ? selectedInviteChannelIds() : [];
-    if (role === "agent" && !allowedChannelIds.length) {
-      showToast("Choose messaging channels", "Select at least one channel this agent can use, or select all.", true);
+    const needsChannels = roleUsesChannelPicker(role);
+    const allowedChannelIds = needsChannels ? selectedInviteChannelIds() : [];
+    if (needsChannels && !allowedChannelIds.length) {
+      showToast("Choose messaging channels", "Select at least one channel this member can use, or select all.", true);
       return;
     }
     $("inviteSubmit").disabled = true;
@@ -6615,7 +7180,7 @@
       const result = await state.api.inviteMember({
         email,
         role,
-        ...(role === "agent" ? { allowedChannelIds } : {}),
+        ...(needsChannels ? { allowedChannelIds } : {}),
         return_to: location.origin,
       });
       $("inviteFields").hidden = true;
@@ -6665,8 +7230,8 @@
 
   async function deleteTeamMember(membershipId) {
     const member = state.team.members.find((item) => item.membershipId === membershipId);
-    if (!canAdmin() || !member || member.membershipId === state.currentUser?.membershipId) return;
-    if (!isOwner() && member.role !== "agent") return;
+    if (!hasPermission("team.manage") || !member || member.membershipId === state.currentUser?.membershipId) return;
+    if (!isOwner() && isElevatedRoleKey(member.role)) return;
     const confirmed = await requestConfirmation({
       title: `Delete ${member.displayName}?`,
       message: `This permanently removes ${member.email || member.displayName} from the Helixcer workspace and ends their access.`,
@@ -6741,7 +7306,7 @@
       select.append(existing);
     }
     select.value = assignedTo;
-    select.disabled = !conversation;
+    select.disabled = !conversation || !hasPermission("chats.assign");
   }
 
   function isAssignedToCurrentUser(conversation) {
@@ -8280,8 +8845,14 @@
   function setRoute(route, { preserveLocation = false } = {}) {
     closeContactRouteMenu();
     closeContactPlatformMenu();
-    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "workspace", "settings"].includes(route)) route = "inbox";
-    if (!canAdmin() && ["channels", "whatsapp-templates", "import-chat", "developer", "team"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"].includes(route)) route = "inbox";
+    if (!hasPermission("channels.manage") && ["channels", "whatsapp-templates", "import-chat"].includes(route)) route = "inbox";
+    if (!hasPermission("developer.manage") && route === "developer") route = "inbox";
+    if (!hasPermission("team.manage") && route === "team") route = "inbox";
+    if (!hasPermission("roles.manage") && route === "roles") route = "inbox";
+    if (!hasPermission("contacts.view") && route === "contacts") route = "inbox";
+    if (!hasPermission("campaigns.view") && route === "campaigns") route = "inbox";
+    if (chatPermissionScope("view") === "none" && route === "inbox") route = "settings";
     if (!preserveLocation) {
       state.pendingConversationId = null;
       if (route === "inbox") clearSelectedConversation({ updateUrl: false });
@@ -8320,7 +8891,7 @@
     const labels = {
       inbox: "Inbox", contacts: "Contacts", campaigns: "Campaign", channels: "Channels",
       "whatsapp-templates": "WhatsApp Templates", "import-chat": "Import Chat",
-      developer: "Developer API", team: "Team", workspace: "Workspace", settings: "Settings",
+      developer: "Developer API", team: "Team", roles: "Roles", workspace: "Workspace", settings: "Settings",
     };
     $("pageTitle").textContent = labels[route];
     if (route === "settings") renderNotificationSetting();
@@ -8328,6 +8899,7 @@
     if (route === "whatsapp-templates") loadWhatsAppTemplateLibrary().catch(() => {});
     if (route === "import-chat") renderImportChatPage();
     if (route === "campaigns") renderCampaignsPage();
+    if (route === "roles") loadRoles().catch(() => {});
     if (route === "contacts") {
       const hasFreshPage = !state.contactSearch.trim()
         && state.contactPage === 1
@@ -10871,8 +11443,8 @@
   async function runImportChat(event) {
     event.preventDefault();
     if (state.importChat.importing) return;
-    if (!canAdmin()) {
-      showToast("Import unavailable", "Only owners and admins can import chat history.", true);
+    if (!hasPermission("channels.manage")) {
+      showToast("Import unavailable", "You do not have permission to import chat history.", true);
       return;
     }
     const channelId = $("importChatChannel").value;
@@ -11362,7 +11934,7 @@
   async function deleteEditingChannel() {
     const channelId = String($("channelIdInput").value || "");
     const channel = state.channels.find((item) => item.channelId === channelId);
-    if (!canAdmin() || !channel) return;
+    if (!hasPermission("channels.manage") || !channel) return;
     const providerName = providerProfiles[channel.connectorType]?.label || "provider";
     const relatedConversationIds = new Set(state.conversations.filter((conversation) => conversation.channelId === channelId)
       .map((conversation) => conversation.conversationId));
@@ -11637,7 +12209,7 @@
   function toggleConversationActionMenu() {
     const menu = $("conversationActionMenu");
     const button = $("conversationMenuButton");
-    if (!canAdmin() || !selectedConversation() || !menu || !button) return;
+    if (!hasPermission("chats.delete") || !selectedConversation() || !menu || !button) return;
     const opening = menu.hidden;
     menu.hidden = !opening;
     button.setAttribute("aria-expanded", String(opening));
@@ -11675,7 +12247,7 @@
 
   async function deleteSelectedConversation() {
     const conversation = selectedConversation();
-    if (!canAdmin() || !conversation) return;
+    if (!hasPermission("chats.delete") || !conversation) return;
     closeConversationActionMenu();
     const confirmed = await requestConfirmation({
       title: `Delete conversation with ${conversation.subject}?`,
@@ -11758,7 +12330,7 @@
 
   async function bulkDeleteConversations() {
     const ids = [...state.selectedConversationIds];
-    if (!canAdmin() || !ids.length || state.bulkActionBusy) return;
+    if (!hasPermission("chats.delete") || !ids.length || state.bulkActionBusy) return;
     const confirmed = await requestConfirmation({
       title: ids.length === 1 ? "Delete this conversation?" : `Delete ${ids.length} conversations?`,
       message: "This permanently deletes the selected conversations, their message history, and attachment media from Helixcer.",
@@ -11810,7 +12382,7 @@
 
   async function bulkDeleteContacts() {
     const ids = [...state.selectedContactIds];
-    if (!canAdmin() || !ids.length || state.bulkActionBusy) return;
+    if (!hasPermission("contacts.delete") || !ids.length || state.bulkActionBusy) return;
     const confirmed = await requestConfirmation({
       title: ids.length === 1 ? "Delete this contact?" : `Delete ${ids.length} contacts?`,
       message: "This permanently deletes the selected contacts from Helixcer, including every conversation and message stored for them.",
@@ -12376,6 +12948,10 @@
           },
           "open-invite": openInviteDialog,
           "close-invite": () => $("inviteDialog").close(),
+          "open-create-role": () => { $("createRoleForm").reset(); $("createRoleDialog").showModal(); },
+          "close-create-role": () => $("createRoleDialog").close(),
+          "save-role": () => { saveSelectedRole().catch(() => {}); },
+          "delete-role": () => { deleteSelectedRole().catch(() => {}); },
           "invite-select-all-channels": toggleInviteSelectAllChannels,
           "copy-invite-link": copyInviteLink,
           "open-api-key": openApiKeyDialog,
@@ -12978,6 +13554,10 @@
       $("attachmentPreviewBody").replaceChildren();
     });
     $("inviteForm").addEventListener("submit", (event) => { event.preventDefault(); inviteMember(event.currentTarget); });
+    $("createRoleForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      createRoleFromForm(event.currentTarget).catch(() => {});
+    });
     $("apiKeyForm").addEventListener("submit", (event) => { event.preventDefault(); createDeveloperApiKey(event.currentTarget); });
     $("confirmationForm").addEventListener("submit", (event) => { event.preventDefault(); finishConfirmation(true); });
     $("confirmationDialog").addEventListener("cancel", (event) => { event.preventDefault(); finishConfirmation(false); });
@@ -12987,6 +13567,25 @@
     $("inviteRole").addEventListener("change", updateInviteRoleHelp);
     $("inviteChannelOptions")?.addEventListener("change", (event) => {
       if (event.target?.matches?.('input[type="checkbox"]')) updateInviteSelectAllLabel();
+    });
+    $("rolesList")?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-select-role]");
+      if (!button) return;
+      selectRoleDraft(button.dataset.selectRole, { force: true });
+      renderRolesPage();
+    });
+    $("roleNameInput")?.addEventListener("input", () => {
+      if (!state.roles.draft) return;
+      state.roles.draft.name = $("roleNameInput").value;
+      markRoleDraftDirty();
+    });
+    $("roleDescriptionInput")?.addEventListener("input", () => {
+      if (!state.roles.draft) return;
+      state.roles.draft.description = $("roleDescriptionInput").value;
+      markRoleDraftDirty();
+    });
+    $("rolesPermissionMatrix")?.addEventListener("change", (event) => {
+      updateRoleDraftFromControls(event.target);
     });
     $("teamTableBody").addEventListener("change", (event) => {
       const select = event.target.closest("[data-member-role]");

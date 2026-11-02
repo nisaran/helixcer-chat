@@ -8,13 +8,23 @@ import {
   logout,
   mobileAuthConfiguration,
   principalView,
-  requireRole,
   restrictedChannelIds,
   startGoogleOAuth,
   updateInvitation,
   updateMembership,
   updateUserProfile
 } from './auth.js';
+import {
+  assertChatAccess,
+  attachPrincipalPermissions,
+  chatScope,
+  createWorkspaceRole,
+  deleteWorkspaceRole,
+  hasPermission,
+  listWorkspaceRoles,
+  requirePermission,
+  updateWorkspaceRole
+} from './roles.js';
 import {
   mobilePushStatus,
   pushConfiguration,
@@ -340,7 +350,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (url.pathname === '/api/realtime' && request.headers.get('Origin') && !cors['Access-Control-Allow-Origin']) {
       return json({ ok: false, error: 'Origin not allowed.' }, 403);
     }
-    const principal = await authenticateRequest(request, env);
+    const principal = await attachPrincipalPermissions(env, await authenticateRequest(request, env));
     if (!principal) return withCors(json({ ok: false, error: 'Unauthorized.' }, 401), cors);
     if (mutation && principal.authType === 'session' && !cors['Access-Control-Allow-Origin']) {
       return json({ ok: false, error: 'Origin not allowed.' }, 403);
@@ -460,6 +470,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (url.pathname === '/api/bootstrap' && request.method === 'GET') {
       const allowedChannels = restrictedChannelIds(principal);
+      const assignedOnly = chatScope(principal, 'view') === 'assigned' ? principal : null;
       // First paint loads one page; inbox scroll and contacts pagination fetch more.
       const bootstrapUrl = withSearchParams(url, {
         limit: url.searchParams.get('limit') || String(BOOTSTRAP_CONVERSATION_LIMIT),
@@ -467,9 +478,16 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         page: url.searchParams.get('page') || '1'
       });
       const [channelsRaw, conversationPage, contactPage, tags, workspace] = await Promise.all([
-        listChannels(env, workspaceId, principal.membership.role !== 'agent'),
-        listConversations(env, workspaceId, bootstrapUrl, { allowedChannelIds: allowedChannels }),
-        listContacts(env, workspaceId, bootstrapUrl),
+        listChannels(env, workspaceId, hasPermission(principal, 'channels.manage')),
+        chatScope(principal, 'view') === 'none'
+          ? Promise.resolve({ items: [], nextCursor: '' })
+          : listConversations(env, workspaceId, bootstrapUrl, {
+            allowedChannelIds: allowedChannels,
+            assignedOnly
+          }),
+        hasPermission(principal, 'contacts.view')
+          ? listContacts(env, workspaceId, bootstrapUrl)
+          : Promise.resolve({ items: [], total: 0, page: 1, pageSize: BOOTSTRAP_CONTACT_LIMIT, nextCursor: '' }),
         listWorkspaceTags(env, workspaceId),
         getWorkspaceProfile(env, workspaceId)
       ]);
@@ -501,31 +519,52 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json({ item: await getWorkspaceProfile(env, workspaceId) }), cors);
     }
     if (url.pathname === '/api/workspace' && request.method === 'PATCH') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'workspace.edit');
       const item = await updateWorkspaceProfile(env, workspaceId, await readJson(request), principal);
       await broadcast(env, workspaceId, { type: 'workspace.updated', workspace: item });
       return withCors(json({ ok: true, item }), cors);
     }
+    if (url.pathname === '/api/roles' && request.method === 'GET') {
+      return withCors(json(await listWorkspaceRoles(env, principal)), cors);
+    }
+    if (url.pathname === '/api/roles' && request.method === 'POST') {
+      const result = await createWorkspaceRole(env, principal, await readJson(request));
+      await broadcast(env, workspaceId, { type: 'roles.updated' });
+      return withCors(json(result, 201), cors);
+    }
+    const roleMatch = url.pathname.match(/^\/api\/roles\/([^/]+)$/);
+    if (roleMatch && request.method === 'PATCH') {
+      const result = await updateWorkspaceRole(env, principal, decodeURIComponent(roleMatch[1]), await readJson(request));
+      await broadcast(env, workspaceId, { type: 'roles.updated' });
+      return withCors(json(result), cors);
+    }
+    if (roleMatch && request.method === 'DELETE') {
+      const result = await deleteWorkspaceRole(env, principal, decodeURIComponent(roleMatch[1]));
+      await broadcast(env, workspaceId, { type: 'roles.updated' });
+      return withCors(json(result), cors);
+    }
     if (url.pathname === '/api/channels' && request.method === 'GET') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'channels.manage');
       return withCors(json({ items: await listChannels(env, workspaceId, true) }), cors);
     }
     if (url.pathname === '/api/channel-data/whatsapp-templates' && request.method === 'GET') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'channels.manage');
       return withCors(json(await listWorkspaceWhatsAppTemplates(env, workspaceId, {
         forceRefresh: url.searchParams.get('refresh') === '1'
       })), cors);
     }
     if (url.pathname === '/api/channel-data/import-chat' && request.method === 'POST') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'channels.manage');
       const result = await importChatHistory(env, workspaceId, principal, await readImportJson(request));
       await broadcast(env, workspaceId, { type: 'bootstrap.changed' });
       return withCors(json(result, 201), cors);
     }
     if (url.pathname === '/api/campaigns' && request.method === 'GET') {
+      requirePermission(principal, 'campaigns.view');
       return withCors(json({ items: await listCampaigns(env, workspaceId, principal) }), cors);
     }
     if (url.pathname === '/api/campaigns' && request.method === 'POST') {
+      requirePermission(principal, 'campaigns.manage');
       const result = await createCampaign(env, workspaceId, await readJson(request), principal);
       await broadcast(env, workspaceId, { type: 'campaign.updated', campaignId: result.campaignId, campaign: result.item });
       ctx.waitUntil(processCampaign(env, workspaceId, result.campaignId, principal));
@@ -533,29 +572,31 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     const campaignMediaMatch = url.pathname.match(/^\/api\/campaigns\/template-media$/);
     if (campaignMediaMatch && request.method === 'POST') {
+      requirePermission(principal, 'campaigns.manage');
       return withCors(json(await uploadCampaignTemplateMedia(env, workspaceId, request, principal), 201), cors);
     }
     const campaignMatch = url.pathname.match(/^\/api\/campaigns\/([^/]+)$/);
     if (campaignMatch && request.method === 'GET') {
+      requirePermission(principal, 'campaigns.view');
       const campaignId = decodeURIComponent(campaignMatch[1]);
       return withCors(json(await getCampaignDetail(env, workspaceId, campaignId, principal)), cors);
     }
     if (url.pathname === '/api/channels' && request.method === 'POST') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'channels.manage');
       const result = await saveChannel(env, workspaceId, await readJson(request), principal, '');
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId: result.channelId });
       return withCors(json(result, 201), cors);
     }
     const channelMatch = url.pathname.match(/^\/api\/channels\/([^/]+)$/);
     if (channelMatch && request.method === 'PATCH') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'channels.manage');
       const channelId = decodeURIComponent(channelMatch[1]);
       const result = await saveChannel(env, workspaceId, await readJson(request), principal, channelId);
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
       return withCors(json(result), cors);
     }
     if (channelMatch && request.method === 'DELETE') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'channels.manage');
       const channelId = decodeURIComponent(channelMatch[1]);
       const result = await deleteChannel(env, workspaceId, channelId, principal);
       await broadcast(env, workspaceId, { type: 'channel.deleted', channelId });
@@ -563,7 +604,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     const channelVerifyMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/verify$/);
     if (channelVerifyMatch && request.method === 'POST') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'channels.manage');
       const channelId = decodeURIComponent(channelVerifyMatch[1]);
       const result = await verifyChannel(env, workspaceId, channelId, request);
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
@@ -571,13 +612,17 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     const channelVerifyTokenMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/verify-token$/);
     if (channelVerifyTokenMatch && request.method === 'GET') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'channels.manage');
       const channelId = decodeURIComponent(channelVerifyTokenMatch[1]);
       return withCors(json(await getChannelVerifyToken(env, workspaceId, channelId, principal)), cors);
     }
     if (url.pathname === '/api/conversations' && request.method === 'GET') {
+      if (chatScope(principal, 'view') === 'none') {
+        throw httpError(403, 'You do not have permission to access chats.');
+      }
       const page = await listConversations(env, workspaceId, url, {
-        allowedChannelIds: restrictedChannelIds(principal)
+        allowedChannelIds: restrictedChannelIds(principal),
+        assignedOnly: chatScope(principal, 'view') === 'assigned' ? principal : null
       });
       return withCors(json({ items: page.items, nextCursor: page.nextCursor }), cors);
     }
@@ -597,7 +642,12 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (conversationMatch && request.method === 'PATCH') {
       const id = decodeURIComponent(conversationMatch[1]);
       await assertConversationChannelAccess(env, workspaceId, id, principal);
+      const existing = await getConversation(env, workspaceId, id);
+      assertChatAccess(principal, existing, 'view');
       const payload = await readJson(request);
+      if (payload.assignedTo !== undefined && !hasPermission(principal, 'chats.assign')) {
+        throw httpError(403, 'You do not have permission to assign conversations.');
+      }
       const item = await updateConversation(env, workspaceId, id, payload, principal);
       await broadcast(env, workspaceId, { type: 'conversation.updated', conversationId: id, conversation: item });
       if (payload.markRead && Number(item.unreadCount || 0) === 0) {
@@ -606,7 +656,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json({ ok: true, item }), cors);
     }
     if (conversationMatch && request.method === 'DELETE') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'chats.delete');
       const id = decodeURIComponent(conversationMatch[1]);
       const result = await deleteConversation(env, workspaceId, id, principal);
       await broadcast(env, workspaceId, { type: 'conversation.deleted', conversationId: id });
@@ -616,6 +666,8 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (messagesMatch && request.method === 'GET') {
       const id = decodeURIComponent(messagesMatch[1]);
       await assertConversationChannelAccess(env, workspaceId, id, principal);
+      const existing = await getConversation(env, workspaceId, id);
+      assertChatAccess(principal, existing, 'view');
       const [items, replyWindow] = await Promise.all([
         listMessages(env, workspaceId, id, url),
         getConversationReplyWindow(env, workspaceId, id)
@@ -624,6 +676,8 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (messagesMatch && request.method === 'POST') {
       const id = decodeURIComponent(messagesMatch[1]);
+      const existing = await getConversation(env, workspaceId, id);
+      assertChatAccess(principal, existing, 'reply');
       const result = await createOutboundMessage(env, workspaceId, id, await readJson(request), principal);
       await broadcast(env, workspaceId, {
         type: 'message.created', conversationId: id, messageId: result.message.messageId, message: result.message
@@ -649,6 +703,8 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     const templateMessageMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/template$/);
     if (templateMessageMatch && request.method === 'POST') {
       const id = decodeURIComponent(templateMessageMatch[1]);
+      const existing = await getConversation(env, workspaceId, id);
+      assertChatAccess(principal, existing, 'reply');
       const result = await createConversationTemplateMessage(env, workspaceId, id, await readJson(request), principal);
       await broadcast(env, workspaceId, {
         type: 'message.created', conversationId: id, messageId: result.message.messageId, message: result.message
@@ -665,6 +721,8 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     const attachmentMessageMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/attachments$/);
     if (attachmentMessageMatch && request.method === 'POST') {
       const id = decodeURIComponent(attachmentMessageMatch[1]);
+      const existing = await getConversation(env, workspaceId, id);
+      assertChatAccess(principal, existing, 'reply');
       const result = await createConversationAttachmentMessage(env, workspaceId, id, request, principal);
       await broadcast(env, workspaceId, {
         type: 'message.created', conversationId: id, messageId: result.message.messageId, message: result.message
@@ -676,6 +734,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(await exportContactsCsv(env, workspaceId), cors);
     }
     if (url.pathname === '/api/contacts' && request.method === 'POST') {
+      requirePermission(principal, 'contacts.create');
       const result = await createContact(env, workspaceId, await readJson(request), principal);
       if (result.conversationId) {
         await broadcast(env, workspaceId, { type: 'conversation.created', conversationId: result.conversationId });
@@ -685,6 +744,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json(result, 201), cors);
     }
     if (url.pathname === '/api/contacts' && request.method === 'GET') {
+      requirePermission(principal, 'contacts.view');
       const page = await listContacts(env, workspaceId, url);
       return withCors(json({
         items: page.items,
@@ -699,6 +759,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     const contactIdentityCollectionMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)\/identities$/);
     if (contactIdentityCollectionMatch && request.method === 'POST') {
+      requirePermission(principal, 'contacts.edit');
       const contactId = decodeURIComponent(contactIdentityCollectionMatch[1]);
       const result = await createContactIdentity(env, workspaceId, contactId, await readJson(request), principal);
       await broadcast(env, workspaceId, { type: 'contact.updated', contactId });
@@ -706,6 +767,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     const contactIdentityMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)\/identities\/([^/]+)$/);
     if (contactIdentityMatch && request.method === 'PATCH') {
+      requirePermission(principal, 'contacts.edit');
       const contactId = decodeURIComponent(contactIdentityMatch[1]);
       const identityId = decodeURIComponent(contactIdentityMatch[2]);
       const result = await updateContactIdentity(env, workspaceId, contactId, identityId, await readJson(request), principal);
@@ -713,6 +775,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json(result), cors);
     }
     if (contactIdentityMatch && request.method === 'DELETE') {
+      requirePermission(principal, 'contacts.edit');
       const contactId = decodeURIComponent(contactIdentityMatch[1]);
       const identityId = decodeURIComponent(contactIdentityMatch[2]);
       const result = await deleteContactIdentity(env, workspaceId, contactId, identityId, principal);
@@ -721,39 +784,41 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     const contactMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)$/);
     if (contactMatch && request.method === 'GET') {
+      requirePermission(principal, 'contacts.view');
       const id = decodeURIComponent(contactMatch[1]);
       return withCors(json({ item: await getContactDetail(env, workspaceId, id) }), cors);
     }
     if (contactMatch && request.method === 'PATCH') {
+      requirePermission(principal, 'contacts.edit');
       const id = decodeURIComponent(contactMatch[1]);
       const item = await updateContact(env, workspaceId, id, await readJson(request), principal);
       await broadcast(env, workspaceId, { type: 'contact.updated', contactId: id });
       return withCors(json({ ok: true, item }), cors);
     }
     if (contactMatch && request.method === 'DELETE') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'contacts.delete');
       const id = decodeURIComponent(contactMatch[1]);
       const result = await deleteContact(env, workspaceId, id, principal);
       await broadcast(env, workspaceId, { type: 'contact.deleted', contactId: id, conversationIds: result.conversationIds });
       return withCors(json(result), cors);
     }
     if (url.pathname === '/api/demo/seed' && request.method === 'POST') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'channels.manage');
       const result = await seedDemo(env, workspaceId, principal);
       await broadcast(env, workspaceId, { type: 'bootstrap.changed' });
       return withCors(json(result, 201), cors);
     }
     if (url.pathname === '/api/developer/api-keys' && request.method === 'GET') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'developer.manage');
       return withCors(json({ items: await listApiKeys(env, workspaceId) }), cors);
     }
     if (url.pathname === '/api/developer/api-keys' && request.method === 'POST') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'developer.manage');
       return withCors(json(await createApiKey(env, workspaceId, principal, await readJson(request)), 201), cors);
     }
     const apiKeyMatch = url.pathname.match(/^\/api\/developer\/api-keys\/([^/]+)$/);
     if (apiKeyMatch && request.method === 'DELETE') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'developer.manage');
       return withCors(json(await deleteApiKey(env, workspaceId, principal, decodeURIComponent(apiKeyMatch[1]))), cors);
     }
     if (url.pathname === '/api/team' && request.method === 'GET') {
@@ -772,7 +837,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json(result), cors);
     }
     if (memberMatch && request.method === 'DELETE') {
-      requireRole(principal, 'admin');
+      requirePermission(principal, 'team.manage');
       const membershipId = decodeURIComponent(memberMatch[1]);
       const result = await deleteTeamMember(env, workspaceId, membershipId, principal);
       await broadcast(env, workspaceId, { type: 'team.updated' });
@@ -869,8 +934,12 @@ async function deleteTeamMember(env, workspaceId, membershipId, principal) {
     FROM memberships m JOIN users u ON u.user_id=m.user_id
     WHERE m.membership_id=?1 AND m.workspace_id=?2`).bind(id, workspaceId).first();
   if (!target) throw httpError(404, 'Team member not found.');
-  if (principal.membership?.role === 'admin' && target.role !== 'agent') {
-    throw httpError(403, 'Administrators can only remove agents.');
+  if (principal.membership?.role !== 'owner') {
+    const { assertAssignableRole } = await import('./roles.js');
+    const targetRole = await assertAssignableRole(env, workspaceId, target.role, { allowOwner: target.role === 'owner' });
+    if (targetRole.isElevated || target.role === 'owner') {
+      throw httpError(403, 'Administrators can only remove non-elevated team members.');
+    }
   }
   if (principal.membership?.membershipId && principal.membership.membershipId === id) {
     throw httpError(409, 'You cannot remove your own workspace membership.');
@@ -3033,6 +3102,13 @@ async function listConversations(env, workspaceId, url, options = {}) {
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
   const cursor = url.searchParams.get('cursor') || '';
   const allowedChannelIds = Array.isArray(options.allowedChannelIds) ? options.allowedChannelIds : null;
+  const assignedMatchers = options.assignedOnly
+    ? [
+      options.assignedOnly.user?.email,
+      options.assignedOnly.user?.displayName,
+      options.assignedOnly.user?.userId
+    ].map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+    : [];
   if (allowedChannelIds && channelId && !allowedChannelIds.includes(channelId)) {
     return { items: [], nextCursor: '' };
   }
@@ -3074,9 +3150,11 @@ async function listConversations(env, workspaceId, url, options = {}) {
             AND instr(lower(COALESCE(search_message.text,'')),lower(?4))>0))
       AND (?5='' OR c.last_message_at<?5)
       AND (?7=0 OR c.channel_id IN (SELECT value FROM json_each(?8)))
+      AND (?9=0 OR lower(c.assigned_to) IN (SELECT lower(value) FROM json_each(?10)))
     ORDER BY c.last_message_at DESC LIMIT ?6`)
     .bind(workspaceId, status, channelId, q, cursor, limit,
-      allowedChannelIds ? 1 : 0, JSON.stringify(allowedChannelIds || [])).all();
+      allowedChannelIds ? 1 : 0, JSON.stringify(allowedChannelIds || []),
+      assignedMatchers.length ? 1 : 0, JSON.stringify(assignedMatchers)).all();
   const items = result.results.map(conversationListItem);
   const contactIds = [...new Set(items.map(item => item.contactId).filter(Boolean))];
   const routes = await conversationRouteOptionsByContact(env, workspaceId, { contactIds });
@@ -3180,6 +3258,22 @@ function conversationListItem(row) {
     lastMessageType: row.last_message_type || '',
     channelProfileId: row.channel_profile_id || '',
     ...whatsappReplyWindowState(connectorType, row.last_inbound_at)
+  };
+}
+
+async function getConversation(env, workspaceId, conversationId) {
+  const row = await env.DB.prepare(`SELECT conversation_id,contact_id,channel_id,identity_id,status,assigned_to,subject
+    FROM conversations WHERE conversation_id=?1 AND workspace_id=?2`)
+    .bind(conversationId, workspaceId).first();
+  if (!row) throw httpError(404, 'Conversation not found.');
+  return {
+    conversationId: row.conversation_id,
+    contactId: row.contact_id,
+    channelId: row.channel_id,
+    identityId: row.identity_id || '',
+    status: row.status,
+    assignedTo: row.assigned_to || '',
+    subject: row.subject || ''
   };
 }
 

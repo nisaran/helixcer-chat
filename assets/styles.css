@@ -2007,6 +2007,98 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .role-dot.owner { background: var(--brand); }
 .role-dot.admin { background: var(--violet); }
 .role-dot.agent { background: var(--green); }
+
+.roles-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.roles-list-surface, .roles-editor-surface { overflow: hidden; }
+.roles-list { display: grid; gap: 6px; padding: 10px; max-height: min(70vh, 720px); overflow: auto; }
+.role-list-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 11px 12px;
+  cursor: pointer;
+}
+.role-list-item:hover { background: var(--panel-warm); }
+.role-list-item.is-active {
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: var(--brand-soft);
+}
+.role-list-item strong { font-size: 13px; letter-spacing: -.1px; }
+.role-list-item span { color: var(--muted); font-size: 11px; }
+.role-list-item em {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 10px;
+}
+.roles-editor-toolbar { align-items: flex-start; }
+.roles-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.roles-editor-form { display: grid; gap: 18px; padding: 16px; }
+.roles-editor-identity {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 12px;
+}
+.role-locked-note {
+  border: 1px solid color-mix(in srgb, var(--amber) 24%, var(--line));
+  border-radius: 12px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.roles-permission-matrix { display: grid; gap: 14px; }
+.role-permission-group {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.role-permission-group header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-warm);
+  padding: 11px 14px;
+}
+.role-permission-group header strong { font-size: 13px; }
+.role-permission-group header span { color: var(--muted); font-size: 11px; }
+.role-permission-rows { display: grid; }
+.role-permission-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+}
+.role-permission-row:first-child { border-top: 0; }
+.role-permission-row label { display: grid; gap: 2px; }
+.role-permission-row label strong { font-size: 13px; font-weight: 600; }
+.role-permission-row label span { color: var(--muted); font-size: 11px; }
+.role-permission-control { justify-self: end; }
+.role-permission-control .compact-select,
+.role-permission-control .text-field { min-width: 180px; }
+.roles-empty-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
 .member-cell { display: flex; align-items: center; gap: 10px; color: var(--ink); }
 .member-cell .avatar { width: 35px; height: 35px; flex-basis: 35px; border-radius: 11px; }
 .member-cell div { min-width: 0; }
@@ -2274,6 +2366,13 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .inline-field { display: grid; }
   .team-note { align-items: flex-start; flex-direction: column; gap: 2px; }
   .role-legend { display: none; }
+  .roles-layout { grid-template-columns: 1fr; }
+  .roles-list { max-height: none; }
+  .roles-editor-identity { grid-template-columns: 1fr; }
+  .role-permission-row { grid-template-columns: 1fr; }
+  .role-permission-control { justify-self: stretch; }
+  .role-permission-control .compact-select,
+  .role-permission-control .text-field { width: 100%; min-width: 0; }
   .invitation-item { grid-template-columns: minmax(0, 1fr) auto; }
   .invitation-item time { display: none; }
   .developer-api-toolbar { align-items: stretch; flex-direction: column; }
