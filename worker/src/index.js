@@ -111,7 +111,7 @@ const CONNECTOR_DEFINITIONS = {
     label: 'Instagram Messaging', webhookPath: 'instagram',
     configFields: ['instagramAccountId', 'username', 'appId', 'apiVersion', 'authMode'],
     requiredConfig: ['instagramAccountId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret'],
-    capabilities: ['text']
+    capabilities: ['text', 'attachments']
   },
   facebook_messenger: {
     label: 'Facebook Messenger', webhookPath: 'facebook-messenger',
@@ -3301,10 +3301,12 @@ async function getConversationReplyWindow(env, workspaceId, conversationId) {
 }
 
 export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Date.now()) {
-  if (connectorType !== 'whatsapp_cloud' && connectorType !== 'facebook_messenger') {
+  if (connectorType !== 'whatsapp_cloud' && connectorType !== 'facebook_messenger' &&
+      connectorType !== 'instagram') {
     return { freeformAllowed: true, replyWindowExpiresAt: '', replyWindowReason: '' };
   }
-  const providerLabel = connectorType === 'facebook_messenger' ? 'Messenger' : 'WhatsApp';
+  const providerLabel = connectorType === 'facebook_messenger' ? 'Messenger'
+    : connectorType === 'instagram' ? 'Instagram' : 'WhatsApp';
   const inboundTime = new Date(String(lastInboundAt || '')).valueOf();
   if (!Number.isFinite(inboundTime)) {
     return {
@@ -3312,7 +3314,9 @@ export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Dat
       replyWindowExpiresAt: '',
       replyWindowReason: connectorType === 'facebook_messenger'
         ? 'No customer message has opened the Messenger 24-hour messaging window.'
-        : 'No customer message has opened the WhatsApp 24-hour service window. Send an approved template.'
+        : connectorType === 'instagram'
+          ? 'No customer message has opened the Instagram 24-hour messaging window.'
+          : 'No customer message has opened the WhatsApp 24-hour service window. Send an approved template.'
     };
   }
   const expiresAt = inboundTime + WHATSAPP_REPLY_WINDOW_MS;
@@ -3322,7 +3326,7 @@ export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Dat
     replyWindowExpiresAt: new Date(expiresAt).toISOString(),
     replyWindowReason: freeformAllowed
       ? ''
-      : connectorType === 'facebook_messenger'
+      : connectorType === 'facebook_messenger' || connectorType === 'instagram'
         ? `The ${providerLabel} 24-hour messaging window has closed.`
         : 'The WhatsApp 24-hour service window has closed. Send an approved template to continue.'
   };
@@ -5741,8 +5745,8 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
     replyToMessageId: form.get('replyToMessageId')
   });
   assertPrincipalChannelAccess(principal, target.channel_id);
-  if (!['whatsapp_cloud', 'telegram', 'facebook_messenger'].includes(target.connectorType)) {
-    throw httpError(409, 'Attachments are currently available for WhatsApp, Telegram, and Messenger conversations.');
+  if (!['whatsapp_cloud', 'telegram', 'facebook_messenger', 'instagram'].includes(target.connectorType)) {
+    throw httpError(409, 'Attachments are currently available for WhatsApp, Telegram, Messenger, and Instagram conversations.');
   }
   if (!target.enabled) throw httpError(409, 'The channel is disabled.');
   assertFreeformReplyAllowed(target.connectorType, target.last_inbound_at);
@@ -5762,7 +5766,8 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
   const attachmentPayload = (safeAttachment) => ({
     attachment: safeAttachment, senderName, ...(reply ? { reply } : {})
   });
-  if (target.connectorType === 'telegram' || target.connectorType === 'facebook_messenger') {
+  if (target.connectorType === 'telegram' || target.connectorType === 'facebook_messenger' ||
+      target.connectorType === 'instagram') {
     let safeAttachment = { ...attachment };
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
@@ -5781,6 +5786,12 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
         sent = await sendTelegramMedia(env, target.channel, target.channel_profile_id, file, attachment,
           reply?.channelMessageId || '');
         safeAttachment = { ...attachment, providerFileId: sent.providerFileId };
+      } else if (target.connectorType === 'instagram') {
+        sent = await sendInstagramMedia(env, target.channel, target.channel_profile_id, file, attachment);
+        safeAttachment = {
+          ...attachment,
+          ...(sent.providerAttachmentId ? { providerAttachmentId: sent.providerAttachmentId } : {})
+        };
       } else {
         sent = await sendFacebookMessengerMedia(env, target.channel, target.channel_profile_id, file, attachment);
         safeAttachment = {
@@ -5915,7 +5926,8 @@ function validateWhatsAppAttachment(file, captionValue, connectorType = 'whatsap
     ? WHATSAPP_IMAGE_MAX_BYTES : MAX_ATTACHMENT_BYTES;
   if (size > maximum) {
     const provider = connectorType === 'telegram' ? 'Telegram'
-      : connectorType === 'facebook_messenger' ? 'Messenger' : 'WhatsApp';
+      : connectorType === 'facebook_messenger' ? 'Messenger'
+        : connectorType === 'instagram' ? 'Instagram' : 'WhatsApp';
     throw httpError(413, `${provider} ${type} attachments may not exceed ${Math.round(maximum / (1024 * 1024))} MB.`);
   }
   const rawName = String(file.name || `attachment.${mimeType.split('/')[1] || 'bin'}`)
@@ -6431,6 +6443,42 @@ async function sendInstagram(env, channel, recipient, text) {
   return {
     status: 'submitted',
     providerMessageId: String(data.message_id || data.id || ''),
+    httpStatus: response.status
+  };
+}
+
+async function sendInstagramMedia(env, channel, recipient, file, attachment) {
+  const credentials = await readChannelCredentials(env, channel);
+  const accountId = String(channel.config?.instagramAccountId || '');
+  if (!credentials.accessToken || !accountId) throw nonRetryableError('Instagram credentials are not configured.');
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const type = attachment.type === 'document' ? 'file' : attachment.type;
+  if (!['image', 'video', 'audio', 'file'].includes(type)) {
+    throw nonRetryableError('This attachment type is not supported for Instagram.');
+  }
+  const body = new FormData();
+  body.set('recipient', JSON.stringify({ id: String(recipient) }));
+  body.set('message', JSON.stringify({
+    attachment: {
+      type,
+      payload: { is_reusable: true }
+    }
+  }));
+  body.set('filedata', file, attachment.filename);
+  const response = await fetch(
+    `https://graph.instagram.com/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}/messages`,
+    { method: 'POST', headers: { Authorization: `Bearer ${credentials.accessToken}` }, body }
+  );
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) {
+    const error = new Error(`Instagram API: ${providerError(data, response.status)}`);
+    error.retryable = isRetryableProviderStatus(response.status);
+    throw error;
+  }
+  return {
+    status: 'submitted',
+    providerMessageId: String(data.message_id || data.id || ''),
+    providerAttachmentId: String(data.attachment_id || ''),
     httpStatus: response.status
   };
 }
@@ -8039,9 +8087,10 @@ export function normalizeInstagram(payload) {
       }
       if (!senderId || (!message && !postback)) continue;
       if (recipientId) recipientIds.add(recipientId);
-      const attachmentType = String(message?.attachments?.[0]?.type || 'message');
+      const attachment = messengerInboundAttachment(message);
       const text = String(message?.text || postback?.title || postback?.payload ||
-        `[Instagram ${attachmentType.replace(/_/g, ' ')} received]`);
+        (attachment ? `[Instagram ${attachment.type} received]`
+          : `[Instagram ${String(message?.attachments?.[0]?.type || 'message').replace(/_/g, ' ')} received]`));
       messages.push({
         channelProfileId: senderId,
         // Instagram webhooks omit profile names; enrichInstagramDisplayNames fills this.
@@ -8049,7 +8098,8 @@ export function normalizeInstagram(payload) {
         text,
         providerMessageId: String(message?.mid || postback?.mid || `${entry?.id || recipientId}:${event?.timestamp || ''}:${senderId}`),
         timestamp,
-        messageType: message?.text || postback ? 'text' : attachmentType
+        messageType: attachment?.type || (message?.text || postback ? 'text' : String(message?.attachments?.[0]?.type || 'message')),
+        ...(attachment ? { attachment } : {})
       });
     }
   }

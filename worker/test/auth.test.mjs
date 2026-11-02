@@ -1109,9 +1109,10 @@ test('managed channel CRUD encrypts credentials, preserves blank secrets, and ke
     })
   }), env);
   assert.equal(instagram.status, 201);
-  const instagramRow = database.prepare("SELECT connector_type,provider_type FROM channels WHERE channel_id='instagram-main'").get();
+  const instagramRow = database.prepare("SELECT connector_type,provider_type,capabilities_json FROM channels WHERE channel_id='instagram-main'").get();
   assert.equal(instagramRow.connector_type, 'generic_http');
   assert.equal(instagramRow.provider_type, 'instagram');
+  assert.deepEqual(JSON.parse(instagramRow.capabilities_json), ['text', 'attachments']);
   const duplicateInstagram = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
     method: 'POST', headers,
     body: JSON.stringify({ channelId: 'instagram-duplicate', name: 'Duplicate Instagram', connectorType: 'instagram',

@@ -3868,7 +3868,7 @@
     if (!conversation) return false;
     const route = conversation.conversationId ? selectedComposerRoute(conversation) : conversation;
     const connectorType = route?.connectorType || channelFor(route?.channelId).connectorType;
-    return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot", "facebook_messenger", "messenger"].includes(connectorType);
+    return ["whatsapp", "whatsapp_cloud", "telegram", "telegram_bot", "facebook_messenger", "messenger", "instagram", "instagram_messaging"].includes(connectorType);
   }
 
   function currentAttachmentQueue(conversation = selectedConversation()) {
@@ -4231,7 +4231,7 @@
       ? "The customer has not messaged on WhatsApp in the last 24 hours. You can only send approved WhatsApp message templates"
       : "Message...";
     $("messageForm").classList.toggle("is-window-closed", blocked);
-    attach.title = !attachmentSupported ? "Attachments are available for WhatsApp, Telegram, and Messenger conversations"
+    attach.title = !attachmentSupported ? "Attachments are available for WhatsApp, Telegram, Messenger, and Instagram conversations"
       : blocked ? "Send an approved template to reopen the conversation" : "Attach files";
     renderComposerRouteControl(conversation, route);
     renderAttachmentQueue();
@@ -7533,7 +7533,7 @@
     const files = [...(fileList || [])];
     if (!conversation || !files.length) return;
     if (!supportsChatAttachments(conversation)) {
-      showToast("Attachments unavailable", "File sending is currently available for WhatsApp and Telegram conversations.", true);
+      showToast("Attachments unavailable", "File sending is currently available for WhatsApp, Telegram, Messenger, and Instagram conversations.", true);
       return;
     }
     if (!whatsappReplyWindow(conversation).allowed) {
