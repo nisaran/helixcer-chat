@@ -1105,6 +1105,14 @@ test("conversation URLs deep-link safely without auto-selecting plain inbox", ()
   assert.match(reconcile, /routedId === activeSelectedId[\s\S]*?openPendingConversation\(\{ refreshIfMissing: true \}\)/);
 });
 
+test("roles hash survives reload and stays aligned with setRoute", () => {
+  const parseHash = app.slice(app.indexOf("function parseAppHash"), app.indexOf("async function openPendingConversation"));
+  assert.match(parseHash, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"\]/);
+  const setRouteFn = app.slice(app.indexOf("function setRoute"), app.indexOf("function whatsappImportChannels"));
+  assert.match(setRouteFn, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"\]/);
+  assert.match(setRouteFn, /if \(!hasPermission\("roles\.manage"\) && route === "roles"\) route = "inbox"/);
+});
+
 test("direct chat URLs show only the visited conversation with filters cleared", () => {
   assert.match(app, /inboxFocusConversationId:\s*null/);
   assert.match(app, /function enterDeepLinkedConversationList/);
