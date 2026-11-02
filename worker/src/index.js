@@ -5787,9 +5787,9 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
           reply?.channelMessageId || '');
         safeAttachment = { ...attachment, providerFileId: sent.providerFileId };
       } else if (target.connectorType === 'instagram' || target.connectorType === 'facebook_messenger') {
-        // Meta Send API returns message/attachment ids, not a CDN URL. Cache the
-        // uploaded bytes so Helixcer can serve inbox previews immediately, and
-        // later enrich with the echo webhook's public media URL when available.
+        // Meta Send API returns message/attachment ids, not a CDN URL. Keep a
+        // durable Helixcer-side preview (inline bytes for modest images, Cache
+        // API otherwise) and enrich later from echo webhook media URLs.
         const previewBytes = await file.arrayBuffer();
         const uploadFile = new File([previewBytes], attachment.filename, {
           type: attachment.mimeType || file.type || 'application/octet-stream'
@@ -5798,10 +5798,12 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
           ? await sendInstagramMedia(env, target.channel, target.channel_profile_id, uploadFile, attachment)
           : await sendFacebookMessengerMedia(env, target.channel, target.channel_profile_id, uploadFile, attachment);
         const previewCached = await cacheOutboundAttachmentPreview(workspaceId, messageId, previewBytes, attachment);
+        const previewBase64 = inlineAttachmentPreviewBase64(previewBytes, attachment);
         safeAttachment = {
           ...attachment,
           ...(sent.providerAttachmentId ? { providerAttachmentId: sent.providerAttachmentId } : {}),
-          ...(previewCached ? { previewCache: true } : {})
+          ...(previewCached ? { previewCache: true } : {}),
+          ...(previewBase64 ? { previewBase64 } : {})
         };
       } else {
         throw nonRetryableError('Unsupported attachment connector.');
@@ -5993,10 +5995,48 @@ async function uploadConversationTemplateMedia(env, workspaceId, conversationId,
   };
 }
 
+const INLINE_ATTACHMENT_PREVIEW_MAX_BYTES = 512 * 1024;
+
 function attachmentPreviewCacheRequest(workspaceId, messageId) {
   return new Request(
     `https://attachment-preview.helixcer.internal/${encodeURIComponent(workspaceId)}/${encodeURIComponent(messageId)}`
   );
+}
+
+function inlineAttachmentPreviewBase64(bytes, attachment) {
+  try {
+    if (String(attachment?.type || '') !== 'image') return '';
+    const body = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : null;
+    if (!body || !body.byteLength || body.byteLength > INLINE_ATTACHMENT_PREVIEW_MAX_BYTES) return '';
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < body.length; i += chunk) {
+      binary += String.fromCharCode(...body.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  } catch (error) {
+    console.error('attachment_inline_preview_failed', { error: cleanError(error) });
+    return '';
+  }
+}
+
+function responseFromAttachmentPreviewBase64(attachment) {
+  const encoded = String(attachment?.previewBase64 || '');
+  if (!encoded || encoded.length > INLINE_ATTACHMENT_PREVIEW_MAX_BYTES * 2) return null;
+  try {
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        'Content-Type': String(attachment?.mimeType || 'application/octet-stream'),
+        'Content-Length': String(bytes.byteLength)
+      }
+    });
+  } catch {
+    return null;
+  }
 }
 
 async function cacheOutboundAttachmentPreview(workspaceId, messageId, bytes, attachment) {
@@ -6075,22 +6115,27 @@ async function streamMessageAttachment(env, workspaceId, messageId, request, url
       headers: range ? { Range: range } : {}
     });
   } else if (channel.connectorType === 'facebook_messenger' || channel.connectorType === 'instagram') {
-    const externalUrl = safeStoredExternalMediaUrl(attachment.externalUrl);
-    if (externalUrl) {
+    // Prefer Helixcer-held bytes first. Meta CDN URLs from echoes are a fallback
+    // and are fetched server-side because browser hotlinks often break for Messenger.
+    if (attachment.previewCache) {
+      const cached = await caches.default.match(attachmentPreviewCacheRequest(workspaceId, messageId));
+      if (cached?.body) providerResponse = cached;
+    }
+    if (!providerResponse) {
+      const inline = responseFromAttachmentPreviewBase64(attachment);
+      if (inline?.body) providerResponse = inline;
+    }
+    if (!providerResponse) {
+      const externalUrl = safeStoredExternalMediaUrl(attachment.externalUrl);
+      if (!externalUrl) throw httpError(410, 'This attachment preview is no longer available.');
       providerResponse = await fetch(externalUrl, {
         headers: {
           ...(range ? { Range: range } : {}),
-          // Meta CDN media is often hotlink-sensitive; omit cookies and follow redirects.
           Accept: '*/*'
         },
-        redirect: 'follow'
+        redirect: 'follow',
+        referrerPolicy: 'no-referrer'
       });
-    } else if (attachment.previewCache) {
-      const cached = await caches.default.match(attachmentPreviewCacheRequest(workspaceId, messageId));
-      if (!cached || !cached.body) throw httpError(410, 'This attachment preview is no longer available.');
-      providerResponse = cached;
-    } else {
-      throw httpError(410, 'This attachment preview is no longer available.');
     }
   } else {
     throw httpError(409, 'This provider does not expose protected attachment previews.');
@@ -6138,11 +6183,20 @@ function safeAttachmentFilename(value) {
 function messageAttachmentView(messageType, payload, messageId = '') {
   const value = payload?.attachment;
   if (!value || typeof value !== 'object') return null;
-  const type = String(messageType || '') === 'template' ? String(value.type || '') : String(messageType || '');
+  const isTemplate = String(messageType || '') === 'template';
+  const type = isTemplate ? String(value.type || '') : String(messageType || '');
   if (!['image', 'video', 'audio', 'document'].includes(type)) return null;
   const externalUrl = safeStoredExternalMediaUrl(value.externalUrl);
   const previewCache = value.previewCache === true;
-  const available = Boolean(value.providerMediaId || value.providerFileId || externalUrl || previewCache);
+  const hasInlinePreview = Boolean(String(value.previewBase64 || '').trim());
+  const available = Boolean(
+    value.providerMediaId || value.providerFileId || externalUrl || previewCache || hasInlinePreview
+  );
+  // Proxy chat media through Helixcer. Keep WhatsApp template header links as
+  // direct external URLs so approved CDN links stay unchanged.
+  const useProxy = Boolean(messageId) && available && !isTemplate && (
+    value.providerMediaId || value.providerFileId || previewCache || hasInlinePreview || Boolean(externalUrl)
+  );
   return {
     type,
     filename: String(value.filename || ''),
@@ -6150,8 +6204,10 @@ function messageAttachmentView(messageType, payload, messageId = '') {
     size: Number(value.size || 0),
     caption: String(value.caption || ''),
     available,
-    external: Boolean(externalUrl),
-    url: externalUrl || (available && messageId ? `/api/messages/${encodeURIComponent(messageId)}/attachment` : '')
+    external: Boolean(externalUrl) && !useProxy,
+    url: useProxy
+      ? `/api/messages/${encodeURIComponent(messageId)}/attachment`
+      : (externalUrl || (available && messageId ? `/api/messages/${encodeURIComponent(messageId)}/attachment` : ''))
   };
 }
 

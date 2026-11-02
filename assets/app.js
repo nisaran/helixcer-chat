@@ -3341,17 +3341,21 @@
   function messageAttachmentUrl(message, download = false) {
     const attachment = message?.attachment;
     if (!attachment || attachment.available !== true) return "";
+    const rawUrl = String(attachment.url || "");
+    // Session-local blob/data previews for just-sent Messenger/Instagram media.
+    if (attachment.localPreview === true || rawUrl.startsWith("blob:") || rawUrl.startsWith("data:")) {
+      return rawUrl.startsWith("blob:") || rawUrl.startsWith("data:") ? rawUrl : "";
+    }
     if (attachment.external === true) {
       try {
-        const url = new URL(String(attachment.url || ""));
+        const url = new URL(rawUrl);
         return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
       } catch { return ""; }
     }
     if (state.api?.attachmentUrl) return state.api.attachmentUrl(message.messageId, { download });
-    const raw = String(attachment.url || "");
-    if (!raw) return "";
+    if (!rawUrl) return "";
     try {
-      const url = new URL(raw, state.api?.base || location.origin);
+      const url = new URL(rawUrl, state.api?.base || location.origin);
       if (download) url.searchParams.set("download", "1");
       return url.toString();
     } catch { return ""; }
@@ -7619,18 +7623,16 @@
         const result = await state.api.sendAttachment(conversation.conversationId, formData);
         const fallback = sent === 0 && caption ? caption : `[Attachment: ${item.file.name}]`;
         const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "document", ...route });
-        // Keep the local object URL until the provider-backed preview is available so
-        // Messenger/Instagram outbound images do not sit on a spinner after "Sent".
-        if (item.previewUrl && message.attachment && message.attachment.available !== true) {
+        // Always keep the local object URL for the open session. Messenger CDN /
+        // Cache-API previews can fail even after the provider accepts the file.
+        if (item.previewUrl) {
           message.attachment = {
-            ...message.attachment,
+            ...(message.attachment || {}),
             available: true,
             external: true,
             url: item.previewUrl,
             localPreview: true,
           };
-        } else if (item.previewUrl) {
-          URL.revokeObjectURL(item.previewUrl);
         }
         upsertMessage(conversation.conversationId, message);
         conversation.lastMessage = conversationMessagePreview(message) || fallback;
