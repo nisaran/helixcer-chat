@@ -153,6 +153,7 @@ test("Channel navigation is collapsed by default and nests the WhatsApp template
   assert.match(app, /if \(!hasPermission\("developer\.manage"\) && route === "developer"\)/);
   assert.match(app, /if \(!hasPermission\("team\.manage"\) && route === "team"\)/);
   assert.match(app, /if \(!hasPermission\("roles\.manage"\) && route === "roles"\)/);
+  assert.match(app, /if \(state\.currentUser\) \{[\s\S]*?if \(!hasPermission\("roles\.manage"\) && route === "roles"\)/);
   assert.match(app, /if \(channelSectionActive\)[\s\S]*?channelNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
   assert.match(app, /if \(route === "whatsapp-templates" \|\| route === "import-chat"\)[\s\S]*?channelDataNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
   assert.match(styles, /\.nav-submenu/);
@@ -1111,6 +1112,18 @@ test("roles hash survives reload and stays aligned with setRoute", () => {
   const setRouteFn = app.slice(app.indexOf("function setRoute"), app.indexOf("function whatsappImportChannels"));
   assert.match(setRouteFn, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"\]/);
   assert.match(setRouteFn, /if \(!hasPermission\("roles\.manage"\) && route === "roles"\) route = "inbox"/);
+});
+
+test("session restore applies the hash route before revealing the shell", () => {
+  const initFn = app.slice(app.indexOf("async function init("), app.indexOf("init();"));
+  assert.doesNotMatch(initFn, /await applyLocationRoute\(\);\s*await initializeSession/);
+  assert.match(initFn, /await initializeSession\(\)/);
+  const session = app.slice(app.indexOf("async function initializeSession"), app.indexOf("function asItems"));
+  assert.match(session, /await applyLocationRoute\(\{ openConversation: false \}\);[\s\S]*?showApplication\(auth\)/);
+  assert.match(session, /showApplication\(auth\)[\s\S]*?await applyLocationRoute\(\)/);
+  const setRouteFn = app.slice(app.indexOf("function setRoute"), app.indexOf("function whatsappImportChannels"));
+  assert.match(setRouteFn, /if \(state\.currentUser\) \{/);
+  assert.match(setRouteFn, /chatPermissionScope\("view"\) === "none" && route === "inbox"\) route = "settings"/);
 });
 
 test("direct chat URLs show only the visited conversation with filters cleared", () => {

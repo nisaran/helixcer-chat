@@ -2145,6 +2145,7 @@
     });
     document.querySelectorAll("[data-owner-only]").forEach((node) => { node.hidden = !isOwner(); node.disabled = !isOwner(); });
     setWorkspaceFormBusy(state.workspaceProfileLoading);
+    if (!state.currentUser) return;
     const blockedRoutes = [];
     if (!hasPermission("contacts.view")) blockedRoutes.push("contacts");
     if (!hasPermission("campaigns.view")) blockedRoutes.push("campaigns");
@@ -2184,6 +2185,12 @@
       }
       const auth = normalizeAuth(authPayload);
       if (!auth.authenticated || auth.status !== "active") throw Object.assign(new Error("Your workspace access is not active."), { status: 403 });
+      // Restore the hash route while the splash still covers the shell so
+      // unauthenticated permission checks cannot flash Settings first.
+      state.currentUser = auth;
+      state.workspace = auth.workspace || state.workspace;
+      state.authStatus = "authenticated";
+      await applyLocationRoute({ openConversation: false });
       showApplication(auth);
       await Promise.all([
         loadAll({ preserveSelection: false }),
@@ -8826,11 +8833,11 @@
     await selectConversation(conversationId, { updateUrl: false });
   }
 
-  async function applyLocationRoute() {
+  async function applyLocationRoute({ openConversation = true } = {}) {
     const target = parseAppHash();
     state.pendingConversationId = target.conversationId || null;
     setRoute(target.route, { preserveLocation: true });
-    if (target.route !== "inbox" || state.authStatus !== "authenticated") return;
+    if (!openConversation || target.route !== "inbox" || state.authStatus !== "authenticated") return;
     if (target.conversationId) {
       enterDeepLinkedConversationList(target.conversationId);
       await openPendingConversation({ refreshIfMissing: true });
@@ -8850,13 +8857,18 @@
     closeContactRouteMenu();
     closeContactPlatformMenu();
     if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"].includes(route)) route = "inbox";
-    if (!hasPermission("channels.manage") && ["channels", "whatsapp-templates", "import-chat"].includes(route)) route = "inbox";
-    if (!hasPermission("developer.manage") && route === "developer") route = "inbox";
-    if (!hasPermission("team.manage") && route === "team") route = "inbox";
-    if (!hasPermission("roles.manage") && route === "roles") route = "inbox";
-    if (!hasPermission("contacts.view") && route === "contacts") route = "inbox";
-    if (!hasPermission("campaigns.view") && route === "campaigns") route = "inbox";
-    if (chatPermissionScope("view") === "none" && route === "inbox") route = "settings";
+    // Permission demotions require an authenticated principal. Before /api/me
+    // resolves, hasPermission is false for everything and would collapse every
+    // deep link to Settings via the inbox fallback.
+    if (state.currentUser) {
+      if (!hasPermission("channels.manage") && ["channels", "whatsapp-templates", "import-chat"].includes(route)) route = "inbox";
+      if (!hasPermission("developer.manage") && route === "developer") route = "inbox";
+      if (!hasPermission("team.manage") && route === "team") route = "inbox";
+      if (!hasPermission("roles.manage") && route === "roles") route = "inbox";
+      if (!hasPermission("contacts.view") && route === "contacts") route = "inbox";
+      if (!hasPermission("campaigns.view") && route === "campaigns") route = "inbox";
+      if (chatPermissionScope("view") === "none" && route === "inbox") route = "settings";
+    }
     if (!preserveLocation) {
       state.pendingConversationId = null;
       if (route === "inbox") clearSelectedConversation({ updateUrl: false });
@@ -13662,7 +13674,6 @@
   async function init() {
     bindEvents();
     updateComposerKeyboardHint();
-    await applyLocationRoute();
     await initializeSession();
   }
 
