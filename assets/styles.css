@@ -1623,8 +1623,22 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 }
 .campaign-contact-table,
 .campaign-audience-table {
+  position: relative;
   overflow: auto; border: 1px solid #dce2de; border-radius: 8px; background: #fff;
+  min-height: 120px;
 }
+.campaign-contact-table.is-loading .campaign-contact-head,
+.campaign-contact-table.is-loading .campaign-contact-list {
+  opacity: .45; pointer-events: none;
+}
+.campaign-contact-loading {
+  position: absolute; inset: 0; z-index: 3;
+  display: grid; place-content: center; justify-items: center; gap: 10px;
+  background: rgba(255, 255, 255, .78);
+  color: #40514f; font-size: 12px; font-weight: 650;
+}
+.campaign-contact-loading[hidden] { display: none; }
+.campaign-contact-loading .auth-spinner { width: 22px; height: 22px; border-width: 2px; }
 .campaign-contact-head,
 .campaign-contact-item,
 .campaign-audience-head,
@@ -1677,12 +1691,23 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   margin-top: 14px; padding-top: 2px;
 }
 .campaign-contact-footer .subtle,
-.campaign-contact-meta { margin: 0; font-size: 11px; text-align: center; }
+.campaign-contact-meta {
+  grid-column: 2;
+  margin: 0; font-size: 11px; text-align: center;
+}
 .campaign-contact-footer #campaignAddSelected {
+  grid-column: 3;
   justify-self: end; min-width: 148px; justify-content: center;
 }
 .campaign-contact-pagination {
+  grid-column: 1;
   display: inline-flex; align-items: center; gap: 6px; justify-self: start;
+}
+/* Keep the Add button pinned right when pagination is hidden (display:none removes the grid item). */
+.campaign-contact-pagination[hidden] {
+  display: inline-flex !important;
+  visibility: hidden;
+  pointer-events: none;
 }
 .campaign-page-chip {
   display: inline-flex; align-items: center; justify-content: center; min-width: 84px;
@@ -1759,9 +1784,14 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .campaign-filter-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .campaign-filter-search { grid-column: 1 / -1; max-width: 280px; }
   .campaign-contact-footer { grid-template-columns: 1fr; justify-items: stretch; }
+  .campaign-contact-pagination,
+  .campaign-contact-footer .subtle,
+  .campaign-contact-meta,
+  .campaign-contact-footer #campaignAddSelected { grid-column: 1; }
   .campaign-contact-footer .subtle,
   .campaign-contact-meta { text-align: left; }
   .campaign-contact-footer #campaignAddSelected { justify-self: stretch; width: 100%; }
+  .campaign-contact-pagination[hidden] { display: none !important; }
   .campaign-message-layout { grid-template-columns: 1fr; }
   .campaign-message-preview { position: static; }
 }

@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261102-campaign-history-filters">
-  <script src="./assets/app.js?v=20261102-campaign-history-filters" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261102-campaign-contact-loading">
+  <script src="./assets/app.js?v=20261102-campaign-contact-loading" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -627,6 +627,10 @@
                   <button class="secondary-button compact-button" type="button" data-action="campaign-clear-filters" id="campaignClearFilters">Clear filters</button>
                 </div>
                 <div class="campaign-contact-table" id="campaignContactTable">
+                  <div class="campaign-contact-loading" id="campaignContactLoading" hidden>
+                    <span class="auth-spinner" aria-hidden="true"></span>
+                    <span>Loading contacts…</span>
+                  </div>
                   <div class="campaign-contact-head">
                     <span class="campaign-contact-check">
                       <input type="checkbox" id="campaignContactSelectAll" aria-label="Select all filtered contacts">

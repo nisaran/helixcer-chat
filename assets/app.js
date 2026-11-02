@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261102-campaign-history-filters";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261102-campaign-contact-loading";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -9302,6 +9302,8 @@
 
   function renderCampaignContactPicker() {
     const host = $("campaignContactList");
+    const table = $("campaignContactTable");
+    const loadingEl = $("campaignContactLoading");
     if (!host) return;
     const rows = filteredCampaignContactRows();
     state.campaigns.contactCandidates = rows;
@@ -9319,6 +9321,16 @@
       Number(state.contactTotal) || 0,
       contactCount,
     );
+    if (loadingEl) {
+      loadingEl.hidden = !loading;
+      const label = loadingEl.querySelector("span:not(.auth-spinner)");
+      if (label) {
+        label.textContent = rows.length && expectedTotal > contactCount
+          ? `Loading contacts… ${contactCount.toLocaleString()} of ${expectedTotal.toLocaleString()}`
+          : "Loading contacts…";
+      }
+    }
+    if (table) table.classList.toggle("is-loading", loading);
     host.replaceChildren();
     if (loading && !rows.length) {
       host.innerHTML = `<div class="campaign-empty-state">Loading contacts…</div>`;
@@ -9335,7 +9347,7 @@
         const platformLabel = campaignPlatformLabel(item.platform);
         const company = String(item.contact.company || "").trim() || "—";
         const tags = campaignContactTagsLabel(item.contact);
-        row.innerHTML = `<span class="campaign-contact-check"><input type="checkbox" data-campaign-row-key="${escapeHtml(item.rowKey)}" ${checked ? "checked" : ""}></span>
+        row.innerHTML = `<span class="campaign-contact-check"><input type="checkbox" data-campaign-row-key="${escapeHtml(item.rowKey)}" ${checked ? "checked" : ""} ${loading ? "disabled" : ""}></span>
           <span class="campaign-contact-name" title="${escapeHtml(item.contact.displayName || "Contact")}">${escapeHtml(item.contact.displayName || "Contact")}</span>
           <span class="campaign-contact-platform" title="${escapeHtml(platformLabel)}">${escapeHtml(platformLabel)}</span>
           <span class="campaign-contact-id" title="${escapeHtml(messagingId)}">${escapeHtml(messagingId)}</span>
@@ -9370,14 +9382,17 @@
     const prev = $("campaignContactPrev");
     const next = $("campaignContactNext");
     const showPagination = rows.length > pageSize;
-    if (pagination) pagination.hidden = !showPagination;
+    if (pagination) {
+      pagination.hidden = !showPagination;
+      pagination.setAttribute("aria-hidden", showPagination ? "false" : "true");
+    }
     if (pageLabel) {
       pageLabel.textContent = loading && expectedTotal > contactCount
         ? `Page ${page} · loading…`
         : `Page ${page} of ${totalPages}`;
     }
-    if (prev) prev.disabled = page <= 1;
-    if (next) next.disabled = page >= totalPages || !rows.length;
+    if (prev) prev.disabled = page <= 1 || loading;
+    if (next) next.disabled = page >= totalPages || !rows.length || loading;
     updateCampaignAddSelectedButton();
   }
 

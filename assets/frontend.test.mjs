@@ -590,7 +590,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261102-campaign-history-filters/);
+  assert.match(html, /app\.js\?v=20261102-campaign-contact-loading/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -951,8 +951,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261102-campaign-history-filters/);
-  assert.match(html, /assets\/styles\.css\?v=20261102-campaign-history-filters/);
+  assert.match(html, /assets\/app\.js\?v=20261102-campaign-contact-loading/);
+  assert.match(html, /assets\/styles\.css\?v=20261102-campaign-contact-loading/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -1348,6 +1348,11 @@ test("Campaign page supports create flow, contact/upload audiences, and expandab
   assert.match(html, /name="campaignAudience"/);
   assert.match(html, /name="campaignUploadMode"/);
   assert.match(html, /id="campaignContactList"/);
+  assert.match(html, /id="campaignContactLoading"/);
+  assert.match(styles, /\.campaign-contact-loading/);
+  assert.match(styles, /\.campaign-contact-pagination\[hidden\]/);
+  assert.match(styles, /\.campaign-contact-footer #campaignAddSelected[\s\S]*grid-column:\s*3/);
+  assert.match(app, /campaignContactLoading/);
   assert.match(html, /id="campaignFieldMapping"/);
   assert.match(html, /id="campaignVariableFields"/);
   assert.match(html, /id="campaignChannelPicker"/);
