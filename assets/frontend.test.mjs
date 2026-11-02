@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const app = await readFile(new URL("./app.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
+const instagramLogo = await readFile(new URL("./provider-instagram.svg", import.meta.url), "utf8");
 const apiDocs = await readFile(new URL("../api-docs.html", import.meta.url), "utf8");
 const serviceWorker = await readFile(new URL("../sw.js", import.meta.url), "utf8");
 
@@ -515,6 +516,9 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /id="composerRouteMenu"[^>]*role="menu"/);
   assert.match(styles, /\.chat-contact-card\s*\{/);
   assert.match(styles, /\.message-route-meta\s*\{/);
+  assert.match(styles, /\.message-route-logo\s*\{[^}]*width:\s*13px/);
+  assert.match(instagramLogo, /stroke-width="2\.35"/);
+  assert.match(instagramLogo, /instagram-gradient/);
   assert.match(styles, /\.composer-route-menu\s*\{/);
   assert.match(styles, /\.template-button\s*\{[^}]*height:\s*34px;[^}]*min-height:\s*34px/);
   assert.match(styles, /\.composer-route-button\s*\{[^}]*height:\s*34px/);
@@ -528,7 +532,6 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(app, /createMessageFootMain\(route, message\.timestamp, outboundSender, statusCluster\)/);
   assert.match(app, /element\("div", "message-route-row"\)/);
   assert.match(app, /main\.append\(element\("time", "", formatClock\(timestamp\)\)\)/);
-  assert.match(styles, /\.message-route-logo\s*\{[^}]*width:\s*10px/);
   assert.match(styles, /\.message-route-row\s*\{/);
   assert.match(styles, /\.message-foot-status\s*\{[^}]*margin-left:\s*auto/);
   assert.match(styles, /\.message-foot-main\s*\{/);
