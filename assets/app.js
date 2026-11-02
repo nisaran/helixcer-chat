@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261102-campaign-contact-loading";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261102-campaign-csv-mapping";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -9503,6 +9503,35 @@
     renderCampaignMessagePreview();
   }
 
+  function campaignFieldMappingByColumn() {
+    const byColumn = {};
+    const mapping = state.campaigns.fieldMapping || {};
+    for (const target of CAMPAIGN_CONTACT_TARGETS) {
+      const header = String(mapping[target.key] || "").trim();
+      if (header) byColumn[header] = target.key;
+    }
+    return byColumn;
+  }
+
+  function assignCampaignCsvColumnField(column, targetKey) {
+    const header = String(column || "").trim();
+    if (!header) return;
+    const mapping = { ...(state.campaigns.fieldMapping || {}) };
+    for (const target of CAMPAIGN_CONTACT_TARGETS) {
+      if (mapping[target.key] === header) mapping[target.key] = "";
+    }
+    const nextTarget = String(targetKey || "").trim();
+    if (nextTarget && CAMPAIGN_CONTACT_TARGETS.some((target) => target.key === nextTarget)) {
+      mapping[nextTarget] = header;
+    }
+    state.campaigns.fieldMapping = {
+      displayName: mapping.displayName || "",
+      profileId: mapping.profileId || "",
+      company: mapping.company || "",
+      tags: mapping.tags || "",
+    };
+  }
+
   function renderCampaignFieldMapping() {
     const host = $("campaignFieldMapping");
     if (!host) return;
@@ -9516,23 +9545,36 @@
     host.replaceChildren();
     const title = document.createElement("p");
     title.className = "import-chat-preview-title";
-    title.textContent = "Map CSV fields to contact fields";
+    title.textContent = "Map CSV columns to contact fields";
     host.append(title);
+    const byColumn = campaignFieldMappingByColumn();
     const table = document.createElement("table");
     table.className = "campaign-mapping-table";
-    table.innerHTML = `<thead><tr><th>Contact field</th><th>CSV column</th></tr></thead>`;
+    table.innerHTML = `<thead><tr><th>CSV column</th><th>Contact field</th></tr></thead>`;
     const body = document.createElement("tbody");
-    for (const target of CAMPAIGN_CONTACT_TARGETS) {
+    for (const header of headers) {
       const row = document.createElement("tr");
-      const options = [`<option value="">${target.required ? "Select column…" : "Don’t import"}</option>`]
-        .concat(headers.map((header) => `<option value="${escapeHtml(header)}" ${state.campaigns.fieldMapping[target.key] === header ? "selected" : ""}>${escapeHtml(header)}</option>`))
+      const selected = byColumn[header] || "";
+      const options = [`<option value="">Don’t import</option>`]
+        .concat(CAMPAIGN_CONTACT_TARGETS.map((target) => {
+          const takenByOther = Boolean(state.campaigns.fieldMapping?.[target.key])
+            && state.campaigns.fieldMapping[target.key] !== header;
+          const label = target.required ? `${target.label} (required)` : target.label;
+          return `<option value="${escapeHtml(target.key)}" ${selected === target.key ? "selected" : ""} ${takenByOther ? "disabled" : ""}>${escapeHtml(label)}</option>`;
+        }))
         .join("");
-      row.innerHTML = `<td><strong>${escapeHtml(target.label)}</strong><span class="subtle">${target.required ? "Required for sending" : "Optional"}</span></td>
-        <td><select class="text-field" data-campaign-field="${escapeHtml(target.key)}">${options}</select></td>`;
+      row.innerHTML = `<td><strong>${escapeHtml(header)}</strong><span class="subtle">From uploaded CSV</span></td>
+        <td><select class="text-field" data-campaign-csv-column="${escapeHtml(header)}">${options}</select></td>`;
       body.append(row);
     }
     table.append(body);
     host.append(table);
+    const note = document.createElement("p");
+    note.className = `subtle campaign-mapping-note${state.campaigns.fieldMapping?.profileId ? "" : " is-warning"}`;
+    note.textContent = state.campaigns.fieldMapping?.profileId
+      ? `Messaging ID mapped from “${state.campaigns.fieldMapping.profileId}”.`
+      : "Messaging ID / Phone is required — map one CSV column to it.";
+    host.append(note);
   }
 
   function renderCampaignUploadPreview() {
@@ -12671,9 +12713,10 @@
       }
     });
     $("campaignFieldMapping")?.addEventListener("change", (event) => {
-      const select = event.target.closest("[data-campaign-field]");
+      const select = event.target.closest("[data-campaign-csv-column]");
       if (!select) return;
-      state.campaigns.fieldMapping[select.dataset.campaignField] = select.value || "";
+      assignCampaignCsvColumnField(select.dataset.campaignCsvColumn, select.value || "");
+      renderCampaignFieldMapping();
       renderCampaignUploadPreview();
       if (isWhatsAppCampaignChannel()) renderCampaignTemplateVariables();
       else renderCampaignTextVariables();

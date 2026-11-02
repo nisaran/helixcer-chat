@@ -1748,6 +1748,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-mapping-table td strong { display: block; font-size: 12px; }
 .campaign-mapping-table td .subtle { display: block; margin-top: 2px; font-size: 10px; }
 .campaign-mapping-table select { width: 100%; min-height: 34px; }
+.campaign-mapping-note { margin: 0; font-size: 11px; }
+.campaign-mapping-note.is-warning { color: #a43f2b; font-weight: 650; }
 .campaign-message-layout {
   display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(240px, 0.85fr); gap: 12px; align-items: start;
 }

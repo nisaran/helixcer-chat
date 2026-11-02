@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261102-campaign-contact-loading">
-  <script src="./assets/app.js?v=20261102-campaign-contact-loading" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261102-campaign-csv-mapping">
+  <script src="./assets/app.js?v=20261102-campaign-csv-mapping" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -692,7 +692,7 @@
                   <input class="text-field" id="campaignUploadUrl" type="url" placeholder="https://example.com/contacts.csv">
                 </label>
                 <button class="secondary-button compact-button" type="button" data-action="campaign-load-upload-url" id="campaignLoadUploadUrl" hidden>Load URL</button>
-                <p class="subtle" id="campaignUploadHelp">Export Excel as CSV. Map columns to contact fields below, then use headers as message variables.</p>
+                <p class="subtle" id="campaignUploadHelp">Export Excel as CSV. Map each CSV column to a contact field below (Messaging ID is required), then use headers as message variables.</p>
                 <div class="campaign-mapping" id="campaignFieldMapping" hidden></div>
                 <p class="subtle campaign-upload-count" id="campaignUploadPreview" hidden></p>
               </div>
