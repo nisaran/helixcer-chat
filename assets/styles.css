@@ -666,7 +666,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   content: "";
   flex: 1;
   min-width: 24px;
-  border-top: 1px dashed rgba(102, 119, 129, .45);
+  border-top: 1px solid rgba(102, 119, 129, .38);
 }
 .message-event-copy {
   display: inline-flex;

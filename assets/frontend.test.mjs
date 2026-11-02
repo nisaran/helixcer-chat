@@ -1491,7 +1491,7 @@ test("Campaign page supports create flow, contact/upload audiences, and expandab
   assert.match(styles, /\.campaign-contact-footer\s*\{[\s\S]*margin-top:\s*14px/);
 });
 
-test("assignment events render as dashed divider text with date and time", () => {
+test("assignment events render as continuous divider text with date and time", () => {
   assert.match(app, /function createAssignmentEventRow/);
   assert.match(app, /className = "message-event-time"/);
   assert.match(app, /formatClock\(message\.timestamp\)/);
@@ -1503,7 +1503,8 @@ test("assignment events render as dashed divider text with date and time", () =>
   assert.match(styles, /\.message-event\s*\{/);
   assert.match(styles, /\.message-event::before/);
   assert.match(styles, /\.message-event::after/);
-  assert.match(styles, /border-top:\s*1px dashed/);
+  assert.match(styles, /border-top:\s*1px solid/);
+  assert.doesNotMatch(styles, /\.message-event::before[\s\S]*?border-top:\s*1px dashed/);
   assert.match(styles, /\.message-event-copy\s*\{/);
   assert.match(styles, /\.message-event-text\s*\{[^}]*font-size:\s*10px/);
   assert.match(styles, /\.message-event-time\s*\{[^}]*font-size:\s*9px/);
