@@ -339,6 +339,8 @@ test("attachments queue without auto-send and render provider-backed previews fo
   assert.match(app, /"telegram", "telegram_bot"/);
   assert.match(app, /"instagram", "instagram_messaging"/);
   assert.match(app, /WhatsApp, Telegram, Messenger, and Instagram/);
+  assert.match(app, /localPreview: true/);
+  assert.match(app, /rawMessage\.attachment === undefined/);
   assert.match(app, /function renderMessageAttachment\(message\)/);
   assert.match(app, /image\.loading = "lazy"/);
   assert.match(app, /video\.preload = "metadata"/);

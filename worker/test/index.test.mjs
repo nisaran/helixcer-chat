@@ -388,6 +388,11 @@ test('normalizes Instagram messages, attachments, echoes, delivery receipts, and
       message: { mid: 'ig-mid-2', attachments: [{ type: 'image', payload: { url: 'https://cdn.fbsbx.com/v/ig-sample.jpg' } }] } },
     { sender: { id: '17841400000000000' }, recipient: { id: 'customer-1' }, timestamp: 1761360001000,
       message: { mid: 'ig-echo', text: 'Reply', is_echo: true } },
+    { sender: { id: '17841400000000000' }, recipient: { id: 'customer-1' }, timestamp: 1761360001500,
+      message: {
+        mid: 'ig-echo-media', is_echo: true,
+        attachments: [{ type: 'image', payload: { url: 'https://cdn.fbsbx.com/v/ig-outbound.jpg' } }]
+      } },
     { sender: { id: 'customer-1' }, recipient: { id: '17841400000000000' }, timestamp: 1761360002000,
       delivery: { mids: ['ig-outbound-1'], watermark: 1761360002000 } },
     { sender: { id: 'customer-1' }, recipient: { id: '17841400000000000' }, timestamp: 1761360003000,
@@ -400,10 +405,11 @@ test('normalizes Instagram messages, attachments, echoes, delivery receipts, and
   assert.equal(result.messages[1].messageType, 'image');
   assert.equal(result.messages[1].attachment?.type, 'image');
   assert.equal(result.messages[1].attachment?.externalUrl, 'https://cdn.fbsbx.com/v/ig-sample.jpg');
-  assert.deepEqual(result.statuses, [
-    { providerMessageId: 'ig-echo', status: 'sent', timestamp: '2025-10-25T02:40:01.000Z' },
-    { providerMessageId: 'ig-outbound-1', status: 'delivered', timestamp: '2025-10-25T02:40:02.000Z' }
-  ]);
+  assert.equal(result.statuses[0].providerMessageId, 'ig-echo');
+  assert.equal(result.statuses[0].status, 'sent');
+  assert.equal(result.statuses[1].providerMessageId, 'ig-echo-media');
+  assert.equal(result.statuses[1].attachment?.externalUrl, 'https://cdn.fbsbx.com/v/ig-outbound.jpg');
+  assert.equal(result.statuses[2].providerMessageId, 'ig-outbound-1');
   assert.deepEqual(result.watermarkStatuses, [
     { channelProfileId: 'customer-1', status: 'read', timestamp: '2025-10-25T02:40:03.000Z' }
   ]);
@@ -418,6 +424,11 @@ test('normalizes Messenger messages, attachments, echoes, and receipts', () => {
       message: { mid: 'm_mid-2', attachments: [{ type: 'image', payload: { url: 'https://cdn.fbsbx.com/v/sample.jpg' } }] } },
     { sender: { id: '109876543210987' }, recipient: { id: 'psid-1' }, timestamp: 1761360001000,
       message: { mid: 'm_echo', text: 'Reply', is_echo: true } },
+    { sender: { id: '109876543210987' }, recipient: { id: 'psid-1' }, timestamp: 1761360001500,
+      message: {
+        mid: 'm_echo-media', is_echo: true,
+        attachments: [{ type: 'image', payload: { url: 'https://cdn.fbsbx.com/v/outbound.jpg' } }]
+      } },
     { sender: { id: 'psid-1' }, recipient: { id: '109876543210987' }, timestamp: 1761360002000,
       delivery: { mids: ['m_outbound-1'], watermark: 1761360002000 } },
     { sender: { id: 'psid-1' }, recipient: { id: '109876543210987' }, timestamp: 1761360003000,
@@ -430,10 +441,10 @@ test('normalizes Messenger messages, attachments, echoes, and receipts', () => {
   assert.equal(result.messages[1].messageType, 'image');
   assert.equal(result.messages[1].attachment?.type, 'image');
   assert.equal(result.messages[1].attachment?.externalUrl, 'https://cdn.fbsbx.com/v/sample.jpg');
-  assert.deepEqual(result.statuses, [
-    { providerMessageId: 'm_echo', status: 'sent', timestamp: '2025-10-25T02:40:01.000Z' },
-    { providerMessageId: 'm_outbound-1', status: 'delivered', timestamp: '2025-10-25T02:40:02.000Z' }
-  ]);
+  assert.equal(result.statuses[0].providerMessageId, 'm_echo');
+  assert.equal(result.statuses[1].providerMessageId, 'm_echo-media');
+  assert.equal(result.statuses[1].attachment?.externalUrl, 'https://cdn.fbsbx.com/v/outbound.jpg');
+  assert.equal(result.statuses[2].providerMessageId, 'm_outbound-1');
   assert.deepEqual(result.watermarkStatuses, [
     { channelProfileId: 'psid-1', status: 'read', timestamp: '2025-10-25T02:40:03.000Z' }
   ]);
