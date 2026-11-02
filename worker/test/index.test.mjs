@@ -17,6 +17,8 @@ import {
   normalizeGenericStatuses,
   facebookMessengerProfileNameFromGraph,
   fetchFacebookMessengerProfileName,
+  fetchInstagramProfileName,
+  instagramProfileNameFromGraph,
   normalizeFacebookMessenger,
   normalizeInstagram,
   normalizeTelegram,
@@ -449,6 +451,29 @@ test('builds Messenger profile names from Graph user fields', async () => {
     }
   );
   assert.equal(name, 'Nisar Khan');
+});
+
+test('builds Instagram profile names from Graph user fields', async () => {
+  assert.equal(instagramProfileNameFromGraph({ name: 'Meera Iyer' }), 'Meera Iyer');
+  assert.equal(instagramProfileNameFromGraph({ username: '@meera.iyer' }), 'meera.iyer');
+  assert.equal(instagramProfileNameFromGraph({ name: 'Meera', username: 'meera.iyer' }), 'Meera');
+  assert.equal(instagramProfileNameFromGraph({}), '');
+  const name = await fetchInstagramProfileName(
+    { config: { apiVersion: 'v26.0' } },
+    { accessToken: 'instagram-user-token' },
+    '7602246256484727',
+    async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.origin, 'https://graph.instagram.com');
+      assert.equal(url.pathname, '/v26.0/7602246256484727');
+      assert.equal(url.searchParams.get('fields'), 'name,username');
+      assert.equal(init.headers.Authorization, 'Bearer instagram-user-token');
+      return new Response(JSON.stringify({ name: 'Meera Iyer', username: 'meera.iyer' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  );
+  assert.equal(name, 'Meera Iyer');
 });
 
 test('encrypts channel credentials with workspace and channel binding', async () => {

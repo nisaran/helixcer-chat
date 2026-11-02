@@ -1054,7 +1054,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .contact-identity-platform-badge { min-width: 72px; border-radius: 999px; background: var(--identity-soft, var(--brand-soft)); color: var(--identity-color, var(--brand-deep)); padding: 6px 9px; text-align: center; font-size: 9px; font-weight: 800; }
 .contact-identity-platform-badge[data-platform="whatsapp"] { --identity-color: #168f66; --identity-soft: #e7f6ef; }
 .contact-identity-platform-badge[data-platform="telegram"] { --identity-color: #2d8bc0; --identity-soft: #e8f4fa; }
-.contact-identity-platform-badge[data-platform="instagram"] { --identity-color: #b6427b; --identity-soft: #f9eaf2; }
+.contact-identity-platform-badge[data-platform="instagram"] { --identity-color: #e1306c; --identity-soft: #fceef4; }
 .contact-identity-platform-badge[data-platform="facebook"] { --identity-color: #2768b2; --identity-soft: #eaf2fb; }
 .contact-identity-platform-badge[data-platform="email"] { --identity-color: #7b5ba9; --identity-soft: #f0ebf8; }
 .contact-identity-summary-copy { min-width: 0; }
@@ -1079,7 +1079,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .identity-platform-button.is-selected { border-color: var(--identity-color, var(--brand)); background: var(--identity-soft, var(--brand-soft)); color: var(--identity-color, var(--brand-deep)); }
 .identity-platform-button[data-platform="whatsapp"] { --identity-color: #168f66; --identity-soft: #e7f6ef; }
 .identity-platform-button[data-platform="telegram"] { --identity-color: #2d8bc0; --identity-soft: #e8f4fa; }
-.identity-platform-button[data-platform="instagram"] { --identity-color: #b6427b; --identity-soft: #f9eaf2; }
+.identity-platform-button[data-platform="instagram"] { --identity-color: #e1306c; --identity-soft: #fceef4; }
 .identity-platform-button[data-platform="facebook"] { --identity-color: #2768b2; --identity-soft: #eaf2fb; }
 .identity-platform-button[data-platform="email"] { --identity-color: #7b5ba9; --identity-soft: #f0ebf8; }
 .identity-remove-button { width: 29px; height: 29px; flex: 0 0 29px; border: 1px solid #ebc9c1; border-radius: 8px; background: #fff8f6; color: #a43f2b; padding: 0; font-size: 16px; line-height: 1; }
@@ -2043,7 +2043,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .provider-mark { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 34px; border-radius: 11px; object-fit: contain; padding: 6px; font-size: 10px; font-weight: 850; }
 .provider-mark.whatsapp { background: #e7f6ef; color: #168f66; }
 .provider-mark.telegram { background: #e8f4fa; color: #2d8bc0; }
-.provider-mark.instagram { background: #f9eaf2; color: #b6427b; }
+.provider-mark.instagram { background: #fceef4; color: #e1306c; }
 .provider-mark.facebook { background: #eaf2fb; color: #1877f2; }
 .secret-field { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .02em; }
 .secret-field.is-saved { border-color: #bcdcca; background: #f1faf5; color: #317058; letter-spacing: .08em; }
