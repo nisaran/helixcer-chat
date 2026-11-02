@@ -1491,16 +1491,19 @@ test("Campaign page supports create flow, contact/upload audiences, and expandab
   assert.match(styles, /\.campaign-contact-footer\s*\{[\s\S]*margin-top:\s*14px/);
 });
 
-test("assignment events render as continuous divider text with date and time", () => {
+test("timeline events render opened, closed, and assigned divider text with date and time", () => {
   assert.match(app, /function createAssignmentEventRow/);
   assert.match(app, /className = "message-event-time"/);
   assert.match(app, /formatClock\(message\.timestamp\)/);
-  assert.match(app, /Chat assigned to \$\{name\}\./);
+  assert.match(app, /Chat assigned to \$\{assignedName\}\./);
+  assert.match(app, /Chat opened by \$\{actorName\}\./);
+  assert.match(app, /Chat closed by \$\{actorName\}\./);
   assert.match(app, /!\s*\/\[\.!\?\]\$\/\.test\(text\)/);
   assert.match(app, /assignmentSilent/);
   assert.match(app, /notifyAssignmentToCurrentUser/);
   assert.match(app, /function applyLocalAssignment/);
   assert.match(app, /showAssignmentNotification/);
+  assert.match(app, /result\?\.statusEvent/);
   assert.match(styles, /\.message-event\s*\{/);
   assert.match(styles, /\.message-event::before/);
   assert.match(styles, /\.message-event::after/);
@@ -1524,4 +1527,5 @@ test("assignment events render as continuous divider text with date and time", (
   const normalizeBody = app.slice(normalizeStart, normalizeEnd);
   assert.match(normalizeBody, /raw\.direction === "internal"/);
   assert.match(normalizeBody, /assignedToName/);
+  assert.match(normalizeBody, /actorName/);
 });

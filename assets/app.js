@@ -1115,9 +1115,35 @@
     async updateConversation(conversationId, patch) {
       const item = this.data.conversations.find((entry) => entry.conversationId === conversationId);
       if (!item) throw new Error("Conversation not found");
+      const previousStatus = item.status;
       if (patch.status) item.status = patch.status;
       if (Object.prototype.hasOwnProperty.call(patch, "assignedTo")) item.assignedTo = patch.assignedTo || "Unassigned";
       if (patch.markRead) item.unreadCount = 0;
+      if (patch.status && patch.status !== previousStatus && ["open", "closed"].includes(patch.status)) {
+        const actorName = String(this.data.me?.displayName || this.data.me?.email || "You").trim() || "You";
+        const eventMessage = {
+          messageId: `demo-status-${Date.now()}`,
+          direction: "internal",
+          messageType: "event",
+          text: patch.status === "closed" ? `Chat closed by ${actorName}.` : `Chat opened by ${actorName}.`,
+          timestamp: new Date().toISOString(),
+          status: "recorded",
+          senderName: actorName,
+          event: {
+            type: patch.status === "closed" ? "closed" : "opened",
+            actor: String(this.data.me?.email || ""),
+            actorName,
+          },
+        };
+        this.data.messages[conversationId] ||= [];
+        this.data.messages[conversationId].push(eventMessage);
+        this.emit({
+          type: "message.created",
+          conversationId,
+          messageId: eventMessage.messageId,
+          message: clone(eventMessage),
+        });
+      }
       this.emit({ type: "conversation.updated", conversation: clone(item), item: clone(item) });
       return { ok: true, item: clone(item) };
     }
@@ -2693,6 +2719,8 @@
         assignedToName: String(eventSource?.assignedToName || ""),
         assignedBy: String(eventSource?.assignedBy || ""),
         assignedByName: String(eventSource?.assignedByName || ""),
+        actor: String(eventSource?.actor || eventSource?.assignedBy || ""),
+        actorName: String(eventSource?.actorName || eventSource?.assignedByName || eventSource?.assignedToName || ""),
       } : null,
     };
   }
@@ -4082,8 +4110,15 @@
     const row = element("div", "message-event");
     row.dataset.messageId = message.messageId;
     row.dataset.messageTimestamp = String(new Date(message.timestamp).getTime() || 0);
-    const name = String(message.event?.assignedToName || "").trim();
-    let text = String(message.text || "").trim() || (name ? `Chat assigned to ${name}.` : "Chat assigned.");
+    const type = String(message.event?.type || "").trim().toLowerCase();
+    const actorName = String(message.event?.actorName || "").trim();
+    const assignedName = String(message.event?.assignedToName || "").trim();
+    let text = String(message.text || "").trim();
+    if (!text) {
+      if (type === "opened") text = actorName ? `Chat opened by ${actorName}.` : "Chat opened.";
+      else if (type === "closed") text = actorName ? `Chat closed by ${actorName}.` : "Chat closed.";
+      else text = assignedName ? `Chat assigned to ${assignedName}.` : "Chat assigned.";
+    }
     if (text && !/[.!?]$/.test(text)) text = `${text}.`;
     const copy = element("span", "message-event-copy");
     copy.append(element("span", "message-event-text", text));
@@ -13570,8 +13605,15 @@
         // Mark before the API call so realtime conversation.updated does not clear the chat
         // before the toast under the status dropdown can be shown.
         if (["pending", "closed"].includes(next)) conversationStatusDeferClearId = conversation.conversationId;
-        await state.api.updateConversation(conversation.conversationId, { status: next });
+        const result = await state.api.updateConversation(conversation.conversationId, { status: next });
         conversation.status = next;
+        if (result?.statusEvent) {
+          const eventMessage = normalizeMessage(result.statusEvent);
+          upsertMessage(conversation.conversationId, eventMessage);
+          if (conversation.conversationId === state.selectedConversationId) {
+            upsertRenderedMessage(eventMessage, conversation.conversationId);
+          }
+        }
         renderCounts();
         const label = next === "closed" ? "Chat closed" : next === "pending" ? "Chat marked pending" : "Chat reopened";
         const detail = next === "closed"

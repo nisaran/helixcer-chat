@@ -343,4 +343,131 @@ test('internal assignment events are excluded from conversation last-message pre
   assert.match(source, /assignmentSilent/);
   assert.match(source, /claimUnassignedConversationOnReply/);
   assert.match(source, /Chat assigned to \$\{assignedToName\}/);
+  assert.match(source, /Chat opened by \$\{actorName\}/);
+  assert.match(source, /Chat closed by \$\{actorName\}/);
+  assert.match(source, /shouldRecordOpenEvent/);
+});
+
+test('closing and reopening a chat inserts timeline events with actor names', async () => {
+  const { database, env, ownerToken, broadcasts, headersFor } = await fixture();
+  const closed = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/assign-conversation', {
+    method: 'PATCH',
+    headers: headersFor(ownerToken),
+    body: JSON.stringify({ status: 'closed' })
+  }), env, { waitUntil() {} });
+  assert.equal(closed.status, 200);
+  const closedBody = await closed.json();
+  assert.equal(closedBody.item.status, 'closed');
+  assert.equal(closedBody.statusEvent.text, 'Chat closed by Owner.');
+  assert.equal(closedBody.statusEvent.event.type, 'closed');
+  assert.equal(database.prepare(`SELECT text FROM messages
+    WHERE conversation_id='assign-conversation' AND direction='internal' ORDER BY timestamp DESC LIMIT 1`).get().text,
+    'Chat closed by Owner.');
+  const closedBroadcast = broadcasts.find((event) => event.type === 'message.created'
+    && event.message?.event?.type === 'closed');
+  assert.ok(closedBroadcast);
+
+  broadcasts.length = 0;
+  const opened = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/assign-conversation', {
+    method: 'PATCH',
+    headers: headersFor(ownerToken),
+    body: JSON.stringify({ status: 'open' })
+  }), env, { waitUntil() {} });
+  assert.equal(opened.status, 200);
+  const openedBody = await opened.json();
+  assert.equal(openedBody.item.status, 'open');
+  assert.equal(openedBody.statusEvent.text, 'Chat opened by Owner.');
+  assert.equal(openedBody.statusEvent.event.type, 'opened');
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM messages
+    WHERE conversation_id='assign-conversation' AND direction='internal' AND text LIKE 'Chat opened by%'`).get().count, 1);
+  const openedBroadcast = broadcasts.find((event) => event.type === 'message.created'
+    && event.message?.event?.type === 'opened');
+  assert.ok(openedBroadcast);
+});
+
+test('setting pending does not insert an open or close timeline event', async () => {
+  const { database, env, ownerToken, headersFor } = await fixture();
+  const response = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/assign-conversation', {
+    method: 'PATCH',
+    headers: headersFor(ownerToken),
+    body: JSON.stringify({ status: 'pending' })
+  }), env, { waitUntil() {} });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.item.status, 'pending');
+  assert.equal(body.statusEvent, undefined);
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM messages
+    WHERE conversation_id='assign-conversation' AND direction='internal'`).get().count, 0);
+});
+
+test('first inbound customer message inserts Chat opened by customer', async () => {
+  const { database, env, broadcasts } = await fixture();
+  env.ASSIGN_WEBHOOK_TOKEN = 'assign-webhook-secret';
+  const response = await handleRequest(new Request('https://api.chat.helixcer.com/webhooks/generic/assign-channel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Webhook-Token': 'assign-webhook-secret' },
+    body: JSON.stringify({
+      id: 'first-inbound-1',
+      from: 'brand-new-customer',
+      senderName: 'Asha Rao',
+      text: 'Hello there',
+      timestamp: '2026-11-02T18:50:00.000Z',
+      type: 'text'
+    })
+  }), env, { waitUntil() {} });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, received: 1 });
+  const openRow = database.prepare(`SELECT text FROM messages
+    WHERE direction='internal' AND text LIKE 'Chat opened by%' ORDER BY timestamp ASC LIMIT 1`).get();
+  assert.equal(openRow.text, 'Chat opened by Asha Rao.');
+  const openBroadcast = broadcasts.find((event) => event.type === 'message.created'
+    && event.message?.event?.type === 'opened');
+  assert.ok(openBroadcast);
+  assert.equal(openBroadcast.message.text, 'Chat opened by Asha Rao.');
+  const inboundBroadcast = broadcasts.find((event) => event.type === 'message.created'
+    && event.message?.direction === 'inbound' && event.message?.text === 'Hello there');
+  assert.ok(inboundBroadcast);
+});
+
+test('customer message into a closed chat inserts Chat opened by customer', async () => {
+  const { database, env, broadcasts } = await fixture();
+  env.ASSIGN_WEBHOOK_TOKEN = 'assign-webhook-secret';
+  database.prepare(`UPDATE conversations SET status='closed' WHERE conversation_id='assign-conversation'`).run();
+  const response = await handleRequest(new Request('https://api.chat.helixcer.com/webhooks/generic/assign-channel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Webhook-Token': 'assign-webhook-secret' },
+    body: JSON.stringify({
+      id: 'reopen-inbound-1',
+      from: 'assign-profile',
+      senderName: 'Assign Contact',
+      text: 'I am back',
+      timestamp: '2026-11-02T18:55:00.000Z',
+      type: 'text'
+    })
+  }), env, { waitUntil() {} });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, received: 1 });
+  assert.equal(database.prepare(`SELECT status FROM conversations WHERE conversation_id='assign-conversation'`).get().status, 'open');
+  assert.equal(database.prepare(`SELECT text FROM messages
+    WHERE conversation_id='assign-conversation' AND direction='internal' AND text LIKE 'Chat opened by%'
+    ORDER BY timestamp DESC LIMIT 1`).get().text, 'Chat opened by Assign Contact.');
+  const openBroadcast = broadcasts.find((event) => event.type === 'message.created'
+    && event.message?.event?.type === 'opened');
+  assert.ok(openBroadcast);
+});
+
+test('repeat inbound while chat is already open does not insert another open event', async () => {
+  const { database, env } = await fixture();
+  env.ASSIGN_WEBHOOK_TOKEN = 'assign-webhook-secret';
+  const first = await handleRequest(new Request('https://api.chat.helixcer.com/webhooks/generic/assign-channel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Webhook-Token': 'assign-webhook-secret' },
+    body: JSON.stringify({
+      id: 'already-open-1', from: 'assign-profile', senderName: 'Assign Contact',
+      text: 'Still open', timestamp: '2026-11-02T19:00:00.000Z', type: 'text'
+    })
+  }), env, { waitUntil() {} });
+  assert.equal(first.status, 200);
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM messages
+    WHERE conversation_id='assign-conversation' AND direction='internal' AND text LIKE 'Chat opened by%'`).get().count, 0);
 });

@@ -652,6 +652,14 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       const result = await updateConversation(env, workspaceId, id, payload, principal);
       const item = result.item || result;
       await broadcast(env, workspaceId, { type: 'conversation.updated', conversationId: id, conversation: item });
+      if (result.statusEvent) {
+        await broadcast(env, workspaceId, {
+          type: 'message.created',
+          conversationId: id,
+          messageId: result.statusEvent.messageId,
+          message: result.statusEvent
+        });
+      }
       if (result.assignmentEvent) {
         await broadcast(env, workspaceId, {
           type: 'message.created',
@@ -676,7 +684,11 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       if (payload.markRead && Number(item.unreadCount || 0) === 0) {
         scheduleConversationReadPush(ctx, env, workspaceId, item);
       }
-      return withCors(json({ ok: true, item }), cors);
+      return withCors(json({
+        ok: true,
+        item,
+        ...(result.statusEvent ? { statusEvent: result.statusEvent } : {})
+      }), cors);
     }
     if (conversationMatch && request.method === 'DELETE') {
       requirePermission(principal, 'chats.delete');
@@ -2212,6 +2224,16 @@ function scheduleConversationReadPush(ctx, env, workspaceId, conversation) {
 
 async function broadcastStoredInbound(env, channel, stored) {
   if (!stored?.message || !stored.conversationId || !stored.messageId) return;
+  if (stored.openEvent) {
+    await broadcast(env, channel.workspaceId, {
+      type: 'message.created',
+      conversationId: stored.conversationId,
+      messageId: stored.openEvent.messageId,
+      message: stored.openEvent,
+      conversation: stored.conversation || null,
+      source: 'webhook'
+    });
+  }
   await broadcast(env, channel.workspaceId, {
     type: 'message.created',
     conversationId: stored.conversationId,
@@ -4814,7 +4836,9 @@ async function listMessages(env, workspaceId, conversationId, url) {
           assignedTo: String(payload.assignedTo || '').slice(0, 160),
           assignedToName: String(payload.assignedToName || '').slice(0, 120),
           assignedBy: String(payload.assignedBy || '').slice(0, 254),
-          assignedByName: String(payload.assignedByName || '').slice(0, 120)
+          assignedByName: String(payload.assignedByName || '').slice(0, 120),
+          actor: String(payload.actor || payload.assignedBy || '').slice(0, 254),
+          actorName: String(payload.actorName || payload.assignedByName || payload.assignedToName || '').slice(0, 120)
         }
       : null;
     return {
@@ -4927,6 +4951,7 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
   if (!['open', 'pending', 'closed'].includes(status)) throw httpError(400, 'Invalid conversation status.');
   const hasAssigneePatch = payload.assignedTo !== undefined;
   const previousAssignee = String(existing.assigned_to || '').trim();
+  const previousStatus = String(existing.status || '');
   let assignedTo = payload.assignedTo === undefined ? existing.assigned_to : String(payload.assignedTo).trim().slice(0, 160);
   let assigneeMember = null;
   if (payload.assignedTo !== undefined && assignedTo) {
@@ -4957,12 +4982,29 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
   await audit(env, principal, 'update', 'conversation', id, { status, assignedTo, markRead });
   const item = await getConversationItem(env, workspaceId, id) ||
     { conversationId: id, status, assignedTo, unreadCount: fallbackUnreadCount, updatedAt: now };
+  const actor = outboundSenderAttribution(principal);
+  let statusEvent = null;
+  const statusChanged = hasStatusPatch && status !== previousStatus;
+  if (statusChanged && status === 'closed') {
+    statusEvent = await insertLifecycleEventMessage(env, workspaceId, existing, {
+      action: 'closed',
+      actorLogin: actor.login,
+      actorName: actor.name,
+      timestamp: now
+    });
+  } else if (statusChanged && status === 'open' && previousStatus !== 'open') {
+    statusEvent = await insertLifecycleEventMessage(env, workspaceId, existing, {
+      action: 'opened',
+      actorLogin: actor.login,
+      actorName: actor.name,
+      timestamp: now
+    });
+  }
   const assignmentChanged = hasAssigneePatch
     && String(assignedTo || '').trim().toLowerCase() !== previousAssignee.toLowerCase();
   let assignmentEvent = null;
   let assignmentNotify = null;
   if (assignmentChanged && String(assignedTo || '').trim()) {
-    const actor = outboundSenderAttribution(principal);
     const assigneeName = String(assigneeMember?.display_name || assignedTo).trim().slice(0, 120) || assignedTo;
     assignmentEvent = await insertAssignmentEventMessage(env, workspaceId, existing, {
       assignedTo,
@@ -4985,32 +5027,39 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
       };
     }
   }
-  return { item, assignmentEvent, assignmentNotify, assignmentChanged };
+  return { item, assignmentEvent, assignmentNotify, assignmentChanged, statusEvent, statusChanged };
 }
 
-async function insertAssignmentEventMessage(env, workspaceId, conversation, details = {}) {
-  const assignedToName = String(details.assignedToName || details.assignedTo || ' teammate').trim().slice(0, 120) || 'teammate';
-  const text = `Chat assigned to ${assignedToName}.`;
+function earlierEventTimestamp(value) {
+  const ms = Date.parse(String(value || ''));
+  if (!Number.isFinite(ms)) return String(value || new Date().toISOString());
+  return new Date(ms - 1).toISOString();
+}
+
+async function insertInternalEventMessage(env, workspaceId, conversation, details = {}) {
+  const text = String(details.text || '').trim().slice(0, 1000);
+  if (!text) throw httpError(500, 'Internal event text is required.');
   const now = String(details.timestamp || new Date().toISOString());
   const messageId = crypto.randomUUID();
   const channelId = String(conversation.channel_id || conversation.channelId || '');
   const contactId = String(conversation.contact_id || conversation.contactId || '');
   const identityId = String(conversation.identity_id || conversation.identityId || '');
-  if (!channelId || !contactId) throw httpError(500, 'Conversation is missing channel details for the assignment event.');
+  if (!channelId || !contactId) throw httpError(500, 'Conversation is missing channel details for the timeline event.');
+  const actorLogin = String(details.actorLogin || '').slice(0, 254);
+  const actorName = String(details.actorName || '').slice(0, 120);
+  const eventType = String(details.event || 'event').slice(0, 40);
   const payload = {
-    event: 'assigned',
-    assignedTo: String(details.assignedTo || '').slice(0, 160),
-    assignedToName,
-    assignedBy: String(details.assignedBy || '').slice(0, 254),
-    assignedByName: String(details.assignedByName || '').slice(0, 120)
+    event: eventType,
+    type: eventType,
+    actor: actorLogin,
+    actorName,
+    ...(isPlainObject(details.payload) ? details.payload : {})
   };
   await env.DB.prepare(`INSERT INTO messages
       (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,payload_json,workspace_id,sender_login,sender_name)
     VALUES (?1,?2,?3,?4,?5,'internal','event',?6,'recorded',?7,?8,?9,?10,?11)`)
     .bind(messageId, conversation.conversation_id || conversation.conversationId, contactId, channelId, identityId,
-      text, now, JSON.stringify(payload), workspaceId,
-      String(details.assignedBy || '').slice(0, 254),
-      String(details.assignedByName || '').slice(0, 120)).run();
+      text, now, JSON.stringify(payload), workspaceId, actorLogin, actorName).run();
   return {
     messageId,
     conversationId: conversation.conversation_id || conversation.conversationId,
@@ -5022,10 +5071,48 @@ async function insertAssignmentEventMessage(env, workspaceId, conversation, deta
     text,
     status: 'recorded',
     timestamp: now,
-    senderName: String(details.assignedByName || '').slice(0, 120),
-    senderLogin: String(details.assignedBy || '').slice(0, 254),
+    senderName: actorName,
+    senderLogin: actorLogin,
     event: payload
   };
+}
+
+async function insertLifecycleEventMessage(env, workspaceId, conversation, details = {}) {
+  const action = details.action === 'closed' ? 'closed' : 'opened';
+  const actorName = String(details.actorName || details.actorLogin || 'teammate').trim().slice(0, 120) || 'teammate';
+  const text = action === 'closed'
+    ? `Chat closed by ${actorName}.`
+    : `Chat opened by ${actorName}.`;
+  return insertInternalEventMessage(env, workspaceId, conversation, {
+    event: action,
+    text,
+    actorLogin: details.actorLogin || '',
+    actorName,
+    timestamp: details.timestamp,
+    payload: {
+      actor: String(details.actorLogin || '').slice(0, 254),
+      actorName
+    }
+  });
+}
+
+async function insertAssignmentEventMessage(env, workspaceId, conversation, details = {}) {
+  const assignedToName = String(details.assignedToName || details.assignedTo || ' teammate').trim().slice(0, 120) || 'teammate';
+  const assignedBy = String(details.assignedBy || '').slice(0, 254);
+  const assignedByName = String(details.assignedByName || '').slice(0, 120);
+  return insertInternalEventMessage(env, workspaceId, conversation, {
+    event: 'assigned',
+    text: `Chat assigned to ${assignedToName}.`,
+    actorLogin: assignedBy,
+    actorName: assignedByName,
+    timestamp: details.timestamp,
+    payload: {
+      assignedTo: String(details.assignedTo || '').slice(0, 160),
+      assignedToName,
+      assignedBy,
+      assignedByName
+    }
+  });
 }
 
 async function claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal) {
@@ -7136,9 +7223,18 @@ async function storeInbound(env, channel, event, rawPayload) {
   }
   identity = await upgradeInboundContactDisplayName(env, channel.workspaceId, identity, profileId,
     event.displayName, now);
+  const priorConversation = await env.DB.prepare(`SELECT conversation_id,status,channel_id,contact_id,identity_id
+    FROM conversations WHERE workspace_id=?1 AND contact_id=?2 LIMIT 1`)
+    .bind(channel.workspaceId, identity.contact_id).first();
+  const shouldRecordOpenEvent = !priorConversation || String(priorConversation.status || '') !== 'open';
   const conversationId = await ensureIdentityConversation(env, channel.workspaceId, identity.contact_id,
     identity.identity_id, channel.channelId, '');
-  const conversation = { conversation_id: conversationId };
+  const conversation = {
+    conversation_id: conversationId,
+    channel_id: channel.channelId,
+    contact_id: identity.contact_id,
+    identity_id: identity.identity_id
+  };
   const messageId = crypto.randomUUID();
   const reply = await resolveInboundReply(env, channel.workspaceId, conversation.conversation_id,
     channel.channelId, event.reply);
@@ -7149,6 +7245,16 @@ async function storeInbound(env, channel, event, rawPayload) {
         providerMessageId: String(event.providerMessageId || '')
       }
     : rawPayload;
+  const senderName = String(identity.contact_display_name || event.displayName || event.channelProfileId);
+  let openEvent = null;
+  if (shouldRecordOpenEvent) {
+    openEvent = await insertLifecycleEventMessage(env, channel.workspaceId, conversation, {
+      action: 'opened',
+      actorLogin: 'customer',
+      actorName: senderName.slice(0, 120) || 'customer',
+      timestamp: earlierEventTimestamp(timestamp)
+    });
+  }
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
       provider_message_id,status,timestamp,payload_json,workspace_id) VALUES (?1,?2,?3,?4,?5,'inbound',?6,?7,?8,'received',?9,?10,?11)`)
@@ -7164,7 +7270,6 @@ async function storeInbound(env, channel, event, rawPayload) {
     'inbound', conversation.conversation_id, timestamp);
   const messageType = String(event.messageType || 'text').slice(0, 40);
   const text = String(event.text || '').slice(0, MAX_TEXT_LENGTH);
-  const senderName = String(identity.contact_display_name || event.displayName || event.channelProfileId);
   const message = {
     messageId, conversationId: conversation.conversation_id, channelId: channel.channelId,
     contactIdentityId: identity.identity_id, identityId: identity.identity_id,
@@ -7182,7 +7287,8 @@ async function storeInbound(env, channel, event, rawPayload) {
     preview: text,
     messageType,
     message,
-    conversation: conversationItem
+    conversation: conversationItem,
+    ...(openEvent ? { openEvent } : {})
   };
   } catch (error) {
     // Let a provider retry process the event if storage failed after claiming its dedupe key.
