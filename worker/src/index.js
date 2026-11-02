@@ -5786,18 +5786,25 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
         sent = await sendTelegramMedia(env, target.channel, target.channel_profile_id, file, attachment,
           reply?.channelMessageId || '');
         safeAttachment = { ...attachment, providerFileId: sent.providerFileId };
-      } else if (target.connectorType === 'instagram') {
-        sent = await sendInstagramMedia(env, target.channel, target.channel_profile_id, file, attachment);
+      } else if (target.connectorType === 'instagram' || target.connectorType === 'facebook_messenger') {
+        // Meta Send API returns message/attachment ids, not a CDN URL. Cache the
+        // uploaded bytes so Helixcer can serve inbox previews immediately, and
+        // later enrich with the echo webhook's public media URL when available.
+        const previewBytes = await file.arrayBuffer();
+        const uploadFile = new File([previewBytes], attachment.filename, {
+          type: attachment.mimeType || file.type || 'application/octet-stream'
+        });
+        sent = target.connectorType === 'instagram'
+          ? await sendInstagramMedia(env, target.channel, target.channel_profile_id, uploadFile, attachment)
+          : await sendFacebookMessengerMedia(env, target.channel, target.channel_profile_id, uploadFile, attachment);
+        const previewCached = await cacheOutboundAttachmentPreview(workspaceId, messageId, previewBytes, attachment);
         safeAttachment = {
           ...attachment,
-          ...(sent.providerAttachmentId ? { providerAttachmentId: sent.providerAttachmentId } : {})
+          ...(sent.providerAttachmentId ? { providerAttachmentId: sent.providerAttachmentId } : {}),
+          ...(previewCached ? { previewCache: true } : {})
         };
       } else {
-        sent = await sendFacebookMessengerMedia(env, target.channel, target.channel_profile_id, file, attachment);
-        safeAttachment = {
-          ...attachment,
-          ...(sent.providerAttachmentId ? { providerAttachmentId: sent.providerAttachmentId } : {})
-        };
+        throw nonRetryableError('Unsupported attachment connector.');
       }
       await persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, safeAttachment, reply, senderName);
     } catch (error) {
@@ -5986,6 +5993,34 @@ async function uploadConversationTemplateMedia(env, workspaceId, conversationId,
   };
 }
 
+function attachmentPreviewCacheRequest(workspaceId, messageId) {
+  return new Request(
+    `https://attachment-preview.helixcer.internal/${encodeURIComponent(workspaceId)}/${encodeURIComponent(messageId)}`
+  );
+}
+
+async function cacheOutboundAttachmentPreview(workspaceId, messageId, bytes, attachment) {
+  try {
+    const body = bytes instanceof ArrayBuffer ? bytes : await new Response(bytes).arrayBuffer();
+    if (!body || !body.byteLength) return false;
+    const response = new Response(body, {
+      headers: {
+        'Content-Type': String(attachment?.mimeType || 'application/octet-stream'),
+        'Content-Length': String(body.byteLength),
+        'Cache-Control': 'private, max-age=2592000',
+        'X-Attachment-Filename': safeAttachmentFilename(attachment?.filename || 'attachment')
+      }
+    });
+    await caches.default.put(attachmentPreviewCacheRequest(workspaceId, messageId), response);
+    return true;
+  } catch (error) {
+    console.error('attachment_preview_cache_failed', {
+      messageId, workspaceId, error: cleanError(error)
+    });
+    return false;
+  }
+}
+
 async function streamMessageAttachment(env, workspaceId, messageId, request, url, principal = null) {
   const row = await env.DB.prepare(`SELECT m.message_id,m.message_type,m.payload_json,m.channel_id,c.connector_type,c.provider_type,
       c.config_json,c.secret_key,c.workspace_id
@@ -6039,6 +6074,24 @@ async function streamMessageAttachment(env, workspaceId, messageId, request, url
     providerResponse = await fetch(`https://api.telegram.org/file/bot${credentials.botToken}/${filePath}`, {
       headers: range ? { Range: range } : {}
     });
+  } else if (channel.connectorType === 'facebook_messenger' || channel.connectorType === 'instagram') {
+    const externalUrl = safeStoredExternalMediaUrl(attachment.externalUrl);
+    if (externalUrl) {
+      providerResponse = await fetch(externalUrl, {
+        headers: {
+          ...(range ? { Range: range } : {}),
+          // Meta CDN media is often hotlink-sensitive; omit cookies and follow redirects.
+          Accept: '*/*'
+        },
+        redirect: 'follow'
+      });
+    } else if (attachment.previewCache) {
+      const cached = await caches.default.match(attachmentPreviewCacheRequest(workspaceId, messageId));
+      if (!cached || !cached.body) throw httpError(410, 'This attachment preview is no longer available.');
+      providerResponse = cached;
+    } else {
+      throw httpError(410, 'This attachment preview is no longer available.');
+    }
   } else {
     throw httpError(409, 'This provider does not expose protected attachment previews.');
   }
@@ -6088,7 +6141,8 @@ function messageAttachmentView(messageType, payload, messageId = '') {
   const type = String(messageType || '') === 'template' ? String(value.type || '') : String(messageType || '');
   if (!['image', 'video', 'audio', 'document'].includes(type)) return null;
   const externalUrl = safeStoredExternalMediaUrl(value.externalUrl);
-  const available = Boolean(value.providerMediaId || value.providerFileId || externalUrl);
+  const previewCache = value.previewCache === true;
+  const available = Boolean(value.providerMediaId || value.providerFileId || externalUrl || previewCache);
   return {
     type,
     filename: String(value.filename || ''),
@@ -6766,6 +6820,30 @@ async function resolveInboundReply(env, workspaceId, conversationId, channelId, 
   return messageReplyView({ reply: providerReply });
 }
 
+async function enrichOutboundAttachmentFromProviderEcho(env, row, attachment) {
+  const externalUrl = safeStoredExternalMediaUrl(attachment?.externalUrl);
+  if (!row?.message_id || !externalUrl) return null;
+  const payload = safeJsonParse(row.payload_json, {});
+  const existing = payload.attachment && typeof payload.attachment === 'object' ? payload.attachment : null;
+  if (!existing) return null;
+  if (safeStoredExternalMediaUrl(existing.externalUrl) === externalUrl) {
+    return messageAttachmentView(row.message_type || existing.type, payload, row.message_id);
+  }
+  const nextPayload = {
+    ...payload,
+    attachment: {
+      ...existing,
+      externalUrl,
+      ...(attachment.type && !existing.type ? { type: attachment.type } : {}),
+      ...(attachment.filename && !existing.filename ? { filename: attachment.filename } : {}),
+      ...(attachment.mimeType && !existing.mimeType ? { mimeType: attachment.mimeType } : {})
+    }
+  };
+  await env.DB.prepare('UPDATE messages SET payload_json=?2 WHERE message_id=?1')
+    .bind(row.message_id, JSON.stringify(nextPayload)).run();
+  return messageAttachmentView(row.message_type || nextPayload.attachment.type, nextPayload, row.message_id);
+}
+
 async function applyProviderStatus(env, workspaceId, channelId, event, rawPayload) {
   const providerMessageId = String(event.providerMessageId || '');
   const internalMessageId = /^[A-Za-z0-9_-]{1,100}$/.test(String(event.internalMessageId || ''))
@@ -6806,14 +6884,26 @@ async function applyProviderStatus(env, workspaceId, channelId, event, rawPayloa
       return [];
     }
     const at = normalizeTimestamp(event.timestamp, new Date().toISOString());
-    const changed = await env.DB.prepare(`SELECT message_id,conversation_id,status,error,provider_message_id,payload_json FROM messages
+    const changed = await env.DB.prepare(`SELECT message_id,conversation_id,status,error,provider_message_id,payload_json,message_type
+      FROM messages
       WHERE workspace_id=?1 AND channel_id=?2
         AND ((?3<>'' AND provider_message_id=?3) OR (?4<>'' AND message_id=?4))`)
       .bind(workspaceId, channelId, providerMessageId, internalMessageId).all();
     const results = [];
     for (const row of changed.results || []) {
       const statusHistory = await persistMessageStatusHistory(env, row, status, at);
-      results.push(realtimeMessageStatus({ ...row, statusHistory }));
+      let attachmentView = null;
+      if (event.attachment?.externalUrl) {
+        const fresh = statusHistory
+          ? await env.DB.prepare(`SELECT message_id,conversation_id,status,error,provider_message_id,payload_json,message_type
+              FROM messages WHERE message_id=?1`).bind(row.message_id).first()
+          : row;
+        attachmentView = await enrichOutboundAttachmentFromProviderEcho(env, fresh || row, event.attachment);
+      }
+      results.push({
+        ...realtimeMessageStatus({ ...row, statusHistory }),
+        ...(attachmentView ? { attachment: attachmentView } : {})
+      });
     }
     return results;
   } catch (error) {
@@ -8063,7 +8153,15 @@ export function normalizeInstagram(payload) {
       if (message?.is_echo) {
         const accountId = String(entry?.id || event?.sender?.id || '');
         if (accountId) recipientIds.add(accountId);
-        if (message.mid) statuses.push({ providerMessageId: String(message.mid), status: 'sent', timestamp });
+        if (message.mid) {
+          const attachment = messengerInboundAttachment(message);
+          statuses.push({
+            providerMessageId: String(message.mid),
+            status: 'sent',
+            timestamp,
+            ...(attachment ? { attachment } : {})
+          });
+        }
         continue;
       }
       if (event?.delivery) {
@@ -8216,7 +8314,15 @@ export function normalizeFacebookMessenger(payload) {
       if (message?.is_echo) {
         const pageId = String(entry?.id || event?.sender?.id || '');
         if (pageId) recipientIds.add(pageId);
-        if (message.mid) statuses.push({ providerMessageId: String(message.mid), status: 'sent', timestamp });
+        if (message.mid) {
+          const attachment = messengerInboundAttachment(message);
+          statuses.push({
+            providerMessageId: String(message.mid),
+            status: 'sent',
+            timestamp,
+            ...(attachment ? { attachment } : {})
+          });
+        }
         continue;
       }
       if (event?.delivery) {

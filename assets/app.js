@@ -7619,13 +7619,25 @@
         const result = await state.api.sendAttachment(conversation.conversationId, formData);
         const fallback = sent === 0 && caption ? caption : `[Attachment: ${item.file.name}]`;
         const message = normalizeMessage(result.item || { text: fallback, direction: "outbound", status: "pending", messageType: "document", ...route });
+        // Keep the local object URL until the provider-backed preview is available so
+        // Messenger/Instagram outbound images do not sit on a spinner after "Sent".
+        if (item.previewUrl && message.attachment && message.attachment.available !== true) {
+          message.attachment = {
+            ...message.attachment,
+            available: true,
+            external: true,
+            url: item.previewUrl,
+            localPreview: true,
+          };
+        } else if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl);
+        }
         upsertMessage(conversation.conversationId, message);
         conversation.lastMessage = conversationMessagePreview(message) || fallback;
         conversation.lastMessageType = String(message.messageType || "document").toLocaleLowerCase();
         conversation.lastMessageAt = message.timestamp;
         if (stillSelected()) upsertRenderedMessage(message, conversation.conversationId);
         queue.shift();
-        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
         sent++;
         if (sent === 1 && replyToMessageId && stillSelected()) clearReplyTarget();
         if (sent === 1 && caption && stillSelected() && input.value.trim() === caption) {
@@ -7710,7 +7722,8 @@
         return;
       }
       const statusOnly = type === "message.updated" && Boolean(existingMessage)
-        && rawMessage.status !== undefined && rawMessage.text === undefined && rawMessage.direction === undefined;
+        && rawMessage.status !== undefined && rawMessage.text === undefined && rawMessage.direction === undefined
+        && rawMessage.attachment === undefined;
       const message = normalizeMessage({
         ...existingMessage,
         ...rawMessage,
