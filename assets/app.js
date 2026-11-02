@@ -5871,6 +5871,10 @@
   }
 
   async function saveContactEdits(form) {
+    if (!hasPermission("contacts.edit")) {
+      showToast("Edit unavailable", "You do not have permission to edit contacts.", true);
+      return;
+    }
     const data = new FormData(form);
     const contactId = String(data.get("contactId") || "");
     const editTagInput = tagInputRoot("edit");
