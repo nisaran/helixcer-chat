@@ -189,7 +189,7 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `GET|POST /api/conversations/:id/messages`
 - `GET /api/conversations/:id/templates` (approved templates from that conversation's WhatsApp connection)
 - `POST /api/conversations/:id/template` (authenticated WhatsApp template send)
-- `POST /api/conversations/:id/attachments` (authenticated WhatsApp, Telegram, or Messenger multipart upload)
+- `POST /api/conversations/:id/attachments` (authenticated WhatsApp, Telegram, Messenger, or Instagram multipart upload)
 - `GET|POST /api/contacts`
 - `GET /api/contacts/export.csv` (one CSV row per contact with separate provider-ID columns; `/export` remains an alias)
 - `GET|PATCH /api/contacts/:contactId`
@@ -231,7 +231,7 @@ Meta connections default to Graph API `v26.0`. `GET /api/channels` returns the p
 
 Credential rows are encrypted independently with a random nonce and authenticated workspace/channel/field context. Listing channels checks only which credential field rows exist and does not decrypt them. Audit entries contain only the names of credential fields changed, never their values.
 
-For each WhatsApp or Messenger conversation, list and message responses include `freeformAllowed`, `replyWindowExpiresAt`, and a human-readable reason when the window is closed. The Worker independently rejects free-form text and attachments outside the 24-hour customer-service window; the dashboard cannot bypass this check. `POST /api/conversations/:id/template` sends an already-approved template from the inbox and remains available after the WhatsApp window closes. The external API can also send approved WhatsApp templates. Creating or approving templates remains in Meta's tools, and Instagram messaging remains subject to Meta's own allowed messaging window and permissions.
+For each WhatsApp, Messenger, or Instagram conversation, list and message responses include `freeformAllowed`, `replyWindowExpiresAt`, and a human-readable reason when the window is closed. The Worker independently rejects free-form text and attachments outside the 24-hour customer-service window; the dashboard cannot bypass this check. `POST /api/conversations/:id/template` sends an already-approved template from the inbox and remains available after the WhatsApp window closes. The external API can also send approved WhatsApp templates. Creating or approving templates remains in Meta's tools.
 
 `GET /api/conversations/:id/templates` derives the WABA and encrypted access token from that conversation's workspace-scoped channel, requests approved templates from Graph API v26.0 (or the saved channel version), and follows at most three cursor pages. Its response never contains a provider token. Each item contains `templateId`, `name`, `language.code`, `status`, `category`, sanitized component definitions, and a flattened `variables` list for text, media-header, named-parameter, and dynamic URL-button inputs. Meta failures are returned as bounded provider errors.
 
@@ -243,7 +243,7 @@ Contact list, bootstrap, and detail responses include `displayName`/`name`, `com
 
 Outbound message status is monotonic: `sent` → `delivered` → `read`, with `failed` retained as terminal. WhatsApp status callbacks, Instagram/Messenger message echoes/delivery receipts/read watermarks, and configured Generic HTTP status callbacks update the same inbox message and broadcast the change in realtime. Telegram's Bot API confirms a successful send but does not expose recipient delivery/read receipts, so Telegram messages remain accurately labeled `sent` rather than fabricating a receipt.
 
-The attachment endpoint accepts multipart form data with a `file` field and optional `caption`. It supports WhatsApp, Telegram, and Messenger media types and limits enforced by this release (up to 16 MiB at the Helixcer edge). WhatsApp uploads to the configured Meta Phone Number ID and queues an encrypted outbound payload. Telegram and Messenger send the file immediately through their provider APIs. Helixcer stores only safe filename/type/size/caption metadata in D1. Inbound Messenger attachments that include a public Meta CDN URL are previewed as external media.
+The attachment endpoint accepts multipart form data with a `file` field and optional `caption`. It supports WhatsApp, Telegram, Messenger, and Instagram media types and limits enforced by this release (up to 16 MiB at the Helixcer edge). WhatsApp uploads to the configured Meta Phone Number ID and queues an encrypted outbound payload. Telegram, Messenger, and Instagram send the file immediately through their provider APIs. Helixcer stores only safe filename/type/size/caption metadata in D1. Inbound Messenger and Instagram attachments that include a public Meta CDN URL are previewed as external media.
 
 Legacy Generic HTTP and Web Chat paths remain for compatibility. Their old environment-secret resolver is isolated to `generic_http`; managed WhatsApp, Telegram, Instagram, and Messenger code reads only encrypted D1 credentials and can never fall back to `WA_*`, `BOT_*`, or other per-channel environment variables.
 

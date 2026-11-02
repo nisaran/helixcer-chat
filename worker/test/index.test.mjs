@@ -237,6 +237,11 @@ test('WhatsApp free-form replies follow the latest inbound 24-hour window', () =
   const unopened = whatsappReplyWindowState('whatsapp_cloud', '', now);
   assert.equal(unopened.freeformAllowed, false);
   assert.equal(unopened.replyWindowExpiresAt, '');
+  const igOpen = whatsappReplyWindowState('instagram', '2026-10-24T13:00:00.000Z', now);
+  assert.equal(igOpen.freeformAllowed, true);
+  const igClosed = whatsappReplyWindowState('instagram', '2026-10-24T11:59:59.000Z', now);
+  assert.equal(igClosed.freeformAllowed, false);
+  assert.match(igClosed.replyWindowReason, /Instagram 24-hour messaging window/i);
 });
 
 test('normalizes inbound WhatsApp messages and statuses', () => {
@@ -375,10 +380,12 @@ test('normalizes Telegram bot updates', () => {
   });
 });
 
-test('normalizes Instagram messages, echoes, delivery receipts, and read watermarks', () => {
+test('normalizes Instagram messages, attachments, echoes, delivery receipts, and read watermarks', () => {
   const result = normalizeInstagram({ entry: [{ id: '17841400000000000', messaging: [
     { sender: { id: 'customer-1' }, recipient: { id: '17841400000000000' }, timestamp: 1761360000000,
       message: { mid: 'ig-mid-1', text: 'Hello from Instagram' } },
+    { sender: { id: 'customer-1' }, recipient: { id: '17841400000000000' }, timestamp: 1761360000500,
+      message: { mid: 'ig-mid-2', attachments: [{ type: 'image', payload: { url: 'https://cdn.fbsbx.com/v/ig-sample.jpg' } }] } },
     { sender: { id: '17841400000000000' }, recipient: { id: 'customer-1' }, timestamp: 1761360001000,
       message: { mid: 'ig-echo', text: 'Reply', is_echo: true } },
     { sender: { id: 'customer-1' }, recipient: { id: '17841400000000000' }, timestamp: 1761360002000,
@@ -386,10 +393,13 @@ test('normalizes Instagram messages, echoes, delivery receipts, and read waterma
     { sender: { id: 'customer-1' }, recipient: { id: '17841400000000000' }, timestamp: 1761360003000,
       read: { watermark: 1761360003000 } }
   ] }] });
-  assert.equal(result.messages.length, 1);
+  assert.equal(result.messages.length, 2);
   assert.equal(result.messages[0].channelProfileId, 'customer-1');
   assert.equal(result.messages[0].providerMessageId, 'ig-mid-1');
   assert.equal(result.messages[0].text, 'Hello from Instagram');
+  assert.equal(result.messages[1].messageType, 'image');
+  assert.equal(result.messages[1].attachment?.type, 'image');
+  assert.equal(result.messages[1].attachment?.externalUrl, 'https://cdn.fbsbx.com/v/ig-sample.jpg');
   assert.deepEqual(result.statuses, [
     { providerMessageId: 'ig-echo', status: 'sent', timestamp: '2025-10-25T02:40:01.000Z' },
     { providerMessageId: 'ig-outbound-1', status: 'delivered', timestamp: '2025-10-25T02:40:02.000Z' }
