@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261102-campaign-history-channel">
-  <script src="./assets/app.js?v=20261102-campaign-history-channel" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261102-filter-all-toggle">
+  <script src="./assets/app.js?v=20261102-filter-all-toggle" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -226,7 +226,6 @@
               </button>
               <div class="conversation-filter-menu" id="conversationFilterMenu" role="group" aria-label="Filter conversations" hidden>
                 <label class="conversation-filter-option"><input type="checkbox" value="all" data-conversation-filter-option><span>All conversations</span><small data-filter-count="all">0</small></label>
-                <label class="conversation-filter-option"><input type="checkbox" value="mine" data-conversation-filter-option><span>Mine</span><small data-filter-count="mine">0</small></label>
                 <label class="conversation-filter-option"><input type="checkbox" value="unassigned" data-conversation-filter-option><span>Unassigned</span><small data-filter-count="unassigned">0</small></label>
                 <label class="conversation-filter-option"><input type="checkbox" value="open" data-conversation-filter-option checked><span>Open</span><small data-filter-count="open">0</small></label>
                 <label class="conversation-filter-option"><input type="checkbox" value="unread" data-conversation-filter-option><span>Unread</span><small data-filter-count="unread">0</small></label>
@@ -237,7 +236,6 @@
 
             <div class="filter-row" id="conversationFilters" aria-label="Conversation filters">
               <button class="filter-chip" type="button" data-filter="all">All <span id="allCount" data-filter-count="all">0</span></button>
-              <button class="filter-chip" type="button" data-filter="mine">Mine <span id="mineCount" data-filter-count="mine">0</span></button>
               <button class="filter-chip" type="button" data-filter="unassigned">Unassigned <span id="unassignedCount" data-filter-count="unassigned">0</span></button>
               <button class="filter-chip is-active" type="button" data-filter="open">Open <span id="openCount" data-filter-count="open">0</span></button>
               <button class="filter-chip" type="button" data-filter="unread">Unread <span id="unreadCount" data-filter-count="unread">0</span></button>
