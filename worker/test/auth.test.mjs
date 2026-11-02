@@ -1887,7 +1887,18 @@ test('shared Instagram app webhook verifies all matches and routes each account 
       return new Response(null, { status: 204 });
     } })
   };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.origin === 'https://graph.instagram.com' && url.pathname === '/v26.0/5550001') {
+      return new Response(JSON.stringify({ name: 'Meera Iyer', username: 'meera.iyer' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return new Response('{}', { status: 404 });
+  };
 
+  try {
   const payload = { object: 'instagram', entry: [
     { id: '17841400000000011', messaging: [{ sender: { id: '5550001' }, recipient: { id: '17841400000000011' },
       timestamp: 1761360000000, message: { mid: 'ig-app-message-one', text: 'First account' } }] },
@@ -1911,13 +1922,15 @@ test('shared Instagram app webhook verifies all matches and routes each account 
   assert.equal(routed.length, 2);
   assert.equal(routed[0].channel_id, 'ig-account-one');
   assert.equal(routed[1].channel_id, 'ig-account-two');
-  const scopedRoutes = database.prepare(`SELECT b.channel_id,b.identity_id,ci.contact_id
+  const scopedRoutes = database.prepare(`SELECT b.channel_id,b.identity_id,ci.contact_id,ci.display_name
     FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
     WHERE b.scoped_profile_id='5550001' AND b.active=1 ORDER BY b.channel_id`).all();
   assert.equal(scopedRoutes.length, 2);
   assert.notEqual(scopedRoutes[0].identity_id, scopedRoutes[1].identity_id);
   assert.notEqual(scopedRoutes[0].contact_id, scopedRoutes[1].contact_id,
     'the same Instagram-scoped id on two accounts must create separate contacts');
+  assert.equal(scopedRoutes[0].display_name, 'Meera Iyer');
+  assert.equal(scopedRoutes[1].display_name, 'Meera Iyer');
   const createdEvents = broadcasts.filter(event => event.type === 'message.created');
   assert.equal(createdEvents.length, 2);
   const firstCreated = createdEvents.find(event => event.message.channelMessageId === 'ig-app-message-one');
@@ -1928,6 +1941,7 @@ test('shared Instagram app webhook verifies all matches and routes each account 
   assert.equal(firstCreated.message.direction, 'inbound');
   assert.equal(firstCreated.conversation.channelId, 'ig-account-one');
   assert.equal(firstCreated.conversation.channelProfileId, '5550001');
+  assert.equal(firstCreated.conversation.subject, 'Meera Iyer');
   assert.equal(secondCreated.message.text, 'Second account');
   assert.equal(secondCreated.conversation.channelId, 'ig-account-two');
   assert.equal(secondCreated.conversation.channelProfileId, '5550001');
@@ -1975,7 +1989,10 @@ test('shared Instagram app webhook verifies all matches and routes each account 
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature }, body: singlePayload
   }), env);
   assert.equal(ambiguous.status, 409);
-  database.close();
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
 });
 
 test('WhatsApp verification requires WABA ownership and subscribes the app before marking credentials verified', async () => {
