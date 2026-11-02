@@ -880,13 +880,40 @@
       this.data.messages[conversationId] ||= [];
       this.data.messages[conversationId].push(item);
       const conversation = this.data.conversations.find((entry) => entry.conversationId === conversationId);
+      let assignment = null;
       if (conversation) {
         conversation.lastMessage = text;
         conversation.lastMessageType = item.messageType;
         conversation.lastMessageAt = item.timestamp;
+        if (!String(conversation.assignedTo || "").trim()) {
+          const assigneeEmail = String(this.data.me?.email || "").trim();
+          const assigneeName = String(this.data.me?.displayName || assigneeEmail || "You").trim() || "You";
+          if (assigneeEmail) {
+            conversation.assignedTo = assigneeEmail;
+            const eventMessage = {
+              messageId: `demo-assign-${Date.now()}`,
+              direction: "internal",
+              messageType: "event",
+              text: `Chat assigned to ${assigneeName}`,
+              timestamp: item.timestamp,
+              status: "recorded",
+              senderName: assigneeName,
+              senderLogin: assigneeEmail,
+              event: {
+                type: "assigned",
+                assignedTo: assigneeEmail,
+                assignedToName: assigneeName,
+                assignedBy: assigneeEmail,
+                assignedByName: assigneeName,
+              },
+            };
+            this.data.messages[conversationId].push(eventMessage);
+            assignment = { conversation: clone(conversation), eventMessage: clone(eventMessage) };
+          }
+        }
       }
       await smallDelay(160);
-      return { ok: true, item: clone(item) };
+      return { ok: true, item: clone(item), ...(assignment ? { assignment } : {}) };
     }
 
     async sendTemplate(conversationId, payload, route = {}) {
@@ -2635,13 +2662,20 @@
         filename: String(replySource.attachment.filename || ""),
       } : null,
     } : null;
+    const direction = raw.direction === "outbound"
+      ? "outbound"
+      : raw.direction === "internal"
+        ? "internal"
+        : "inbound";
+    const eventSource = raw.event && typeof raw.event === "object" ? raw.event : null;
     return {
       ...raw,
       messageId: String(raw.messageId || raw.id || `message-${Date.now()}-${Math.random().toString(36).slice(2)}`),
-      direction: raw.direction === "outbound" ? "outbound" : "inbound",
+      direction,
+      messageType: String(raw.messageType || raw.type || "text"),
       text: raw.text || raw.body || raw.content || "",
       timestamp: raw.timestamp || raw.createdAt || raw.sentAt || new Date().toISOString(),
-      status: raw.status || (raw.direction === "outbound" ? "sent" : "received"),
+      status: raw.status || (direction === "outbound" ? "sent" : direction === "internal" ? "recorded" : "received"),
       senderName: raw.senderName || raw.sender || "",
       channelMessageId: raw.channelMessageId || raw.providerMessageId || "",
       channelId: String(raw.channelId || raw.route?.channelId || ""),
@@ -2653,6 +2687,13 @@
       statusHistory: normalizeMessageStatusHistory(raw.statusHistory || raw.delivery || null),
       template,
       reply,
+      event: direction === "internal" ? {
+        type: String(eventSource?.type || eventSource?.event || raw.messageType || "event"),
+        assignedTo: String(eventSource?.assignedTo || ""),
+        assignedToName: String(eventSource?.assignedToName || ""),
+        assignedBy: String(eventSource?.assignedBy || ""),
+        assignedByName: String(eventSource?.assignedByName || ""),
+      } : null,
     };
   }
 
@@ -3789,6 +3830,7 @@
 
   function conversationMessagePreview(message) {
     if (!message) return "";
+    if (message.direction === "internal" || message.messageType === "event") return "";
     const attachment = message.attachment && typeof message.attachment === "object" ? message.attachment : null;
     const text = String(attachment?.caption || message.text || "").trim();
     const generatedType = generatedMediaPreviewMatch(text);
@@ -3991,6 +4033,9 @@
   }
 
   function createMessageRow(message, conversation) {
+    if (message.direction === "internal" || message.messageType === "event") {
+      return createAssignmentEventRow(message);
+    }
     const row = element("div", `message-row${message.direction === "outbound" ? " is-outbound" : ""}`);
     row.dataset.messageId = message.messageId;
     row.dataset.messageTimestamp = String(new Date(message.timestamp).getTime() || 0);
@@ -4031,6 +4076,46 @@
       row.append(replyButton);
     }
     return row;
+  }
+
+  function createAssignmentEventRow(message) {
+    const row = element("div", "message-event");
+    row.dataset.messageId = message.messageId;
+    row.dataset.messageTimestamp = String(new Date(message.timestamp).getTime() || 0);
+    const name = String(message.event?.assignedToName || "").trim();
+    const text = String(message.text || "").trim() || (name ? `Chat assigned to ${name}` : "Chat assigned");
+    row.append(element("span", "message-event-text", text));
+    const stamp = formatClock(message.timestamp);
+    if (stamp) {
+      const time = document.createElement("time");
+      time.className = "message-event-time";
+      time.dateTime = String(message.timestamp || "");
+      time.textContent = stamp;
+      row.append(time);
+    }
+    return row;
+  }
+
+  function applyLocalAssignment(conversation, assignment, options = {}) {
+    if (!conversation || !assignment?.conversation) return;
+    const incoming = normalizeConversation({ ...conversation, ...assignment.conversation });
+    Object.assign(conversation, {
+      assignedTo: incoming.assignedTo,
+      updatedAt: incoming.updatedAt || conversation.updatedAt,
+    });
+    const index = state.conversations.findIndex((item) => item.conversationId === conversation.conversationId);
+    if (index >= 0) state.conversations[index] = { ...state.conversations[index], ...conversation };
+    if (assignment.eventMessage) {
+      const eventMessage = normalizeMessage(assignment.eventMessage);
+      upsertMessage(conversation.conversationId, eventMessage);
+      if (conversation.conversationId === state.selectedConversationId) {
+        upsertRenderedMessage(eventMessage, conversation.conversationId);
+      }
+    }
+    if (conversation.conversationId === state.selectedConversationId) {
+      renderSelectedConversation({ preserveScroll: true, renderThread: false });
+    }
+    if (options.renderList !== false) renderConversationList();
   }
 
   function messageThreadNearBottom(host = $("messageThread")) {
@@ -7358,6 +7443,7 @@
       conversation.lastMessageType = String(message.messageType || "text").toLocaleLowerCase();
       conversation.lastMessageAt = message.timestamp;
       upsertRenderedMessage(message, conversation.conversationId);
+      applyLocalAssignment(conversation, result.assignment);
       renderConversationList();
       if (replyToMessageId) clearReplyTarget();
       state.composerDrafts.delete(conversation.conversationId);
@@ -8085,6 +8171,7 @@
       conversation.lastMessageAt = message.timestamp;
       closeTemplateDialog();
       upsertRenderedMessage(message, conversation.conversationId);
+      applyLocalAssignment(conversation, result.assignment);
       renderConversationList();
       showToast("Template queued", `${name} is being sent through WhatsApp.`);
     } catch (error) {
@@ -8215,6 +8302,7 @@
         conversation.lastMessageType = String(message.messageType || "document").toLocaleLowerCase();
         conversation.lastMessageAt = message.timestamp;
         if (stillSelected()) upsertRenderedMessage(message, conversation.conversationId);
+        applyLocalAssignment(conversation, result.assignment, { renderList: false });
         queue.shift();
         sent++;
         if (sent === 1 && replyToMessageId && stillSelected()) clearReplyTarget();
@@ -8337,10 +8425,12 @@
         conversation = incomingConversation;
       }
       if (conversation) {
-        conversation.lastMessageType = String(message.messageType || "text").toLocaleLowerCase();
-        if (!rawConversation) {
-          conversation.lastMessage = conversationMessagePreview(message) || messageDisplayText(message);
-          conversation.lastMessageAt = message.timestamp;
+        if (message.direction !== "internal") {
+          conversation.lastMessageType = String(message.messageType || "text").toLocaleLowerCase();
+          if (!rawConversation) {
+            conversation.lastMessage = conversationMessagePreview(message) || messageDisplayText(message);
+            conversation.lastMessageAt = message.timestamp;
+          }
         }
         if (message.direction === "inbound") {
           conversation.freeformAllowed = true;
@@ -8362,11 +8452,34 @@
       }
       return;
     }
+    if (type === "conversation.assigned") {
+      const rawConversation = event.conversation || event.item || event.data || {};
+      const eventConversationId = String(event.conversationId || rawConversation.conversationId || rawConversation.id || "");
+      const existing = state.conversations.find((item) => item.conversationId === eventConversationId);
+      const incoming = normalizeConversation({
+        ...existing,
+        ...rawConversation,
+        conversationId: eventConversationId || rawConversation.conversationId,
+        assignedTo: event.assignedTo !== undefined ? event.assignedTo : rawConversation.assignedTo,
+      });
+      if (!incoming.conversationId) return;
+      const index = state.conversations.findIndex((item) => item.conversationId === incoming.conversationId);
+      if (index >= 0) state.conversations[index] = { ...state.conversations[index], ...incoming };
+      else state.conversations.unshift(incoming);
+      markConversationRealtimeMutation(incoming.conversationId);
+      if (!event.assignmentSilent) notifyAssignmentToCurrentUser(incoming);
+      renderCounts();
+      renderConversationList();
+      if (incoming.conversationId === state.selectedConversationId) {
+        renderSelectedConversation({ preserveScroll: true, renderThread: false });
+      }
+      return;
+    }
     if (type === "conversation.updated" || type === "conversation.created") {
       const rawConversation = event.conversation || event.item || event.data || {};
       const eventConversationId = String(event.conversationId || rawConversation.conversationId || rawConversation.id || "");
       const existing = state.conversations.find((item) => item.conversationId === eventConversationId);
-      if (!rawConversation.subject && !rawConversation.status) {
+      if (!rawConversation.subject && !rawConversation.status && rawConversation.assignedTo === undefined) {
         await reconcileWorkspace();
         return;
       }
@@ -8736,6 +8849,38 @@
       tag: `helixcer-${conversation.conversationId}`,
       data: { url: conversationUrl(conversation.conversationId), conversationId: conversation.conversationId },
     };
+    await showBrowserNotification(title, options, conversation.conversationId);
+  }
+
+  function currentUserAssigneeMatchers() {
+    const email = String(state.currentUser?.email || "").trim().toLowerCase();
+    const userId = String(state.currentUser?.userId || "").trim().toLowerCase();
+    return [email, userId].filter(Boolean);
+  }
+
+  function notifyAssignmentToCurrentUser(conversation) {
+    const assignee = String(conversation?.assignedTo || "").trim().toLowerCase();
+    if (!assignee) return;
+    if (!currentUserAssigneeMatchers().includes(assignee)) return;
+    if (isConversationActivelyViewed(conversation.conversationId)) return;
+    showAssignmentNotification(conversation).catch(() => {});
+  }
+
+  async function showAssignmentNotification(conversation) {
+    if (!state.notificationsEnabled || !notificationSupport() || Notification.permission !== "granted") return;
+    if (state.pushSubscriptionReady && document.visibilityState !== "visible") return;
+    const title = "Chat assigned to you";
+    const options = {
+      body: conversation.subject || "A conversation was assigned to you.",
+      icon: "/assets/helixcer-mark.jpg?v=fc5bb333",
+      badge: "/assets/helixcer-mark.jpg?v=fc5bb333",
+      tag: `helixcer-assign-${conversation.conversationId}`,
+      data: { url: conversationUrl(conversation.conversationId), conversationId: conversation.conversationId },
+    };
+    await showBrowserNotification(title, options, conversation.conversationId);
+  }
+
+  async function showBrowserNotification(title, options, conversationId) {
     let registration = null;
     try {
       registration = await ensureServiceWorkerRegistration();
@@ -8759,7 +8904,7 @@
     notification.addEventListener("click", () => {
       window.focus();
       setRoute("inbox");
-      selectConversation(conversation.conversationId);
+      if (conversationId) selectConversation(conversationId);
       notification.close();
     });
   }

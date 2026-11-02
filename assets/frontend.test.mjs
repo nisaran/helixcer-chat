@@ -1490,3 +1490,30 @@ test("Campaign page supports create flow, contact/upload audiences, and expandab
   assert.match(app, /inline: true/);
   assert.match(styles, /\.campaign-contact-footer\s*\{[\s\S]*margin-top:\s*14px/);
 });
+
+test("assignment events render as distinguished timeline rows with date and time", () => {
+  assert.match(app, /function createAssignmentEventRow/);
+  assert.match(app, /className = "message-event-time"/);
+  assert.match(app, /formatClock\(message\.timestamp\)/);
+  assert.match(app, /Chat assigned to \$\{name\}/);
+  assert.match(app, /assignmentSilent/);
+  assert.match(app, /notifyAssignmentToCurrentUser/);
+  assert.match(app, /function applyLocalAssignment/);
+  assert.match(app, /showAssignmentNotification/);
+  assert.match(styles, /\.message-event\s*\{/);
+  assert.match(styles, /\.message-event-text\s*\{/);
+  assert.match(styles, /\.message-event-time\s*\{/);
+  assert.match(styles, /#0f766e/);
+  const eventBody = app.slice(app.indexOf("function createAssignmentEventRow"), app.indexOf("function applyLocalAssignment"));
+  assert.match(eventBody, /message-event/);
+  assert.match(eventBody, /message-event-text/);
+  assert.match(eventBody, /message-event-time/);
+  const assignedHandler = app.slice(app.indexOf('if (type === "conversation.assigned")'),
+    app.indexOf('if (type === "conversation.updated"'));
+  assert.match(assignedHandler, /if \(!event\.assignmentSilent\) notifyAssignmentToCurrentUser\(incoming\)/);
+  const normalizeStart = app.indexOf("function normalizeMessage(raw)");
+  const normalizeEnd = app.indexOf("function normalizeMessageStatusHistory");
+  const normalizeBody = app.slice(normalizeStart, normalizeEnd);
+  assert.match(normalizeBody, /raw\.direction === "internal"/);
+  assert.match(normalizeBody, /assignedToName/);
+});

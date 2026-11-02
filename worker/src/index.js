@@ -32,6 +32,7 @@ import {
   removePushSubscription,
   saveMobilePushDevice,
   savePushSubscription,
+  sendMembershipNotifications,
   sendWorkspaceMobileConversationRead,
   sendWorkspaceNotifications
 } from './push.js';
@@ -648,8 +649,30 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       if (payload.assignedTo !== undefined && !hasPermission(principal, 'chats.assign')) {
         throw httpError(403, 'You do not have permission to assign conversations.');
       }
-      const item = await updateConversation(env, workspaceId, id, payload, principal);
+      const result = await updateConversation(env, workspaceId, id, payload, principal);
+      const item = result.item || result;
       await broadcast(env, workspaceId, { type: 'conversation.updated', conversationId: id, conversation: item });
+      if (result.assignmentEvent) {
+        await broadcast(env, workspaceId, {
+          type: 'message.created',
+          conversationId: id,
+          messageId: result.assignmentEvent.messageId,
+          message: result.assignmentEvent,
+          assignmentSilent: !result.assignmentNotify
+        });
+      }
+      if (result.assignmentChanged) {
+        await broadcast(env, workspaceId, {
+          type: 'conversation.assigned',
+          conversationId: id,
+          conversation: item,
+          assignedTo: item.assignedTo || '',
+          assignmentSilent: !result.assignmentNotify
+        });
+      }
+      if (result.assignmentNotify) {
+        scheduleAssignmentPush(ctx, env, workspaceId, item, result.assignmentNotify);
+      }
       if (payload.markRead && Number(item.unreadCount || 0) === 0) {
         scheduleConversationReadPush(ctx, env, workspaceId, item);
       }
@@ -682,8 +705,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       await broadcast(env, workspaceId, {
         type: 'message.created', conversationId: id, messageId: result.message.messageId, message: result.message
       });
+      await broadcastAssignmentSideEffects(env, workspaceId, id, result.assignment);
       ctx.waitUntil(sendOrQueue(env, result.message.messageId));
-      return withCors(json({ ok: true, item: result.message }, 202), cors);
+      return withCors(json(outboundSendResponse(result), 202), cors);
     }
     const messageAttachmentMatch = url.pathname.match(/^\/api\/messages\/([^/]+)\/attachment$/);
     if (messageAttachmentMatch && request.method === 'GET') {
@@ -709,8 +733,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       await broadcast(env, workspaceId, {
         type: 'message.created', conversationId: id, messageId: result.message.messageId, message: result.message
       });
+      await broadcastAssignmentSideEffects(env, workspaceId, id, result.assignment);
       ctx.waitUntil(sendOrQueue(env, result.message.messageId));
-      return withCors(json({ ok: true, item: result.message }, 202), cors);
+      return withCors(json(outboundSendResponse(result), 202), cors);
     }
     const templateMediaMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/template-media$/);
     if (templateMediaMatch && request.method === 'POST') {
@@ -727,8 +752,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       await broadcast(env, workspaceId, {
         type: 'message.created', conversationId: id, messageId: result.message.messageId, message: result.message
       });
+      await broadcastAssignmentSideEffects(env, workspaceId, id, result.assignment);
       if (result.message.status === 'pending') ctx.waitUntil(sendOrQueue(env, result.message.messageId));
-      return withCors(json({ ok: true, item: result.message }, 202), cors);
+      return withCors(json(outboundSendResponse(result), 202), cors);
     }
     if (['/api/contacts/export', '/api/contacts/export.csv'].includes(url.pathname) && request.method === 'GET') {
       return withCors(await exportContactsCsv(env, workspaceId), cors);
@@ -2095,6 +2121,72 @@ function scheduleInboundPush(ctx, env, channel, inbound) {
   if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(delivery);
 }
 
+function scheduleAssignmentPush(ctx, env, workspaceId, conversation, notify) {
+  const membershipId = String(notify?.membershipId || '').trim();
+  if (!membershipId) return;
+  const delivery = (async () => {
+    const notification = assignmentPushNotification(conversation, notify);
+    return sendMembershipNotifications(env, workspaceId, membershipId, notification);
+  })().catch(error => console.error('assignment_push_failed', {
+    workspaceId,
+    conversationId: conversation?.conversationId || '',
+    membershipId,
+    message: cleanError(error)
+  }));
+  if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(delivery);
+}
+
+export function assignmentPushNotification(conversation = {}, notify = {}) {
+  const subject = compactNotificationText(conversation.subject || notify.subject, 120) || 'Conversation';
+  const assigneeName = compactNotificationText(notify.assigneeName, 80) || 'you';
+  const rawConversationId = String(conversation.conversationId || notify.conversationId || '');
+  const conversationId = /^[A-Za-z0-9_-]{1,100}$/.test(rawConversationId) ? rawConversationId : '';
+  return {
+    title: 'Chat assigned to you',
+    body: subject === 'Conversation' ? `A chat was assigned to ${assigneeName}.` : `${subject} was assigned to you.`,
+    tag: `helixcer-assign-${conversationId || 'inbox'}`,
+    url: conversationId ? `/#inbox/${conversationId}` : '/#inbox',
+    ...(notify.timestamp ? { eventTimestamp: notify.timestamp } : {})
+  };
+}
+
+function outboundSendResponse(result = {}) {
+  const payload = { ok: true, item: result.message };
+  if (result.assignment?.conversation) {
+    payload.assignment = {
+      conversation: result.assignment.conversation,
+      ...(result.assignment.eventMessage ? { eventMessage: result.assignment.eventMessage } : {})
+    };
+  }
+  return payload;
+}
+
+async function broadcastAssignmentSideEffects(env, workspaceId, conversationId, assignment) {
+  if (!assignment?.conversation) return;
+  await broadcast(env, workspaceId, {
+    type: 'conversation.updated',
+    conversationId,
+    conversation: assignment.conversation,
+    assignmentSilent: true
+  });
+  await broadcast(env, workspaceId, {
+    type: 'conversation.assigned',
+    conversationId,
+    conversation: assignment.conversation,
+    assignedTo: assignment.conversation.assignedTo || '',
+    assignmentSilent: true
+  });
+  if (assignment.eventMessage) {
+    await broadcast(env, workspaceId, {
+      type: 'message.created',
+      conversationId,
+      messageId: assignment.eventMessage.messageId,
+      message: assignment.eventMessage,
+      assignmentSilent: true
+    });
+  }
+}
+
 function scheduleConversationReadPush(ctx, env, workspaceId, conversation) {
   const delivery = (async () => {
     // Re-check after the PATCH response was assembled. A webhook can create a
@@ -3118,8 +3210,10 @@ async function listConversations(env, workspaceId, url, options = {}) {
         WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id AND legacy.channel_id=c.channel_id
         ORDER BY legacy.created_at LIMIT 1) ELSE '' END,'') AS channel_profile_id,
       (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
+        AND m.direction!='internal'
         ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message,
       (SELECT message_type FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
+        AND m.direction!='internal'
         ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message_type,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
@@ -3284,8 +3378,10 @@ async function getConversationItem(env, workspaceId, conversationId) {
         WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id AND legacy.channel_id=c.channel_id
         ORDER BY legacy.created_at LIMIT 1) ELSE '' END,'') AS channel_profile_id,
       (SELECT text FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
+        AND m.direction!='internal'
         ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message,
       (SELECT message_type FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
+        AND m.direction!='internal'
         ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message_type,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
@@ -4712,6 +4808,15 @@ async function listMessages(env, workspaceId, conversationId, url) {
     const template = row.message_type === 'template' ? templateMessageView(payload) : null;
     const senderName = messageSenderNameView(row, payload);
     const senderLogin = messageSenderLoginView(row, payload);
+    const event = row.direction === 'internal' && isPlainObject(payload)
+      ? {
+          type: String(payload.event || row.message_type || 'event').slice(0, 40),
+          assignedTo: String(payload.assignedTo || '').slice(0, 160),
+          assignedToName: String(payload.assignedToName || '').slice(0, 120),
+          assignedBy: String(payload.assignedBy || '').slice(0, 254),
+          assignedByName: String(payload.assignedByName || '').slice(0, 120)
+        }
+      : null;
     return {
       messageId: row.message_id, direction: row.direction, text: row.text, messageType: row.message_type,
       contactIdentityId: row.identity_id || '', identityId: row.identity_id || '',
@@ -4723,6 +4828,7 @@ async function listMessages(env, workspaceId, conversationId, url) {
       ...(senderLogin ? { senderLogin } : {}),
       attachment: messageAttachmentView(row.message_type, payload, row.message_id),
       ...(template ? { template } : {}),
+      ...(event ? { event } : {}),
       ...((() => {
         const statusHistory = messageStatusHistoryView(payload);
         return statusHistory ? { statusHistory } : {};
@@ -4733,17 +4839,25 @@ async function listMessages(env, workspaceId, conversationId, url) {
 }
 
 function messageSenderNameView(row, payload) {
-  if (row?.direction !== 'outbound') return '';
+  if (!['outbound', 'internal'].includes(row?.direction)) return '';
   const fromColumn = String(row?.sender_name || '').trim();
   if (fromColumn) return fromColumn.slice(0, 120);
+  if (row?.direction === 'internal' && isPlainObject(payload)) {
+    const assignedByName = String(payload.assignedByName || '').trim();
+    if (assignedByName) return assignedByName.slice(0, 120);
+  }
   const fromPayload = String(payload?.senderName || '').trim();
   return fromPayload ? fromPayload.slice(0, 120) : '';
 }
 
 function messageSenderLoginView(row, payload) {
-  if (row?.direction !== 'outbound') return '';
+  if (!['outbound', 'internal'].includes(row?.direction)) return '';
   const fromColumn = String(row?.sender_login || '').trim();
   if (fromColumn) return fromColumn.slice(0, 254);
+  if (row?.direction === 'internal' && isPlainObject(payload)) {
+    const assignedBy = String(payload.assignedBy || '').trim();
+    if (assignedBy) return assignedBy.slice(0, 254);
+  }
   const name = messageSenderNameView(row, payload);
   if (name === 'API') return 'API';
   if (name === 'Interakt') return 'Interakt';
@@ -4812,12 +4926,16 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
   const status = payload.status ?? existing.status;
   if (!['open', 'pending', 'closed'].includes(status)) throw httpError(400, 'Invalid conversation status.');
   const hasAssigneePatch = payload.assignedTo !== undefined;
+  const previousAssignee = String(existing.assigned_to || '').trim();
   let assignedTo = payload.assignedTo === undefined ? existing.assigned_to : String(payload.assignedTo).trim().slice(0, 160);
+  let assigneeMember = null;
   if (payload.assignedTo !== undefined && assignedTo) {
-    const assignee = await env.DB.prepare(`SELECT u.email FROM memberships m JOIN users u ON u.user_id=m.user_id
-      WHERE m.workspace_id=?1 AND m.status='active' AND (lower(u.email)=lower(?2) OR u.user_id=?2)`).bind(workspaceId, assignedTo).first();
-    if (!assignee) throw httpError(400, 'Assignee is not an active workspace member.');
-    assignedTo = assignee.email;
+    assigneeMember = await env.DB.prepare(`SELECT u.email,u.display_name,u.user_id,m.membership_id
+      FROM memberships m JOIN users u ON u.user_id=m.user_id
+      WHERE m.workspace_id=?1 AND m.status='active' AND (lower(u.email)=lower(?2) OR u.user_id=?2)`)
+      .bind(workspaceId, assignedTo).first();
+    if (!assigneeMember) throw httpError(400, 'Assignee is not an active workspace member.');
+    assignedTo = assigneeMember.email;
   }
   const markRead = Boolean(payload.markRead);
   // Clear only the unread messages that existed when this request began. An
@@ -4837,8 +4955,116 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
     .bind(id, workspaceId, hasStatusPatch ? 1 : 0, status, hasAssigneePatch ? 1 : 0, assignedTo,
       markRead ? 1 : 0, knownUnreadCount, now).run();
   await audit(env, principal, 'update', 'conversation', id, { status, assignedTo, markRead });
-  return await getConversationItem(env, workspaceId, id) ||
+  const item = await getConversationItem(env, workspaceId, id) ||
     { conversationId: id, status, assignedTo, unreadCount: fallbackUnreadCount, updatedAt: now };
+  const assignmentChanged = hasAssigneePatch
+    && String(assignedTo || '').trim().toLowerCase() !== previousAssignee.toLowerCase();
+  let assignmentEvent = null;
+  let assignmentNotify = null;
+  if (assignmentChanged && String(assignedTo || '').trim()) {
+    const actor = outboundSenderAttribution(principal);
+    const assigneeName = String(assigneeMember?.display_name || assignedTo).trim().slice(0, 120) || assignedTo;
+    assignmentEvent = await insertAssignmentEventMessage(env, workspaceId, existing, {
+      assignedTo,
+      assignedToName: assigneeName,
+      assignedBy: actor.login,
+      assignedByName: actor.name,
+      timestamp: now
+    });
+    const actorEmail = String(principal?.user?.email || '').trim().toLowerCase();
+    const actorUserId = String(principal?.user?.userId || '').trim();
+    const isSelfAssign = (actorEmail && actorEmail === String(assignedTo).toLowerCase())
+      || (actorUserId && actorUserId === String(assigneeMember?.user_id || ''));
+    if (!isSelfAssign && assigneeMember?.membership_id) {
+      assignmentNotify = {
+        membershipId: assigneeMember.membership_id,
+        assigneeName,
+        subject: item.subject || existing.subject || '',
+        conversationId: id,
+        timestamp: now
+      };
+    }
+  }
+  return { item, assignmentEvent, assignmentNotify, assignmentChanged };
+}
+
+async function insertAssignmentEventMessage(env, workspaceId, conversation, details = {}) {
+  const assignedToName = String(details.assignedToName || details.assignedTo || ' teammate').trim().slice(0, 120) || 'teammate';
+  const text = `Chat assigned to ${assignedToName}`;
+  const now = String(details.timestamp || new Date().toISOString());
+  const messageId = crypto.randomUUID();
+  const channelId = String(conversation.channel_id || conversation.channelId || '');
+  const contactId = String(conversation.contact_id || conversation.contactId || '');
+  const identityId = String(conversation.identity_id || conversation.identityId || '');
+  if (!channelId || !contactId) throw httpError(500, 'Conversation is missing channel details for the assignment event.');
+  const payload = {
+    event: 'assigned',
+    assignedTo: String(details.assignedTo || '').slice(0, 160),
+    assignedToName,
+    assignedBy: String(details.assignedBy || '').slice(0, 254),
+    assignedByName: String(details.assignedByName || '').slice(0, 120)
+  };
+  await env.DB.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,payload_json,workspace_id,sender_login,sender_name)
+    VALUES (?1,?2,?3,?4,?5,'internal','event',?6,'recorded',?7,?8,?9,?10,?11)`)
+    .bind(messageId, conversation.conversation_id || conversation.conversationId, contactId, channelId, identityId,
+      text, now, JSON.stringify(payload), workspaceId,
+      String(details.assignedBy || '').slice(0, 254),
+      String(details.assignedByName || '').slice(0, 120)).run();
+  return {
+    messageId,
+    conversationId: conversation.conversation_id || conversation.conversationId,
+    channelId,
+    contactIdentityId: identityId,
+    identityId,
+    direction: 'internal',
+    messageType: 'event',
+    text,
+    status: 'recorded',
+    timestamp: now,
+    senderName: String(details.assignedByName || '').slice(0, 120),
+    senderLogin: String(details.assignedBy || '').slice(0, 254),
+    event: payload
+  };
+}
+
+async function claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal) {
+  const existing = await env.DB.prepare(`SELECT conversation_id,contact_id,channel_id,identity_id,assigned_to,subject
+    FROM conversations WHERE conversation_id=?1 AND workspace_id=?2`)
+    .bind(conversationId, workspaceId).first();
+  if (!existing || String(existing.assigned_to || '').trim()) return null;
+  const actor = outboundSenderAttribution(principal);
+  const email = String(principal?.user?.email || '').trim();
+  if (!email || email === 'emergency-recovery' || actor.login === 'API') return null;
+  const member = await env.DB.prepare(`SELECT u.email,u.display_name,m.membership_id FROM memberships m
+    JOIN users u ON u.user_id=m.user_id
+    WHERE m.workspace_id=?1 AND m.status='active' AND lower(u.email)=lower(?2) LIMIT 1`)
+    .bind(workspaceId, email).first();
+  if (!member?.email) return null;
+  const now = new Date().toISOString();
+  const claimed = await env.DB.prepare(`UPDATE conversations SET assigned_to=?3,updated_at=?4
+    WHERE conversation_id=?1 AND workspace_id=?2 AND TRIM(COALESCE(assigned_to,''))=''`)
+    .bind(conversationId, workspaceId, member.email, now).run();
+  if (!Number(claimed?.meta?.changes || 0)) return null;
+  const eventMessage = await insertAssignmentEventMessage(env, workspaceId, existing, {
+    assignedTo: member.email,
+    assignedToName: String(member.display_name || member.email).trim().slice(0, 120) || member.email,
+    assignedBy: actor.login,
+    assignedByName: actor.name,
+    timestamp: now
+  });
+  const conversation = await getConversationItem(env, workspaceId, conversationId);
+  return {
+    conversation: conversation || {
+      conversationId,
+      assignedTo: member.email,
+      subject: existing.subject || '',
+      updatedAt: now
+    },
+    eventMessage,
+    // Self-claim never notifies the assignee.
+    notify: null
+  };
 }
 
 async function listWhatsAppMediaTargets(env, workspaceId, { conversationId = '', contactId = '' } = {}) {
@@ -5067,12 +5293,13 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
   await audit(env, principal, 'send_message', 'conversation', conversationId, {
     channelId: row.channel_id, messageId, senderName, ...(reply ? { replyToMessageId: reply.messageId } : {})
   });
+  const assignment = await claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal);
   return { message: {
     messageId, conversationId, channelId: row.channel_id, contactIdentityId: row.identity_id || '',
     identityId: row.identity_id || '', direction: 'outbound', messageType: 'text',
     text, status: 'pending', timestamp: now, reply: reply || null, senderName, senderLogin: sender.login,
     connectorType, channelName: row.channel_name || '', channelProfileId: row.channel_profile_id || ''
-  } };
+  }, assignment };
 }
 
 async function resolveReplyTarget(env, workspaceId, conversationId, channelId, connectorType, replyToMessageId) {
@@ -5767,6 +5994,7 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   await audit(env, principal, 'send_template', 'conversation', conversationId, {
     channelId: target.channel_id, messageId, templateName: template.name, senderName
   });
+  const assignment = await claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal);
   return { message: {
     messageId, conversationId, channelId: target.channel_id, contactIdentityId: target.identity_id,
     identityId: target.identity_id, direction: 'outbound', messageType: 'template',
@@ -5775,7 +6003,7 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
     attachment: messageAttachmentView('template', storedPayload, messageId),
     connectorType: target.connectorType, channelName: target.channel_name || '',
     channelProfileId: target.channel_profile_id || ''
-  } };
+  }, assignment };
 }
 
 function validateTemplateMediaPreview(value) {
@@ -5920,23 +6148,25 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
         channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType,
         size: attachment.size, status: 'failed', senderName
       });
+      const failedAssignment = await claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal);
       return { message: {
         messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
         text: preview, status: 'failed', error: failure, timestamp: now, channelMessageId: '', senderName,
         attachment: messageAttachmentView(attachment.type, attachmentPayload(safeAttachment), messageId), reply: reply || null,
         connectorType: target.connectorType, channelName: target.channel_name || '', channelProfileId: target.channel_profile_id || ''
-      } };
+      }, assignment: failedAssignment };
     }
     await auditAttachmentBestEffort(env, principal, conversationId, {
       channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType, size: attachment.size,
       senderName
     });
+    const sentAssignment = await claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal);
     return { message: {
       messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
       text: preview, status: sent.status, timestamp: now, channelMessageId: sent.providerMessageId, senderName,
       attachment: messageAttachmentView(attachment.type, attachmentPayload(safeAttachment), messageId), reply: reply || null,
       connectorType: target.connectorType, channelName: target.channel_name || '', channelProfileId: target.channel_profile_id || ''
-    } };
+    }, assignment: sentAssignment };
   }
 
   const providerMediaId = await uploadWhatsAppMedia(env, target.channel, file, attachment);
@@ -5963,12 +6193,13 @@ async function createConversationAttachmentMessage(env, workspaceId, conversatio
     channelId: target.channel_id, messageId, type: attachment.type, mimeType: attachment.mimeType, size: attachment.size,
     senderName
   });
+  const assignment = await claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal);
   return { message: {
     messageId, conversationId, channelId: target.channel_id, direction: 'outbound', messageType: attachment.type,
     text: preview, status: 'pending', timestamp: now, channelMessageId: '', senderName,
     attachment: messageAttachmentView(attachment.type, attachmentPayload(safeAttachment), messageId), reply: reply || null,
     connectorType: target.connectorType, channelName: target.channel_name || '', channelProfileId: target.channel_profile_id || ''
-  } };
+  }, assignment };
 }
 
 async function persistTelegramAttachmentSuccess(env, workspaceId, messageId, sent, attachment, reply = null, senderName = '') {

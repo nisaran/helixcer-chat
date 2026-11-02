@@ -250,14 +250,21 @@ async function recordMobilePushFailure(env, pushDeviceId, now) {
     .bind(pushDeviceId, now).run();
 }
 
-export async function sendWorkspacePush(env, workspaceId, notification = {}) {
+export async function sendWorkspacePush(env, workspaceId, notification = {}, options = {}) {
   const vapid = configuredVapid(env);
   if (!vapid || !workspaceId) return { sent: 0, removed: 0, failed: 0, unavailable: true };
-  const result = await env.DB.prepare(`SELECT p.subscription_id,p.endpoint,p.p256dh,p.auth,p.expiration_time
-    FROM push_subscriptions p
-    JOIN memberships m ON m.membership_id=p.membership_id AND m.workspace_id=p.workspace_id AND m.status='active'
-    WHERE p.workspace_id=?1 ORDER BY p.updated_at DESC LIMIT ?2`)
-    .bind(workspaceId, MAX_DELIVERIES_PER_PUSH_BACKEND).all();
+  const membershipId = String(options.membershipId || '').trim();
+  const result = membershipId
+    ? await env.DB.prepare(`SELECT p.subscription_id,p.endpoint,p.p256dh,p.auth,p.expiration_time
+        FROM push_subscriptions p
+        JOIN memberships m ON m.membership_id=p.membership_id AND m.workspace_id=p.workspace_id AND m.status='active'
+        WHERE p.workspace_id=?1 AND p.membership_id=?2 ORDER BY p.updated_at DESC LIMIT ?3`)
+      .bind(workspaceId, membershipId, MAX_DELIVERIES_PER_PUSH_BACKEND).all()
+    : await env.DB.prepare(`SELECT p.subscription_id,p.endpoint,p.p256dh,p.auth,p.expiration_time
+        FROM push_subscriptions p
+        JOIN memberships m ON m.membership_id=p.membership_id AND m.workspace_id=p.workspace_id AND m.status='active'
+        WHERE p.workspace_id=?1 ORDER BY p.updated_at DESC LIMIT ?2`)
+      .bind(workspaceId, MAX_DELIVERIES_PER_PUSH_BACKEND).all();
   const rows = result.results || [];
   const message = { data: safeNotification(notification), options: { ttl: 120, urgency: 'high' } };
   const totals = { sent: 0, removed: 0, failed: 0, unavailable: false };
@@ -288,7 +295,7 @@ export async function sendWorkspacePush(env, workspaceId, notification = {}) {
   return totals;
 }
 
-export async function sendWorkspaceMobilePush(env, workspaceId, notification = {}, fetchImpl = fetch) {
+export async function sendWorkspaceMobilePush(env, workspaceId, notification = {}, fetchImpl = fetch, options = {}) {
   const safe = safeNotification(notification);
   const conversationId = notificationConversationId(safe.url);
   return sendWorkspaceMobileData(env, workspaceId, {
@@ -300,7 +307,7 @@ export async function sendWorkspaceMobilePush(env, workspaceId, notification = {
     conversationUnreadCount: safe.conversationUnreadCount,
     ...(safe.eventTimestamp ? { eventTimestamp: safe.eventTimestamp } : {}),
     target: conversationId ? `helixcer://conversation/${conversationId}` : 'helixcer://inbox'
-  }, fetchImpl);
+  }, fetchImpl, options);
 }
 
 /**
@@ -322,17 +329,27 @@ export async function sendWorkspaceMobileConversationRead(env, workspaceId, stat
   }, fetchImpl);
 }
 
-async function sendWorkspaceMobileData(env, workspaceId, data, fetchImpl) {
+async function sendWorkspaceMobileData(env, workspaceId, data, fetchImpl, options = {}) {
   const firebase = configuredFirebase(env);
   if (!firebase || !workspaceId) return { sent: 0, removed: 0, failed: 0, unavailable: true };
-  const result = await env.DB.prepare(`SELECT p.push_device_id,p.registration_token
-    FROM mobile_push_devices p
-    JOIN memberships m ON m.membership_id=p.membership_id AND m.workspace_id=p.workspace_id AND m.status='active'
-    JOIN sessions s ON s.session_id=p.session_id AND s.user_id=m.user_id AND s.workspace_id=p.workspace_id
-      AND s.session_type='mobile' AND s.revoked_at IS NULL AND s.expires_at>?3
-    WHERE p.workspace_id=?1 AND p.app_id=?2 AND p.platform='android'
-    ORDER BY p.updated_at DESC LIMIT ?4`)
-    .bind(workspaceId, ANDROID_APP_ID, new Date().toISOString(), MAX_DELIVERIES_PER_PUSH_BACKEND).all();
+  const membershipId = String(options.membershipId || '').trim();
+  const result = membershipId
+    ? await env.DB.prepare(`SELECT p.push_device_id,p.registration_token
+        FROM mobile_push_devices p
+        JOIN memberships m ON m.membership_id=p.membership_id AND m.workspace_id=p.workspace_id AND m.status='active'
+        JOIN sessions s ON s.session_id=p.session_id AND s.user_id=m.user_id AND s.workspace_id=p.workspace_id
+          AND s.session_type='mobile' AND s.revoked_at IS NULL AND s.expires_at>?4
+        WHERE p.workspace_id=?1 AND p.app_id=?2 AND p.platform='android' AND p.membership_id=?3
+        ORDER BY p.updated_at DESC LIMIT ?5`)
+      .bind(workspaceId, ANDROID_APP_ID, membershipId, new Date().toISOString(), MAX_DELIVERIES_PER_PUSH_BACKEND).all()
+    : await env.DB.prepare(`SELECT p.push_device_id,p.registration_token
+        FROM mobile_push_devices p
+        JOIN memberships m ON m.membership_id=p.membership_id AND m.workspace_id=p.workspace_id AND m.status='active'
+        JOIN sessions s ON s.session_id=p.session_id AND s.user_id=m.user_id AND s.workspace_id=p.workspace_id
+          AND s.session_type='mobile' AND s.revoked_at IS NULL AND s.expires_at>?3
+        WHERE p.workspace_id=?1 AND p.app_id=?2 AND p.platform='android'
+        ORDER BY p.updated_at DESC LIMIT ?4`)
+      .bind(workspaceId, ANDROID_APP_ID, new Date().toISOString(), MAX_DELIVERIES_PER_PUSH_BACKEND).all();
   const rows = result.results || [];
   if (!rows.length) return { sent: 0, removed: 0, failed: 0, unavailable: false };
   const accessToken = await firebaseAccessToken(firebase, fetchImpl);
@@ -378,6 +395,26 @@ export async function sendWorkspaceNotifications(env, workspaceId, notification 
   const [webResult, mobileResult] = await Promise.allSettled([
     sendWorkspacePush(env, workspaceId, notification),
     sendWorkspaceMobilePush(env, workspaceId, notification)
+  ]);
+  const failed = { sent: 0, removed: 0, failed: 1, unavailable: false };
+  return {
+    web: webResult.status === 'fulfilled' ? webResult.value : failed,
+    mobile: mobileResult.status === 'fulfilled' ? mobileResult.value : failed
+  };
+}
+
+export async function sendMembershipNotifications(env, workspaceId, membershipId, notification = {}) {
+  const targetMembershipId = String(membershipId || '').trim();
+  if (!workspaceId || !targetMembershipId) {
+    return {
+      web: { sent: 0, removed: 0, failed: 0, unavailable: true },
+      mobile: { sent: 0, removed: 0, failed: 0, unavailable: true }
+    };
+  }
+  const options = { membershipId: targetMembershipId };
+  const [webResult, mobileResult] = await Promise.allSettled([
+    sendWorkspacePush(env, workspaceId, notification, options),
+    sendWorkspaceMobilePush(env, workspaceId, notification, fetch, options)
   ]);
   const failed = { sent: 0, removed: 0, failed: 1, unavailable: false };
   return {
