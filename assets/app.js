@@ -7682,6 +7682,14 @@
         merged.status = mergeOutboundMessageStatus(existing.status, message.status);
       }
       merged.statusHistory = mergeMessageStatusHistory(existing.statusHistory, message.statusHistory);
+      const existingLocal = existing.attachment?.localPreview === true ? existing.attachment : null;
+      const incomingAttachment = message.attachment && typeof message.attachment === "object" ? message.attachment : null;
+      if (incomingAttachment?.available === true && incomingAttachment.localPreview !== true && existingLocal?.url) {
+        try { URL.revokeObjectURL(existingLocal.url); } catch {}
+        merged.attachment = incomingAttachment;
+      } else if (existingLocal && (!incomingAttachment || incomingAttachment.available !== true)) {
+        merged.attachment = existingLocal;
+      }
       messages[index] = merged;
     }
     else messages.push(message);
