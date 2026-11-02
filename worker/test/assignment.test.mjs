@@ -206,7 +206,7 @@ test('assigning a chat to another member inserts a timeline event and notifies o
     FROM messages WHERE conversation_id='assign-conversation' AND direction='internal'`).get();
   assert.ok(eventRow);
   assert.equal(eventRow.message_type, 'event');
-  assert.equal(eventRow.text, 'Chat assigned to Agent One');
+  assert.equal(eventRow.text, 'Chat assigned to Agent One.');
   assert.equal(eventRow.sender_name, 'Owner');
   assert.equal(eventRow.sender_login, 'owner@example.com');
   const payload = JSON.parse(eventRow.payload_json);
@@ -221,7 +221,7 @@ test('assigning a chat to another member inserts a timeline event and notifies o
     && event.message?.direction === 'internal');
   assert.ok(messageEvent);
   assert.equal(messageEvent.assignmentSilent, false);
-  assert.equal(messageEvent.message.text, 'Chat assigned to Agent One');
+  assert.equal(messageEvent.message.text, 'Chat assigned to Agent One.');
   assert.equal(messageEvent.message.senderName, 'Owner');
   assert.ok(waitUntilPromises.length >= 1);
 
@@ -250,7 +250,7 @@ test('self-assigning a chat inserts a timeline event without notifying', async (
   assert.equal((await response.json()).item.assignedTo, 'agent@example.com');
   assert.equal(database.prepare(`SELECT text FROM messages
     WHERE conversation_id='assign-conversation' AND direction='internal'`).get().text,
-    'Chat assigned to Agent One');
+    'Chat assigned to Agent One.');
   const assignedEvent = broadcasts.find((event) => event.type === 'conversation.assigned');
   assert.ok(assignedEvent);
   assert.equal(assignedEvent.assignmentSilent, true);
@@ -273,7 +273,7 @@ test('replying to an unassigned chat silently claims it for the sender', async (
     const body = await response.json();
     assert.equal(body.item.text, 'Taking this chat');
     assert.equal(body.assignment.conversation.assignedTo, 'agent@example.com');
-    assert.equal(body.assignment.eventMessage.text, 'Chat assigned to Agent One');
+    assert.equal(body.assignment.eventMessage.text, 'Chat assigned to Agent One.');
     assert.equal(database.prepare(`SELECT assigned_to FROM conversations WHERE conversation_id='assign-conversation'`).get().assigned_to,
       'agent@example.com');
     const assignedEvent = broadcasts.find((event) => event.type === 'conversation.assigned');

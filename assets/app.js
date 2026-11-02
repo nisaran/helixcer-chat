@@ -894,7 +894,7 @@
               messageId: `demo-assign-${Date.now()}`,
               direction: "internal",
               messageType: "event",
-              text: `Chat assigned to ${assigneeName}`,
+              text: `Chat assigned to ${assigneeName}.`,
               timestamp: item.timestamp,
               status: "recorded",
               senderName: assigneeName,
@@ -4083,7 +4083,8 @@
     row.dataset.messageId = message.messageId;
     row.dataset.messageTimestamp = String(new Date(message.timestamp).getTime() || 0);
     const name = String(message.event?.assignedToName || "").trim();
-    const text = String(message.text || "").trim() || (name ? `Chat assigned to ${name}` : "Chat assigned");
+    let text = String(message.text || "").trim() || (name ? `Chat assigned to ${name}.` : "Chat assigned.");
+    if (text && !/[.!?]$/.test(text)) text = `${text}.`;
     const copy = element("span", "message-event-copy");
     copy.append(element("span", "message-event-text", text));
     const stamp = formatClock(message.timestamp);

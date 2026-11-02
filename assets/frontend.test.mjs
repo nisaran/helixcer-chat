@@ -1495,7 +1495,8 @@ test("assignment events render as continuous divider text with date and time", (
   assert.match(app, /function createAssignmentEventRow/);
   assert.match(app, /className = "message-event-time"/);
   assert.match(app, /formatClock\(message\.timestamp\)/);
-  assert.match(app, /Chat assigned to \$\{name\}/);
+  assert.match(app, /Chat assigned to \$\{name\}\./);
+  assert.match(app, /!\s*\/\[\.!\?\]\$\/\.test\(text\)/);
   assert.match(app, /assignmentSilent/);
   assert.match(app, /notifyAssignmentToCurrentUser/);
   assert.match(app, /function applyLocalAssignment/);

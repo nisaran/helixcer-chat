@@ -4990,7 +4990,7 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
 
 async function insertAssignmentEventMessage(env, workspaceId, conversation, details = {}) {
   const assignedToName = String(details.assignedToName || details.assignedTo || ' teammate').trim().slice(0, 120) || 'teammate';
-  const text = `Chat assigned to ${assignedToName}`;
+  const text = `Chat assigned to ${assignedToName}.`;
   const now = String(details.timestamp || new Date().toISOString());
   const messageId = crypto.randomUUID();
   const channelId = String(conversation.channel_id || conversation.channelId || '');
