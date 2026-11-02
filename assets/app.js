@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261102-campaign-csv-mapping";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261102-campaign-variable-defaults";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -9826,14 +9826,16 @@
     return state.campaigns.templates.find((template) => `${template.name}:${template.language?.code || template.language || ""}` === key) || null;
   }
 
-  function campaignVariableSourceOptions({ includeFields = true } = {}) {
-    const options = [
+  function campaignVariableSourceOptions({ includeFields = true, includeEmpty = true } = {}) {
+    const options = [];
+    if (includeEmpty) options.push({ value: "", label: "Select…" });
+    options.push(
       { value: "contact.displayName", label: "Contact name" },
       { value: "contact.company", label: "Company" },
       { value: "contact.tags", label: "Tags" },
       { value: "contact.profileId", label: "Messaging ID" },
       { value: "constant", label: "Constant value" },
-    ];
+    );
     if (includeFields && state.campaigns.audienceSource === "upload") {
       for (const header of state.campaigns.uploadHeaders || []) {
         options.push({ value: `field.${header}`, label: `CSV: ${header}` });
@@ -9908,9 +9910,11 @@
           { value: "upload", label: "Upload file" },
           { value: "url", label: "Use URL" },
         ]
-        : campaignVariableSourceOptions();
-      let source = current.source || (descriptor.kind === "media" ? "upload" : "");
-      if (descriptor.kind !== "media" && String(current.value || "").trim() && source === "constant") {
+        : campaignVariableSourceOptions({ includeEmpty: true });
+      let source = String(current.source || "").trim();
+      if (descriptor.kind === "media") {
+        source = source === "url" ? "url" : "upload";
+      } else if (String(current.value || "").trim() && (!source || source === "constant")) {
         source = "constant";
       }
       const locked = descriptor.kind !== "media" && campaignSourceUsesContactField(source);
@@ -9976,6 +9980,7 @@
     const next = [];
     for (const key of keys) {
       const current = existing.get(key) || { key, source: "", value: "" };
+      current.source = String(current.source || "").trim();
       if (String(current.value || "").trim() && (!current.source || current.source === "constant")) {
         current.source = "constant";
       }
@@ -9984,7 +9989,7 @@
       const row = document.createElement("div");
       row.className = "campaign-variable-row";
       row.dataset.textVariable = key;
-      const options = campaignVariableSourceOptions();
+      const options = campaignVariableSourceOptions({ includeEmpty: true });
       row.innerHTML = `
         <label class="field-label">{{${escapeHtml(key)}}}
           <select class="text-field campaign-text-source">${options.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === current.source ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>
