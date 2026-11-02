@@ -600,7 +600,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261102-campaign-history-channel/);
+  assert.match(html, /app\.js\?v=20261102-filter-all-toggle/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -963,8 +963,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261102-campaign-history-channel/);
-  assert.match(html, /assets\/styles\.css\?v=20261102-campaign-history-channel/);
+  assert.match(html, /assets\/app\.js\?v=20261102-filter-all-toggle/);
+  assert.match(html, /assets\/styles\.css\?v=20261102-filter-all-toggle/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -1057,13 +1057,14 @@ test("chat history fills the available viewport without covering the composer", 
 test("conversation filters are multi-selectable with responsive desktop and mobile controls", () => {
   assert.match(app, /filters:\s*new Set\(\["open"\]\)/);
   assert.match(html, /id="conversationFilterToggle"[^>]*aria-controls="conversationFilterMenu"/);
-  assert.match(html, /data-conversation-filter-option[^>]*value="mine"|value="mine"[^>]*data-conversation-filter-option/);
+  assert.doesNotMatch(html, /data-conversation-filter-option[^>]*value="mine"|value="mine"[^>]*data-conversation-filter-option/);
+  assert.doesNotMatch(html, /data-filter="mine"/);
   assert.match(html, /class="filter-chip is-active"[^>]*data-filter="open"/);
-  assert.match(app, /conversationFilterOptions = \["mine", "unassigned", "open", "unread", "closed"\]/);
+  assert.match(app, /conversationFilterOptions = \["unassigned", "open", "unread", "closed"\]/);
   assert.match(app, /function isAllConversationFilters/);
   assert.match(app, /function selectAllConversationFilters/);
   assert.match(app, /function clearConversationFilters/);
-  assert.match(app, /if \(filter === "all"\) selectAllConversationFilters\(\)/);
+  assert.match(app, /if \(filter === "all"\) \{[\s\S]*?if \(isAllConversationFilters\(\)\) clearConversationFilters\(\);[\s\S]*?else selectAllConversationFilters\(\);/);
   assert.match(app, /clearConversationFilters\(\)/);
   assert.match(html, /data-action="clear-conversation-filters">None</);
   assert.doesNotMatch(html, /Show all conversations/);
@@ -1076,7 +1077,7 @@ test("conversation filters are multi-selectable with responsive desktop and mobi
   assert.match(app, /if \(selected\.size === 0 \|\| viewScope === "none"\) return \[\]/);
   assert.match(app, /input\.checked = input\.value === "all" \? showingAll : selected\.has\(input\.value\)/);
   assert.match(app, /const statusFilters = showingAll \? \[\] : \["open", "closed"\]\.filter/);
-  assert.match(app, /const assignmentFilters = showingAll \? \[\] : \["mine", "unassigned"\]\.filter/);
+  assert.match(app, /const unassignedOnly = !showingAll && selected\.has\("unassigned"\)/);
   assert.match(app, /!showingAll && selected\.has\("unread"\)/);
   assert.match(app, /toggleConversationFilter\(button\.dataset\.filter\)/);
   assert.match(styles, /\.conversation-filter-desktop \{/);

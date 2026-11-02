@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261102-campaign-history-channel";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261102-filter-all-toggle";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -3050,9 +3050,8 @@
     const open = conversations.filter((item) => item.status !== "closed").length;
     const closed = conversations.filter((item) => item.status === "closed").length;
     const unread = conversations.filter((item) => item.unreadCount > 0).length;
-    const mine = conversations.filter((item) => isAssignedToCurrentUser(item)).length;
     const unassigned = conversations.filter((item) => !item.assignedTo || item.assignedTo === "Unassigned").length;
-    const counts = { all: conversations.length, mine, unassigned, open, unread, closed };
+    const counts = { all: conversations.length, unassigned, open, unread, closed };
     Object.entries(counts).forEach(([filter, count]) => {
       document.querySelectorAll(`[data-filter-count="${filter}"]`).forEach((node) => { node.textContent = String(count); });
     });
@@ -3061,9 +3060,9 @@
     renderConversationFilterControls();
   }
 
-  const conversationFilterOptions = ["mine", "unassigned", "open", "unread", "closed"];
+  const conversationFilterOptions = ["unassigned", "open", "unread", "closed"];
   const conversationFilterLabels = {
-    mine: "Mine", unassigned: "Unassigned", open: "Open", unread: "Unread", closed: "Closed",
+    unassigned: "Unassigned", open: "Open", unread: "Unread", closed: "Closed",
   };
 
   function isAllConversationFilters(selected = state.filters) {
@@ -3118,8 +3117,11 @@
 
   function toggleConversationFilter(filter) {
     clearDeepLinkedConversationList();
-    if (filter === "all") selectAllConversationFilters();
-    else if (isAllConversationFilters()) {
+    if (filter === "all") {
+      // Second click on All conversations clears every chip, same as None.
+      if (isAllConversationFilters()) clearConversationFilters();
+      else selectAllConversationFilters();
+    } else if (isAllConversationFilters()) {
       state.filters = new Set(conversationFilterOptions.filter((item) => item !== filter));
     } else if (state.filters.has(filter)) state.filters.delete(filter);
     else {
@@ -3156,15 +3158,13 @@
     if (selected.size === 0 || viewScope === "none") return [];
     const showingAll = isAllConversationFilters(selected);
     const statusFilters = showingAll ? [] : ["open", "closed"].filter((filter) => selected.has(filter));
-    const assignmentFilters = showingAll ? [] : ["mine", "unassigned"].filter((filter) => selected.has(filter));
+    const unassignedOnly = !showingAll && selected.has("unassigned");
     // Text search is server-side (`refreshInboxCatalogue` / load-more with q).
     return unifiedConversations()
       .filter((item) => {
         if (viewScope === "assigned" && !isAssignedToCurrentUser(item)) return false;
         if (statusFilters.length && !statusFilters.some((filter) => filter === "open" ? item.status !== "closed" : item.status === "closed")) return false;
-        if (assignmentFilters.length && !assignmentFilters.some((filter) => filter === "mine"
-          ? isAssignedToCurrentUser(item)
-          : !item.assignedTo || item.assignedTo === "Unassigned")) return false;
+        if (unassignedOnly && item.assignedTo && item.assignedTo !== "Unassigned") return false;
         if (!showingAll && selected.has("unread") && item.unreadCount <= 0) return false;
         return true;
       })
