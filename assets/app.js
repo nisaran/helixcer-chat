@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261102-campaign-variable-defaults";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261102-campaign-history-channel";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -8563,16 +8563,45 @@
     return `${year}-${month}-${day}`;
   }
 
+  function campaignHistoryChannelInfo(channelId, fallback = {}) {
+    const id = String(channelId || fallback.channelId || "").trim();
+    const channel = state.channels.find((item) => item.channelId === id) || null;
+    const name = String(channel?.name || fallback.channelName || id || "Channel").trim() || "Channel";
+    const connectorType = String(channel?.connectorType || fallback.connectorType || "").trim();
+    const identifier = String(campaignChannelIdentifier(channel) || id || "").trim();
+    const label = identifier && identifier !== name ? `${name} - ${identifier}` : name;
+    const searchText = [name, identifier, id, campaignPlatformLabel(connectorPlatform(connectorType))]
+      .filter(Boolean)
+      .join(" ");
+    return { channelId: id, channel, name, identifier, connectorType, label, searchText };
+  }
+
+  function campaignHistoryChannelMarkup(info) {
+    const logoPath = providerLogoPaths[info.connectorType];
+    const style = channelStyles[info.connectorType] || channelStyles.generic || { short: "?" };
+    const logo = logoPath
+      ? `<img class="campaign-history-channel-logo" src="${escapeHtml(logoPath)}" alt="" aria-hidden="true">`
+      : `<span class="campaign-history-channel-logo provider-logo-fallback" aria-hidden="true">${escapeHtml(style.short || "?")}</span>`;
+    return `<span class="campaign-history-channel">${logo}<span class="campaign-history-channel-text" title="${escapeHtml(info.label)}">${escapeHtml(info.label)}</span></span>`;
+  }
+
   function campaignHistoryFilterOptionLists() {
     const items = state.campaigns.items || [];
     const platforms = [...new Set(items.map((item) => campaignHistoryPlatform(item)).filter(Boolean))]
       .sort((a, b) => campaignPlatformLabel(a).localeCompare(campaignPlatformLabel(b)))
-      .map((value) => ({ value, label: campaignPlatformLabel(value) }));
+      .map((value) => ({ value, label: campaignPlatformLabel(value), searchText: campaignPlatformLabel(value) }));
     const channels = [...new Map(items
       .filter((item) => item.channelId)
-      .map((item) => [item.channelId, item.channelName || item.channelId]))]
-      .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
-      .map(([value, label]) => ({ value, label }));
+      .map((item) => [item.channelId, campaignHistoryChannelInfo(item.channelId, item)]))]
+      .map(([, info]) => info)
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)))
+      .map((info) => ({
+        value: info.channelId,
+        label: info.label,
+        searchText: info.searchText,
+        connectorType: info.connectorType,
+        markup: campaignHistoryChannelMarkup(info),
+      }));
     return { platforms, channels };
   }
 
@@ -8634,7 +8663,11 @@
       trigger.textContent = count ? `${count} selected` : anyLabel;
       trigger.classList.toggle("has-selection", count > 0);
       const query = String(queries[key] || "").trim().toLocaleLowerCase();
-      const options = (lists[key] || []).filter((option) => !query || option.label.toLocaleLowerCase().includes(query));
+      const options = (lists[key] || []).filter((option) => {
+        if (!query) return true;
+        const haystack = String(option.searchText || option.label || "").toLocaleLowerCase();
+        return haystack.includes(query);
+      });
       const wasOpen = keepOpen === key || (!menu.hidden && host.classList.contains("is-open"));
       menu.replaceChildren();
       const search = document.createElement("input");
@@ -8653,9 +8686,11 @@
         options.forEach((option) => {
           const row = document.createElement("label");
           row.className = "campaign-multi-filter-option";
+          if (key === "channels") row.classList.add("campaign-history-channel-option");
           const checked = selected.has(option.value);
+          const labelHtml = option.markup || `<span>${escapeHtml(option.label)}</span>`;
           row.innerHTML = `<input type="checkbox" data-campaign-history-filter-value="${escapeHtml(option.value)}" ${checked ? "checked" : ""}>
-            <span>${escapeHtml(option.label)}</span>`;
+            ${labelHtml}`;
           row.querySelector("input")?.addEventListener("change", (event) => {
             const next = new Set(state.campaigns.historyFilters[key] || []);
             if (event.target.checked) next.add(option.value);
@@ -8761,9 +8796,10 @@
       const expanded = state.campaigns.expandedId === campaign.campaignId;
       if (expanded) row.classList.add("is-open");
       const statusClass = String(campaign.status || "").replace(/[^\w-]+/g, "_");
+      const channelInfo = campaignHistoryChannelInfo(campaign.channelId, campaign);
       row.innerHTML = `
         <td class="campaign-name-cell"><strong>${escapeHtml(campaign.name || "Campaign")}</strong><span>${escapeHtml(campaign.messageType === "template" ? (campaign.templateName || "Template") : "Text message")}</span></td>
-        <td>${escapeHtml(campaign.channelName || campaign.channelId || "—")}</td>
+        <td class="campaign-history-channel-cell">${campaign.channelId || campaign.channelName ? campaignHistoryChannelMarkup(channelInfo) : "—"}</td>
         <td><span class="campaign-status-pill is-${escapeHtml(statusClass)}">${escapeHtml(campaignStatusLabel(campaign.status))}</span></td>
         <td>${Number(campaign.totalCount || 0)}</td>
         <td>${Number(campaign.deliveredCount || 0)}</td>

@@ -1477,6 +1477,31 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-expand-label { line-height: 1; }
 .campaign-name-cell strong { display: block; font-size: 13px; }
 .campaign-name-cell span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.campaign-history-channel {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%;
+}
+.campaign-history-channel-logo,
+.campaign-history-channel .provider-logo-fallback {
+  width: 18px; height: 18px; flex: 0 0 auto; object-fit: contain; border-radius: 4px;
+}
+.campaign-history-channel .provider-logo-fallback {
+  display: grid; place-items: center; background: #e9edeb; color: #5e6c69;
+  font-size: 7px; font-weight: 850;
+}
+.campaign-history-channel-text {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ink); font-size: 12px; font-weight: 650;
+}
+.campaign-history-channel-cell { max-width: 260px; }
+.campaign-history-channel-option {
+  align-items: flex-start;
+}
+.campaign-history-channel-option .campaign-history-channel {
+  flex: 1 1 auto;
+}
+.campaign-multi-filter-menu:has(.campaign-history-channel-option) {
+  min-width: min(320px, 80vw);
+}
 .campaign-status-pill {
   display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px;
   background: #eef2f1; color: #40514f; font-size: 10px; font-weight: 750;
