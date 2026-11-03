@@ -3701,7 +3701,9 @@
       try {
         const data = await state.api.searchMessages({
           q: query,
-          limit: 5,
+          // Prefer conversation-scoped hits when the Worker supports it; keep a
+          // wider limit so older Workers without conversationId still return this chat.
+          limit: conversationId ? 50 : 100,
           conversationId,
           textOnly: true,
         });
