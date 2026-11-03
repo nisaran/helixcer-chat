@@ -26,8 +26,8 @@ FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nreplace-with-service-account-
 # set/change still work; forgot-password emails are skipped.
 SMTP_HOST="smtp.gmail.com"
 SMTP_PORT="465"
-SMTP_USER="noreply@helixcer.com"
+SMTP_USER="notifications@helixcer.com"
 SMTP_PASSWORD="your-google-app-password"
 # Optional fallback if SMTP is unset:
 # RESEND_API_KEY="re_xxxxxxxx"
-EMAIL_FROM="Helixcer Chat <noreply@helixcer.com>"
+EMAIL_FROM="Helixcer Chat <notifications@helixcer.com>"

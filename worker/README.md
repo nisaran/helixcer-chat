@@ -56,7 +56,7 @@ Optional password-reset delivery secrets:
 - `SMTP_USER` / `SMTP_PASSWORD`: Google Workspace or Gmail SMTP login (use an [App Password](https://myaccount.google.com/apppasswords)). Preferred for Forgot password emails.
 - `SMTP_HOST` / `SMTP_PORT`: optional, defaults to `smtp.gmail.com` / `465`.
 - `RESEND_API_KEY`: optional fallback email provider if SMTP is unset.
-- `EMAIL_FROM`: optional From header, for example `Helixcer Chat <noreply@helixcer.com>` (must be allowed by the SMTP mailbox).
+- `EMAIL_FROM`: optional From header, for example `Helixcer Chat <notifications@helixcer.com>` (must be allowed by the SMTP mailbox).
 
 If Google includes the Android OAuth client as the ID token's `azp` claim, set
 `GOOGLE_ANDROID_CLIENT_IDS` to that client ID (or a comma-separated allowlist).
