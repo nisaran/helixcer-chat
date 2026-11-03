@@ -160,6 +160,8 @@
     roles: { items: [], catalog: [], selectedKey: "", draft: null, dirty: false, loading: false, saving: false },
     apiKeys: [],
     authStatus: "checking",
+    pendingResetToken: "",
+    pendingInviteToken: "",
     api: null,
     disconnectRealtime: null,
     realtimeConnectedOnce: false,
@@ -1497,6 +1499,37 @@
       return url.toString();
     }
 
+    loginWithPassword(payload) {
+      return this.isDemo
+        ? Promise.reject(Object.assign(new Error("Password sign-in is unavailable in demo mode."), { status: 400 }))
+        : this.request("/auth/login", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    forgotPassword(payload) {
+      return this.isDemo
+        ? Promise.resolve({ ok: true })
+        : this.request("/auth/forgot-password", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    resetPassword(payload) {
+      return this.isDemo
+        ? Promise.reject(Object.assign(new Error("Password reset is unavailable in demo mode."), { status: 400 }))
+        : this.request("/auth/reset-password", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    acceptInviteWithPassword(payload) {
+      return this.isDemo
+        ? Promise.reject(Object.assign(new Error("Invitations are unavailable in demo mode."), { status: 400 }))
+        : this.request("/auth/accept-invite", { method: "POST", body: JSON.stringify(payload) });
+    }
+
+    previewInvite(invite) {
+      if (this.isDemo) return Promise.resolve({ email: "" });
+      const url = new URL("/auth/invite", this.base);
+      url.searchParams.set("invite", invite);
+      return this.request(`${url.pathname}${url.search}`);
+    }
+
     me() {
       return this.isDemo ? this.demo.me() : this.request("/api/me");
     }
@@ -1505,6 +1538,12 @@
       return this.isDemo
         ? this.demo.updateProfile(payload)
         : this.request("/api/me", { method: "PATCH", body: JSON.stringify(payload) });
+    }
+
+    changePassword(payload) {
+      return this.isDemo
+        ? Promise.resolve({ ok: true, hasPassword: true, user: { ...this.demo.data?.auth?.user, hasPassword: true } })
+        : this.request("/api/me/password", { method: "POST", body: JSON.stringify(payload) });
     }
 
     logout() {
@@ -2008,6 +2047,7 @@
       state: String(user.state || ""),
       postalCode: String(user.postalCode || ""),
       country: String(user.country || ""),
+      hasPassword: Boolean(user.hasPassword ?? source.hasPassword),
       membershipId: String(membership.membershipId || membership.id || ""),
       role: role || "agent",
       status: membership.status || "active",
@@ -2195,7 +2235,7 @@
     $("appShell").hidden = true;
   }
 
-  function showSignedOut(message = "") {
+  function showSignedOut(message = "", { success = false } = {}) {
     state.authStatus = "signed-out";
     state.currentUser = null;
     state.workspaceProfile = null;
@@ -2207,10 +2247,34 @@
     $("sessionSplash").hidden = true;
     $("authGate").hidden = false;
     $("googleSignInLink").href = state.api?.loginUrl() || "#";
+    setAuthAlert(message, { success });
+    closeMobileMenu();
+  }
+
+  function setAuthAlert(message = "", { success = false } = {}) {
     const alert = $("authAlert");
     alert.hidden = !message;
-    alert.textContent = message;
-    closeMobileMenu();
+    alert.textContent = message || "";
+    alert.classList.toggle("is-success", Boolean(message) && success);
+  }
+
+  function setAuthPanel(panel = "login") {
+    const login = panel === "login";
+    const forgot = panel === "forgot";
+    const reset = panel === "reset";
+    const invite = panel === "invite";
+    $("passwordLoginForm").hidden = !login;
+    $("forgotPasswordForm").hidden = !forgot;
+    $("resetPasswordForm").hidden = !reset;
+    $("invitePasswordForm").hidden = !invite;
+    $("authDivider").hidden = reset;
+    $("googleSignInLink").hidden = reset;
+    $("signedOutTitle").textContent = invite ? "Set password" : reset ? "Set password" : forgot ? "Forgot password" : "Welcome back";
+  }
+
+  function passwordsMatch(password, confirm, confirmField) {
+    confirmField.setCustomValidity(password === confirm ? "" : "Passwords do not match.");
+    return password === confirm;
   }
 
   function showApplication(auth) {
@@ -2269,12 +2333,22 @@
     createApi();
     const authParams = new URLSearchParams(location.search);
     const callbackError = String(authParams.get("auth_error") || authParams.get("authError") || "").trim();
-    if (callbackError) {
+    const resetToken = String(authParams.get("reset") || "").trim();
+    const inviteToken = String(authParams.get("invite") || "").trim();
+    const signedOutNotice = String(authParams.get("signed_out") || authParams.get("signedOut") || "").trim();
+    if (callbackError || resetToken || inviteToken || signedOutNotice) {
       authParams.delete("auth_error");
       authParams.delete("authError");
       authParams.delete("auth_error_code");
-      const cleanQuery = authParams.toString();
-      history.replaceState(null, "", `${location.pathname}${cleanQuery ? `?${cleanQuery}` : ""}${location.hash}`);
+      authParams.delete("signed_out");
+      authParams.delete("signedOut");
+      // Keep invite/reset tokens in the URL until the form succeeds so refresh still works.
+      if (!resetToken) authParams.delete("reset");
+      if (!inviteToken) authParams.delete("invite");
+      if (callbackError || signedOutNotice) {
+        const cleanQuery = authParams.toString();
+        history.replaceState(null, "", `${location.pathname}${cleanQuery ? `?${cleanQuery}` : ""}${location.hash}`);
+      }
     }
     try {
       let authPayload;
@@ -2311,9 +2385,153 @@
       const message = error.status === 403
         ? "Your account does not currently have access to this workspace."
         : error.status === 401
-          ? "Sign in with an approved Google account to continue."
+          ? (signedOutNotice ? "You have signed out of the workspace." : "")
           : "We could not reach the secure session service. Please try again.";
       showSignedOut(callbackError || message);
+      await prepareSignedOutAuth({ resetToken, inviteToken });
+    }
+  }
+
+  async function prepareSignedOutAuth({ resetToken = "", inviteToken = "" } = {}) {
+    state.pendingResetToken = resetToken || "";
+    state.pendingInviteToken = inviteToken || "";
+    $("googleSignInLink").href = state.api?.loginUrl() || "#";
+    if (resetToken) {
+      setAuthPanel("reset");
+      $("resetPassword").value = "";
+      $("resetPasswordConfirm").value = "";
+      $("resetPassword").focus();
+      return;
+    }
+    if (inviteToken) {
+      setAuthPanel("invite");
+      $("invitePassword").value = "";
+      $("invitePasswordConfirm").value = "";
+      try {
+        const preview = await state.api.previewInvite(inviteToken);
+        $("inviteEmail").value = preview?.email || "";
+      } catch {
+        setAuthAlert("This invitation is invalid or expired.");
+        setAuthPanel("login");
+        return;
+      }
+      $("invitePassword").focus();
+      return;
+    }
+    setAuthPanel("login");
+  }
+
+  async function completePasswordAuth(response) {
+    const auth = normalizeAuth(response?.me || response);
+    if (!auth.authenticated || auth.status !== "active") {
+      throw Object.assign(new Error("Your workspace access is not active."), { status: 403 });
+    }
+    const clean = new URLSearchParams(location.search);
+    clean.delete("invite");
+    clean.delete("reset");
+    clean.delete("auth_error");
+    clean.delete("authError");
+    clean.delete("auth_error_code");
+    const query = clean.toString();
+    history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash || "#inbox"}`);
+    state.pendingResetToken = "";
+    state.pendingInviteToken = "";
+    state.currentUser = auth;
+    state.workspace = auth.workspace || state.workspace;
+    state.authStatus = "authenticated";
+    await applyLocationRoute({ openConversation: false });
+    showApplication(auth);
+    await Promise.all([
+      loadAll({ preserveSelection: false }),
+      hasPermission("team.manage") ? loadTeam() : Promise.resolve(),
+      hasPermission("roles.manage") ? loadRoles() : Promise.resolve(),
+      hasPermission("developer.manage") ? loadApiKeys() : Promise.resolve(),
+      prepareBrowserPush(),
+    ]);
+    await applyLocationRoute();
+  }
+
+  async function submitPasswordLogin(form) {
+    if (!form.reportValidity() || !state.api || state.api.isDemo) return;
+    const data = new FormData(form);
+    const button = $("passwordLoginButton");
+    button.disabled = true;
+    setAuthAlert("");
+    try {
+      const response = await state.api.loginWithPassword({
+        email: String(data.get("email") || "").trim(),
+        password: String(data.get("password") || ""),
+      });
+      await completePasswordAuth(response);
+    } catch (error) {
+      setAuthAlert(error.message || "Sign-in failed.");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function submitForgotPassword(form) {
+    if (!form.reportValidity() || !state.api) return;
+    const data = new FormData(form);
+    const button = $("forgotPasswordButton");
+    button.disabled = true;
+    setAuthAlert("");
+    try {
+      await state.api.forgotPassword({ email: String(data.get("email") || "").trim() });
+      setAuthPanel("login");
+      setAuthAlert("If that email can access this workspace, a reset link is on its way.", { success: true });
+    } catch (error) {
+      setAuthAlert(error.message || "Unable to send reset link.");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function submitResetPassword(form) {
+    if (!state.pendingResetToken) {
+      setAuthAlert("This reset link is invalid or expired.");
+      return;
+    }
+    const password = $("resetPassword").value;
+    const confirm = $("resetPasswordConfirm").value;
+    if (!passwordsMatch(password, confirm, $("resetPasswordConfirm")) || !form.reportValidity()) return;
+    const button = $("resetPasswordButton");
+    button.disabled = true;
+    setAuthAlert("");
+    try {
+      const response = await state.api.resetPassword({
+        token: state.pendingResetToken,
+        password,
+      });
+      await completePasswordAuth(response);
+    } catch (error) {
+      setAuthAlert(error.message || "Unable to set password.");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function submitInvitePassword(form) {
+    if (!state.pendingInviteToken) {
+      setAuthAlert("This invitation is invalid or expired.");
+      return;
+    }
+    const password = $("invitePassword").value;
+    const confirm = $("invitePasswordConfirm").value;
+    if (!passwordsMatch(password, confirm, $("invitePasswordConfirm")) || !form.reportValidity()) return;
+    const button = $("invitePasswordButton");
+    button.disabled = true;
+    setAuthAlert("");
+    try {
+      const response = await state.api.acceptInviteWithPassword({
+        invite: state.pendingInviteToken,
+        password,
+      });
+      await completePasswordAuth(response);
+    } catch (error) {
+      setAuthAlert(error.message || "Unable to set password.");
+    } finally {
+      button.disabled = false;
     }
   }
 
@@ -12020,7 +12238,10 @@
     catch { /* Always clear local recovery state and return to sign-in. */ }
     sessionStorage.removeItem(RECOVERY_TOKEN_KEY);
     state.messages.clear();
+    state.pendingResetToken = "";
+    state.pendingInviteToken = "";
     showSignedOut("You have signed out of the workspace.");
+    setAuthPanel("login");
   }
 
   function toggleUserMenu(force) {
@@ -12061,6 +12282,53 @@
     setProfileFormBusy(false);
     $("profileDialog").showModal();
     $("profileDisplayName").focus();
+  }
+
+  function openPasswordDialog() {
+    const user = state.currentUser;
+    if (!user) return;
+    toggleUserMenu(false);
+    const hasPassword = Boolean(user.hasPassword);
+    $("passwordDialogTitle").textContent = hasPassword ? "Change password" : "Set password";
+    $("profileCurrentPasswordField").hidden = !hasPassword;
+    $("profileCurrentPassword").required = hasPassword;
+    $("profileCurrentPassword").value = "";
+    $("profileNewPassword").value = "";
+    $("profileNewPasswordConfirm").value = "";
+    $("passwordSaveState").textContent = "";
+    $("passwordSaveButton").disabled = false;
+    $("passwordDialog").showModal();
+    (hasPassword ? $("profileCurrentPassword") : $("profileNewPassword")).focus();
+  }
+
+  async function savePassword(form) {
+    if (!state.currentUser || !state.api) return;
+    const hasPassword = Boolean(state.currentUser.hasPassword);
+    const currentPassword = $("profileCurrentPassword").value;
+    const newPassword = $("profileNewPassword").value;
+    const confirm = $("profileNewPasswordConfirm").value;
+    $("profileCurrentPassword").required = hasPassword;
+    if (!passwordsMatch(newPassword, confirm, $("profileNewPasswordConfirm")) || !form.reportValidity()) return;
+    $("passwordSaveState").textContent = "Saving…";
+    $("passwordSaveButton").disabled = true;
+    try {
+      const response = await state.api.changePassword({
+        currentPassword: hasPassword ? currentPassword : undefined,
+        newPassword,
+      });
+      state.currentUser = {
+        ...state.currentUser,
+        ...normalizeAuth(response),
+        hasPassword: true,
+      };
+      $("passwordSaveState").textContent = "Saved";
+      showToast(hasPassword ? "Password updated" : "Password set");
+      $("passwordDialog").close();
+    } catch (error) {
+      $("passwordSaveState").textContent = "Not saved";
+      $("passwordSaveButton").disabled = false;
+      showToast("Password was not updated", error.message, true);
+    }
   }
 
   async function saveProfile(form) {
@@ -13334,6 +13602,20 @@
           "toggle-user-menu": () => toggleUserMenu(),
           "open-profile": openProfileDialog,
           "close-profile": () => $("profileDialog").close(),
+          "open-password": openPasswordDialog,
+          "close-password": () => $("passwordDialog").close(),
+          "show-forgot-password": () => {
+            setAuthPanel("forgot");
+            setAuthAlert("");
+            $("forgotEmail").value = $("loginEmail").value || "";
+            $("forgotEmail").focus();
+          },
+          "show-password-login": () => {
+            state.pendingResetToken = "";
+            setAuthPanel("login");
+            setAuthAlert("");
+            $("loginEmail").focus();
+          },
           "logout": logout,
           "toggle-details": toggleDetails,
           "edit-contact-from-details": editContactFromDetails,
@@ -13614,7 +13896,32 @@
       event.preventDefault();
       saveProfile(event.currentTarget);
     });
+    $("passwordForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      savePassword(event.currentTarget);
+    });
+    $("passwordLoginForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitPasswordLogin(event.currentTarget);
+    });
+    $("forgotPasswordForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitForgotPassword(event.currentTarget);
+    });
+    $("resetPasswordForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitResetPassword(event.currentTarget);
+    });
+    $("invitePasswordForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitInvitePassword(event.currentTarget);
+    });
     ["profilePhoneCountryCode", "profilePhoneNumber"].forEach((id) => {
+      $(id).addEventListener("input", (event) => {
+        event.target.setCustomValidity("");
+      });
+    });
+    ["resetPasswordConfirm", "invitePasswordConfirm", "profileNewPasswordConfirm"].forEach((id) => {
       $(id).addEventListener("input", (event) => {
         event.target.setCustomValidity("");
       });

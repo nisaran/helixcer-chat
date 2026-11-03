@@ -1,14 +1,21 @@
 import {
+  acceptInvitationWithPassword,
   authenticateRequest,
+  changePassword,
   createMobileAuthChallenge,
   createGoogleMobileSession,
   createInvitation,
   finishGoogleOAuthResponse,
   listTeam,
+  loginWithPassword,
   logout,
   mobileAuthConfiguration,
+  previewInvitation,
   principalView,
+  requestPasswordReset,
+  resetPasswordWithToken,
   restrictedChannelIds,
+  SESSION_COOKIE,
   startGoogleOAuth,
   updateInvitation,
   updateMembership,
@@ -326,6 +333,39 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       }
       return withCors(response, cors);
     }
+    if (request.method === 'GET' && url.pathname === '/auth/invite') {
+      if (request.headers.get('Origin') && !cors['Access-Control-Allow-Origin']) {
+        return json({ ok: false, error: 'Origin not allowed.' }, 403);
+      }
+      return withCors(json(await previewInvitation(env, url.searchParams.get('token') || url.searchParams.get('invite') || '')), cors);
+    }
+    if (request.method === 'POST' && url.pathname === '/auth/login') {
+      if (!cors['Access-Control-Allow-Origin']) return json({ ok: false, error: 'Origin not allowed.' }, 403);
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return withCors(limited, cors);
+      const result = await loginWithPassword(env, await readJson(request));
+      return withCors(passwordSessionResponse(result), cors);
+    }
+    if (request.method === 'POST' && url.pathname === '/auth/forgot-password') {
+      if (!cors['Access-Control-Allow-Origin']) return json({ ok: false, error: 'Origin not allowed.' }, 403);
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return withCors(limited, cors);
+      return withCors(json(await requestPasswordReset(env, await readJson(request))), cors);
+    }
+    if (request.method === 'POST' && url.pathname === '/auth/reset-password') {
+      if (!cors['Access-Control-Allow-Origin']) return json({ ok: false, error: 'Origin not allowed.' }, 403);
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return withCors(limited, cors);
+      const result = await resetPasswordWithToken(env, await readJson(request));
+      return withCors(passwordSessionResponse(result), cors);
+    }
+    if (request.method === 'POST' && url.pathname === '/auth/accept-invite') {
+      if (!cors['Access-Control-Allow-Origin']) return json({ ok: false, error: 'Origin not allowed.' }, 403);
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return withCors(limited, cors);
+      const result = await acceptInvitationWithPassword(env, await readJson(request));
+      return withCors(passwordSessionResponse(result), cors);
+    }
     const whatsappMatch = url.pathname.match(/^\/webhooks\/whatsapp\/([^/]+)$/);
     if (whatsappMatch) return await handleWhatsAppWebhook(request, env, decodeURIComponent(whatsappMatch[1]), ctx);
     const telegramMatch = url.pathname.match(/^\/webhooks\/telegram\/([^/]+)$/);
@@ -430,6 +470,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (url.pathname === '/api/me' && request.method === 'PATCH') {
       const updated = await updateUserProfile(env, principal, await readJson(request));
       return withCors(json({ ok: true, ...principalView(updated) }), cors);
+    }
+    if (url.pathname === '/api/me/password' && request.method === 'POST') {
+      return withCors(json(await changePassword(env, principal, await readJson(request))), cors);
     }
     if (url.pathname === '/api/push/config' && request.method === 'GET') {
       if (principal.authType !== 'session') return withCors(json({ ok: false, error: 'A verified browser session is required.' }, 403), cors);
@@ -9171,8 +9214,26 @@ async function cleanupExpiredAuth(env) {
     env.DB.prepare('DELETE FROM oauth_states WHERE expires_at<=?1').bind(now),
     env.DB.prepare('DELETE FROM mobile_auth_challenges WHERE expires_at<=?1 OR consumed_at IS NOT NULL').bind(now),
     env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?1 OR revoked_at IS NOT NULL').bind(now),
+    env.DB.prepare('DELETE FROM password_reset_tokens WHERE expires_at<=?1 OR consumed_at IS NOT NULL').bind(now),
     env.DB.prepare("UPDATE invitations SET status='expired',updated_at=?1 WHERE status='pending' AND expires_at<=?1").bind(now)
   ]);
+}
+
+function passwordSessionResponse(result) {
+  const headers = new Headers({
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store'
+  });
+  headers.append('Set-Cookie', cookieHeaderForSession(result.token, result.maxAge));
+  return new Response(JSON.stringify({
+    ok: true,
+    me: result.me,
+    expiresAt: result.expiresAt
+  }), { status: 200, headers });
+}
+
+function cookieHeaderForSession(token, maxAge) {
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 async function cleanupExpiredExternalRequests(env) {

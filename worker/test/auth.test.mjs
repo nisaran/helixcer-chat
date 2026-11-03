@@ -3,19 +3,27 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import {
+  acceptInvitationWithPassword,
   authenticateRequest,
+  changePassword,
   createGoogleMobileSession,
   createMobileAuthChallenge,
   createInvitation,
+  hashPassword,
   hashToken,
+  loginWithPassword,
   mobileAuthConfiguration,
+  previewInvitation,
+  requestPasswordReset,
+  resetPasswordWithToken,
   requireRole,
   startGoogleOAuth,
   finishGoogleOAuth,
   finishGoogleOAuthResponse,
   updateMembership,
   validateReturnTo,
-  verifyGoogleIdToken
+  verifyGoogleIdToken,
+  verifyPassword
 } from '../src/auth.js';
 import worker, { encryptChannelCredential, handleRequest } from '../src/index.js';
 
@@ -135,6 +143,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0021_campaigns.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0022_facebook_messenger_page.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0023_workspace_roles.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0024_password_auth.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -4322,5 +4331,166 @@ test('agent invitations store channel access and restrict messaging to selected 
   const adminBody = await adminBootstrap.json();
   assert.deepEqual(adminBody.channels.map(item => item.channelId).sort(), ['wa-sales', 'wa-service']);
   assert.equal(adminBody.conversations.length, 2);
+  database.close();
+});
+
+test('password hashes verify with PBKDF2 encoding', async () => {
+  const encoded = await hashPassword('correct-horse');
+  assert.match(encoded, /^pbkdf2-sha256\$600000\$/);
+  assert.equal(await verifyPassword('correct-horse', encoded), true);
+  assert.equal(await verifyPassword('wrong-horse', encoded), false);
+});
+
+test('invited members can set a password, sign in, and change it', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, { APP_ORIGIN: 'https://chat.helixcer.com' });
+  const { principal } = await performOwnerLogin(env);
+  const invitation = await createInvitation(
+    new Request('https://api.chat.helixcer.com/api/team/invitations'), env, principal,
+    { email: 'password.agent@example.com', role: 'agent', return_to: 'https://chat.helixcer.com/' }
+  );
+  assert.match(invitation.inviteUrl, /^https:\/\/chat\.helixcer\.com\/\?/);
+  const inviteToken = new URL(invitation.inviteUrl).searchParams.get('invite');
+  const preview = await previewInvitation(env, inviteToken);
+  assert.equal(preview.email, 'password.agent@example.com');
+
+  const accepted = await acceptInvitationWithPassword(env, {
+    invite: inviteToken,
+    password: 'invite-secret-1'
+  });
+  assert.equal(accepted.me.user.email, 'password.agent@example.com');
+  assert.equal(accepted.me.hasPassword, true);
+
+  const login = await loginWithPassword(env, {
+    email: 'password.agent@example.com',
+    password: 'invite-secret-1'
+  });
+  assert.equal(login.me.user.email, 'password.agent@example.com');
+
+  await assert.rejects(() => loginWithPassword(env, {
+    email: 'password.agent@example.com',
+    password: 'wrong-password'
+  }), /Invalid email or password/);
+
+  const authed = {
+    ...login.me,
+    authType: 'session',
+    user: { ...login.me.user, userId: login.me.user.userId, hasPassword: true },
+    membership: login.me.membership,
+    workspace: login.me.workspace
+  };
+  // Rebuild a real principal from the session cookie path.
+  const sessionPrincipal = await authenticateRequest(new Request('https://api.chat.helixcer.com/api/me', {
+    headers: { Cookie: `__Host-helixcer_session=${encodeURIComponent(login.token)}` }
+  }), env);
+  assert.equal(sessionPrincipal.user.hasPassword, true);
+  const changed = await changePassword(env, sessionPrincipal, {
+    currentPassword: 'invite-secret-1',
+    newPassword: 'invite-secret-2'
+  });
+  assert.equal(changed.hasPassword, true);
+  await loginWithPassword(env, { email: 'password.agent@example.com', password: 'invite-secret-2' });
+  assert.ok(authed);
+  database.close();
+});
+
+test('google members can create a password with forgot-password reset', async () => {
+  const { database, DB } = await testDatabase();
+  const sent = [];
+  const env = envFor(DB, {
+    APP_ORIGIN: 'https://chat.helixcer.com',
+    RESEND_API_KEY: 're_test',
+    EMAIL_FROM: 'Helixcer Chat <noreply@helixcer.com>'
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url === 'https://api.resend.com/emails') {
+      const body = JSON.parse(init.body);
+      sent.push(body);
+      return new Response(JSON.stringify({ id: 'email_1' }), { status: 200 });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    await performOwnerLogin(env);
+    const result = await requestPasswordReset(env, { email: 'owner@example.com' });
+    assert.equal(result.ok, true);
+    assert.equal(sent.length, 1);
+    const resetUrl = new URL(sent[0].text.match(/https:\/\/chat\.helixcer\.com\/\?reset=[^\s]+/)[0]);
+    const token = resetUrl.searchParams.get('reset');
+    const reset = await resetPasswordWithToken(env, { token, password: 'owner-pass-99' });
+    assert.equal(reset.me.user.email, 'owner@example.com');
+    assert.equal(reset.me.hasPassword, true);
+    await loginWithPassword(env, { email: 'owner@example.com', password: 'owner-pass-99' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  database.close();
+});
+
+test('pending invitations can set a first password through forgot-password', async () => {
+  const { database, DB } = await testDatabase();
+  const sent = [];
+  const env = envFor(DB, {
+    APP_ORIGIN: 'https://chat.helixcer.com',
+    RESEND_API_KEY: 're_test',
+    EMAIL_FROM: 'Helixcer Chat <noreply@helixcer.com>'
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input) === 'https://api.resend.com/emails') {
+      sent.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ id: 'email_2' }), { status: 200 });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const { principal } = await performOwnerLogin(env);
+    await createInvitation(
+      new Request('https://api.chat.helixcer.com/api/team/invitations'), env, principal,
+      { email: 'fresh@example.com', role: 'agent' }
+    );
+    await requestPasswordReset(env, { email: 'fresh@example.com' });
+    const resetUrl = new URL(sent[0].text.match(/https:\/\/chat\.helixcer\.com\/\?reset=[^\s]+/)[0]);
+    const reset = await resetPasswordWithToken(env, {
+      token: resetUrl.searchParams.get('reset'),
+      password: 'fresh-pass-11'
+    });
+    assert.equal(reset.me.user.email, 'fresh@example.com');
+    assert.equal(reset.me.membership.role, 'agent');
+    await loginWithPassword(env, { email: 'fresh@example.com', password: 'fresh-pass-11' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  database.close();
+});
+
+test('password login HTTP route sets the host-only session cookie', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, { APP_ORIGIN: 'https://chat.helixcer.com' });
+  env.INBOX_HUB = {
+    idFromName: value => value,
+    get: () => ({ fetch: async () => new Response(null, { status: 204 }) })
+  };
+  const { principal } = await performOwnerLogin(env);
+  const invitation = await createInvitation(
+    new Request('https://api.chat.helixcer.com/api/team/invitations'), env, principal,
+    { email: 'cookie@example.com', role: 'agent' }
+  );
+  const inviteToken = new URL(invitation.inviteUrl).searchParams.get('invite');
+  await acceptInvitationWithPassword(env, { invite: inviteToken, password: 'cookie-pass-1' });
+  const response = await handleRequest(new Request('https://api.chat.helixcer.com/auth/login', {
+    method: 'POST',
+    headers: {
+      Origin: 'https://chat.helixcer.com',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ email: 'cookie@example.com', password: 'cookie-pass-1' })
+  }), env);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('set-cookie') || '', /__Host-helixcer_session=/);
+  const body = await response.json();
+  assert.equal(body.me.user.email, 'cookie@example.com');
   database.close();
 });

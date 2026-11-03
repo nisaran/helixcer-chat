@@ -60,7 +60,7 @@ const MIGRATIONS = [
   '0014_unified_contact_conversations.sql', '0015_saas_clients.sql',
   '0016_internal_slug.sql', '0017_agent_channel_access.sql', '0019_outbound_sender.sql',
   '0020_user_profile.sql', '0021_campaigns.sql', '0022_facebook_messenger_page.sql',
-  '0023_workspace_roles.sql'
+  '0023_workspace_roles.sql', '0024_password_auth.sql'
 ];
 
 const ADMIN_ORIGIN = 'https://admin.chat.helixcer.com';
@@ -218,7 +218,7 @@ test('creates a client workspace with an owner invitation link', async () => {
   });
   assert.equal(created.status, 201);
   assert.equal(created.payload.item.slug, 'blue-ocean-foods');
-  assert.match(created.payload.inviteUrl, /\/auth\/google\/start\?/);
+  assert.match(created.payload.inviteUrl, /^https:\/\/chat\.helixcer\.com\/\?/);
   assert.match(created.payload.inviteUrl, /invite=/);
 
   const workspace = DB.database.prepare(`SELECT kind,status FROM workspaces WHERE slug='blue-ocean-foods'`).get();
