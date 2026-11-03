@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261102-filter-all-toggle";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261103-template-url-click";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -2674,7 +2674,13 @@
         if (!button || typeof button !== "object") return [];
         const text = String(button.text || button.label || "").trim().slice(0, 100);
         if (!text) return [];
-        return [{ ...button, text, type: String(button.type || "quick_reply").toLocaleLowerCase().slice(0, 40) }];
+        const type = String(button.type || "quick_reply").toLocaleLowerCase().slice(0, 40);
+        const item = { text, type };
+        if (type === "url") {
+          const url = safeTemplateActionUrl(button.url);
+          if (url) item.url = url;
+        }
+        return [item];
       }) : [],
     } : null;
     const reply = replySource ? {
@@ -3937,6 +3943,15 @@
     return { text, buttons };
   }
 
+  function safeTemplateActionUrl(value) {
+    try {
+      const url = new URL(String(value || ""));
+      return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
+    } catch {
+      return "";
+    }
+  }
+
   function renderTemplateMessageActions(buttons) {
     if (!Array.isArray(buttons) || !buttons.length) return null;
     const actions = element("div", "message-template-actions");
@@ -3945,10 +3960,25 @@
     buttons.slice(0, 10).forEach((button) => {
       const label = String(button?.text || button?.label || "").trim().slice(0, 100);
       if (!label) return;
-      const action = element("span", "message-template-action", label);
-      action.setAttribute("role", "button");
-      action.setAttribute("aria-disabled", "true");
-      action.dataset.buttonType = String(button?.type || "quick_reply").toLocaleLowerCase().slice(0, 40);
+      const type = String(button?.type || "quick_reply").toLocaleLowerCase().slice(0, 40);
+      // Only Visit Website (url) actions are clickable for agents; quick replies stay display-only.
+      const href = type === "url" ? safeTemplateActionUrl(button?.url) : "";
+      let action;
+      if (href) {
+        action = document.createElement("a");
+        action.className = "message-template-action is-link";
+        action.href = href;
+        action.target = "_blank";
+        action.rel = "noopener noreferrer";
+        action.textContent = label;
+        action.title = href;
+        action.setAttribute("aria-label", `${label} (opens website)`);
+      } else {
+        action = element("span", "message-template-action", label);
+        action.setAttribute("role", "button");
+        action.setAttribute("aria-disabled", "true");
+      }
+      action.dataset.buttonType = type;
       actions.append(action);
     });
     return actions.childElementCount ? actions : null;

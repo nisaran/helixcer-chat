@@ -419,7 +419,7 @@ test('external template API stores and broadcasts the rendered template and medi
     assert.equal(stored.senderName, 'API');
     assert.deepEqual(stored.template, {
       name: 'invoice_ready', language: { code: 'en_US' }, templateId: 'meta-template-invoice', category: 'UTILITY',
-      buttons: [{ type: 'url', text: 'View invoice' }]
+      buttons: [{ type: 'url', text: 'View invoice', url: 'https://billing.example/INV-1001' }]
     });
     assert.deepEqual(stored.attachment, {
       type: 'document', filename: 'invoice-1001.pdf', mimeType: '', size: 0, caption: '',

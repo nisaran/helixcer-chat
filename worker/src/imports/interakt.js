@@ -391,8 +391,13 @@ export function interaktTemplatePresentation(message) {
     const footer = String(definition.footer || '').trim();
     if (footer) parts.push(footer);
 
-    for (const button of parseInteraktButtons(definition.buttons)) {
-      buttons.push(button);
+    for (const [buttonIndex, button] of parseInteraktButtons(definition.buttons).entries()) {
+      if (button.type === 'url') {
+        const resolvedUrl = resolvedInteraktButtonUrl(button.url, buttonComponentParameters(components, buttonIndex));
+        buttons.push(resolvedUrl ? { type: button.type, text: button.text, url: resolvedUrl } : { type: button.type, text: button.text });
+        continue;
+      }
+      buttons.push({ type: button.type, text: button.text });
     }
 
     if (!attachment && headerParameters.length) {
@@ -490,10 +495,32 @@ function parseInteraktButtons(value) {
       || type === 'copy_code' || type === 'catalog' || type === 'mpm' || type === 'flow' || type === 'otp'
       ? type
       : (type === 'phone number' ? 'phone_number' : (type ? type : 'quick_reply'));
-    out.push({ type: normalized, text });
+    const item = { type: normalized, text };
+    if (normalized === 'url') {
+      const url = String(button.url || '').trim().slice(0, 2048);
+      if (url) item.url = url;
+    }
+    out.push(item);
     if (out.length >= 10) break;
   }
   return out;
+}
+
+function buttonComponentParameters(components, buttonIndex) {
+  if (!Array.isArray(components)) return [];
+  const match = components.find((component) => {
+    if (String(component?.type || '').toLowerCase() !== 'button') return false;
+    return Number(component.index) === Number(buttonIndex);
+  });
+  return Array.isArray(match?.parameters) ? match.parameters : [];
+}
+
+function resolvedInteraktButtonUrl(rawUrl, parameters) {
+  const source = String(rawUrl || '').trim();
+  if (!source) return '';
+  const resolved = replaceTemplateVariables(source, parameters);
+  if (!/^https:\/\//i.test(resolved) || /\{\{/.test(resolved)) return '';
+  return resolved.slice(0, 2048);
 }
 
 function replaceTemplateVariables(text, parameters) {
