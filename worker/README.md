@@ -6,6 +6,7 @@ The backend uses Cloudflare Workers, D1, a scheduled D1 outbox, and a Durable Ob
 
 - D1 stores workspaces, verified users, workspace memberships, server-side sessions, invitations, channels, contacts, conversations, messages, retries, webhook deduplication, and audit events.
 - Google OAuth uses Authorization Code + PKCE + state + nonce. Google ID-token signatures are verified against Google's rotating JWK set with Web Crypto; issuer, audience, expiry, nonce, stable `sub`, and verified email are checked.
+- Email/password sign-in stores only a PBKDF2-SHA-256 password hash on `users`. Invited emails may set a password from the invite link or a Forgot password reset; existing Google accounts can add a password the same way or from Profile while signed in. Forgot-password emails send through Resend when `RESEND_API_KEY` (and optional `EMAIL_FROM`) are configured.
 - The browser receives only a random `__Host-helixcer_session` cookie. It is host-only, `HttpOnly`, `Secure`, and `SameSite=Lax`; D1 stores only its SHA-256 hash.
 - Durable Object instances and broadcasts are keyed by `workspace_id`. Each socket carries only server-internal session metadata and is revalidated before events or keepalive replies; logout, disablement, and role changes disconnect affected sockets.
 - WhatsApp, Telegram, Instagram, and Facebook Messenger webhooks retain independent signature/token verification and do not depend on an agent session.
@@ -47,7 +48,13 @@ npx wrangler secret put VAPID_PRIVATE_KEY
 npx wrangler secret put FIREBASE_PROJECT_ID
 npx wrangler secret put FIREBASE_CLIENT_EMAIL
 npx wrangler secret put FIREBASE_PRIVATE_KEY
+npx wrangler secret put RESEND_API_KEY
 ```
+
+Optional password-reset delivery secrets:
+
+- `RESEND_API_KEY`: sends Forgot password emails through [Resend](https://resend.com). Without it, invite links and in-profile password set/change still work; reset emails are skipped.
+- `EMAIL_FROM`: optional From header, for example `Helixcer Chat <noreply@helixcer.com>`.
 
 If Google includes the Android OAuth client as the ID token's `azp` claim, set
 `GOOGLE_ANDROID_CLIENT_IDS` to that client ID (or a comma-separated allowlist).

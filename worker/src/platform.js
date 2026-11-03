@@ -544,8 +544,8 @@ async function internalWorkspace(env) {
 }
 
 function inviteLink(request, env, token) {
-  const url = new URL('/auth/google/start', request.url);
-  url.searchParams.set('return_to', env.APP_ORIGIN || 'https://chat.helixcer.com');
+  const base = String(env.APP_ORIGIN || '').trim() || 'https://chat.helixcer.com';
+  const url = new URL(base.endsWith('/') ? base : `${base}/`);
   url.searchParams.set('invite', token);
   return url.toString();
 }

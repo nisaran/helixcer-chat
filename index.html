@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261103-search-focus-matching-message">
-  <script src="./assets/app.js?v=20261103-search-focus-matching-message" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261103-password-login">
+  <script src="./assets/app.js?v=20261103-password-login" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -36,13 +36,40 @@
       <div class="auth-signed-out" id="signedOutContent">
         <p class="eyebrow">One shared customer inbox</p>
         <h1 id="signedOutTitle">Welcome back</h1>
-        <p class="auth-copy">Sign in with your approved Google account to continue to the Helixcer workspace.</p>
         <p class="auth-alert" id="authAlert" hidden></p>
+
+        <form class="auth-form" id="passwordLoginForm" autocomplete="on">
+          <label class="field-label">Email<input class="text-field" id="loginEmail" name="email" type="email" required maxlength="254" autocomplete="username" inputmode="email"></label>
+          <label class="field-label">Password<input class="text-field" id="loginPassword" name="password" type="password" required maxlength="128" autocomplete="current-password"></label>
+          <button class="primary-button auth-submit" id="passwordLoginButton" type="submit">Sign in</button>
+          <button class="auth-text-link" id="forgotPasswordLink" type="button" data-action="show-forgot-password">Forgot password</button>
+        </form>
+
+        <form class="auth-form" id="forgotPasswordForm" hidden autocomplete="on">
+          <label class="field-label">Email<input class="text-field" id="forgotEmail" name="email" type="email" required maxlength="254" autocomplete="username" inputmode="email"></label>
+          <button class="primary-button auth-submit" id="forgotPasswordButton" type="submit">Send reset link</button>
+          <button class="auth-text-link" type="button" data-action="show-password-login">Back to sign in</button>
+        </form>
+
+        <form class="auth-form" id="resetPasswordForm" hidden autocomplete="on">
+          <label class="field-label">New password<input class="text-field" id="resetPassword" name="password" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+          <label class="field-label">Confirm password<input class="text-field" id="resetPasswordConfirm" name="passwordConfirm" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+          <button class="primary-button auth-submit" id="resetPasswordButton" type="submit">Set password</button>
+          <button class="auth-text-link" type="button" data-action="show-password-login">Back to sign in</button>
+        </form>
+
+        <form class="auth-form" id="invitePasswordForm" hidden autocomplete="on">
+          <label class="field-label">Email<input class="text-field" id="inviteEmail" name="email" type="email" readonly aria-readonly="true" autocomplete="username"></label>
+          <label class="field-label">Password<input class="text-field" id="invitePassword" name="password" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+          <label class="field-label">Confirm password<input class="text-field" id="invitePasswordConfirm" name="passwordConfirm" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+          <button class="primary-button auth-submit" id="invitePasswordButton" type="submit">Set password</button>
+        </form>
+
+        <div class="auth-divider" id="authDivider"><span>or</span></div>
         <a class="google-signin" id="googleSignInLink" href="#">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.2c0-.7-.1-1.4-.2-2H12v3.7h5a4.3 4.3 0 0 1-1.9 2.8v2.4h3.1c1.8-1.7 2.8-4.1 2.8-6.9Z"/><path d="M12 21c2.5 0 4.7-.8 6.2-2.2l-3.1-2.4c-.8.6-1.9.9-3.1.9a5.5 5.5 0 0 1-5.2-3.8H3.6V16A9.4 9.4 0 0 0 12 21Z"/><path d="M6.8 13.5a5.6 5.6 0 0 1 0-3.5V7.5H3.6a9.4 9.4 0 0 0 0 8.5l3.2-2.5Z"/><path d="M12 6.3c1.4 0 2.6.5 3.6 1.4L18.3 5A9.1 9.1 0 0 0 3.6 7.5L6.8 10A5.5 5.5 0 0 1 12 6.3Z"/></svg>
           Continue with Google
         </a>
-        <p class="auth-footnote">Only workspace members can sign in. Contact the owner if your email has not been added.</p>
       </div>
     </div>
     <p class="auth-footer">Single workspace · Secure session · No billing portal</p>
@@ -173,6 +200,7 @@
             <div class="user-menu" id="userMenu" hidden>
               <div class="user-menu-identity"><strong id="userMenuName">Account</strong><span id="userMenuEmail">—</span><em id="userMenuRole">Agent</em></div>
               <button type="button" data-action="open-profile">Profile</button>
+              <button type="button" data-action="open-password">Change password</button>
               <button class="logout-button" type="button" data-action="logout">Sign out</button>
             </div>
           </div>
@@ -1043,7 +1071,6 @@
         <div><p class="eyebrow">Your account</p><h2 id="profileDialogTitle">Edit profile</h2></div>
         <button class="icon-button" type="button" data-action="close-profile" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
-      <p class="modal-copy">Update how your name and contact details appear in Helixcer. Your login ID stays tied to your Google account.</p>
       <div class="form-grid">
         <label class="field-label form-span"><span>Login ID <span class="field-optional">Read only</span></span><input class="text-field" id="profileEmail" name="email" type="email" readonly aria-readonly="true" autocomplete="username"></label>
         <label class="field-label form-span">Name<input class="text-field" id="profileDisplayName" name="displayName" required maxlength="120" autocomplete="name" placeholder="Your name"></label>
@@ -1065,6 +1092,25 @@
         <span class="profile-save-state" id="profileSaveState" role="status" aria-live="polite"></span>
         <button class="secondary-button" type="button" data-action="close-profile">Cancel</button>
         <button class="primary-button" id="profileSaveButton" type="submit">Save profile</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal profile-modal" id="passwordDialog" aria-labelledby="passwordDialogTitle">
+    <form class="modal-card" id="passwordForm" autocomplete="on">
+      <div class="modal-head">
+        <div><p class="eyebrow">Your account</p><h2 id="passwordDialogTitle">Change password</h2></div>
+        <button class="icon-button" type="button" data-action="close-password" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="form-grid">
+        <label class="field-label form-span" id="profileCurrentPasswordField"><span>Current password</span><input class="text-field" id="profileCurrentPassword" name="currentPassword" type="password" maxlength="128" autocomplete="current-password"></label>
+        <label class="field-label form-span">New password<input class="text-field" id="profileNewPassword" name="newPassword" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+        <label class="field-label form-span">Confirm password<input class="text-field" id="profileNewPasswordConfirm" name="newPasswordConfirm" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+      </div>
+      <div class="modal-actions">
+        <span class="profile-save-state" id="passwordSaveState" role="status" aria-live="polite"></span>
+        <button class="secondary-button" type="button" data-action="close-password">Cancel</button>
+        <button class="primary-button" id="passwordSaveButton" type="submit">Save password</button>
       </div>
     </form>
   </dialog>

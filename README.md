@@ -5,7 +5,7 @@ Helixcer Chat is a zero-monthly-cost omnichannel inbox designed for GitHub Pages
 ## What is included
 
 - Responsive shared inbox with search, filters, contacts, channel health, assignments, statuses, and demo mode.
-- Google sign-in with server-side sessions, plus Owner, Admin, and Agent workspace roles.
+- Google and email/password sign-in with server-side sessions, plus Owner, Admin, and Agent workspace roles. Invited members can set a password from the invite link or Forgot password; Google users can add a password the same way or from Profile.
 - Team invitations, member enable/disable controls, and protection against removing the last active Owner.
 - REST API backed by indexed D1 tables for contacts, identities, conversations, messages, webhook deduplication, retries, and audit history.
 - Person-first contacts: one master contact exposes at most one WhatsApp, Telegram, Instagram, Facebook, and email ID. Explicit internal channel bindings retain each connected account's scoped address and conversation history, so starting a chat never guesses which connected account to use.

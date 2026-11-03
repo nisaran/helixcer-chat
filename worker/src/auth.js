@@ -136,7 +136,7 @@ export async function authenticateRequest(request, env) {
   if (!rawToken) return null;
   const row = await env.DB.prepare(`SELECT s.session_id,s.expires_at,s.session_type,s.device_id,
       u.user_id,u.email,u.display_name,u.avatar_url,u.phone,u.address_line1,u.address_line2,
-      u.city,u.state,u.postal_code,u.country,
+      u.city,u.state,u.postal_code,u.country,u.password_hash,
       m.membership_id,m.role,m.status,m.allowed_channel_ids_json,
       w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
     FROM sessions s JOIN users u ON u.user_id=s.user_id
@@ -250,8 +250,18 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
   const email = normalizeEmail(identity.email);
   const workspaceId = (await resolveDefaultWorkspace(env)).workspace_id;
   let user = await env.DB.prepare('SELECT * FROM users WHERE google_sub=?1').bind(identity.sub).first();
-  const emailOwner = await env.DB.prepare('SELECT user_id,google_sub FROM users WHERE lower(email)=?1').bind(email).first();
-  if (emailOwner && emailOwner.google_sub !== identity.sub) throw authError(409, 'This email is already linked to another Google identity.');
+  const emailOwner = await env.DB.prepare('SELECT user_id,google_sub,password_hash FROM users WHERE lower(email)=?1').bind(email).first();
+  if (emailOwner && emailOwner.google_sub !== identity.sub) {
+    if (isPasswordPlaceholderSub(emailOwner.google_sub)) {
+      // Link Google to an existing password-created account for the same email.
+      user = await env.DB.prepare('SELECT * FROM users WHERE user_id=?1').bind(emailOwner.user_id).first();
+      await env.DB.prepare('UPDATE users SET google_sub=?2,updated_at=?3 WHERE user_id=?1')
+        .bind(emailOwner.user_id, identity.sub, now).run();
+      if (user) user.google_sub = identity.sub;
+    } else {
+      throw authError(409, 'This email is already linked to another Google identity.');
+    }
+  }
 
   const existingMembership = user
     ? await env.DB.prepare(`SELECT workspace_id FROM memberships
@@ -326,7 +336,7 @@ async function provisionVerifiedIdentity(env, identity, invitationTokenHash) {
   }
 
   const row = await env.DB.prepare(`SELECT u.user_id,u.email,u.display_name,u.avatar_url,u.phone,u.address_line1,
-      u.address_line2,u.city,u.state,u.postal_code,u.country,m.membership_id,m.role,m.status,
+      u.address_line2,u.city,u.state,u.postal_code,u.country,u.password_hash,m.membership_id,m.role,m.status,
       m.allowed_channel_ids_json,w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
     FROM users u JOIN memberships m ON m.user_id=u.user_id JOIN workspaces w ON w.workspace_id=m.workspace_id
     WHERE u.user_id=?1 AND m.status='active' AND w.status='active' AND (?2='' OR m.workspace_id=?2)
@@ -415,16 +425,13 @@ export async function createInvitation(request, env, principal, payload) {
   await auditAuthAction(env, principal, 'invite', 'invitation', invitationId, {
     email, role, allowedChannelIds
   });
-  const loginUrl = new URL('/auth/google/start', request.url);
-  loginUrl.searchParams.set('return_to', validateReturnTo(payload.returnTo || payload.return_to || '/', env));
-  loginUrl.searchParams.set('invite', token);
   return {
     ok: true,
     invitation: {
       invitationId, email, role, status: 'pending', expiresAt, createdAt: now.toISOString(),
       allowedChannelIds
     },
-    inviteUrl: loginUrl.toString()
+    inviteUrl: appInviteUrl(env, token, payload.returnTo || payload.return_to || '/')
   };
 }
 
@@ -566,7 +573,10 @@ export async function resolveAllowedChannelIds(env, workspaceId, role, payload =
 export function principalView(principal) {
   return {
     authenticated: true,
-    user: principal.user,
+    user: {
+      ...principal.user,
+      hasPassword: Boolean(principal.user?.hasPassword)
+    },
     workspace: principal.workspace,
     membership: {
       ...principal.membership,
@@ -574,7 +584,8 @@ export function principalView(principal) {
         ? principal.membership.allowedChannelIds
         : []
     },
-    permissions: principal.permissions || null
+    permissions: principal.permissions || null,
+    hasPassword: Boolean(principal.user?.hasPassword)
   };
 }
 
@@ -691,7 +702,8 @@ function principalFromRow(row, authType = 'session') {
       city: row.city || '',
       state: row.state || '',
       postalCode: row.postal_code || '',
-      country: row.country || ''
+      country: row.country || '',
+      hasPassword: Boolean(row.password_hash)
     },
     workspace: { workspaceId: row.workspace_id, name: row.workspace_name, slug: row.workspace_slug },
     membership: {
@@ -758,6 +770,369 @@ export async function updateUserProfile(env, principal, payload = {}) {
     fields: ['displayName', 'phone', 'address']
   });
   return { ...principal, user };
+}
+
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_LENGTH = 128;
+const PASSWORD_PBKDF2_ITERATIONS = 600000;
+const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
+
+export async function previewInvitation(env, token) {
+  const raw = String(token || '').trim();
+  if (!raw || raw.length > 256) throw authError(400, 'Invitation token is invalid.');
+  const invite = await env.DB.prepare(`SELECT email,expires_at FROM invitations
+    WHERE token_hash=?1 AND status='pending' AND expires_at>?2`)
+    .bind(await hashToken(raw), new Date().toISOString()).first();
+  if (!invite) throw authError(404, 'This invitation is invalid or expired.');
+  return { email: normalizeEmail(invite.email), expiresAt: invite.expires_at };
+}
+
+export async function loginWithPassword(env, payload = {}) {
+  const email = normalizeEmail(payload.email);
+  const password = String(payload.password ?? '');
+  if (!email || !email.includes('@') || email.length > 254) throw authError(400, 'A valid email is required.');
+  if (!password) throw authError(400, 'Password is required.');
+  const user = await env.DB.prepare(`SELECT user_id,email,password_hash FROM users WHERE lower(email)=?1`).bind(email).first();
+  if (!user?.password_hash) throw authError(401, 'Invalid email or password.');
+  const valid = await verifyPassword(password, user.password_hash);
+  if (!valid) throw authError(401, 'Invalid email or password.');
+  const principal = await activePrincipalForUser(env, user.user_id);
+  if (!principal) throw authError(403, 'Your account has not been invited to this workspace.');
+  const session = await createSession(env, principal);
+  await env.DB.prepare('UPDATE users SET last_login_at=?2,updated_at=?2 WHERE user_id=?1')
+    .bind(user.user_id, new Date().toISOString()).run();
+  await auditAuthAction(env, principal, 'login', 'session', session.sessionId, { authProvider: 'password' });
+  return sessionResponse(session, principal);
+}
+
+export async function requestPasswordReset(env, payload = {}) {
+  const email = normalizeEmail(payload.email);
+  const generic = { ok: true };
+  if (!email || !email.includes('@') || email.length > 254) return generic;
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const user = await env.DB.prepare(`SELECT u.user_id,u.email FROM users u
+      JOIN memberships m ON m.user_id=u.user_id
+      JOIN workspaces w ON w.workspace_id=m.workspace_id
+    WHERE lower(u.email)=?1 AND m.status='active' AND w.status='active'
+    ORDER BY u.created_at LIMIT 1`).bind(email).first();
+  const invite = user
+    ? null
+    : await env.DB.prepare(`SELECT invitation_id,email FROM invitations
+        WHERE lower(email)=?1 AND status='pending' AND expires_at>?2
+        ORDER BY created_at DESC LIMIT 1`).bind(email, nowIso).first();
+  if (!user && !invite) return generic;
+
+  const token = randomToken(32);
+  const expiresAt = new Date(now.getTime() + PASSWORD_RESET_TTL_SECONDS * 1000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE password_reset_tokens SET consumed_at=?2
+      WHERE lower(email)=?1 AND consumed_at IS NULL`).bind(email, nowIso),
+    env.DB.prepare(`INSERT INTO password_reset_tokens
+        (token_hash,email,user_id,invitation_id,expires_at,consumed_at,created_at)
+      VALUES (?1,?2,?3,?4,?5,NULL,?6)`)
+      .bind(await hashToken(token), email, user?.user_id || null, invite?.invitation_id || null, expiresAt, nowIso)
+  ]);
+
+  const resetUrl = appResetUrl(env, token);
+  try {
+    const { sendTransactionalEmail, passwordResetEmailContent } = await import('./mail.js');
+    const content = passwordResetEmailContent(resetUrl);
+    await sendTransactionalEmail(env, { to: email, ...content });
+  } catch (error) {
+    console.error('password_reset_email_failed', {
+      code: error?.code || '',
+      message: error?.message || 'Unknown email failure'
+    });
+  }
+  return generic;
+}
+
+export async function resetPasswordWithToken(env, payload = {}) {
+  const token = String(payload.token || payload.resetToken || '').trim();
+  if (!token || token.length > 256) throw authError(400, 'This reset link is invalid or expired.');
+  const password = cleanNewPassword(payload.password ?? payload.newPassword);
+  const now = new Date().toISOString();
+  const tokenHash = await hashToken(token);
+  const row = await env.DB.prepare(`SELECT token_hash,email,user_id,invitation_id,expires_at
+    FROM password_reset_tokens WHERE token_hash=?1 AND consumed_at IS NULL AND expires_at>?2`)
+    .bind(tokenHash, now).first();
+  if (!row) throw authError(400, 'This reset link is invalid or expired.');
+
+  const passwordHash = await hashPassword(password);
+  let userId = row.user_id || '';
+  if (userId) {
+    await env.DB.prepare('UPDATE users SET password_hash=?2,updated_at=?3 WHERE user_id=?1')
+      .bind(userId, passwordHash, now).run();
+  } else if (row.invitation_id) {
+    const created = await createUserFromInvitation(env, {
+      invitationId: row.invitation_id,
+      email: row.email,
+      passwordHash,
+      now
+    });
+    userId = created.userId;
+  } else {
+    throw authError(400, 'This reset link is invalid or expired.');
+  }
+
+  await env.DB.prepare('UPDATE password_reset_tokens SET consumed_at=?2 WHERE token_hash=?1')
+    .bind(tokenHash, now).run();
+  await env.DB.prepare(`UPDATE password_reset_tokens SET consumed_at=?2
+    WHERE lower(email)=?1 AND consumed_at IS NULL`).bind(normalizeEmail(row.email), now).run();
+
+  const principal = await activePrincipalForUser(env, userId);
+  if (!principal) throw authError(403, 'Your account has not been invited to this workspace.');
+  const session = await createSession(env, principal);
+  await env.DB.prepare('UPDATE users SET last_login_at=?2,updated_at=?2 WHERE user_id=?1')
+    .bind(userId, now).run();
+  await auditAuthAction(env, principal, 'password.reset', 'user', userId, { authProvider: 'password_reset' });
+  await auditAuthAction(env, principal, 'login', 'session', session.sessionId, { authProvider: 'password_reset' });
+  return sessionResponse(session, principal);
+}
+
+export async function acceptInvitationWithPassword(env, payload = {}) {
+  const inviteToken = String(payload.invite || payload.invitationToken || payload.token || '').trim();
+  if (!inviteToken || inviteToken.length > 256) throw authError(400, 'Invitation token is invalid.');
+  const password = cleanNewPassword(payload.password ?? payload.newPassword);
+  const now = new Date().toISOString();
+  const invitationTokenHash = await hashToken(inviteToken);
+  const invite = await env.DB.prepare(`SELECT invitation_id,email,workspace_id FROM invitations
+    WHERE token_hash=?1 AND status='pending' AND expires_at>?2`)
+    .bind(invitationTokenHash, now).first();
+  if (!invite) throw authError(403, 'This invitation is invalid or expired.');
+  const email = normalizeEmail(invite.email);
+  const existing = await env.DB.prepare('SELECT user_id,password_hash,google_sub FROM users WHERE lower(email)=?1')
+    .bind(email).first();
+  let userId = existing?.user_id || '';
+  const passwordHash = await hashPassword(password);
+  if (existing) {
+    await env.DB.prepare('UPDATE users SET password_hash=?2,updated_at=?3 WHERE user_id=?1')
+      .bind(existing.user_id, passwordHash, now).run();
+    await acceptPendingInvitation(env, {
+      invitationId: invite.invitation_id,
+      invitationTokenHash,
+      email,
+      userId: existing.user_id,
+      now
+    });
+  } else {
+    const created = await createUserFromInvitation(env, {
+      invitationId: invite.invitation_id,
+      invitationTokenHash,
+      email,
+      passwordHash,
+      now
+    });
+    userId = created.userId;
+  }
+  const principal = await activePrincipalForUser(env, userId, invite.workspace_id);
+  if (!principal) throw authError(403, 'Your account has not been invited to this workspace.');
+  const session = await createSession(env, principal);
+  await env.DB.prepare('UPDATE users SET last_login_at=?2,updated_at=?2 WHERE user_id=?1')
+    .bind(userId, now).run();
+  await auditAuthAction(env, principal, 'login', 'session', session.sessionId, { authProvider: 'password_invite' });
+  return sessionResponse(session, principal);
+}
+
+export async function changePassword(env, principal, payload = {}) {
+  if (!principal?.user?.userId) {
+    throw authError(403, 'A signed-in account is required to change your password.');
+  }
+  if (!['session', 'mobile_session'].includes(principal.authType)) {
+    throw authError(403, 'A verified session is required to change your password.');
+  }
+  const row = await env.DB.prepare('SELECT password_hash FROM users WHERE user_id=?1')
+    .bind(principal.user.userId).first();
+  if (!row) throw authError(404, 'Account not found.');
+  const hasPassword = Boolean(row.password_hash);
+  const currentPassword = String(payload.currentPassword ?? payload.password ?? '');
+  if (hasPassword) {
+    if (!currentPassword) throw authError(400, 'Current password is required.');
+    const valid = await verifyPassword(currentPassword, row.password_hash);
+    if (!valid) throw authError(401, 'Current password is incorrect.');
+  }
+  const nextPassword = cleanNewPassword(payload.newPassword ?? payload.passwordNew);
+  if (hasPassword && currentPassword === nextPassword) {
+    throw authError(400, 'Choose a different new password.');
+  }
+  const now = new Date().toISOString();
+  await env.DB.prepare('UPDATE users SET password_hash=?2,updated_at=?3 WHERE user_id=?1')
+    .bind(principal.user.userId, await hashPassword(nextPassword), now).run();
+  await auditAuthAction(env, principal, hasPassword ? 'password.changed' : 'password.set', 'user', principal.user.userId, {});
+  return {
+    ok: true,
+    ...principalView({
+      ...principal,
+      user: { ...principal.user, hasPassword: true }
+    })
+  };
+}
+
+async function createUserFromInvitation(env, {
+  invitationId, invitationTokenHash = null, email, passwordHash, now
+}) {
+  const invite = await env.DB.prepare(`SELECT invitation_id,workspace_id,token_hash,email FROM invitations
+    WHERE invitation_id=?1 AND status='pending' AND expires_at>?2`)
+    .bind(invitationId, now).first();
+  if (!invite || normalizeEmail(invite.email) !== normalizeEmail(email)) {
+    throw authError(403, 'This invitation is invalid or expired.');
+  }
+  const tokenHash = invitationTokenHash || invite.token_hash;
+  const userId = crypto.randomUUID();
+  const googleSub = passwordPlaceholderSub(userId);
+  await env.DB.prepare(`INSERT INTO users
+      (user_id,google_sub,email,display_name,avatar_url,email_verified,password_hash,last_login_at,created_at,updated_at)
+    VALUES (?1,?2,?3,'', '',1,?4,?5,?5,?5)`)
+    .bind(userId, googleSub, normalizeEmail(email), passwordHash, now).run();
+  try {
+    await acceptPendingInvitation(env, {
+      invitationId: invite.invitation_id,
+      invitationTokenHash: tokenHash,
+      email: normalizeEmail(email),
+      userId,
+      now
+    });
+  } catch (error) {
+    await env.DB.prepare('DELETE FROM users WHERE user_id=?1 AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=?1)')
+      .bind(userId).run();
+    throw error;
+  }
+  return { userId };
+}
+
+async function acceptPendingInvitation(env, { invitationId, invitationTokenHash, email, userId, now }) {
+  const [membershipResult, invitationResult] = await env.DB.batch([
+    env.DB.prepare(`INSERT INTO memberships
+        (membership_id,workspace_id,user_id,role,status,invited_by_user_id,created_at,updated_at,allowed_channel_ids_json)
+      SELECT ?1,i.workspace_id,?2,i.role,'active',i.invited_by_user_id,?3,?3,i.allowed_channel_ids_json
+      FROM invitations i
+      WHERE i.invitation_id=?4 AND i.token_hash=?5 AND lower(i.email)=?6
+        AND i.status='pending' AND i.expires_at>?3
+      ON CONFLICT(workspace_id,user_id) DO UPDATE SET role=excluded.role,status='active',
+        invited_by_user_id=excluded.invited_by_user_id,updated_at=excluded.updated_at,
+        allowed_channel_ids_json=excluded.allowed_channel_ids_json`)
+      .bind(crypto.randomUUID(), userId, now, invitationId, invitationTokenHash, normalizeEmail(email)),
+    env.DB.prepare(`UPDATE invitations SET status='accepted',accepted_at=?4,updated_at=?4
+      WHERE invitation_id=?1 AND token_hash=?2 AND lower(email)=?3
+        AND status='pending' AND expires_at>?4`)
+      .bind(invitationId, invitationTokenHash, normalizeEmail(email), now)
+  ]);
+  if (!membershipResult?.meta?.changes || !invitationResult?.meta?.changes) {
+    throw authError(403, 'This invitation is invalid or expired.');
+  }
+}
+
+async function activePrincipalForUser(env, userId, preferredWorkspaceId = '') {
+  const row = await env.DB.prepare(`SELECT u.user_id,u.email,u.display_name,u.avatar_url,u.phone,u.address_line1,
+      u.address_line2,u.city,u.state,u.postal_code,u.country,u.password_hash,m.membership_id,m.role,m.status,
+      m.allowed_channel_ids_json,w.workspace_id,w.name AS workspace_name,w.slug AS workspace_slug
+    FROM users u JOIN memberships m ON m.user_id=u.user_id JOIN workspaces w ON w.workspace_id=m.workspace_id
+    WHERE u.user_id=?1 AND m.status='active' AND w.status='active' AND (?2='' OR m.workspace_id=?2)
+    ORDER BY CASE m.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END LIMIT 1`)
+    .bind(userId, preferredWorkspaceId || '').first();
+  if (!row) {
+    const suspended = await env.DB.prepare(`SELECT 1 FROM memberships m
+      JOIN workspaces w ON w.workspace_id=m.workspace_id
+      WHERE m.user_id=?1 AND m.status='active' AND w.status='suspended'`).bind(userId).first();
+    if (suspended) throw authError(403, 'This workspace has been suspended. Contact Helixcer support.');
+    return null;
+  }
+  return principalFromRow(row);
+}
+
+function sessionResponse(session, principal) {
+  return {
+    ok: true,
+    me: principalView(principal),
+    expiresAt: session.expiresAt,
+    sessionId: session.sessionId,
+    maxAge: session.maxAge,
+    token: session.token
+  };
+}
+
+function appInviteUrl(env, token, returnTo = '/') {
+  const base = String(env.APP_ORIGIN || '').trim() || 'https://chat.helixcer.com';
+  const url = new URL(base.endsWith('/') ? base : `${base}/`);
+  url.searchParams.set('invite', token);
+  try {
+    const safeReturn = validateReturnTo(returnTo, env);
+    const returnUrl = new URL(safeReturn);
+    if (returnUrl.hash) url.hash = returnUrl.hash;
+  } catch { /* Keep the default app origin invite link. */ }
+  return url.toString();
+}
+
+function appResetUrl(env, token) {
+  const base = String(env.APP_ORIGIN || '').trim() || 'https://chat.helixcer.com';
+  const url = new URL(base.endsWith('/') ? base : `${base}/`);
+  url.searchParams.set('reset', token);
+  return url.toString();
+}
+
+function cleanNewPassword(value) {
+  const password = String(value ?? '');
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    throw authError(400, `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
+  }
+  if (password.length > PASSWORD_MAX_LENGTH) {
+    throw authError(400, `Password must be ${PASSWORD_MAX_LENGTH} characters or fewer.`);
+  }
+  if (/\s/.test(password)) throw authError(400, 'Password cannot contain spaces.');
+  return password;
+}
+
+function passwordPlaceholderSub(userId) {
+  return `password:${userId}`;
+}
+
+function isPasswordPlaceholderSub(value) {
+  return String(value || '').startsWith('password:');
+}
+
+export async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PASSWORD_PBKDF2_ITERATIONS },
+    key,
+    256
+  );
+  return `pbkdf2-sha256$${PASSWORD_PBKDF2_ITERATIONS}$${base64UrlEncode(salt)}$${base64UrlEncode(new Uint8Array(bits))}`;
+}
+
+export async function verifyPassword(password, encoded) {
+  const parts = String(encoded || '').split('$');
+  if (parts.length !== 4 || parts[0] !== 'pbkdf2-sha256') return false;
+  const iterations = Number.parseInt(parts[1], 10);
+  if (!Number.isFinite(iterations) || iterations < 10000 || iterations > 5000000) return false;
+  let salt;
+  let expected;
+  try {
+    salt = base64UrlDecode(parts[2]);
+    expected = base64UrlDecode(parts[3]);
+  } catch {
+    return false;
+  }
+  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    key,
+    expected.length * 8
+  );
+  return timingSafeEqualBytes(new Uint8Array(bits), expected);
+}
+
+function timingSafeEqualBytes(left, right) {
+  const a = left instanceof Uint8Array ? left : new Uint8Array(left || []);
+  const b = right instanceof Uint8Array ? right : new Uint8Array(right || []);
+  let mismatch = a.length ^ b.length;
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index++) {
+    mismatch |= (a[index % (a.length || 1)] || 0) ^ (b[index % (b.length || 1)] || 0);
+  }
+  return mismatch === 0;
 }
 
 function memberView(row) {
