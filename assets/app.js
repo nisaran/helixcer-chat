@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261103-template-button-url-preview";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261103-remove-button-url-field-preview";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -7532,11 +7532,6 @@
       .filter((value) => value && !seen.has(value) && seen.add(value));
   }
 
-  function templateButtonUrlTemplate(template, buttonIndex) {
-    const buttons = asItems(asItems(template?.components).find((component) => String(component.type || "").toUpperCase() === "BUTTONS")?.buttons);
-    return String(buttons[buttonIndex]?.url || "").trim();
-  }
-
   function templateVariableDescriptors(template) {
     if (Array.isArray(template?.variables) && template.variables.length) {
       return template.variables.map((variable, index) => {
@@ -7553,7 +7548,6 @@
           parameterIndex,
           subType: componentType === "button" ? "url" : "",
           buttonIndex,
-          urlTemplate: componentType === "button" ? templateButtonUrlTemplate(template, buttonIndex) : "",
           kind: media ? "media" : sourceKind === "location" ? "location" : "text",
           mediaType: media ? sourceKind : "",
           parameterName: /^\d+$/.test(key) || key === "media" ? "" : key,
@@ -7587,7 +7581,6 @@
       if (type === "BUTTONS") {
         asItems(component.buttons).forEach((button, buttonIndex) => {
           if (String(button.type || "").toUpperCase() !== "URL") return;
-          const urlTemplate = String(button.url || "").trim();
           templatePlaceholders(button.url).forEach((placeholder, index) => descriptors.push({
             id: `button-${buttonIndex}-${index}-${placeholder.replace(/[^a-z0-9_-]/gi, "-")}`,
             componentType: "button",
@@ -7595,7 +7588,6 @@
             parameterIndex: index,
             subType: "url",
             buttonIndex,
-            urlTemplate,
             kind: "text",
             parameterName: /^\d+$/.test(placeholder) ? "" : placeholder,
             placeholder,
@@ -7694,20 +7686,7 @@
       ? (resolved || "No saved value for this contact")
       : "Choose a contact field or manual entry";
     preview.classList.toggle("is-missing", !resolved);
-    updateTemplateButtonUrlPreview(row);
     renderTemplateComposerPreview();
-  }
-
-  function updateTemplateButtonUrlPreview(row) {
-    const preview = row?.querySelector("[data-role='button-url-preview']");
-    const urlTemplate = String(row?.dataset.urlTemplate || "").trim();
-    if (!preview || !urlTemplate) return;
-    const buttonIndex = Number(row.dataset.buttonIndex || 0);
-    const model = templateComposerModel({ includeMediaPreview: false });
-    const resolved = String(model?.buttons?.[buttonIndex]?.url || urlTemplate).trim();
-    preview.textContent = resolved;
-    preview.hidden = !resolved;
-    preview.title = resolved;
   }
 
   const templateSourceOptions = [
@@ -7878,14 +7857,6 @@
       row.append(label, manual);
       if (descriptor.kind === "media") row.append(file);
       row.append(preview);
-      // Mirror the Visit Website URL shown under the preview button.
-      if (descriptor.componentType === "button" && descriptor.urlTemplate) {
-        row.dataset.buttonIndex = String(descriptor.buttonIndex || 0);
-        row.dataset.urlTemplate = descriptor.urlTemplate;
-        const urlPreview = element("small", "template-button-url-preview");
-        urlPreview.dataset.role = "button-url-preview";
-        row.append(urlPreview);
-      }
       host.append(row);
       searchableComboboxOptions(menu, options, "", source.value);
       syncTemplateVariableSource(row);
