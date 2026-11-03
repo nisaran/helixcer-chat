@@ -29,3 +29,4 @@ backups/
 .deploy-staging/
 
 .cf-status-deploy/
+.deploy-mcp/
