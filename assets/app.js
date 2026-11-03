@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261102-filter-all-toggle";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261103-template-button-url-preview";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -2674,7 +2674,13 @@
         if (!button || typeof button !== "object") return [];
         const text = String(button.text || button.label || "").trim().slice(0, 100);
         if (!text) return [];
-        return [{ ...button, text, type: String(button.type || "quick_reply").toLocaleLowerCase().slice(0, 40) }];
+        const type = String(button.type || "quick_reply").toLocaleLowerCase().slice(0, 40);
+        const item = { text, type };
+        if (type === "url") {
+          const url = safeTemplateActionUrl(button.url);
+          if (url) item.url = url;
+        }
+        return [item];
       }) : [],
     } : null;
     const reply = replySource ? {
@@ -3937,6 +3943,15 @@
     return { text, buttons };
   }
 
+  function safeTemplateActionUrl(value) {
+    try {
+      const url = new URL(String(value || ""));
+      return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
+    } catch {
+      return "";
+    }
+  }
+
   function renderTemplateMessageActions(buttons) {
     if (!Array.isArray(buttons) || !buttons.length) return null;
     const actions = element("div", "message-template-actions");
@@ -3945,10 +3960,25 @@
     buttons.slice(0, 10).forEach((button) => {
       const label = String(button?.text || button?.label || "").trim().slice(0, 100);
       if (!label) return;
-      const action = element("span", "message-template-action", label);
-      action.setAttribute("role", "button");
-      action.setAttribute("aria-disabled", "true");
-      action.dataset.buttonType = String(button?.type || "quick_reply").toLocaleLowerCase().slice(0, 40);
+      const type = String(button?.type || "quick_reply").toLocaleLowerCase().slice(0, 40);
+      // Only Visit Website (url) actions are clickable for agents; quick replies stay display-only.
+      const href = type === "url" ? safeTemplateActionUrl(button?.url) : "";
+      let action;
+      if (href) {
+        action = document.createElement("a");
+        action.className = "message-template-action is-link";
+        action.href = href;
+        action.target = "_blank";
+        action.rel = "noopener noreferrer";
+        action.textContent = label;
+        action.title = href;
+        action.setAttribute("aria-label", `${label} (opens website)`);
+      } else {
+        action = element("span", "message-template-action", label);
+        action.setAttribute("role", "button");
+        action.setAttribute("aria-disabled", "true");
+      }
+      action.dataset.buttonType = type;
       actions.append(action);
     });
     return actions.childElementCount ? actions : null;
@@ -7502,6 +7532,11 @@
       .filter((value) => value && !seen.has(value) && seen.add(value));
   }
 
+  function templateButtonUrlTemplate(template, buttonIndex) {
+    const buttons = asItems(asItems(template?.components).find((component) => String(component.type || "").toUpperCase() === "BUTTONS")?.buttons);
+    return String(buttons[buttonIndex]?.url || "").trim();
+  }
+
   function templateVariableDescriptors(template) {
     if (Array.isArray(template?.variables) && template.variables.length) {
       return template.variables.map((variable, index) => {
@@ -7518,6 +7553,7 @@
           parameterIndex,
           subType: componentType === "button" ? "url" : "",
           buttonIndex,
+          urlTemplate: componentType === "button" ? templateButtonUrlTemplate(template, buttonIndex) : "",
           kind: media ? "media" : sourceKind === "location" ? "location" : "text",
           mediaType: media ? sourceKind : "",
           parameterName: /^\d+$/.test(key) || key === "media" ? "" : key,
@@ -7551,6 +7587,7 @@
       if (type === "BUTTONS") {
         asItems(component.buttons).forEach((button, buttonIndex) => {
           if (String(button.type || "").toUpperCase() !== "URL") return;
+          const urlTemplate = String(button.url || "").trim();
           templatePlaceholders(button.url).forEach((placeholder, index) => descriptors.push({
             id: `button-${buttonIndex}-${index}-${placeholder.replace(/[^a-z0-9_-]/gi, "-")}`,
             componentType: "button",
@@ -7558,6 +7595,7 @@
             parameterIndex: index,
             subType: "url",
             buttonIndex,
+            urlTemplate,
             kind: "text",
             parameterName: /^\d+$/.test(placeholder) ? "" : placeholder,
             placeholder,
@@ -7656,7 +7694,20 @@
       ? (resolved || "No saved value for this contact")
       : "Choose a contact field or manual entry";
     preview.classList.toggle("is-missing", !resolved);
+    updateTemplateButtonUrlPreview(row);
     renderTemplateComposerPreview();
+  }
+
+  function updateTemplateButtonUrlPreview(row) {
+    const preview = row?.querySelector("[data-role='button-url-preview']");
+    const urlTemplate = String(row?.dataset.urlTemplate || "").trim();
+    if (!preview || !urlTemplate) return;
+    const buttonIndex = Number(row.dataset.buttonIndex || 0);
+    const model = templateComposerModel({ includeMediaPreview: false });
+    const resolved = String(model?.buttons?.[buttonIndex]?.url || urlTemplate).trim();
+    preview.textContent = resolved;
+    preview.hidden = !resolved;
+    preview.title = resolved;
   }
 
   const templateSourceOptions = [
@@ -7827,6 +7878,14 @@
       row.append(label, manual);
       if (descriptor.kind === "media") row.append(file);
       row.append(preview);
+      // Mirror the Visit Website URL shown under the preview button.
+      if (descriptor.componentType === "button" && descriptor.urlTemplate) {
+        row.dataset.buttonIndex = String(descriptor.buttonIndex || 0);
+        row.dataset.urlTemplate = descriptor.urlTemplate;
+        const urlPreview = element("small", "template-button-url-preview");
+        urlPreview.dataset.role = "button-url-preview";
+        row.append(urlPreview);
+      }
       host.append(row);
       searchableComboboxOptions(menu, options, "", source.value);
       syncTemplateVariableSource(row);

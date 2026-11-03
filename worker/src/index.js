@@ -4932,7 +4932,14 @@ function templateMessageView(payload) {
     if (!isPlainObject(button)) return [];
     const type = String(button.type || '').toLowerCase();
     const text = providerText(button.text, 100);
-    return TEMPLATE_BUTTON_TYPES.has(type) && text ? [{ type, text }] : [];
+    if (!(TEMPLATE_BUTTON_TYPES.has(type) && text)) return [];
+    const item = { type, text };
+    // Keep resolved Visit Website links so inbox agents can open them.
+    if (type === 'url') {
+      const url = providerText(button.url, 2048);
+      if (url && /^https:\/\//i.test(url) && !/\{\{/.test(url)) item.url = url;
+    }
+    return [item];
   });
   return {
     name,
@@ -5975,7 +5982,14 @@ function renderWhatsAppTemplatePresentation(definition, template) {
         const button = componentButtons[buttonIndex];
         const label = providerText(button?.text || button?.type, 100);
         const buttonType = String(button?.type || '').toLowerCase();
-        if (label && TEMPLATE_BUTTON_TYPES.has(buttonType)) buttons.push({ type: buttonType, text: label });
+        if (!(label && TEMPLATE_BUTTON_TYPES.has(buttonType))) continue;
+        const item = { type: buttonType, text: label };
+        // Persist resolved Visit Website URLs so agents can open them in the inbox.
+        if (buttonType === 'url') {
+          const url = resolvedWhatsAppTemplateButtonUrl(button, componentParameters('button', buttonIndex));
+          if (url) item.url = url;
+        }
+        buttons.push(item);
       }
     }
   }
@@ -6002,6 +6016,14 @@ function replaceWhatsAppTemplatePreviewVariables(text, parameters) {
     if (value === undefined) value = values[fallbackIndex++];
     return value === undefined || value === '' ? match : value;
   });
+}
+
+function resolvedWhatsAppTemplateButtonUrl(button, parameters) {
+  const rawUrl = providerText(button?.url, 2048);
+  if (!rawUrl) return '';
+  const resolved = replaceWhatsAppTemplatePreviewVariables(rawUrl, parameters);
+  if (!/^https:\/\//i.test(resolved) || /\{\{/.test(resolved)) return '';
+  return providerText(resolved, 2048);
 }
 
 function whatsappTemplateParameterPreview(parameter) {

@@ -95,6 +95,7 @@ test('maps Interakt template and media messages', () => {
   );
   assert.equal(template.template?.name, 'payment_reminder_no_amt');
   assert.equal(template.template?.language?.code, 'en');
+  // Dynamic Visit Website URLs stay non-clickable until button params resolve to https.
   assert.deepEqual(template.template?.buttons, [{ type: 'url', text: 'Pay now' }]);
   assert.equal(template.status, 'read');
   assert.equal(template.direction, 'outbound');
@@ -149,6 +150,34 @@ test('maps Interakt template and media messages', () => {
   assert.equal(withDocument.mediaFileName, 'ticket.pdf');
   assert.equal(withDocument.mediaUrl, 'https://www.helixcer.com/_files/ugd/ticket.pdf');
   assert.equal(withDocument.attachment?.type, 'document');
+  assert.deepEqual(withDocument.template?.buttons, [
+    { type: 'url', text: 'Download Ticket', url: 'https://example.com' }
+  ]);
+
+  const withResolvedUrl = mapInteraktMessage({
+    id: 'm1c-url',
+    channel_message_id: 'wamid.1c-url',
+    direction: 'outbound',
+    content_type: 'Template',
+    text: JSON.stringify([
+      { type: 'body', parameters: [{ type: 'text', text: 'Helixcer' }] },
+      { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'INV-42' }] }
+    ]),
+    status: 'Read',
+    timestamp: '2026-01-01T00:00:00+0000',
+    raw: {
+      raw_template: {
+        name: 'pay_link',
+        language: 'en',
+        body: 'Hi {{1}}, pay when ready.',
+        buttons: '[{"type":"URL","text":"Pay now","url":"https://pay.example/{{1}}"},{"type":"QUICK_REPLY","text":"Need help"}]'
+      }
+    }
+  });
+  assert.deepEqual(withResolvedUrl.template?.buttons, [
+    { type: 'url', text: 'Pay now', url: 'https://pay.example/INV-42' },
+    { type: 'quick_reply', text: 'Need help' }
+  ]);
 
   const failed = mapInteraktMessage({
     id: 'm1d',

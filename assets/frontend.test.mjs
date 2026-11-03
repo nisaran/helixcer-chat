@@ -277,7 +277,12 @@ test("chat renders WhatsApp formatting and template actions without unsafe HTML"
   assert.match(app, /match\(\/\^\\s\*Actions:/);
   assert.match(app, /message\?\.template\?\.buttons/);
   assert.match(app, /function renderTemplateMessageActions\(buttons\)/);
+  assert.match(app, /function safeTemplateActionUrl\(value\)/);
+  assert.match(app, /type === "url" \? safeTemplateActionUrl\(button\?\.url\)/);
+  assert.match(app, /action\.className = "message-template-action is-link"/);
+  assert.match(app, /action\.rel = "noopener noreferrer"/);
   assert.match(app, /action\.setAttribute\("aria-disabled", "true"\)/);
+  assert.match(styles, /a\.message-template-action\.is-link/);
   assert.match(app, /function whatsAppPlainText\(value\)/);
   assert.match(app, /function conversationPreviewText\(value, messageType, conversation\)/);
   assert.match(app, /const isTemplate = String\(messageType \|\| ""\)[\s\S]*?=== "template"/);
@@ -311,6 +316,11 @@ test("template composer searches templates and variables, previews substitutions
   assert.match(app, /comboInput\.setAttribute\("role", "combobox"\)/);
   assert.match(app, /function replaceTemplatePlaceholders/);
   assert.match(app, /function renderTemplateComposerPreview/);
+  assert.match(app, /function updateTemplateButtonUrlPreview\(row\)/);
+  assert.match(app, /function templateButtonUrlTemplate\(template, buttonIndex\)/);
+  assert.match(app, /data-role='button-url-preview'/);
+  assert.match(app, /row\.dataset\.urlTemplate = descriptor\.urlTemplate/);
+  assert.match(styles, /\.template-button-url-preview\s*\{/);
   assert.match(app, /template-media/);
   assert.match(app, /\[\["upload", "Upload a file"\], \["url", "Use media URL"\]\]/);
   assert.match(app, /source\.value = descriptor\.kind === "media" \? "upload"/);
@@ -600,7 +610,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261102-filter-all-toggle/);
+  assert.match(html, /app\.js\?v=20261103-template-button-url-preview/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -963,8 +973,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261102-filter-all-toggle/);
-  assert.match(html, /assets\/styles\.css\?v=20261102-filter-all-toggle/);
+  assert.match(html, /assets\/app\.js\?v=20261103-template-button-url-preview/);
+  assert.match(html, /assets\/styles\.css\?v=20261103-template-button-url-preview/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
