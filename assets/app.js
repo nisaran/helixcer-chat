@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261103-fix-inbox-search-filters";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261103-search-focus-matching-message";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -26,6 +26,8 @@
     conversationsLoadError: "",
     conversationSearchRequestId: 0,
     conversationSearchActive: false,
+    // conversationId → { messageId, timestamp } for text matches in the active query.
+    searchMessageHits: new Map(),
     conversationObserverPaused: false,
     // When set by a direct #inbox/<id> visit, the left list shows only this chat
     // with filters cleared. In-app navigation clears it.
@@ -846,9 +848,49 @@
       return { ok: true, item: clone(item) };
     }
 
-    async getMessages(conversationId) {
+    async getMessages(conversationId, { before = "", limit = 100 } = {}) {
       await smallDelay(100);
-      return { items: clone(this.data.messages[conversationId] || []) };
+      let items = clone(this.data.messages[conversationId] || [])
+        .sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+      if (before) items = items.filter((item) => String(item.timestamp || "") < String(before));
+      if (before) items = items.slice(Math.max(0, items.length - limit));
+      else items = items.slice(Math.max(0, items.length - limit));
+      return { items };
+    }
+
+    async searchMessages({ q = "", limit = 50, conversationId = "", textOnly = false } = {}) {
+      await smallDelay(60);
+      const needle = String(q || "").trim().toLocaleLowerCase();
+      if (!needle) return { items: [] };
+      const items = [];
+      Object.entries(this.data.messages || {}).forEach(([id, messages]) => {
+        if (conversationId && id !== conversationId) return;
+        const conversation = (this.data.conversations || []).find((item) => item.conversationId === id);
+        const contact = (this.data.contacts || []).find((item) => item.contactId === conversation?.contactId);
+        (messages || []).forEach((message) => {
+          const textHit = String(message.text || "").toLocaleLowerCase().includes(needle)
+            || String(message.attachment?.caption || "").toLocaleLowerCase().includes(needle);
+          const metaHit = !textOnly && (
+            String(conversation?.subject || "").toLocaleLowerCase().includes(needle)
+            || String(contact?.displayName || "").toLocaleLowerCase().includes(needle)
+            || String(contact?.company || "").toLocaleLowerCase().includes(needle)
+          );
+          if (!textHit && !metaHit) return;
+          if (textOnly && !textHit) return;
+          items.push({
+            messageId: message.messageId,
+            conversationId: id,
+            contactId: conversation?.contactId || "",
+            text: message.text || "",
+            messageType: message.messageType || "text",
+            direction: message.direction || "",
+            timestamp: message.timestamp || "",
+            contactName: contact?.displayName || conversation?.subject || "",
+          });
+        });
+      });
+      items.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+      return { items: items.slice(0, Math.max(1, Number(limit) || 50)) };
     }
 
     async sendMessage(conversationId, text, replyToMessageId = "", route = {}) {
@@ -1504,10 +1546,22 @@
         : this.request("/api/workspace", { method: "PATCH", body: JSON.stringify(payload) });
     }
 
-    getMessages(conversationId) {
-      return this.isDemo
-        ? this.demo.getMessages(conversationId)
-        : this.request(`/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=100`);
+    getMessages(conversationId, { before = "", limit = 100 } = {}) {
+      if (this.isDemo) return this.demo.getMessages(conversationId, { before, limit });
+      const query = new URLSearchParams();
+      query.set("limit", String(limit || 100));
+      if (before) query.set("before", before);
+      return this.request(`/api/conversations/${encodeURIComponent(conversationId)}/messages?${query}`);
+    }
+
+    searchMessages({ q = "", limit = 50, conversationId = "", textOnly = false } = {}) {
+      if (this.isDemo) return this.demo.searchMessages({ q, limit, conversationId, textOnly });
+      const query = new URLSearchParams();
+      if (q) query.set("q", q);
+      if (limit) query.set("limit", String(limit));
+      if (conversationId) query.set("conversationId", conversationId);
+      if (textOnly) query.set("textOnly", "1");
+      return this.request(`/api/search/messages?${query}`);
     }
 
     sendMessage(conversationId, text, replyToMessageId = "", route = {}) {
@@ -3171,6 +3225,7 @@
     state.inboxFocusConversationId = conversationId;
     state.search = "";
     state.conversationSearchActive = false;
+    state.searchMessageHits = new Map();
     const searchInput = $("conversationSearch");
     if (searchInput) searchInput.value = "";
     // Direct visits keep the solo chat visible without any filter chips selected.
@@ -3539,27 +3594,129 @@
       // Drop the previous page so All/Open do not keep painting stale unfiltered rows
       // while the search request is in flight.
       state.conversations = [];
+      state.searchMessageHits = new Map();
     }
     renderConversationList();
     try {
-      const data = await state.api.listConversations({
-        cursor: "",
-        limit: CONVERSATION_PAGE_SIZE,
-        q,
-      });
+      const [data, messageHits] = await Promise.all([
+        state.api.listConversations({
+          cursor: "",
+          limit: CONVERSATION_PAGE_SIZE,
+          q,
+        }),
+        q ? state.api.searchMessages({ q, limit: 100, textOnly: true }).catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
+      ]);
       if (requestId !== state.conversationSearchRequestId) return;
       state.conversations = asItems(data.items || data).map(normalizeConversation);
       applyConversationPageMeta(data.nextCursor);
+      state.searchMessageHits = indexSearchMessageHits(asItems(messageHits.items || messageHits), q);
     } catch (error) {
       if (requestId !== state.conversationSearchRequestId) return;
       state.conversationsLoadError = error.message || "Could not search conversations.";
-      if (reset) state.conversations = [];
+      if (reset) {
+        state.conversations = [];
+        state.searchMessageHits = new Map();
+      }
     } finally {
       if (requestId !== state.conversationSearchRequestId) return;
       state.conversationsSearching = false;
       renderConversationList();
       renderCounts();
     }
+  }
+
+  function messageTextMatchesQuery(message, query) {
+    const needle = String(query || "").trim().toLocaleLowerCase();
+    if (!needle || !message) return false;
+    const haystack = `${message.text || ""} ${message.attachment?.caption || ""}`.toLocaleLowerCase();
+    return haystack.includes(needle);
+  }
+
+  function indexSearchMessageHits(items, query) {
+    const hits = new Map();
+    const needle = String(query || "").trim();
+    asItems(items).forEach((item) => {
+      const conversationId = String(item.conversationId || "").trim();
+      const messageId = String(item.messageId || "").trim();
+      if (!conversationId || !messageId) return;
+      if (!messageTextMatchesQuery(item, needle)) return;
+      if (hits.has(conversationId)) return;
+      hits.set(conversationId, {
+        messageId,
+        timestamp: item.timestamp || "",
+        text: item.text || "",
+      });
+    });
+    return hits;
+  }
+
+  function findLocalSearchMessageHit(conversationId, query) {
+    const needle = String(query || "").trim();
+    if (!needle) return null;
+    const messages = (state.messages.get(conversationId) || [])
+      .filter((message) => messageTextMatchesQuery(message, needle)
+        && message.direction !== "internal"
+        && message.messageType !== "event")
+      .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+    if (!messages.length) return null;
+    return {
+      messageId: messages[0].messageId,
+      timestamp: messages[0].timestamp || "",
+      text: messages[0].text || "",
+    };
+  }
+
+  async function ensureSearchHitMessageLoaded(conversationId, hit) {
+    if (!conversationId || !hit?.messageId) return false;
+    const hasMessage = () => (state.messages.get(conversationId) || [])
+      .some((message) => message.messageId === hit.messageId);
+    if (hasMessage()) return true;
+    for (let page = 0; page < 8; page += 1) {
+      const current = state.messages.get(conversationId) || [];
+      const oldest = current
+        .slice()
+        .sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0))[0];
+      if (!oldest?.timestamp) break;
+      if (hit.timestamp && String(oldest.timestamp) <= String(hit.timestamp) && !hasMessage()) break;
+      const data = await state.api.getMessages(conversationId, {
+        before: oldest.timestamp,
+        limit: 100,
+      });
+      const fetched = asItems(data.items || data).map(normalizeMessage);
+      if (!fetched.length) break;
+      state.messages.set(
+        conversationId,
+        mergeMessageSnapshots(state.messages.get(conversationId), fetched),
+      );
+      if (hasMessage()) return true;
+    }
+    return hasMessage();
+  }
+
+  async function focusInboxSearchMessage(conversationId) {
+    const query = state.search.trim();
+    if (!query || !conversationId || state.selectedConversationId !== conversationId) return;
+    let hit = state.searchMessageHits.get(conversationId) || findLocalSearchMessageHit(conversationId, query);
+    if (!hit?.messageId) {
+      try {
+        const data = await state.api.searchMessages({
+          q: query,
+          limit: 5,
+          conversationId,
+          textOnly: true,
+        });
+        const indexed = indexSearchMessageHits(asItems(data.items || data), query);
+        hit = indexed.get(conversationId) || null;
+        if (hit) state.searchMessageHits.set(conversationId, hit);
+      } catch (_error) {
+        hit = findLocalSearchMessageHit(conversationId, query);
+      }
+    }
+    if (!hit?.messageId || state.selectedConversationId !== conversationId) return;
+    const loaded = await ensureSearchHitMessageLoaded(conversationId, hit);
+    if (!loaded || state.selectedConversationId !== conversationId) return;
+    renderMessages({ preserveScroll: true });
+    requestAnimationFrame(() => jumpToMessage(hit.messageId));
   }
 
   function inboxSearchActive() {
@@ -3674,6 +3831,11 @@
       }
     }
     renderSelectedConversation();
+    // When inbox search matched message text (e.g. "jamsheer" inside Nisar Dropx),
+    // open the thread focused on that hit instead of only the latest messages.
+    if (changingConversation && state.search.trim()) {
+      focusInboxSearchMessage(conversationId).catch(() => {});
+    }
   }
 
   function renderSelectedConversation({ preserveScroll = false, renderThread = true } = {}) {
