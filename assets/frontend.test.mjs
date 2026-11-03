@@ -605,7 +605,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261103-fix-inbox-search-filters/);
+  assert.match(html, /app\.js\?v=20261103-search-focus-matching-message/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -968,8 +968,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261103-fix-inbox-search-filters/);
-  assert.match(html, /assets\/styles\.css\?v=20261103-fix-inbox-search-filters/);
+  assert.match(html, /assets\/app\.js\?v=20261103-search-focus-matching-message/);
+  assert.match(html, /assets\/styles\.css\?v=20261103-search-focus-matching-message/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -1107,6 +1107,19 @@ test("inbox search clears stale rows and ignores unfiltered bootstrap while sear
   assert.match(searchInput, /if \(queryChanged\) \{/);
   assert.match(searchInput, /state\.conversationsSearching = true/);
   assert.match(searchInput, /state\.conversations = \[\]/);
+});
+
+test("opening an inbox search hit focuses the matching message content", () => {
+  assert.match(app, /searchMessageHits:\s*new Map\(\)/);
+  assert.match(app, /function focusInboxSearchMessage\(conversationId\)/);
+  assert.match(app, /function indexSearchMessageHits\(/);
+  assert.match(app, /function ensureSearchHitMessageLoaded\(/);
+  assert.match(app, /searchMessages\(\{[\s\S]*?textOnly:\s*true/);
+  assert.match(app, /jumpToMessage\(hit\.messageId\)/);
+  assert.match(app, /changingConversation && state\.search\.trim\(\)/);
+  assert.match(app, /focusInboxSearchMessage\(conversationId\)/);
+  assert.match(app, /async searchMessages\(/);
+  assert.match(app, /getMessages\(conversationId, \{ before/);
 });
 
 test("the inbox opens on the Open conversation filter without selecting a chat", () => {

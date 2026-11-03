@@ -3318,6 +3318,10 @@ export async function searchMessages(env, workspaceId, url, options = {}) {
   const query = (url.searchParams.get('q') || '').trim().slice(0, 100);
   if (!query) return [];
   const limit = clampInt(url.searchParams.get('limit'), 1, 100, 50);
+  const conversationId = String(url.searchParams.get('conversationId') || '').trim().slice(0, 100);
+  // textOnly=1 is used when opening an inbox search hit so we jump to a message
+  // that actually contains the query, not a chat that only matched by contact name.
+  const textOnly = ['1', 'true', 'yes'].includes(String(url.searchParams.get('textOnly') || '').toLowerCase());
   const allowedChannelIds = Array.isArray(options.allowedChannelIds) ? options.allowedChannelIds : null;
   const result = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.identity_id,m.text,m.message_type,m.direction,m.timestamp,
       c.contact_id,c.status AS conversation_status,c.assigned_to,c.unread_count,
@@ -3334,13 +3338,26 @@ export async function searchMessages(env, workspaceId, url, options = {}) {
     LEFT JOIN channel_identity_bindings b ON b.workspace_id=m.workspace_id AND b.identity_id=m.identity_id
       AND b.channel_id=m.channel_id AND b.active=1
     WHERE m.workspace_id=?1
-      AND (instr(lower(COALESCE(m.text,'')),lower(?2))>0
-        OR instr(lower(COALESCE(ct.display_name,'')),lower(?2))>0
-        OR instr(lower(COALESCE(ct.company,'')),lower(?2))>0
-        OR instr(lower(COALESCE(b.scoped_profile_id,ci.profile_id,'')),lower(?2))>0)
+      AND (?6='' OR m.conversation_id=?6)
+      AND (
+        instr(lower(COALESCE(m.text,'')),lower(?2))>0
+        OR (?7=0 AND (
+          instr(lower(COALESCE(ct.display_name,'')),lower(?2))>0
+          OR instr(lower(COALESCE(ct.company,'')),lower(?2))>0
+          OR instr(lower(COALESCE(b.scoped_profile_id,ci.profile_id,'')),lower(?2))>0
+        ))
+      )
       AND (?4=0 OR m.channel_id IN (SELECT value FROM json_each(?5)))
     ORDER BY m.timestamp DESC,m.message_id DESC LIMIT ?3`)
-    .bind(workspaceId, query, limit, allowedChannelIds ? 1 : 0, JSON.stringify(allowedChannelIds || [])).all();
+    .bind(
+      workspaceId,
+      query,
+      limit,
+      allowedChannelIds ? 1 : 0,
+      JSON.stringify(allowedChannelIds || []),
+      conversationId,
+      textOnly ? 1 : 0
+    ).all();
   return (result.results || []).map(row => ({
     messageId: row.message_id,
     conversationId: row.conversation_id,
