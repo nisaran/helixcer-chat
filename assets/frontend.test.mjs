@@ -605,7 +605,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261103-remove-button-url-field-preview/);
+  assert.match(html, /app\.js\?v=20261103-fix-inbox-search-filters/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -968,8 +968,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261103-remove-button-url-field-preview/);
-  assert.match(html, /assets\/styles\.css\?v=20261103-remove-button-url-field-preview/);
+  assert.match(html, /assets\/app\.js\?v=20261103-fix-inbox-search-filters/);
+  assert.match(html, /assets\/styles\.css\?v=20261103-fix-inbox-search-filters/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -1079,7 +1079,8 @@ test("conversation filters are multi-selectable with responsive desktop and mobi
   assert.match(clearFiltersBody, /clearConversationFilters\(\)/);
   assert.match(clearFiltersBody, /renderConversationList\(\)/);
   assert.doesNotMatch(clearFiltersBody, /closeConversationFilterMenu/);
-  assert.match(app, /if \(selected\.size === 0 \|\| viewScope === "none"\) return \[\]/);
+  assert.match(app, /viewScope === "none" \|\| \(selected\.size === 0 && !searchActive\)\) return \[\]/);
+  assert.match(app, /const showingAll = selected\.size === 0 \|\| isAllConversationFilters\(selected\)/);
   assert.match(app, /input\.checked = input\.value === "all" \? showingAll : selected\.has\(input\.value\)/);
   assert.match(app, /const statusFilters = showingAll \? \[\] : \["open", "closed"\]\.filter/);
   assert.match(app, /const unassignedOnly = !showingAll && selected\.has\("unassigned"\)/);
@@ -1087,6 +1088,25 @@ test("conversation filters are multi-selectable with responsive desktop and mobi
   assert.match(app, /toggleConversationFilter\(button\.dataset\.filter\)/);
   assert.match(styles, /\.conversation-filter-desktop \{/);
   assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.conversation-filter-desktop \{ display: none; \}[\s\S]*?\.filter-row \{ display: flex; \}/);
+});
+
+test("inbox search clears stale rows and ignores unfiltered bootstrap while searching", () => {
+  const refresh = app.slice(app.indexOf("async function refreshInboxCatalogue"), app.indexOf("function inboxSearchActive"));
+  assert.match(refresh, /state\.conversations = \[\]/);
+  assert.match(refresh, /listConversations\(\{[\s\S]*?q/);
+  assert.match(app, /function inboxSearchActive\(\)/);
+  assert.match(app, /function upsertConversationDuringSearch\(incoming\)/);
+  const reconcile = app.slice(app.indexOf("async function reconcileWorkspace"), app.indexOf("function renderAll"));
+  assert.match(reconcile, /if \(!inboxSearchActive\(\)\) \{/);
+  assert.match(reconcile, /keepUnfetched:\s*true/);
+  assert.match(app, /else if \(!inboxSearchActive\(\)\) state\.conversations\.unshift/);
+  const loadAll = app.slice(app.indexOf("async function loadAll"), app.indexOf("async function reconcileWorkspace"));
+  assert.match(loadAll, /if \(searchQuery\) \{/);
+  assert.match(loadAll, /if \(searchQuery\) await refreshInboxCatalogue\(\{ reset: true \}\)/);
+  const searchInput = app.slice(app.indexOf('$("conversationSearch").addEventListener("input"'), app.indexOf('let contactSearchTimer'));
+  assert.match(searchInput, /if \(queryChanged\) \{/);
+  assert.match(searchInput, /state\.conversationsSearching = true/);
+  assert.match(searchInput, /state\.conversations = \[\]/);
 });
 
 test("the inbox opens on the Open conversation filter without selecting a chat", () => {
