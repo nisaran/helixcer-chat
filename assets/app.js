@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261103-remove-button-url-field-preview";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261103-fix-inbox-search-filters";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -2970,11 +2970,19 @@
       }
       state.channels = asItems(data.channels).map(normalizeChannel);
       if (data.tags) state.workspaceTags = normalizeWorkspaceTags(data.tags);
-      const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
-      // Full reload replaces the catalogue; keep only live mutations newer than this fetch.
-      state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart);
-      applyConversationPageMeta(data.conversationNextCursor);
-      state.conversationSearchActive = Boolean(state.search.trim());
+      const searchQuery = state.search.trim();
+      state.conversationSearchActive = Boolean(searchQuery);
+      if (searchQuery) {
+        // Bootstrap has no `q`. Keep an empty shell and re-run the search catalogue
+        // after loadAll so a full reload cannot paint unrelated chats over the query.
+        state.conversations = [];
+        applyConversationPageMeta("");
+      } else {
+        const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
+        // Full reload replaces the catalogue; keep only live mutations newer than this fetch.
+        state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart);
+        applyConversationPageMeta(data.conversationNextCursor);
+      }
       const fetchedContacts = asItems(data.contacts).map(normalizeContact);
       state.contacts = fetchedContacts;
       applyContactPageMeta({
@@ -2989,6 +2997,7 @@
       }
       renderAll();
       if (state.selectedConversationId) await selectConversation(state.selectedConversationId, { markRead: false, updateUrl: false });
+      if (searchQuery) await refreshInboxCatalogue({ reset: true });
     } catch (error) {
       state.conversations = [];
       applyConversationPageMeta("");
@@ -3033,15 +3042,19 @@
       }
       state.channels = asItems(data.channels).map(normalizeChannel);
       if (data.tags) state.workspaceTags = normalizeWorkspaceTags(data.tags);
-      const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
-      // Soft reconcile only refreshes the first catalogue page. Always keep rows
-      // already loaded (infinite-scroll pages and deep-linked chats) so a focus /
-      // pageshow refresh cannot blank the open conversation while the URL stays.
-      state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart, {
-        keepUnfetched: true,
-      });
-      if (data.conversationNextCursor !== undefined) {
-        applyConversationPageMeta(data.conversationNextCursor || state.conversationNextCursor);
+      // Bootstrap has no search `q`. Never merge that unfiltered first page over an
+      // active conversation search — that is what reintroduces unrelated chats.
+      if (!inboxSearchActive()) {
+        const fetchedConversations = asItems(data.conversations).map(normalizeConversation);
+        // Soft reconcile only refreshes the first catalogue page. Always keep rows
+        // already loaded (infinite-scroll pages and deep-linked chats) so a focus /
+        // pageshow refresh cannot blank the open conversation while the URL stays.
+        state.conversations = mergeConversationSnapshots(fetchedConversations, realtimeRevisionAtStart, {
+          keepUnfetched: true,
+        });
+        if (data.conversationNextCursor !== undefined) {
+          applyConversationPageMeta(data.conversationNextCursor || state.conversationNextCursor);
+        }
       }
       const fetchedContacts = asItems(data.contacts).map(normalizeContact);
       const resolvedTotal = resolveContactTotal(data, fetchedContacts);
@@ -3230,8 +3243,10 @@
         .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
     }
     const selected = state.filters;
-    if (selected.size === 0 || viewScope === "none") return [];
-    const showingAll = isAllConversationFilters(selected);
+    const searchActive = Boolean(state.search.trim() || state.conversationSearchActive);
+    // Filters=None hides the catalogue, but an active search still shows server hits.
+    if (viewScope === "none" || (selected.size === 0 && !searchActive)) return [];
+    const showingAll = selected.size === 0 || isAllConversationFilters(selected);
     const statusFilters = showingAll ? [] : ["open", "closed"].filter((filter) => selected.has(filter));
     const unassignedOnly = !showingAll && selected.has("unassigned");
     // Text search is server-side (`refreshInboxCatalogue` / load-more with q).
@@ -3519,7 +3534,12 @@
     state.conversationsLoadingMore = false;
     state.conversationsLoadError = "";
     state.conversationObserverPaused = false;
-    if (reset) applyConversationPageMeta("");
+    if (reset) {
+      applyConversationPageMeta("");
+      // Drop the previous page so All/Open do not keep painting stale unfiltered rows
+      // while the search request is in flight.
+      state.conversations = [];
+    }
     renderConversationList();
     try {
       const data = await state.api.listConversations({
@@ -3540,6 +3560,21 @@
       renderConversationList();
       renderCounts();
     }
+  }
+
+  function inboxSearchActive() {
+    return Boolean(state.search.trim() || state.conversationSearchActive || state.conversationsSearching);
+  }
+
+  function upsertConversationDuringSearch(incoming) {
+    if (!incoming?.conversationId) return false;
+    const index = state.conversations.findIndex((item) => item.conversationId === incoming.conversationId);
+    if (index >= 0) {
+      state.conversations[index] = { ...state.conversations[index], ...incoming };
+      return true;
+    }
+    // While searching, do not insert chats that were not part of the server result set.
+    return false;
   }
 
   function saveComposerDraft(conversationId = state.selectedConversationId) {
@@ -8489,8 +8524,9 @@
         const incomingConversation = normalizeConversation({ ...conversation, ...rawConversation, conversationId });
         const conversationIndex = state.conversations.findIndex((item) => item.conversationId === conversationId);
         if (conversationIndex >= 0) state.conversations[conversationIndex] = incomingConversation;
-        else state.conversations.unshift(incomingConversation);
-        conversation = incomingConversation;
+        else if (!inboxSearchActive()) state.conversations.unshift(incomingConversation);
+        else upsertConversationDuringSearch(incomingConversation);
+        conversation = state.conversations.find((item) => item.conversationId === conversationId) || (inboxSearchActive() ? null : incomingConversation);
       }
       if (conversation) {
         if (message.direction !== "internal") {
@@ -8533,7 +8569,8 @@
       if (!incoming.conversationId) return;
       const index = state.conversations.findIndex((item) => item.conversationId === incoming.conversationId);
       if (index >= 0) state.conversations[index] = { ...state.conversations[index], ...incoming };
-      else state.conversations.unshift(incoming);
+      else if (!inboxSearchActive()) state.conversations.unshift(incoming);
+      else upsertConversationDuringSearch(incoming);
       markConversationRealtimeMutation(incoming.conversationId);
       if (!event.assignmentSilent) notifyAssignmentToCurrentUser(incoming);
       renderCounts();
@@ -8555,7 +8592,8 @@
       if (!incoming.conversationId) return;
       const index = state.conversations.findIndex((item) => item.conversationId === incoming.conversationId);
       if (index >= 0) state.conversations[index] = { ...state.conversations[index], ...incoming };
-      else state.conversations.unshift(incoming);
+      else if (!inboxSearchActive()) state.conversations.unshift(incoming);
+      else upsertConversationDuringSearch(incoming);
       markConversationRealtimeMutation(incoming.conversationId);
       if (incoming.conversationId === state.selectedConversationId && ["pending", "closed"].includes(incoming.status)) {
         // Keep the chat open while a local status toast is anchored under the dropdown.
@@ -13330,10 +13368,22 @@
 
     let conversationSearchTimer = 0;
     $("conversationSearch").addEventListener("input", (event) => {
-      state.search = event.target.value;
+      const nextQuery = event.target.value;
+      const queryChanged = nextQuery.trim() !== state.search.trim();
+      state.search = nextQuery;
       if (state.inboxFocusConversationId) {
         clearDeepLinkedConversationList();
         renderConversationFilterControls();
+      }
+      // Drop stale unfiltered rows as soon as the query changes so All/Open do not
+      // keep painting unrelated chats during the debounce window.
+      if (queryChanged) {
+        state.conversationSearchActive = Boolean(nextQuery.trim());
+        state.conversationsSearching = true;
+        state.conversations = [];
+        applyConversationPageMeta("");
+        renderConversationList();
+        renderCounts();
       }
       window.clearTimeout(conversationSearchTimer);
       conversationSearchTimer = window.setTimeout(() => {
