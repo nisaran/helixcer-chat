@@ -2665,3 +2665,24 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 @media (max-width: 960px) {
   .campaign-audience-column, .campaign-message-column { flex: 0 0 100%; width: 100%; }
 }
+/* Compact history leaves room for the actual campaign rows. */
+.campaigns-route { gap: 12px; padding-top: 4px; }
+.campaigns-heading .eyebrow, .campaigns-heading .campaign-page-description { display: none; }
+.campaigns-heading h2 { font-size: 24px; }
+.campaign-overview { gap: 10px; margin-bottom: 14px; }
+.campaign-overview-card { padding: 12px 16px; gap: 10px; border-radius: 11px; }
+.campaign-overview-icon { flex-basis: 32px; width: 32px; height: 32px; border-radius: 10px; font-size: 20px; }
+.campaign-overview-card strong { font-size: 22px; margin-top: 2px; }
+.campaign-overview-card > div > span { font-size: 11px; }
+.campaign-history-panel > .campaign-panel-toolbar { padding-bottom: 10px; gap: 10px; }
+.campaign-history-panel .campaign-panel-toolbar strong { font-size: 14px; }
+.campaign-history-panel .campaign-panel-toolbar .subtle { font-size: 11px; }
+.campaigns-route .campaign-bulk-controls { padding: 3px 8px; }
+.campaign-history-filters { padding: 10px 12px; gap: 10px; margin-bottom: 10px; }
+.campaign-history-filters .text-field { min-height: 34px; height: 34px; }
+.campaign-table th { padding: 11px 8px; }
+.campaign-table > tbody > .campaign-row > td { padding: 12px 8px; }
+@media (max-width: 640px) {
+  .campaign-overview-card { padding: 10px; }
+  .campaign-history-filters { padding: 10px; }
+}

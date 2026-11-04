@@ -10096,6 +10096,15 @@
     finally { state.campaigns.bulkBusy = false; renderCampaignHistory(); }
   }
 
+  function campaignHistoryCounts(items = filteredCampaignHistory()) {
+    return {
+      total: items.length,
+      inProgress: items.filter(item => ["queued", "sending"].includes(item.status)).length,
+      paused: items.filter(item => item.status === "paused").length,
+      completed: items.filter(item => ["completed", "completed_with_errors"].includes(item.status)).length,
+    };
+  }
+
   function renderCampaignHistory({ keepHistoryFilterOpen = "" } = {}) {
     const body = $("campaignTableBody");
     const empty = $("campaignHistoryEmpty");
@@ -10114,12 +10123,12 @@
     body.replaceChildren();
     const overview = $("campaignOverview");
     if (overview) {
-      const campaigns = state.campaigns.items || [];
+      const counts = campaignHistoryCounts();
       const cards = [
-        ["Campaigns", campaigns.length, "all", "◈"],
-        ["In progress", campaigns.filter(item => ["queued", "sending"].includes(item.status)).length, "active", "▷"],
-        ["Paused", campaigns.filter(item => item.status === "paused").length, "paused", "Ⅱ"],
-        ["Completed", campaigns.filter(item => ["completed", "completed_with_errors"].includes(item.status)).length, "complete", "✓"],
+        ["Campaigns", counts.total, "all", "◈"],
+        ["In progress", counts.inProgress, "active", "▷"],
+        ["Paused", counts.paused, "paused", "Ⅱ"],
+        ["Completed", counts.completed, "complete", "✓"],
       ];
       overview.innerHTML = cards.map(([label, count, kind, icon]) => '<div class="campaign-overview-card is-' + kind + '"><span class="campaign-overview-icon" aria-hidden="true">' + icon + '</span><div><span>' + label + '</span><strong>' + count + '</strong></div></div>').join("");
     }
@@ -11313,7 +11322,11 @@
     const menu = $("campaignTemplateOptions");
     const search = $("campaignTemplateSearch");
     if (!menu || !search) return;
-    const needle = String(search.value || "").trim().toLocaleLowerCase();
+    const selected = selectedCampaignTemplate();
+    const selectedLabel = selected ? `${selected.name} (${selected.language?.code || selected.language || "en"})` : "";
+    const searchText = String(search.value || "").trim();
+    // The selected display label is not a search query. Reopening lists all templates.
+    const needle = searchText === selectedLabel ? "" : searchText.toLocaleLowerCase();
     menu.replaceChildren();
     const templates = state.campaigns.templates.filter((template) => {
       if (!needle) return true;
