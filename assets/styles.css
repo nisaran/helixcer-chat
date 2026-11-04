@@ -2494,3 +2494,6 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-recipient-detail { width: 320px; max-width: 320px; }
 .campaign-recipient-detail-text { display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
 .campaign-recipient-updated { white-space: nowrap; }
+.conversation-search-scope { display: grid; gap: 6px; padding: 8px 0; font-size: 12px; color: var(--muted); }
+.conversation-search-scope[hidden] { display: none; }
+.conversation-search-scope label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
