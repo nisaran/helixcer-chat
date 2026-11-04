@@ -78,6 +78,8 @@
       lastSummary: null,
     },
     campaigns: {
+      selectedIds: new Set(),
+      bulkBusy: false,
       mode: "history",
       items: [],
       loading: false,
@@ -1662,6 +1664,11 @@
           body: JSON.stringify(payload),
           signal,
         });
+    }
+
+    campaignAction(campaignIds, action) {
+      if (this.isDemo) return Promise.reject(new Error("Campaign actions require a connected workspace."));
+      return this.request("/api/campaigns/actions", { method: "POST", body: JSON.stringify({ campaignIds, action }) });
     }
 
     listCampaigns() {
@@ -10026,6 +10033,58 @@
     renderCampaignHistory();
   }
 
+  function campaignBulkEligible(action, status) {
+    return ({ pause: ["queued", "sending"], resume: ["paused", "queued", "sending"], cancel: ["paused", "queued", "sending"] }[action] || []).includes(status);
+  }
+
+  function renderCampaignBulkControls(items = filteredCampaignHistory()) {
+    const permitted = hasPermission("campaigns.manage");
+    const selected = state.campaigns.selectedIds;
+    const valid = new Set(state.campaigns.items.map(item => item.campaignId));
+    for (const id of selected) if (!valid.has(id)) selected.delete(id);
+    $("campaignBulkControls").hidden = !permitted;
+    $("campaignSelectedCount").textContent = selected.size + " selected";
+    $("campaignBulkToggle").disabled = !selected.size || state.campaigns.bulkBusy;
+    if (!selected.size) {
+      $("campaignBulkMenu").hidden = true;
+      $("campaignBulkToggle").setAttribute("aria-expanded", "false");
+    }
+    const all = $("campaignSelectAll");
+    all.disabled = !permitted || !items.length || state.campaigns.bulkBusy;
+    all.checked = items.length > 0 && items.every(item => selected.has(item.campaignId));
+    all.indeterminate = !all.checked && items.some(item => selected.has(item.campaignId));
+    for (const action of ["pause", "resume", "cancel"]) {
+      const button = document.querySelector('[data-action="campaign-bulk-' + action + '"]');
+      if (button) button.disabled = state.campaigns.bulkBusy || !state.campaigns.items.some(item => selected.has(item.campaignId) && campaignBulkEligible(action, item.status));
+    }
+  }
+
+  async function applyCampaignBulkAction(action) {
+    if (state.campaigns.bulkBusy || !hasPermission("campaigns.manage")) return;
+    const items = state.campaigns.items.filter(item => state.campaigns.selectedIds.has(item.campaignId) && campaignBulkEligible(action, item.status));
+    if (!items.length) return;
+    $("campaignBulkMenu").hidden = true;
+    $("campaignBulkToggle").setAttribute("aria-expanded", "false");
+    const label = capitalize(action);
+    const messages = {
+      pause: "Pause the remaining unsent recipients? You can resume these campaigns later.",
+      resume: "Resume remaining recipients? This will send customer messages; already sent recipients will not be re-created.",
+      cancel: "Permanently cancel the remaining recipients? Cancelled campaigns cannot be resumed.",
+    };
+    state.campaigns.bulkBusy = true;
+    renderCampaignBulkControls();
+    try {
+      const confirmed = await requestConfirmation({ eyebrow: "Campaign action", title: label + " " + items.length + " campaign(s)?", message: messages[action],
+        note: items.map(item => item.name || "Campaign").join(" · ") + "\nMessages already being delivered may still arrive.", confirmLabel: label + " campaigns", danger: action === "cancel" });
+      if (!confirmed) return;
+      const result = await state.api.campaignAction(items.map(item => item.campaignId), action);
+      state.campaigns.selectedIds.clear();
+      await loadCampaigns();
+      showToast("Campaigns updated", result.affectedIds.length + " campaign(s) updated." + (result.skipped ? " " + result.skipped + " no longer eligible." : ""));
+    } catch (error) { showToast("Campaign action failed", error.message, true); }
+    finally { state.campaigns.bulkBusy = false; renderCampaignHistory(); }
+  }
+
   function renderCampaignHistory({ keepHistoryFilterOpen = "" } = {}) {
     const body = $("campaignTableBody");
     const empty = $("campaignHistoryEmpty");
@@ -10048,6 +10107,7 @@
     if (wrap) wrap.classList.toggle("is-loading", isLoading);
 
     const items = filteredCampaignHistory();
+    renderCampaignBulkControls(items);
     const pageSize = campaignHistoryPageSizeValue();
     const total = items.length;
     const totalPages = pageSize === "all" ? 1 : Math.max(1, Math.ceil(total / pageSize) || 1);
@@ -10077,6 +10137,7 @@
       const statusClass = String(campaign.status || "").replace(/[^\w-]+/g, "_");
       const channelInfo = campaignHistoryChannelInfo(campaign.channelId, campaign);
       row.innerHTML = `
+        <td class="campaign-selection-cell"><input type="checkbox" data-campaign-selection="${escapeHtml(campaign.campaignId)}" aria-label="Select ${escapeHtml(campaign.name || "Campaign")}" ${state.campaigns.selectedIds.has(campaign.campaignId) ? "checked" : ""} ${!hasPermission("campaigns.manage") || state.campaigns.bulkBusy ? "disabled" : ""}></td>
         <td class="campaign-name-cell"><strong>${escapeHtml(campaign.name || "Campaign")}</strong><span>${escapeHtml(campaign.messageType === "template" ? (campaign.templateName || "Template") : "Text message")}</span></td>
         <td class="campaign-history-channel-cell">${campaign.channelId || campaign.channelName ? campaignHistoryChannelMarkup(channelInfo) : "—"}</td>
         <td><span class="campaign-status-pill is-${escapeHtml(statusClass)}">${escapeHtml(campaignStatusLabel(campaign.status))}</span></td>
@@ -10099,7 +10160,7 @@
         detail.dataset.campaignDetail = campaign.campaignId;
         const recipients = state.campaigns.recipientsByCampaign.get(campaign.campaignId) || [];
         const loaded = state.campaigns.recipientsByCampaign.has(campaign.campaignId);
-        detail.innerHTML = `<td colspan="9">${renderCampaignRecipientTable(recipients, { loaded })}</td>`;
+        detail.innerHTML = `<td colspan="10">${renderCampaignRecipientTable(recipients, { loaded })}</td>`;
         body.append(detail);
       }
     }
@@ -13595,6 +13656,16 @@
           downloadImportChatIssues();
           return;
         }
+        if (actionButton.dataset.action === "campaign-bulk-menu") {
+          const menu = $("campaignBulkMenu");
+          menu.hidden = !menu.hidden;
+          $("campaignBulkToggle").setAttribute("aria-expanded", String(!menu.hidden));
+          return;
+        }
+        if (["campaign-bulk-pause", "campaign-bulk-resume", "campaign-bulk-cancel"].includes(actionButton.dataset.action)) {
+          applyCampaignBulkAction(actionButton.dataset.action.replace("campaign-bulk-", ""));
+          return;
+        }
         if (actionButton.dataset.action === "campaign-show-history") {
           resetCampaignCreateForm();
           showCampaignMode("history");
@@ -14222,7 +14293,23 @@
       state.campaigns.historyPage = 1;
       renderCampaignHistory();
     });
+    $("campaignSelectAll")?.addEventListener("change", (event) => {
+      if (!hasPermission("campaigns.manage") || state.campaigns.bulkBusy) return;
+      filteredCampaignHistory().forEach(item => {
+        if (event.target.checked) state.campaigns.selectedIds.add(item.campaignId);
+        else state.campaigns.selectedIds.delete(item.campaignId);
+      });
+      renderCampaignHistory();
+    });
     $("campaignHistoryPanel")?.addEventListener("change", (event) => {
+      if (event.target.matches("[data-campaign-selection]")) {
+        if (!hasPermission("campaigns.manage") || state.campaigns.bulkBusy) return;
+        const id = event.target.dataset.campaignSelection;
+        if (event.target.checked) state.campaigns.selectedIds.add(id);
+        else state.campaigns.selectedIds.delete(id);
+        renderCampaignBulkControls();
+        return;
+      }
       const select = event.target.closest("[data-campaign-recipient-page-size]");
       if (!select) return;
       const value = select.value === "all" ? "all" : Number(select.value) || 20;

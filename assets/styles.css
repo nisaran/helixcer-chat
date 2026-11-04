@@ -2494,3 +2494,14 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-recipient-detail { width: 320px; max-width: 320px; }
 .campaign-recipient-detail-text { display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
 .campaign-recipient-updated { white-space: nowrap; }
+
+.campaign-selection-cell { width: 36px; text-align: center; }
+.campaign-bulk-controls { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.campaign-bulk-controls[hidden], .campaign-bulk-menu[hidden] { display: none; }
+.campaign-bulk-menu-wrap { position: relative; }
+.campaign-bulk-menu { position: absolute; right: 0; top: 100%; z-index: 20; min-width: 150px; background: white; border: 1px solid #ddd; border-radius: 12px; padding: 6px; box-shadow: 0 8px 24px #0002; }
+.campaign-bulk-menu button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 10px 14px; border-radius: 6px; cursor: pointer; }
+.campaign-bulk-menu button:hover { background: #f1ecff; }
+.campaign-bulk-menu button:disabled { opacity: .4; cursor: default; }
+.campaign-status-pill.is-paused { background: #fff1d5; color: #8b5d00; }
+.campaign-status-pill.is-cancelled { background: #eee; color: #666; }

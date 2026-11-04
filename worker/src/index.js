@@ -1,3 +1,4 @@
+import { applyCampaignActions, campaignDispatchState } from './campaign-controls.js';
 ﻿import {
   acceptInvitationWithPassword,
   authenticateRequest,
@@ -609,6 +610,18 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       const result = await importChatHistory(env, workspaceId, principal, await readImportJson(request));
       await broadcast(env, workspaceId, { type: 'bootstrap.changed' });
       return withCors(json(result, 201), cors);
+    }
+    if (url.pathname === '/api/campaigns/actions' && request.method === 'POST') {
+      requirePermission(principal, 'campaigns.manage');
+      const payload = await readJson(request);
+      rejectUnknownKeys(payload, new Set(['campaignIds', 'action']), 'campaign action');
+      const result = await applyCampaignActions(env, workspaceId, payload.campaignIds, payload.action, principal, assertPrincipalChannelAccess);
+      for (const campaignId of result.affectedIds) {
+        const detail = await getCampaignDetail(env, workspaceId, campaignId, principal);
+        await broadcast(env, workspaceId, { type: 'campaign.updated', campaignId, campaign: detail.item });
+      }
+      await audit(env, principal, payload.action, 'campaign', result.affectedIds.join(','), { campaignIds: result.affectedIds });
+      return withCors(json({ ok: true, ...result }), cors);
     }
     if (url.pathname === '/api/campaigns' && request.method === 'GET') {
       requirePermission(principal, 'campaigns.view');
@@ -6730,6 +6743,7 @@ function safeStoredExternalMediaUrl(value) {
 }
 
 async function sendOrQueue(env, messageId) {
+  if (['paused', 'cancelled'].includes(await campaignDispatchState(env, messageId))) return;
   const queued = await env.DB.prepare('SELECT outbox_id,status FROM outbox WHERE message_id=?1').bind(messageId).first();
   if (queued) {
     const claimed = await env.DB.prepare("UPDATE outbox SET status='processing',updated_at=?2 WHERE message_id=?1 AND status='pending'")
@@ -6787,6 +6801,10 @@ async function sendOrQueue(env, messageId) {
 }
 
 async function dispatchOutbound(env, messageId) {
+  const campaignState = await campaignDispatchState(env, messageId);
+  if (campaignState === 'paused' || campaignState === 'cancelled') {
+    throw Object.assign(new Error('Campaign is ' + campaignState), { campaignHeld: true, campaignState });
+  }
   const row = await env.DB.prepare(`SELECT m.*,c.config_json,c.connector_type,c.provider_type,c.secret_key,c.enabled,
       COALESCE(b.scoped_profile_id,'') AS channel_profile_id,
       COALESCE(NULLIF(m.identity_id,''),NULLIF(cv.identity_id,''),'') AS delivery_identity_id,cv.contact_id
@@ -7204,8 +7222,18 @@ async function retryDueMessages(env) {
   await env.DB.prepare(`UPDATE outbox SET status='pending',next_attempt_at=?1,updated_at=?1
     WHERE status='processing' AND updated_at<=?2`).bind(now, staleBefore).run();
   const due = await env.DB.prepare(`SELECT outbox_id,message_id,attempts,max_attempts,workspace_id FROM outbox
-    WHERE status='pending' AND next_attempt_at<=?1 ORDER BY next_attempt_at LIMIT 25`).bind(now).all();
+    WHERE status='pending' AND next_attempt_at<=?1
+      AND NOT EXISTS (SELECT 1 FROM campaign_recipients r JOIN campaigns c
+        ON c.workspace_id=r.workspace_id AND c.campaign_id=r.campaign_id
+        WHERE r.message_id=outbox.message_id AND c.status='paused')
+    ORDER BY next_attempt_at LIMIT 25`).bind(now).all();
   for (const job of due.results) {
+    const campaignState = await campaignDispatchState(env, job.message_id);
+    if (campaignState === 'paused') continue;
+    if (campaignState === 'cancelled') {
+      await env.DB.prepare('DELETE FROM outbox WHERE message_id=?1').bind(job.message_id).run();
+      continue;
+    }
     const claimed = await env.DB.prepare("UPDATE outbox SET status='processing',updated_at=?2 WHERE outbox_id=?1 AND status='pending'")
       .bind(job.outbox_id, now).run();
     if (!claimed.meta?.changes) continue;
@@ -7220,6 +7248,11 @@ async function retryDueMessages(env) {
     try {
       await markMessageSent(env, job.message_id, await dispatchOutbound(env, job.message_id));
     } catch (error) {
+      if (error.campaignHeld) {
+        await env.DB.prepare("UPDATE outbox SET status='pending',next_attempt_at=?2 WHERE message_id=?1")
+          .bind(job.message_id, new Date(Date.now() + 60000).toISOString()).run();
+        continue;
+      }
       const latest = await env.DB.prepare(`SELECT conversation_id,status,provider_message_id
         FROM messages WHERE message_id=?1`).bind(job.message_id).first();
       if (latest && isTerminalProviderStatus(latest.status)) {
@@ -7938,11 +7971,13 @@ async function queueCampaignRecipientMessage(env, workspaceId, campaignId, recip
     env.DB.prepare(`INSERT OR IGNORE INTO outbox
       (outbox_id,message_id,attempts,max_attempts,next_attempt_at,status,last_error,created_at,updated_at,workspace_id)
       SELECT ?1,?2,0,6,?3,'pending','',?3,?3,?4 FROM messages
-      WHERE workspace_id=?4 AND message_id=?2 AND status IN ('pending','queued','retrying')`)
-      .bind(crypto.randomUUID(), messageId, now, workspaceId),
+      WHERE workspace_id=?4 AND message_id=?2 AND status IN ('pending','queued','retrying')
+        AND EXISTS (SELECT 1 FROM campaigns WHERE workspace_id=?4 AND campaign_id=?5 AND status IN ('queued','sending'))`)
+      .bind(crypto.randomUUID(), messageId, now, workspaceId, campaignId),
     env.DB.prepare(`UPDATE campaign_recipients SET message_id=?4,conversation_id=?5,
-      status=COALESCE((SELECT CASE WHEN status IN ('sent','delivered','read','failed') THEN status ELSE 'queued' END
-        FROM messages WHERE workspace_id=?1 AND message_id=?4),'queued'),updated_at=?6
+      status=CASE WHEN EXISTS (SELECT 1 FROM campaigns WHERE workspace_id=?1 AND campaign_id=?2 AND status='cancelled') THEN 'cancelled'
+        ELSE COALESCE((SELECT CASE WHEN status IN ('sent','delivered','read','failed') THEN status ELSE 'queued' END
+        FROM messages WHERE workspace_id=?1 AND message_id=?4),'queued') END,updated_at=?6
       WHERE workspace_id=?1 AND campaign_id=?2 AND recipient_id=?3`)
       .bind(workspaceId, campaignId, recipient.recipientId, messageId, conversationId, now)
   ]);
@@ -7970,7 +8005,7 @@ async function runCampaignQueue(env) {
       const remaining = await env.DB.prepare(`SELECT COUNT(*) AS total FROM campaign_recipients
         WHERE workspace_id=?1 AND campaign_id=?2 AND status='pending' AND message_id=''`)
         .bind(job.workspace_id, job.campaign_id).first();
-      await env.DB.prepare('UPDATE campaign_jobs SET state=?3,lease_until=?4 WHERE campaign_id=?1 AND lease_until=?2')
+      await env.DB.prepare("UPDATE campaign_jobs SET state=CASE WHEN state='active' THEN ?3 ELSE state END,lease_until=?4 WHERE campaign_id=?1 AND lease_until=?2")
         .bind(job.campaign_id, lease, Number(remaining?.total) ? 'active' : 'done', '').run();
     } catch (error) {
       // Persist progress and release the lease for next minute's retry.
@@ -7984,9 +8019,10 @@ async function runCampaignQueue(env) {
 async function processCampaign(env, workspaceId, campaignId, principal, batchSize = 10) {
   const detail = await getCampaignDetail(env, workspaceId, campaignId, principal);
   const campaign = detail.item;
+  if (['paused', 'cancelled'].includes(campaign.status)) return campaign;
   const now = new Date().toISOString();
   await env.DB.prepare(`UPDATE campaigns SET status='sending',updated_at=?3
-    WHERE workspace_id=?1 AND campaign_id=?2`).bind(workspaceId, campaignId, now).run();
+    WHERE workspace_id=?1 AND campaign_id=?2 AND status IN ('queued','sending')`).bind(workspaceId, campaignId, now).run();
   await broadcast(env, workspaceId, { type: 'campaign.updated', campaignId, campaign: { ...campaign, status: 'sending' } });
 
   const channel = await getChannel(env, campaign.channelId, '', workspaceId);
@@ -8003,6 +8039,8 @@ async function processCampaign(env, workspaceId, campaignId, principal, batchSiz
 
   const pending = detail.recipients.filter(item => !item.messageId && item.status === 'pending').slice(0, batchSize);
   for (const recipient of pending) {
+    const control = await env.DB.prepare('SELECT status FROM campaigns WHERE workspace_id=?1 AND campaign_id=?2').bind(workspaceId, campaignId).first();
+    if (!control || ['paused', 'cancelled'].includes(control.status)) break;
     try {
       const existing = await env.DB.prepare('SELECT message_id,conversation_id FROM messages WHERE workspace_id=?1 AND message_id=?2')
         .bind(workspaceId, recipient.recipientId).first();
@@ -8184,7 +8222,7 @@ async function finalizeCampaign(env, workspaceId, campaignId, principal) {
   const status = campaignFinalStatus(counts);
   const now = new Date().toISOString();
   await env.DB.prepare(`UPDATE campaigns SET
-      status=?3,total_count=?4,pending_count=?5,sent_count=?6,delivered_count=?7,read_count=?8,failed_count=?9,
+      status=CASE WHEN status IN ('paused','cancelled') THEN status ELSE ?3 END,total_count=?4,pending_count=?5,sent_count=?6,delivered_count=?7,read_count=?8,failed_count=?9,
       updated_at=?10,completed_at=CASE WHEN ?3 IN ('completed','completed_with_errors','failed','cancelled') THEN ?10 ELSE completed_at END
     WHERE workspace_id=?1 AND campaign_id=?2`)
     .bind(
@@ -8225,6 +8263,7 @@ async function syncCampaignRecipientStatus(env, workspaceId, messageId, status, 
   const finalStatus = campaignFinalStatus(counts);
   await env.DB.prepare(`UPDATE campaigns SET
       status=CASE
+        WHEN status IN ('paused','cancelled') THEN status
         WHEN status IN ('queued','sending') AND ?3 IN ('completed','completed_with_errors','failed') THEN ?3
         WHEN status IN ('queued','sending') THEN status
         ELSE ?3

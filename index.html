@@ -518,6 +518,17 @@
               <strong id="campaignHistoryTitle">Campaign history</strong>
               <span class="subtle">Totals show in each row. Expand a campaign for individual delivery details.</span>
             </div>
+            <div class="campaign-bulk-controls" id="campaignBulkControls">
+              <span class="subtle" id="campaignSelectedCount">0 selected</span>
+              <div class="campaign-bulk-menu-wrap">
+                <button class="secondary-button compact-button" type="button" data-action="campaign-bulk-menu" id="campaignBulkToggle" aria-expanded="false" aria-controls="campaignBulkMenu" disabled>Actions ▾</button>
+                <div class="campaign-bulk-menu" id="campaignBulkMenu" hidden>
+                  <button type="button" data-action="campaign-bulk-pause">Pause</button>
+                  <button type="button" data-action="campaign-bulk-resume">Resume</button>
+                  <button type="button" data-action="campaign-bulk-cancel">Cancel</button>
+                </div>
+              </div>
+            </div>
             <button class="secondary-button compact-button" type="button" data-action="refresh-campaigns">Refresh</button>
           </div>
           <div class="campaign-history-filters" id="campaignHistoryFilters">
@@ -549,6 +560,7 @@
             <table class="campaign-table" id="campaignTable">
               <thead>
                 <tr>
+                  <th class="campaign-selection-cell"><input type="checkbox" id="campaignSelectAll" aria-label="Select all filtered campaigns"></th>
                   <th>Campaign</th>
                   <th>Channel</th>
                   <th>Status</th>

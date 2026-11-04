@@ -3,7 +3,7 @@
 export const CAMPAIGN_AUDIENCE_SOURCES = Object.freeze(['contacts', 'upload']);
 export const CAMPAIGN_MESSAGE_TYPES = Object.freeze(['template', 'text']);
 export const CAMPAIGN_STATUSES = Object.freeze([
-  'queued', 'sending', 'completed', 'completed_with_errors', 'failed', 'cancelled'
+  'queued', 'sending', 'paused', 'completed', 'completed_with_errors', 'failed', 'cancelled'
 ]);
 export const CAMPAIGN_RECIPIENT_STATUSES = Object.freeze([
   'pending', 'queued', 'sent', 'delivered', 'read', 'failed'
@@ -56,6 +56,7 @@ export function campaignCountsFromRows(rows = []) {
   };
   for (const row of rows) {
     const status = String(row.status || row.recipient_status || 'pending').toLowerCase();
+    if (status === 'cancelled') continue;
     if (status === 'failed') counts.failedCount += 1;
     else if (status === 'read') {
       counts.readCount += 1;
