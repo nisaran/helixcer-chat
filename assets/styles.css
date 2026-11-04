@@ -2696,3 +2696,5 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-recipient-message-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; max-height: 60vh; overflow-y: auto; }
 
 .campaign-recipient-message-tooltip { position: fixed; inset: auto; margin: 0; width: 420px; max-width: calc(100vw - 24px); max-height: min(420px, calc(100vh - 24px)); overflow-y: auto; box-sizing: border-box; border: 1px solid #dfdaed; border-radius: 10px; padding: 14px 16px; background: #fff; color: #17213b; box-shadow: 0 8px 30px #21164129; font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.campaign-recipient-heading-actions { display: flex; align-items: center; gap: 8px; }

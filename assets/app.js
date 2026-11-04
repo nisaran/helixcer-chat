@@ -10245,7 +10245,7 @@
         return `<option value="${value}" ${selected}>${label}</option>`;
       })
       .join("");
-    return `<div class="campaign-recipient-panel"><div class="campaign-recipient-heading"><strong>Recipients</strong><button class="secondary-button compact-button campaign-full-details-button" type="button" data-action="view-campaign-full-details" data-campaign-id="${escapeHtml(campaignId)}">View full details</button></div>
+    return `<div class="campaign-recipient-panel"><div class="campaign-recipient-heading"><strong>Recipients</strong><div class="campaign-recipient-heading-actions"><button class="secondary-button compact-button" type="button" data-action="export-campaign-recipients" data-campaign-id="${escapeHtml(campaignId)}">Export</button><button class="secondary-button compact-button campaign-full-details-button" type="button" data-action="view-campaign-full-details" data-campaign-id="${escapeHtml(campaignId)}">View full details</button></div></div>
       <table class="campaign-recipient-table"><thead><tr><th>Recipient</th><th>ID</th><th>Status</th><th>Status updated on</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table>
       <div class="campaign-recipient-footer">
         <p class="subtle campaign-recipient-meta">${escapeHtml(meta)}</p>
@@ -10260,6 +10260,25 @@
         </div>
       </div>
     </div>`;
+  }
+
+  function campaignRecipientExportRows(recipients) {
+    return [["Recipient", "Messaging ID", "Status", "Status updated on", "Message", "Error"], ...recipients.map((recipient) => [
+      String(recipient.displayName || ""), String(recipient.profileId || ""), campaignStatusLabel(recipient.status),
+      recipient.updatedAt ? formatCampaignTime(recipient.updatedAt) : "", String(recipient.messageText || ""), String(recipient.error || "")
+    ])];
+  }
+
+  function exportCampaignRecipients(campaignId) {
+    try {
+      const recipients = state.campaigns.recipientsByCampaign.get(campaignId);
+      if (!recipients?.length) throw new Error("No recipients available to export.");
+      const workbook = XLSX.utils.book_new();
+      const sheet = XLSX.utils.aoa_to_sheet(campaignRecipientExportRows(recipients));
+      sheet["!cols"] = [{wch:28}, {wch:24}, {wch:16}, {wch:24}, {wch:70}, {wch:40}];
+      XLSX.utils.book_append_sheet(workbook, sheet, "Recipients");
+      XLSX.writeFile(workbook, "helixcer-campaign-" + String(campaignId).replace(/[^a-zA-Z0-9_-]/g, "_") + ".xlsx");
+    } catch (error) { showToast("Export failed", error.message, true); }
   }
 
   function hideCampaignRecipientMessage() {
@@ -11609,6 +11628,19 @@
       return record;
     }).filter((record) => Object.values(record).some(Boolean));
     return { headers, records };
+  }
+
+  async function applyCampaignUploadFile(file) {
+    if (file.size > 10 * 1024 * 1024) throw new Error("Choose a file smaller than 10 MB.");
+    if (!/\.(csv|txt|xlsx|xls)$/i.test(file.name)) throw new Error("Choose a CSV, XLSX, or XLS file.");
+    if (/\.(xlsx|xls)$/i.test(file.name)) {
+      const workbook = XLSX.read(await file.arrayBuffer(), {type:"array", sheetRows:501, cellFormula:false, cellHTML:false});
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!sheet || !sheet["!ref"]) throw new Error("The first worksheet is empty. Place contacts in the first worksheet.");
+      await applyCampaignCsvText(XLSX.utils.sheet_to_csv(sheet, {blankrows:false}), file.name);
+    } else {
+      await applyCampaignCsvText(await file.text(), file.name);
+    }
   }
 
   async function applyCampaignCsvText(text, fileName = "contacts.csv") {
@@ -13761,6 +13793,10 @@
           showCampaignRecipientMessage(actionButton.dataset.campaignId, actionButton.dataset.recipientId, actionButton);
           return;
         }
+        if (actionButton.dataset.action === "export-campaign-recipients") {
+          exportCampaignRecipients(actionButton.dataset.campaignId);
+          return;
+        }
         if (actionButton.dataset.action === "view-campaign-full-details") {
           showCampaignFullDetails(actionButton.dataset.campaignId);
           return;
@@ -14432,9 +14468,9 @@
       const file = event.target.files?.[0];
       if (!file) return;
       try {
-        await applyCampaignCsvText(await file.text(), file.name);
+        await applyCampaignUploadFile(file);
       } catch (error) {
-        showToast("CSV upload failed", error.message, true);
+        showToast("Contact upload failed", error.message, true);
       }
     });
     $("campaignFieldMapping")?.addEventListener("change", (event) => {

@@ -14,8 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261105-campaign-message-tooltip">
-  <script src="./assets/app.js?v=20261105-campaign-message-tooltip" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261105-campaign-excel-export">
+  <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
+  <script src="./assets/app.js?v=20261105-campaign-excel-export" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -740,15 +741,15 @@
                   <label class="campaign-choice"><input type="radio" name="campaignUploadMode" value="url"> Use URL</label>
                 </div>
                 <label class="field-label" id="campaignUploadFileLabel" for="campaignUploadFile">
-                  CSV file
-                  <input class="text-field" id="campaignUploadFile" type="file" accept=".csv,.txt,text/csv,text/plain">
+                  CSV or Excel file
+                  <input class="text-field" id="campaignUploadFile" type="file" accept=".csv,.txt,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
                 </label>
                 <label class="field-label" id="campaignUploadUrlLabel" for="campaignUploadUrl" hidden>
                   CSV URL
                   <input class="text-field" id="campaignUploadUrl" type="url" placeholder="https://example.com/contacts.csv">
                 </label>
                 <button class="secondary-button compact-button" type="button" data-action="campaign-load-upload-url" id="campaignLoadUploadUrl" hidden>Load URL</button>
-                <p class="subtle" id="campaignUploadHelp">Export Excel as CSV. Map each CSV column to a contact field below (Messaging ID is required), then use headers as message variables.</p>
+                <p class="subtle" id="campaignUploadHelp">Upload CSV or Excel (.xlsx, .xls), up to 10 MB. Excel uses the first worksheet. Include headers in the first row. Map columns below (Messaging ID is required). Up to 500 contacts are loaded.</p>
                 <div class="campaign-mapping" id="campaignFieldMapping" hidden></div>
                 <p class="subtle campaign-upload-count" id="campaignUploadPreview" hidden></p>
               </div>
