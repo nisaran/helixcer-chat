@@ -505,7 +505,7 @@
 
       <section class="route content-route campaigns-route" id="campaignsRoute" data-route-panel="campaigns" aria-labelledby="campaignsTitle" hidden>
         <div class="route-heading campaigns-heading">
-          <div><h2 id="campaignsTitle">Campaign</h2></div>
+          <div><p class="eyebrow">Customer outreach</p><h2 id="campaignsTitle">Campaigns</h2><p class="campaign-page-description">Manage customer campaigns and track every delivery.</p></div>
           <div class="route-heading-actions">
             <button class="secondary-button" type="button" data-action="campaign-show-history" id="campaignHistoryButton" hidden>Campaign history</button>
             <button class="primary-button" type="button" data-action="campaign-show-create" id="campaignCreateButton"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create campaign</button>
@@ -513,6 +513,7 @@
         </div>
 
         <section class="campaign-panel campaign-history-panel" id="campaignHistoryPanel" aria-labelledby="campaignHistoryTitle">
+          <div class="campaign-overview" id="campaignOverview" aria-label="Campaign overview"></div>
           <div class="campaign-panel-toolbar">
             <div>
               <strong id="campaignHistoryTitle">Campaign history</strong>
@@ -532,6 +533,7 @@
             <button class="secondary-button compact-button" type="button" data-action="refresh-campaigns">Refresh</button>
           </div>
           <div class="campaign-history-filters" id="campaignHistoryFilters">
+            <label class="field-label campaign-history-search" for="campaignHistorySearch">Search<input class="text-field" id="campaignHistorySearch" type="search" placeholder="Search campaigns…"></label>
             <div class="campaign-multi-filter" data-campaign-history-filter="platforms">
               <span class="campaign-multi-filter-label">Platform</span>
               <button class="campaign-multi-filter-trigger text-field" type="button" aria-haspopup="listbox" aria-expanded="false">Any platform</button>
@@ -606,8 +608,14 @@
             </div>
             <button class="secondary-button" type="button" data-action="campaign-show-history">← Back</button>
           </div>
+          <nav class="campaign-steps" aria-label="Campaign sections">
+            <button type="button" data-action="campaign-section" data-target="campaignSettingsSection" aria-current="step"><span>1</span> Settings</button>
+            <button type="button" data-action="campaign-section" data-target="campaignAudienceSection"><span>2</span> Audience</button>
+            <button type="button" data-action="campaign-section" data-target="campaignMessageFieldset"><span>3</span> Message</button>
+            <button type="button" data-action="campaign-section" data-target="campaignReviewSection"><span>4</span> Review</button>
+          </nav>
           <form class="campaign-create-form" id="campaignCreateForm" autocomplete="off">
-            <fieldset class="campaign-fieldset campaign-card">
+            <fieldset class="campaign-fieldset campaign-card" id="campaignSettingsSection">
               <legend>Campaign settings</legend>
               <div class="campaign-create-grid">
                 <label class="field-label" for="campaignName">
@@ -632,7 +640,7 @@
               </div>
             </fieldset>
 
-            <fieldset class="campaign-fieldset campaign-card">
+            <fieldset class="campaign-fieldset campaign-card" id="campaignAudienceSection">
               <legend>Audience</legend>
               <div class="campaign-choice-row" role="radiogroup" aria-label="Audience source">
                 <label class="campaign-choice"><input type="radio" name="campaignAudience" value="contacts" checked> Select from contacts</label>
@@ -747,6 +755,7 @@
 
             <fieldset class="campaign-fieldset campaign-card" id="campaignMessageFieldset">
               <legend>Message</legend>
+              <p class="campaign-message-empty" id="campaignMessageEmpty">Choose a sending channel to compose your message. WhatsApp channels use approved templates.</p>
               <div class="campaign-message-layout">
                 <div class="campaign-message-main">
                   <div id="campaignWhatsAppComposer" hidden>
@@ -783,11 +792,11 @@
               </div>
             </fieldset>
 
-            <div class="campaign-create-actions">
+            <div class="campaign-create-actions" id="campaignReviewSection">
               <p class="subtle" id="campaignCreateHelp">Existing chats keep their open or closed status. New upload contacts stay closed in the inbox.</p>
               <div class="campaign-create-action-buttons">
-                <button class="secondary-button" type="button" data-action="campaign-show-history">Cancel</button>
-                <button class="primary-button" id="campaignSubmit" type="submit">Send campaign</button>
+                <button class="secondary-button" type="button" data-action="campaign-show-history">Discard</button>
+                <button class="primary-button" id="campaignSubmit" type="submit">Review &amp; send</button>
               </div>
             </div>
           </form>

@@ -78,6 +78,7 @@
       lastSummary: null,
     },
     campaigns: {
+      historySearch: "",
       selectedIds: new Set(),
       bulkBusy: false,
       mode: "history",
@@ -9898,11 +9899,13 @@
 
   function filteredCampaignHistory() {
     const filters = state.campaigns.historyFilters || {};
+    const search = String(state.campaigns.historySearch || "").trim().toLocaleLowerCase();
     const platforms = filters.platforms instanceof Set ? filters.platforms : new Set();
     const channels = filters.channels instanceof Set ? filters.channels : new Set();
     const createdFrom = String(filters.createdFrom || "").trim();
     const createdTo = String(filters.createdTo || "").trim();
     return (state.campaigns.items || []).filter((campaign) => {
+      if (search && ![campaign.name, campaign.templateName, campaignHistoryChannelInfo(campaign.channelId, campaign).label].join(" ").toLocaleLowerCase().includes(search)) return false;
       if (platforms.size && !platforms.has(campaignHistoryPlatform(campaign))) return false;
       if (channels.size && !channels.has(String(campaign.channelId || ""))) return false;
       const createdDay = campaignCreatedDay(campaign.createdAt);
@@ -10023,6 +10026,8 @@
   }
 
   function clearCampaignHistoryFilters() {
+    state.campaigns.historySearch = "";
+    if ($("campaignHistorySearch")) $("campaignHistorySearch").value = "";
     state.campaigns.historyFilters = {
       platforms: new Set(),
       channels: new Set(),
@@ -10106,6 +10111,17 @@
     renderCampaignHistoryMultiFilters({ keepOpen: keepHistoryFilterOpen });
     if (keepHistoryFilterOpen) keepCampaignHistoryFilterOpen(keepHistoryFilterOpen);
     body.replaceChildren();
+    const overview = $("campaignOverview");
+    if (overview) {
+      const campaigns = state.campaigns.items || [];
+      const cards = [
+        ["Campaigns", campaigns.length, "all", "◈"],
+        ["In progress", campaigns.filter(item => ["queued", "sending"].includes(item.status)).length, "active", "▷"],
+        ["Paused", campaigns.filter(item => item.status === "paused").length, "paused", "Ⅱ"],
+        ["Completed", campaigns.filter(item => ["completed", "completed_with_errors"].includes(item.status)).length, "complete", "✓"],
+      ];
+      overview.innerHTML = cards.map(([label, count, kind, icon]) => '<div class="campaign-overview-card is-' + kind + '"><span class="campaign-overview-icon" aria-hidden="true">' + icon + '</span><div><span>' + label + '</span><strong>' + count + '</strong></div></div>').join("");
+    }
 
     const isLoading = Boolean(state.campaigns.loading);
     if (loading) loading.hidden = !isLoading;
@@ -10220,7 +10236,7 @@
         return `<option value="${value}" ${selected}>${label}</option>`;
       })
       .join("");
-    return `<div class="campaign-recipient-panel">
+    return `<div class="campaign-recipient-panel"><div class="campaign-recipient-heading"><strong>Recipients</strong><span class="subtle">${total.toLocaleString()} contacts · individual delivery updates</span></div>
       <table class="campaign-recipient-table"><thead><tr><th>Recipient</th><th>ID</th><th>Status</th><th>Status updated on</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table>
       <div class="campaign-recipient-footer">
         <p class="subtle campaign-recipient-meta">${escapeHtml(meta)}</p>
@@ -10282,7 +10298,15 @@
         if (key !== "__campaignDetails") fields.push(["CSV column: " + key, value]);
       }
     }
-    return '<dl class="campaign-full-details-list">' + fields.map(([label, value]) =>
+    const metrics = [
+      ["Total", campaign.totalCount || 0], ["Pending", campaign.pendingCount || 0],
+      ["Sent", campaignCurrentSentCount(campaign)], ["Delivered", campaign.deliveredCount || 0],
+      ["Read", campaign.readCount || 0], ["Failed", campaign.failedCount || 0],
+    ];
+    const header = '<div class="campaign-detail-hero"><p class="eyebrow">Campaign overview</p><h3>' + escapeHtml(campaign.name || "Campaign") + '</h3><div><span>' + escapeHtml(campaignPlatformLabel(platform)) + '</span><span class="campaign-status-pill">' + escapeHtml(campaignStatusLabel(campaign.status)) + '</span></div></div>';
+    const metricStrip = '<div class="campaign-detail-metrics">' + metrics.map(([label, value]) => '<div><span>' + label + '</span><strong>' + Number(value) + '</strong></div>').join("") + '</div>';
+    const metricLabels = new Set(["Total recipients", "Pending", "Sent", "Delivered", "Read", "Failed", "Campaign", "Platform", "Status"]);
+    return header + metricStrip + '<dl class="campaign-full-details-list">' + fields.filter(([label]) => !metricLabels.has(label)).map(([label, value]) =>
       '<div><dt>' + escapeHtml(label) + '</dt><dd>' + escapeHtml(String(value ?? "") || "—") + '</dd></div>'
     ).join("") + '</dl>';
   }
@@ -11094,6 +11118,7 @@
 
   function renderCampaignMessageComposer() {
     const channel = selectedCampaignChannel();
+    if ($("campaignMessageEmpty")) $("campaignMessageEmpty").hidden = Boolean(channel);
     const whatsapp = isWhatsAppCampaignChannel(channel);
     $("campaignWhatsAppComposer").hidden = !whatsapp;
     $("campaignTextComposer").hidden = whatsapp || !channel;
@@ -11754,7 +11779,7 @@
       showToast("Campaign not sent", error.message, true);
     } finally {
       state.campaigns.submitting = false;
-      if (submit) { submit.disabled = false; submit.textContent = "Send campaign"; }
+      if (submit) { submit.disabled = false; submit.textContent = "Review & send"; }
     }
   }
 
@@ -13663,6 +13688,17 @@
           downloadImportChatIssues();
           return;
         }
+        if (actionButton.dataset.action === "campaign-section") {
+          const section = $(actionButton.dataset.target);
+          document.querySelectorAll('[data-action="campaign-section"]').forEach(button => {
+            if (button === actionButton) button.setAttribute("aria-current", "step");
+            else button.removeAttribute("aria-current");
+          });
+          section?.scrollIntoView({ behavior: "smooth", block: "start" });
+          const focusTarget = actionButton.dataset.target === "campaignReviewSection" ? $("campaignSubmit") : section?.querySelector("input:not([type=hidden]), textarea, button");
+          focusTarget?.focus({ preventScroll: true });
+          return;
+        }
         if (actionButton.dataset.action === "campaign-bulk-menu") {
           const menu = $("campaignBulkMenu");
           menu.hidden = !menu.hidden;
@@ -14297,6 +14333,11 @@
     $("campaignHistoryPageSize")?.addEventListener("change", (event) => {
       const value = event.target.value === "all" ? "all" : Number(event.target.value) || 20;
       state.campaigns.historyPageSize = value;
+      state.campaigns.historyPage = 1;
+      renderCampaignHistory();
+    });
+    $("campaignHistorySearch")?.addEventListener("input", (event) => {
+      state.campaigns.historySearch = event.target.value || "";
       state.campaigns.historyPage = 1;
       renderCampaignHistory();
     });
