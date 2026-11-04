@@ -9804,6 +9804,11 @@
     }
   }
 
+  function campaignCurrentSentCount(campaign) {
+    // Server totals are cumulative: delivered includes read and sent includes delivered.
+    return Math.max(0, Number(campaign.sentCount || 0) - Number(campaign.deliveredCount || 0));
+  }
+
   function campaignStatusLabel(status) {
     const value = String(status || "queued");
     if (value === "completed_with_errors") return "Completed with errors";
@@ -10142,7 +10147,7 @@
         <td class="campaign-history-channel-cell">${campaign.channelId || campaign.channelName ? campaignHistoryChannelMarkup(channelInfo) : "—"}</td>
         <td><span class="campaign-status-pill is-${escapeHtml(statusClass)}">${escapeHtml(campaignStatusLabel(campaign.status))}</span></td>
         <td>${Number(campaign.totalCount || 0)}</td>
-        <td>${Number(campaign.sentCount || 0)}</td>
+        <td>${campaignCurrentSentCount(campaign)}</td>
         <td>${Number(campaign.deliveredCount || 0)}</td>
         <td>${Number(campaign.readCount || 0)}</td>
         <td>${Number(campaign.failedCount || 0)}</td>
@@ -10252,7 +10257,7 @@
       ["Message", campaign.messageBody],
       ["Total recipients", campaign.totalCount ?? 0],
       ["Pending", campaign.pendingCount ?? 0],
-      ["Sent", campaign.sentCount ?? 0],
+      ["Sent", campaignCurrentSentCount(campaign)],
       ["Delivered", campaign.deliveredCount ?? 0],
       ["Read", campaign.readCount ?? 0],
       ["Failed", campaign.failedCount ?? 0],
