@@ -10107,6 +10107,7 @@
         <td>${escapeHtml(recipient.displayName || recipient.profileId || recipient.contactId || "—")}</td>
         <td>${escapeHtml(recipient.profileId || "—")}</td>
         <td><span class="campaign-status-pill is-${escapeHtml(String(recipient.status || "").replace(/[^\w-]+/g, "_"))}">${escapeHtml(campaignStatusLabel(recipient.status))}</span></td>
+        <td class="campaign-recipient-updated">${escapeHtml(recipient.updatedAt ? formatCampaignTime(recipient.updatedAt) : "—")}</td>
         <td class="campaign-recipient-detail"><span class="campaign-recipient-detail-text" title="${escapeHtml(recipient.error || recipient.messageText || "—")}" tabindex="0">${escapeHtml(recipient.error || recipient.messageText || "—")}</span></td>
       </tr>`).join("");
     const meta = pageSize === "all"
@@ -10120,7 +10121,7 @@
       })
       .join("");
     return `<div class="campaign-recipient-panel">
-      <table class="campaign-recipient-table"><thead><tr><th>Recipient</th><th>ID</th><th>Status</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table>
+      <table class="campaign-recipient-table"><thead><tr><th>Recipient</th><th>ID</th><th>Status</th><th>Status updated on</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table>
       <div class="campaign-recipient-footer">
         <p class="subtle campaign-recipient-meta">${escapeHtml(meta)}</p>
         <div class="campaign-history-pagination">
@@ -10626,6 +10627,28 @@
         menu.append(row);
       });
     });
+  }
+
+  function resetCampaignCreateForm() {
+    $("campaignCreateForm")?.reset();
+    Object.assign(state.campaigns, {
+      audienceSource: "contacts", uploadMode: "file", uploadHeaders: [], uploadRows: [],
+      fieldMapping: { displayName: "", profileId: "", company: "", tags: "" },
+      selectedContactIds: new Set(), audienceContactIds: new Set(),
+      audienceSearch: "", contactCandidates: [], channelSearch: "", channelMenuOpen: false,
+      templates: [], templateKey: "", variableMappings: [], textVariables: [],
+    });
+    ["campaignName", "campaignChannel", "campaignChannelSearch", "campaignTemplateSelect", "campaignTemplateSearch",
+      "campaignMessageText", "campaignUploadUrl", "campaignUploadFile", "campaignAudienceSearch"].forEach((id) => {
+      if ($(id)) $(id).value = "";
+    });
+    closeCampaignChannelMenu();
+    $("campaignVariableFields")?.replaceChildren();
+    $("campaignTextVariableFields")?.replaceChildren();
+    if ($("campaignTemplateOptions")) $("campaignTemplateOptions").hidden = true;
+    $("campaignTemplateSearch")?.setAttribute("aria-expanded", "false");
+    clearCampaignContactFilters();
+    renderCampaignCreateForm();
   }
 
   function renderCampaignCreateForm() {
@@ -11146,6 +11169,7 @@
     if (status) status.textContent = "Loading approved templates…";
     try {
       if (!state.whatsappTemplatesLoaded) await loadWhatsAppTemplateLibrary();
+      if (selectedCampaignChannel()?.channelId !== channel.channelId) return;
       state.campaigns.templates = (state.whatsappTemplates || [])
         .filter((template) => !template.channelId || template.channelId === channel.channelId);
       renderCampaignTemplateOptions();
@@ -11535,7 +11559,10 @@
       confirmLabel: "Send campaign",
       danger: false,
     });
-    if (!confirmed) return;
+    if (!confirmed) {
+      resetCampaignCreateForm();
+      return;
+    }
 
     const payload = {
       name,
@@ -11620,10 +11647,7 @@
       const result = await state.api.createCampaign(payload);
       if (result?.item) upsertCampaignItem(result.item);
       showToast("Campaign queued", `${name} is sending. Delivery updates appear in history and the inbox.`);
-      state.campaigns.audienceContactIds = new Set();
-      state.campaigns.selectedContactIds = new Set();
-      state.campaigns.uploadRows = [];
-      state.campaigns.uploadHeaders = [];
+      resetCampaignCreateForm();
       showCampaignMode("history");
       await loadCampaigns();
     } catch (error) {
@@ -13540,6 +13564,7 @@
           return;
         }
         if (actionButton.dataset.action === "campaign-show-history") {
+          resetCampaignCreateForm();
           showCampaignMode("history");
           loadCampaigns().catch(() => {});
           return;

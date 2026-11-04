@@ -70,3 +70,32 @@ test("full campaign details show saved filters, escape content, and label legacy
   assert.ok(markup.includes("Phone"));
   assert.ok(!markup.includes("CSV column: __campaignDetails"));
 });
+
+test("campaign reset clears draft inputs, recipients, upload mappings, and filters", () => {
+  const nodes = new Map();
+  const node = id => {
+    if (!nodes.has(id)) nodes.set(id, { value: "old input", hidden: false, reset() {}, replaceChildren() {}, setAttribute() {} });
+    return nodes.get(id);
+  };
+  node("campaignName"); node("campaignChannel"); node("campaignMessageText");
+  const campaigns = { audienceSource: "upload", uploadRows: [{ Phone: "123" }], templateKey: "old", selectedContactIds: new Set(["old"]), audienceContactIds: new Set(["old"]), contactFilters: { companies: new Set(["Acme"]) } };
+  let renders = 0;
+  const context = vm.createContext({
+    state: { campaigns }, $: node,
+    closeCampaignChannelMenu() {},
+    clearCampaignContactFilters() { campaigns.contactFilters = {}; campaigns.contactFilter = ""; },
+    renderCampaignCreateForm() { renders++; },
+  });
+  vm.runInContext(extract("resetCampaignCreateForm"), context);
+  vm.runInContext("resetCampaignCreateForm()", context);
+  assert.equal(node("campaignName").value, "");
+  assert.equal(node("campaignChannel").value, "");
+  assert.equal(node("campaignMessageText").value, "");
+  assert.equal(campaigns.audienceSource, "contacts");
+  assert.equal(campaigns.uploadRows.length, 0);
+  assert.equal(campaigns.templateKey, "");
+  assert.equal(campaigns.selectedContactIds.size, 0);
+  assert.equal(campaigns.audienceContactIds.size, 0);
+  assert.deepEqual(campaigns.contactFilters, {});
+  assert.equal(renders, 1);
+});
