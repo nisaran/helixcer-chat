@@ -10107,7 +10107,7 @@
         <td>${escapeHtml(recipient.displayName || recipient.profileId || recipient.contactId || "—")}</td>
         <td>${escapeHtml(recipient.profileId || "—")}</td>
         <td><span class="campaign-status-pill is-${escapeHtml(String(recipient.status || "").replace(/[^\w-]+/g, "_"))}">${escapeHtml(campaignStatusLabel(recipient.status))}</span></td>
-        <td>${escapeHtml(recipient.error || recipient.messageText || "—")}</td>
+        <td class="campaign-recipient-detail"><span class="campaign-recipient-detail-text" title="${escapeHtml(recipient.error || recipient.messageText || "—")}" tabindex="0">${escapeHtml(recipient.error || recipient.messageText || "—")}</span></td>
       </tr>`).join("");
     const meta = pageSize === "all"
       ? `${total.toLocaleString()} recipient${total === 1 ? "" : "s"}`
