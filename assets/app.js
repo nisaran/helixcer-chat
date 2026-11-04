@@ -174,6 +174,9 @@
     pushSubscriptionReady: false,
     pushSyncPromise: null,
     pushActionPending: false,
+    pushRetryTimer: 0,
+    pushPaused: false,
+    pushConfigError: false,
     lastNotificationAt: new Map(),
     confirmationResolve: null,
     loading: true,
@@ -2284,6 +2287,8 @@
   }
 
   function showApplication(auth) {
+    state.pushPaused = false;
+    state.notificationsEnabled = localStorage.getItem(NOTIFICATION_PREFERENCE_KEY) === "true";
     state.authStatus = "authenticated";
     state.currentUser = auth;
     state.workspace = auth.workspace || state.workspace;
@@ -9157,7 +9162,9 @@
     }
     try {
       state.pushConfig = await state.api.getPushConfig();
+      state.pushConfigError = false;
     } catch {
+      state.pushConfigError = true;
       state.pushConfig = { available: false, publicKey: "" };
     }
     renderNotificationSetting();
@@ -9224,31 +9231,37 @@
       return;
     }
     if (state.pushConfig === null) {
-      toggle.checked = false;
+      toggle.checked = state.notificationsEnabled;
       toggle.disabled = true;
       status.textContent = "Checking the background notification service…";
       return;
     }
     if (!state.pushConfig.available) {
-      toggle.checked = false;
-      toggle.disabled = true;
-      status.textContent = "Background notifications are not configured on the server.";
+      toggle.checked = state.notificationsEnabled;
+      toggle.disabled = !state.notificationsEnabled;
+      status.textContent = state.pushConfigError
+        ? "Reconnecting to the notification service. Your preference is saved."
+        : "Background notifications are not configured on the server.";
       return;
     }
     if (!state.serviceWorkerRegistration?.active) {
-      toggle.checked = false;
-      toggle.disabled = true;
+      toggle.checked = state.notificationsEnabled;
+      toggle.disabled = !state.notificationsEnabled;
       status.textContent = "Preparing the background notification service…";
       return;
     }
     const permission = Notification.permission;
     const enabledOnDevice = permission === "granted" && state.notificationsEnabled && state.pushSubscriptionReady;
-    toggle.checked = enabledOnDevice;
+    toggle.checked = permission === "granted" && state.notificationsEnabled;
     toggle.disabled = state.pushActionPending;
     if (state.pushActionPending) {
       status.textContent = permission === "granted"
         ? "Creating this device's background notification subscription…"
         : "Waiting for Chrome's notification permission…";
+      return;
+    }
+    if (permission === "granted" && state.notificationsEnabled && !state.pushSubscriptionReady) {
+      status.textContent = "Reconnecting background notifications. Your preference is saved; alerts may be delayed until reconnected.";
       return;
     }
     status.textContent = permission === "granted"
@@ -9267,8 +9280,10 @@
       return;
     }
     if (!enabled) {
+      window.clearTimeout(state.pushRetryTimer);
       state.notificationsEnabled = false;
       localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
+      if (state.pushSyncPromise) await state.pushSyncPromise.catch(() => {});
       await removeBrowserPushSubscription();
       renderNotificationSetting();
       showToast("Notifications disabled", "This device will no longer receive Helixcer message alerts.");
@@ -9276,9 +9291,7 @@
       return;
     }
     state.pushActionPending = true;
-    state.notificationsEnabled = false;
     state.pushSubscriptionReady = false;
-    localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
     renderNotificationSetting();
     if (Notification.permission !== "granted") {
       let permission = "default";
@@ -9297,6 +9310,8 @@
         return;
       }
     }
+    state.notificationsEnabled = true;
+    localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "true");
     try {
       const registration = await subscribeBrowserPush();
       await registration.showNotification("Helixcer notifications enabled", {
@@ -9305,17 +9320,15 @@
         badge: "/assets/helixcer-mark.jpg?v=fc5bb333",
         tag: "helixcer-notification-test",
         data: { url: "/#inbox" }
-      });
+      }).catch(() => {});
       state.notificationsEnabled = true;
       localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "true");
     } catch (error) {
-      state.notificationsEnabled = false;
       state.pushSubscriptionReady = false;
-      localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
-      await removeBrowserPushSubscription().catch(() => {});
       state.pushActionPending = false;
       renderNotificationSetting();
-      showToast("Notifications were not enabled", `The background notification service could not start: ${error.message}`, true);
+      scheduleBrowserPushRetry();
+      showToast("Notifications reconnecting", "Your preference is saved. Background alerts will resume when the connection is restored.", true);
       toggle.blur();
       return;
     }
@@ -9325,23 +9338,33 @@
     toggle.blur();
   }
 
+  function scheduleBrowserPushRetry() {
+    window.clearTimeout(state.pushRetryTimer);
+    if (state.pushPaused || state.authStatus !== "authenticated" || !state.notificationsEnabled) return;
+    state.pushRetryTimer = window.setTimeout(() => prepareBrowserPush().catch(() => {}), 30000);
+  }
+
   function prepareBrowserPush() {
+    if (state.pushPaused || state.authStatus !== "authenticated") return Promise.resolve();
     if (state.pushSyncPromise) return state.pushSyncPromise;
     state.pushSyncPromise = (async () => {
       await loadPushConfiguration();
-      if (!backgroundPushSupport() || !state.pushConfig?.available) return;
+      if (state.pushPaused) return;
+      if (!backgroundPushSupport() || !state.pushConfig?.available) {
+        if (state.pushConfigError) scheduleBrowserPushRetry();
+        return;
+      }
       try {
         await ensureServiceWorkerRegistration();
       } catch {
         state.pushSubscriptionReady = false;
         renderNotificationSetting();
+        scheduleBrowserPushRetry();
         return;
       }
       if (!state.notificationsEnabled || Notification.permission !== "granted") {
         state.pushSubscriptionReady = false;
         if (state.notificationsEnabled) {
-          state.notificationsEnabled = false;
-          localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
           await removeBrowserPushSubscription();
         }
         renderNotificationSetting();
@@ -9349,8 +9372,10 @@
       }
       try {
         await subscribeBrowserPush();
+        window.clearTimeout(state.pushRetryTimer);
       } catch {
         state.pushSubscriptionReady = false;
+        scheduleBrowserPushRetry();
       }
       renderNotificationSetting();
     })().finally(() => { state.pushSyncPromise = null; });
@@ -12379,11 +12404,11 @@
   }
 
   async function logout() {
-    if (state.notificationsEnabled) {
-      state.notificationsEnabled = false;
-      localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, "false");
-      await removeBrowserPushSubscription();
-    }
+    state.pushPaused = true;
+    window.clearTimeout(state.pushRetryTimer);
+    if (state.pushSyncPromise) await state.pushSyncPromise.catch(() => {});
+    await removeBrowserPushSubscription();
+    state.notificationsEnabled = false;
     try { await state.api.logout(); }
     catch { /* Always clear local recovery state and return to sign-in. */ }
     sessionStorage.removeItem(RECOVERY_TOKEN_KEY);
