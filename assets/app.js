@@ -19,7 +19,6 @@
     route: "inbox",
     filters: new Set(["open"]),
     search: "",
-    searchWithinFilters: false,
     contactSearch: "",
     conversationNextCursor: "",
     conversationsLoadingMore: false,
@@ -3520,7 +3519,7 @@
     const searchActive = Boolean(state.search.trim() || state.conversationSearchActive);
     // Filters=None hides the catalogue, but an active search still shows server hits.
     if (viewScope === "none" || (selected.size === 0 && !searchActive)) return [];
-    const showingAll = (searchActive && !state.searchWithinFilters) || selected.size === 0 || isAllConversationFilters(selected);
+    const showingAll = searchActive || selected.size === 0 || isAllConversationFilters(selected);
     const statusFilters = showingAll ? [] : ["open", "closed"].filter((filter) => selected.has(filter));
     const unassignedOnly = !showingAll && selected.has("unassigned");
     // Text search is server-side (`refreshInboxCatalogue` / load-more with q).
@@ -3559,12 +3558,6 @@
   }
 
   function renderConversationList() {
-    const scope = $("conversationSearchScope");
-    if (scope) scope.hidden = !state.search.trim();
-    const scopeLabel = $("conversationSearchScopeLabel");
-    if (scopeLabel) scopeLabel.textContent = state.searchWithinFilters ? "Searching within current filters" : "Searching all chats";
-    const scopeInput = $("conversationSearchWithinFilters");
-    if (scopeInput) scopeInput.checked = state.searchWithinFilters;
     const host = $("conversationList");
     disconnectConversationListObserver();
     host.replaceChildren();
@@ -13972,16 +13965,10 @@
     });
 
     let conversationSearchTimer = 0;
-    $("conversationSearchWithinFilters")?.addEventListener("change", (event) => {
-      state.searchWithinFilters = event.target.checked;
-      renderConversationList();
-      renderCounts();
-    });
     $("conversationSearch").addEventListener("input", (event) => {
       const nextQuery = event.target.value;
       const queryChanged = nextQuery.trim() !== state.search.trim();
       state.search = nextQuery;
-      if (!nextQuery.trim()) state.searchWithinFilters = false;
       if (state.inboxFocusConversationId) {
         clearDeepLinkedConversationList();
         renderConversationFilterControls();
