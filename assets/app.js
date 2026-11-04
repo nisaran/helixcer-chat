@@ -10165,7 +10165,15 @@
       ["Updated", campaign.updatedAt ? formatCampaignTime(campaign.updatedAt) : ""],
       ["Completed", campaign.completedAt ? formatCampaignTime(campaign.completedAt) : ""],
     ];
-    for (const mapping of campaign.variableMapping || []) {
+    const mappingPayload = campaign.variableMapping || {};
+    const mappings = Array.isArray(mappingPayload) ? mappingPayload : [
+      ...(Array.isArray(mappingPayload.variableMappings) ? mappingPayload.variableMappings : []),
+      ...(Array.isArray(mappingPayload.textVariables) ? mappingPayload.textVariables : []),
+    ];
+    if (mappingPayload.previewText) fields.push(["Message preview", mappingPayload.previewText]);
+    if (mappingPayload.mediaPreview?.filename) fields.push(["Media attachment", mappingPayload.mediaPreview.filename]);
+    for (const mapping of mappings) {
+      if (!mapping || typeof mapping !== "object") continue;
       fields.push(["Variable: " + (mapping.id || mapping.key || mapping.placeholder || "Value"), [mapping.source, mapping.value].filter(Boolean).join(" · ")]);
     }
     if (campaign.audienceSource === "upload") {
