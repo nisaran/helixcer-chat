@@ -1548,8 +1548,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 }
 .campaign-history-loading[hidden] { display: none; }
 .campaign-history-loading .auth-spinner { width: 22px; height: 22px; border-width: 2px; }
-.campaign-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.campaign-table th, .campaign-table td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.campaign-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.campaign-table th, .campaign-table td { padding: 9px 7px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .campaign-table th { color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
 .campaign-expand-col { width: 108px; text-align: right; }
 .campaign-table th.campaign-expand-col,

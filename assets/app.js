@@ -10147,6 +10147,7 @@
         <td class="campaign-history-channel-cell">${campaign.channelId || campaign.channelName ? campaignHistoryChannelMarkup(channelInfo) : "—"}</td>
         <td><span class="campaign-status-pill is-${escapeHtml(statusClass)}">${escapeHtml(campaignStatusLabel(campaign.status))}</span></td>
         <td>${Number(campaign.totalCount || 0)}</td>
+        <td>${Number(campaign.pendingCount || 0)}</td>
         <td>${campaignCurrentSentCount(campaign)}</td>
         <td>${Number(campaign.deliveredCount || 0)}</td>
         <td>${Number(campaign.readCount || 0)}</td>
@@ -10166,7 +10167,7 @@
         detail.dataset.campaignDetail = campaign.campaignId;
         const recipients = state.campaigns.recipientsByCampaign.get(campaign.campaignId) || [];
         const loaded = state.campaigns.recipientsByCampaign.has(campaign.campaignId);
-        detail.innerHTML = `<td colspan="11">${renderCampaignRecipientTable(recipients, { loaded })}</td>`;
+        detail.innerHTML = `<td colspan="12">${renderCampaignRecipientTable(recipients, { loaded })}</td>`;
         body.append(detail);
       }
     }
