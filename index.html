@@ -590,6 +590,7 @@
             <div>
               <strong id="campaignCreateTitle">Create campaign</strong>
             </div>
+            <button class="secondary-button" type="button" data-action="campaign-show-history">← Back</button>
           </div>
           <form class="campaign-create-form" id="campaignCreateForm" autocomplete="off">
             <fieldset class="campaign-fieldset campaign-card">
@@ -1280,6 +1281,14 @@
         <button class="primary-button" id="webhookTokenSubmit" type="submit">Save token</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog class="modal" id="campaignFullDetailsDialog" aria-labelledby="campaignFullDetailsTitle">
+    <div class="modal-card campaign-full-details-card">
+      <div class="modal-head"><h2 id="campaignFullDetailsTitle">Campaign details</h2>
+        <button class="secondary-button" type="button" data-action="close-campaign-full-details">Close</button></div>
+      <div id="campaignFullDetailsBody" aria-live="polite"></div>
+    </div>
   </dialog>
 
   <dialog class="modal confirmation-modal" id="confirmationDialog" aria-labelledby="confirmationTitle" aria-describedby="confirmationMessage">

@@ -2482,3 +2482,10 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.campaign-full-details-card { width: min(760px, 92vw); max-height: 85vh; overflow: auto; }
+.campaign-full-details-list { margin: 20px 0 0; }
+.campaign-full-details-list > div { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line, #e3e8e6); }
+.campaign-full-details-list dt { font-weight: 700; }
+.campaign-full-details-list dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.campaign-expand-col > button { margin: 3px; }
