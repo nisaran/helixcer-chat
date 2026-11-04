@@ -2648,3 +2648,11 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-create-form .campaign-contact-head, .campaign-create-form .campaign-contact-item,
 .campaign-create-form .campaign-audience-head, .campaign-create-form .campaign-audience-row { min-width: 640px; }
 .campaign-create-form .campaign-contact-list, .campaign-create-form .campaign-audience-rows { min-width: 640px; overflow-x: hidden; }
+/* Independent columns prevent long template mappings from stretching audience spacing. */
+.campaign-audience-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; grid-column: 1; grid-row: 1; }
+#campaignMessageFieldset { grid-column: 2; grid-row: 1; }
+.campaign-create-actions { grid-row: 2; }
+@media (max-width: 960px) {
+  .campaign-audience-column, #campaignMessageFieldset { grid-column: 1; grid-row: auto; }
+  .campaign-create-actions { grid-row: auto; }
+}
