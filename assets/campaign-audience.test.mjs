@@ -45,7 +45,7 @@ test("full campaign details show saved filters, escape content, and label legacy
     formatCampaignTime: value => value,
     escapeHtml: value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
   });
-  vm.runInContext(extract("campaignFullDetailsMarkup"), context);
+  vm.runInContext(extract("campaignCurrentSentCount") + extract("campaignFullDetailsMarkup"), context);
   context.campaign = { name: "<script>", fieldMapping: { __campaignDetails: { platform: "whatsapp", channelName: "Original channel", filters: ["Company: Acme", "Tags: Reminder"] } } };
   let markup = vm.runInContext("campaignFullDetailsMarkup(campaign)", context);
   assert.ok(markup.includes("Company: Acme · Tags: Reminder"));
@@ -98,4 +98,13 @@ test("campaign reset clears draft inputs, recipients, upload mappings, and filte
   assert.equal(campaigns.audienceContactIds.size, 0);
   assert.deepEqual(campaigns.contactFilters, {});
   assert.equal(renders, 1);
+});
+
+test("sent count excludes messages that advanced to delivered or read", () => {
+  const context = vm.createContext({});
+  vm.runInContext(extract("campaignCurrentSentCount"), context);
+  for (const [sentCount, deliveredCount, expected] of [[10,4,6],[10,10,0],[0,0,0],[2,3,0]]) {
+    context.campaign = { sentCount, deliveredCount };
+    assert.equal(vm.runInContext("campaignCurrentSentCount(campaign)",context),expected);
+  }
 });
