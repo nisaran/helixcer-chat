@@ -2130,10 +2130,16 @@
     return true;
   }
 
+  function updateBrowserTitle(pageName = $("pageTitle")?.textContent || "Inbox") {
+    const workspaceName = String(state.workspace?.displayName || state.workspace?.name || DEFAULT_WORKSPACE).trim();
+    document.title = `${pageName} | ${workspaceName} | Helixcer Chat`;
+  }
+
   function updateWorkspaceIdentity(profile = state.workspaceProfile || normalizeWorkspaceProfile(state.workspace)) {
     const displayName = profile.displayName || DEFAULT_WORKSPACE;
     $("sidebarWorkspaceName").textContent = displayName;
     state.workspace = { ...state.workspace, ...profile, name: displayName };
+    updateBrowserTitle();
     if (state.currentUser?.workspace) state.currentUser.workspace = { ...state.currentUser.workspace, ...profile, name: displayName };
   }
 
@@ -9573,6 +9579,7 @@
       developer: "Developer API", team: "Team", roles: "Roles", workspace: "Workspace", settings: "Settings",
     };
     $("pageTitle").textContent = labels[route];
+    updateBrowserTitle(labels[route]);
     if (route === "settings") renderNotificationSetting();
     if (route === "workspace") loadWorkspaceProfile().catch(() => {});
     if (route === "whatsapp-templates") loadWhatsAppTemplateLibrary().catch(() => {});
