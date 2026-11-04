@@ -1,9 +1,10 @@
-import {
+﻿import {
   acceptInvitationWithPassword,
   authenticateRequest,
   changePassword,
   createMobileAuthChallenge,
   createGoogleMobileSession,
+  createPasswordMobileSession,
   createInvitation,
   finishGoogleOAuthResponse,
   listTeam,
@@ -318,6 +319,11 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       const limited = await enforceOAuthRateLimit(request, env);
       if (limited) return limited;
       return json(await createGoogleMobileSession(env, await readJson(request)));
+    }
+    if (request.method === 'POST' && url.pathname === '/auth/mobile/login') {
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return limited;
+      return json(await createPasswordMobileSession(env, await readJson(request)));
     }
     if (request.method === 'POST' && (url.pathname === '/auth/logout' || url.pathname === '/api/logout')) {
       const logoutPrincipal = await authenticateRequest(request, env);
