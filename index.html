@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261105-campaign-recipient-info">
-  <script src="./assets/app.js?v=20261105-campaign-recipient-info" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261105-campaign-message-tooltip">
+  <script src="./assets/app.js?v=20261105-campaign-message-tooltip" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1318,13 +1318,7 @@
     </div>
   </dialog>
 
-  <dialog class="modal" id="campaignRecipientMessageDialog" aria-labelledby="campaignRecipientMessageTitle">
-    <div class="modal-card campaign-full-details-card">
-      <div class="modal-head"><h2 id="campaignRecipientMessageTitle">Full message</h2>
-        <button class="secondary-button" type="button" data-action="close-campaign-recipient-message">Close</button></div>
-      <div id="campaignRecipientMessageBody" class="campaign-recipient-message-body"></div>
-    </div>
-  </dialog>
+  <div id="campaignRecipientMessageTooltip" class="campaign-recipient-message-tooltip" role="tooltip" popover="manual"></div>
 
   <dialog class="modal confirmation-modal" id="confirmationDialog" aria-labelledby="confirmationTitle" aria-describedby="confirmationMessage">
     <form class="modal-card confirmation-card" id="confirmationForm">

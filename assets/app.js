@@ -10262,12 +10262,25 @@
     </div>`;
   }
 
-  function showCampaignRecipientMessage(campaignId, recipientId) {
+  function hideCampaignRecipientMessage() {
+    const tooltip = $("campaignRecipientMessageTooltip");
+    if (tooltip?.matches(":popover-open")) tooltip.hidePopover();
+    document.querySelectorAll('.campaign-recipient-info[aria-describedby]').forEach((button) => button.removeAttribute("aria-describedby"));
+  }
+
+  function showCampaignRecipientMessage(campaignId, recipientId, anchor) {
     const recipient = (state.campaigns.recipientsByCampaign.get(campaignId) || [])
       .find((item) => String(item.recipientId) === String(recipientId));
-    if (!recipient) return;
-    $("campaignRecipientMessageBody").textContent = recipient.messageText || recipient.error || "No message available.";
-    $("campaignRecipientMessageDialog").showModal();
+    if (!recipient || !anchor) return;
+    const tooltip = $("campaignRecipientMessageTooltip");
+    hideCampaignRecipientMessage();
+    tooltip.textContent = recipient.messageText || recipient.error || "No message available.";
+    anchor.setAttribute("aria-describedby", tooltip.id);
+    tooltip.showPopover();
+    const rect = anchor.getBoundingClientRect();
+    const box = tooltip.getBoundingClientRect();
+    tooltip.style.left = Math.max(12, Math.min(rect.right - box.width, window.innerWidth - box.width - 12)) + "px";
+    tooltip.style.top = Math.max(12, rect.top >= box.height + 20 ? rect.top - box.height - 8 : Math.min(rect.bottom + 8, window.innerHeight - box.height - 12)) + "px";
   }
 
   function campaignFullDetailsMarkup(campaign) {
@@ -13745,11 +13758,7 @@
           return;
         }
         if (actionButton.dataset.action === "view-campaign-recipient-message") {
-          showCampaignRecipientMessage(actionButton.dataset.campaignId, actionButton.dataset.recipientId);
-          return;
-        }
-        if (actionButton.dataset.action === "close-campaign-recipient-message") {
-          $("campaignRecipientMessageDialog").close();
+          showCampaignRecipientMessage(actionButton.dataset.campaignId, actionButton.dataset.recipientId, actionButton);
           return;
         }
         if (actionButton.dataset.action === "view-campaign-full-details") {
@@ -14287,6 +14296,7 @@
     });
     $("campaignChannelSearch")?.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
+        hideCampaignRecipientMessage();
         event.preventDefault();
         closeCampaignChannelMenu();
         $("campaignChannelTrigger")?.focus();
@@ -14717,6 +14727,26 @@
     document.addEventListener("scroll", positionContactRouteMenu, true);
     document.addEventListener("scroll", positionMessageStatusMenu, true);
     document.addEventListener("scroll", positionContactPlatformMenu, true);
+    for (const eventName of ["mouseover", "focusin"]) {
+      document.addEventListener(eventName, (event) => {
+        const button = event.target.closest?.(".campaign-recipient-info");
+        if (button) showCampaignRecipientMessage(button.dataset.campaignId, button.dataset.recipientId, button);
+      });
+    }
+    document.addEventListener("mouseout", (event) => {
+      if (!event.target.closest?.(".campaign-recipient-info, #campaignRecipientMessageTooltip")) return;
+      if (!event.relatedTarget?.closest?.(".campaign-recipient-info, #campaignRecipientMessageTooltip")) hideCampaignRecipientMessage();
+    });
+    document.addEventListener("focusout", (event) => {
+      if (event.target.closest?.(".campaign-recipient-info")) hideCampaignRecipientMessage();
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest?.(".campaign-recipient-info, #campaignRecipientMessageTooltip")) hideCampaignRecipientMessage();
+    });
+    document.addEventListener("scroll", (event) => {
+      if (!$("campaignRecipientMessageTooltip")?.contains(event.target)) hideCampaignRecipientMessage();
+    }, true);
+    window.addEventListener("resize", hideCampaignRecipientMessage);
     window.addEventListener("pagehide", () => state.disconnectRealtime?.());
     window.addEventListener("beforeunload", () => state.disconnectRealtime?.());
     window.addEventListener("helixcer:unauthorized", () => showSignedOut("Your session expired. Sign in again to continue."));
