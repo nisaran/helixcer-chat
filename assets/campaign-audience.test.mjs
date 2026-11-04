@@ -35,3 +35,29 @@ test("campaign audience waits for a channel and uses platform IDs across channel
   context.state.campaigns.contactFilters.platforms = new Set(["whatsapp"]);
   assert.equal(rows().length, 0);
 });
+
+test("full campaign details show saved filters, escape content, and label legacy data", () => {
+  const context = vm.createContext({
+    campaignHistoryChannelInfo: () => ({ name: "Current channel", identifier: "123" }),
+    campaignHistoryPlatform: () => "whatsapp",
+    campaignPlatformLabel: value => value,
+    campaignStatusLabel: value => value,
+    formatCampaignTime: value => value,
+    escapeHtml: value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
+  });
+  vm.runInContext(extract("campaignFullDetailsMarkup"), context);
+  context.campaign = { name: "<script>", fieldMapping: { __campaignDetails: { platform: "whatsapp", channelName: "Original channel", filters: ["Company: Acme", "Tags: Reminder"] } } };
+  let markup = vm.runInContext("campaignFullDetailsMarkup(campaign)", context);
+  assert.ok(markup.includes("Company: Acme · Tags: Reminder"));
+  assert.ok(markup.includes("Original channel"));
+  assert.ok(markup.includes("&lt;script&gt;"));
+  assert.ok(!markup.includes("<script>"));
+  context.campaign = {};
+  markup = vm.runInContext("campaignFullDetailsMarkup(campaign)", context);
+  assert.ok(markup.includes("Not recorded for this campaign"));
+  context.campaign = { audienceSource: "upload", fieldMapping: { profileId: "Phone", __campaignDetails: { filters: [] } } };
+  markup = vm.runInContext("campaignFullDetailsMarkup(campaign)", context);
+  assert.ok(markup.includes("Not applicable (uploaded contacts)"));
+  assert.ok(markup.includes("Phone"));
+  assert.ok(!markup.includes("CSV column: __campaignDetails"));
+});

@@ -10054,6 +10054,7 @@
         <td>${Number(campaign.failedCount || 0)}</td>
         <td>${escapeHtml(formatCampaignTime(campaign.createdAt))}</td>
         <td class="campaign-expand-col">
+          <button class="secondary-button compact-button" type="button" data-action="view-campaign-full-details" data-campaign-id="${escapeHtml(campaign.campaignId)}">View full details</button>
           <button class="campaign-expand-button" type="button" data-action="toggle-campaign-detail" data-campaign-id="${escapeHtml(campaign.campaignId)}" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Hide campaign details" : "Show campaign details"}" title="${expanded ? "Collapse" : "Expand"}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
             <span class="campaign-expand-label">${expanded ? "Hide" : "Details"}</span>
@@ -10133,6 +10134,65 @@
         </div>
       </div>
     </div>`;
+  }
+
+  function campaignFullDetailsMarkup(campaign) {
+    const snapshot = campaign.fieldMapping?.__campaignDetails;
+    const info = campaignHistoryChannelInfo(campaign.channelId, campaign);
+    const platform = snapshot?.platform || campaignHistoryPlatform(campaign);
+    const filters = snapshot
+      ? (campaign.audienceSource === "upload" ? "Not applicable (uploaded contacts)" : snapshot.filters?.join(" · ") || "None")
+      : "Not recorded for this campaign";
+    const fields = [
+      ["Campaign", campaign.name],
+      ["Platform", campaignPlatformLabel(platform)],
+      ["Channel", snapshot?.channelName || info.name],
+      ["Channel profile", snapshot?.channelIdentifier || info.identifier],
+      ["Status", campaignStatusLabel(campaign.status)],
+      ["Audience", campaign.audienceSource === "upload" ? "Uploaded contacts" : "Selected contacts"],
+      ["Audience filters", filters],
+      ["Message type", campaign.messageType === "template" ? "Template" : "Text message"],
+      ["Template", campaign.templateName],
+      ["Template language", campaign.templateLanguage],
+      ["Message", campaign.messageBody],
+      ["Total recipients", campaign.totalCount ?? 0],
+      ["Pending", campaign.pendingCount ?? 0],
+      ["Sent", campaign.sentCount ?? 0],
+      ["Delivered", campaign.deliveredCount ?? 0],
+      ["Read", campaign.readCount ?? 0],
+      ["Failed", campaign.failedCount ?? 0],
+      ["Created", campaign.createdAt ? formatCampaignTime(campaign.createdAt) : ""],
+      ["Updated", campaign.updatedAt ? formatCampaignTime(campaign.updatedAt) : ""],
+      ["Completed", campaign.completedAt ? formatCampaignTime(campaign.completedAt) : ""],
+    ];
+    for (const mapping of campaign.variableMapping || []) {
+      fields.push(["Variable: " + (mapping.id || mapping.key || mapping.placeholder || "Value"), [mapping.source, mapping.value].filter(Boolean).join(" · ")]);
+    }
+    if (campaign.audienceSource === "upload") {
+      for (const [key, value] of Object.entries(campaign.fieldMapping || {})) {
+        if (key !== "__campaignDetails") fields.push(["CSV column: " + key, value]);
+      }
+    }
+    return '<dl class="campaign-full-details-list">' + fields.map(([label, value]) =>
+      '<div><dt>' + escapeHtml(label) + '</dt><dd>' + escapeHtml(String(value ?? "") || "—") + '</dd></div>'
+    ).join("") + '</dl>';
+  }
+
+  async function showCampaignFullDetails(campaignId) {
+    const dialog = $("campaignFullDetailsDialog");
+    const body = $("campaignFullDetailsBody");
+    body.textContent = "Loading campaign details…";
+    if (!dialog.open) dialog.showModal();
+    dialog.dataset.campaignId = campaignId;
+    try {
+      const data = await state.api.getCampaign(campaignId);
+      if (dialog.dataset.campaignId !== campaignId || !dialog.open) return;
+      if (!data?.item) throw new Error("Campaign not found.");
+      upsertCampaignItem(data.item);
+      body.innerHTML = campaignFullDetailsMarkup(data.item);
+    } catch (error) {
+      if (dialog.dataset.campaignId === campaignId) body.textContent = error.message || "Could not load campaign details.";
+    }
   }
 
   async function toggleCampaignDetail(campaignId) {
@@ -11474,7 +11534,15 @@
       channelId: channel.channelId,
       audienceSource,
       recipients,
-      fieldMapping: audienceSource === "upload" ? state.campaigns.fieldMapping : {},
+      fieldMapping: {
+        ...(audienceSource === "upload" ? state.campaigns.fieldMapping : {}),
+        __campaignDetails: {
+          platform: connectorPlatform(channel.connectorType),
+          channelName: channel.name || channel.channelId,
+          channelIdentifier: campaignChannelIdentifier(channel),
+          filters: audienceSource === "contacts" ? campaignAppliedFilterSummary() : [],
+        },
+      },
     };
 
     const submit = $("campaignSubmit");
@@ -13475,6 +13543,14 @@
         }
         if (actionButton.dataset.action === "refresh-campaigns") {
           loadCampaigns().catch(() => {});
+          return;
+        }
+        if (actionButton.dataset.action === "view-campaign-full-details") {
+          showCampaignFullDetails(actionButton.dataset.campaignId);
+          return;
+        }
+        if (actionButton.dataset.action === "close-campaign-full-details") {
+          $("campaignFullDetailsDialog").close();
           return;
         }
         if (actionButton.dataset.action === "toggle-campaign-detail") {
