@@ -6632,7 +6632,12 @@ async function streamMessageAttachment(env, workspaceId, messageId, request, url
       providerResponse = await fetch(externalUrl, {
         headers: {
           ...(range ? { Range: range } : {}),
-          Accept: '*/*'
+          Accept: attachmentType === 'image' ? 'image/*' : '*/*',
+          // Meta's messaging CDN can return a 200 HTML login/interstitial page
+          // to a headerless Worker fetch, even while the signed media URL works
+          // in a browser. Preserve the requesting browser's user-agent only;
+          // never forward its cookies or Helixcer authorization to Meta.
+          'User-Agent': request.headers.get('User-Agent') || 'Mozilla/5.0'
         },
         redirect: 'follow',
         referrerPolicy: 'no-referrer'
@@ -6642,6 +6647,10 @@ async function streamMessageAttachment(env, workspaceId, messageId, request, url
     throw httpError(409, 'This provider does not expose protected attachment previews.');
   }
   if (!providerResponse.ok || !providerResponse.body) throw httpError(502, 'The provider could not return this attachment.');
+  const providerMime = String(providerResponse.headers.get('Content-Type') || '').toLowerCase().split(';', 1)[0].trim();
+  if (providerMime === 'text/html' || providerMime === 'application/xhtml+xml') {
+    throw httpError(502, 'The media provider returned a web page instead of the attachment. Please retry the preview.');
+  }
   const filename = safeAttachmentFilename(attachment.filename || `${attachmentType}-attachment`);
   const requestedDownload = url.searchParams.get('download') === '1';
   const mimeType = safeInlineAttachmentMime(attachmentType, attachment.mimeType, providerResponse.headers.get('Content-Type'));
