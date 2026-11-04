@@ -10054,11 +10054,11 @@
         <td>${Number(campaign.failedCount || 0)}</td>
         <td>${escapeHtml(formatCampaignTime(campaign.createdAt))}</td>
         <td class="campaign-expand-col">
-          <button class="secondary-button compact-button" type="button" data-action="view-campaign-full-details" data-campaign-id="${escapeHtml(campaign.campaignId)}">View full details</button>
           <button class="campaign-expand-button" type="button" data-action="toggle-campaign-detail" data-campaign-id="${escapeHtml(campaign.campaignId)}" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Hide campaign details" : "Show campaign details"}" title="${expanded ? "Collapse" : "Expand"}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
             <span class="campaign-expand-label">${expanded ? "Hide" : "Details"}</span>
           </button>
+          ${expanded ? `<button class="secondary-button compact-button campaign-full-details-button" type="button" data-action="view-campaign-full-details" data-campaign-id="${escapeHtml(campaign.campaignId)}">View full details</button>` : ""}
         </td>`;
       body.append(row);
       if (expanded) {
