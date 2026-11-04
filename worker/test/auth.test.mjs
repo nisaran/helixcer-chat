@@ -144,6 +144,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0022_facebook_messenger_page.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0023_workspace_roles.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0024_password_auth.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0025_campaign_jobs.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
