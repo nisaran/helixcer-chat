@@ -14,8 +14,8 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261105-campaign-compact-filters">
-  <script src="./assets/app.js?v=20261105-campaign-compact-filters" defer></script>
+  <link rel="stylesheet" href="./assets/styles.css?v=20261105-campaign-recipient-info">
+  <script src="./assets/app.js?v=20261105-campaign-recipient-info" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1315,6 +1315,14 @@
       <div class="modal-head"><h2 id="campaignFullDetailsTitle">Campaign details</h2>
         <button class="secondary-button" type="button" data-action="close-campaign-full-details">Close</button></div>
       <div id="campaignFullDetailsBody" aria-live="polite"></div>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="campaignRecipientMessageDialog" aria-labelledby="campaignRecipientMessageTitle">
+    <div class="modal-card campaign-full-details-card">
+      <div class="modal-head"><h2 id="campaignRecipientMessageTitle">Full message</h2>
+        <button class="secondary-button" type="button" data-action="close-campaign-recipient-message">Close</button></div>
+      <div id="campaignRecipientMessageBody" class="campaign-recipient-message-body"></div>
     </div>
   </dialog>
 

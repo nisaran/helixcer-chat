@@ -10184,7 +10184,6 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
             <span class="campaign-expand-label">${expanded ? "Hide" : "Details"}</span>
           </button>
-          ${expanded ? `<button class="secondary-button compact-button campaign-full-details-button" type="button" data-action="view-campaign-full-details" data-campaign-id="${escapeHtml(campaign.campaignId)}">View full details</button>` : ""}
         </td>`;
       body.append(row);
       if (expanded) {
@@ -10193,7 +10192,7 @@
         detail.dataset.campaignDetail = campaign.campaignId;
         const recipients = state.campaigns.recipientsByCampaign.get(campaign.campaignId) || [];
         const loaded = state.campaigns.recipientsByCampaign.has(campaign.campaignId);
-        detail.innerHTML = `<td colspan="12">${renderCampaignRecipientTable(recipients, { loaded })}</td>`;
+        detail.innerHTML = `<td colspan="12">${renderCampaignRecipientTable(recipients, { loaded, campaignId: campaign.campaignId })}</td>`;
         body.append(detail);
       }
     }
@@ -10213,7 +10212,7 @@
     if (next) next.disabled = page >= totalPages || !total || pageSize === "all";
   }
 
-  function renderCampaignRecipientTable(recipients, { loaded = false } = {}) {
+  function renderCampaignRecipientTable(recipients, { loaded = false, campaignId = "" } = {}) {
     if (!loaded) {
       return `<div class="campaign-recipient-loading"><span class="auth-spinner" aria-hidden="true"></span><span>Loading recipient details…</span></div>`;
     }
@@ -10234,7 +10233,7 @@
         <td>${escapeHtml(recipient.profileId || "—")}</td>
         <td><span class="campaign-status-pill is-${escapeHtml(String(recipient.status || "").replace(/[^\w-]+/g, "_"))}">${escapeHtml(campaignStatusLabel(recipient.status))}</span></td>
         <td class="campaign-recipient-updated">${escapeHtml(recipient.updatedAt ? formatCampaignTime(recipient.updatedAt) : "—")}</td>
-        <td class="campaign-recipient-detail"><span class="campaign-recipient-detail-text" title="${escapeHtml(recipient.error || recipient.messageText || "—")}" tabindex="0">${escapeHtml(recipient.error || recipient.messageText || "—")}</span></td>
+        <td class="campaign-recipient-detail"><div class="campaign-recipient-message-preview"><span class="campaign-recipient-detail-text" title="${escapeHtml(recipient.error || recipient.messageText || "—")}" tabindex="0">${escapeHtml(recipient.error || recipient.messageText || "—")}</span><button class="campaign-recipient-info" type="button" data-action="view-campaign-recipient-message" data-campaign-id="${escapeHtml(campaignId)}" data-recipient-id="${escapeHtml(recipient.recipientId)}" aria-label="View full message for ${escapeHtml(recipient.displayName || recipient.profileId || "recipient")}"><span aria-hidden="true">i</span></button></div></td>
       </tr>`).join("");
     const meta = pageSize === "all"
       ? `${total.toLocaleString()} recipient${total === 1 ? "" : "s"}`
@@ -10246,7 +10245,7 @@
         return `<option value="${value}" ${selected}>${label}</option>`;
       })
       .join("");
-    return `<div class="campaign-recipient-panel"><div class="campaign-recipient-heading"><strong>Recipients</strong><span class="subtle">${total.toLocaleString()} contacts · individual delivery updates</span></div>
+    return `<div class="campaign-recipient-panel"><div class="campaign-recipient-heading"><strong>Recipients</strong><button class="secondary-button compact-button campaign-full-details-button" type="button" data-action="view-campaign-full-details" data-campaign-id="${escapeHtml(campaignId)}">View full details</button></div>
       <table class="campaign-recipient-table"><thead><tr><th>Recipient</th><th>ID</th><th>Status</th><th>Status updated on</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table>
       <div class="campaign-recipient-footer">
         <p class="subtle campaign-recipient-meta">${escapeHtml(meta)}</p>
@@ -10261,6 +10260,14 @@
         </div>
       </div>
     </div>`;
+  }
+
+  function showCampaignRecipientMessage(campaignId, recipientId) {
+    const recipient = (state.campaigns.recipientsByCampaign.get(campaignId) || [])
+      .find((item) => String(item.recipientId) === String(recipientId));
+    if (!recipient) return;
+    $("campaignRecipientMessageBody").textContent = recipient.messageText || recipient.error || "No message available.";
+    $("campaignRecipientMessageDialog").showModal();
   }
 
   function campaignFullDetailsMarkup(campaign) {
@@ -13735,6 +13742,14 @@
         }
         if (actionButton.dataset.action === "refresh-campaigns") {
           loadCampaigns().catch(() => {});
+          return;
+        }
+        if (actionButton.dataset.action === "view-campaign-recipient-message") {
+          showCampaignRecipientMessage(actionButton.dataset.campaignId, actionButton.dataset.recipientId);
+          return;
+        }
+        if (actionButton.dataset.action === "close-campaign-recipient-message") {
+          $("campaignRecipientMessageDialog").close();
           return;
         }
         if (actionButton.dataset.action === "view-campaign-full-details") {
