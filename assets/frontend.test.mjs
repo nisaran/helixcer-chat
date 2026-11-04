@@ -599,9 +599,11 @@ test("the unified inbox is person-first while route identity stays on messages a
   const contactsEnd = app.indexOf("function contactPlatformRoutes", contactsStart);
   const renderContactsBody = app.slice(contactsStart, contactsEnd);
   assert.doesNotMatch(renderContactsBody, /messaging ID/);
+  assert.match(renderContactsBody, /contact-platforms-col/);
   assert.match(renderContactsBody, /contact-platform-logos/);
   assert.match(renderContactsBody, /contact-list-platform-logo/);
   assert.match(renderContactsBody, /providerLogo\(platformConnectorType\(platform\)/);
+  assert.match(renderContactsBody, /columnCount = state\.contactSelectMode \? 7 : 6/);
   assert.match(renderContactsBody, /Closed" : "Open"/);
   assert.doesNotMatch(renderContactsBody, /Inactive" : "Active"|providerLogoPaths|provider-(?:whatsapp|telegram|instagram)\.svg/);
   assert.doesNotMatch(renderContactsBody, /avatarPalettes|element\("span", "avatar"/);
@@ -615,12 +617,13 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /id="contactPrevPage"/);
   assert.match(html, /id="contactNextPage"/);
   assert.match(html, /id="contactPageLabel"/);
+  assert.match(html, /<th>Contact<\/th><th>Company<\/th><th>Platforms<\/th><th>Tags<\/th>/);
   assert.match(html, /id="inboxSelectToggle"|data-action="toggle-inbox-select"/);
   assert.match(html, /id="contactSelectToggle"|data-action="toggle-contact-select"/);
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261104-inbox-contacts-platform-logos/);
+  assert.match(html, /app\.js\?v=20261104-contacts-platforms-column/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -784,6 +787,7 @@ test("conversation previews truncate to the panel width without a horizontal scr
   assert.match(styles, /\.conversation-preview-logo/);
   assert.match(app, /function conversationPreviewConnectorType/);
   assert.match(app, /conversation-preview-logo/);
+  assert.match(styles, /\.contact-platforms-col/);
   assert.match(styles, /\.contact-platform-logos/);
   assert.match(styles, /\.contact-list-platform-logo/);
 });
@@ -989,8 +993,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261104-inbox-contacts-platform-logos/);
-  assert.match(html, /assets\/styles\.css\?v=20261104-inbox-contacts-platform-logos/);
+  assert.match(html, /assets\/app\.js\?v=20261104-contacts-platforms-column/);
+  assert.match(html, /assets\/styles\.css\?v=20261104-contacts-platforms-column/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);

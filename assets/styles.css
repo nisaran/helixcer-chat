@@ -1068,7 +1068,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .contact-pagination[hidden] { display: none; }
 #contactPageLabel { white-space: nowrap; }
 .contact-table-wrap { overflow-x: auto; }
-.contact-table { width: 100%; min-width: 680px; border-collapse: collapse; }
+.contact-table { width: 100%; min-width: 760px; border-collapse: collapse; }
 .contact-table th { color: var(--muted); padding: 8px 14px; text-align: left; font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
 .contact-table td { border-top: 1px solid #eff1ee; padding: 7px 14px; color: #56605e; font-size: 12px; }
 .contact-table tbody tr { cursor: pointer; outline: 0; transition: background .12s ease, box-shadow .12s ease; -webkit-tap-highlight-color: transparent; }
@@ -1080,13 +1080,16 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .contact-cell strong, .contact-cell span { display: block; }
 .contact-cell strong { font-size: 12px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contact-cell span { color: var(--muted); font-size: 10px; }
-.contact-cell .contact-platform-logos,
+.contact-platforms-col {
+  white-space: nowrap;
+}
 .contact-platform-logos {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
   flex-wrap: wrap;
+  vertical-align: middle;
 }
 .contact-list-platform-logo {
   width: 16px;

@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261104-inbox-contacts-platform-logos";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261104-contacts-platforms-column";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -5619,7 +5619,7 @@
     if (pagination) pagination.hidden = false;
     const selectHeader = $("contactSelectHeader");
     if (selectHeader) selectHeader.hidden = !state.contactSelectMode;
-    const columnCount = state.contactSelectMode ? 6 : 5;
+    const columnCount = state.contactSelectMode ? 7 : 6;
     const tbody = $("contactTableBody");
     tbody.replaceChildren();
     renderContactBulkBar(contacts);
@@ -5672,22 +5672,27 @@
       const identityCell = document.createElement("td");
       const identity = element("div", "contact-cell");
       identity.append(element("strong", "", contact.displayName));
+      identityCell.append(identity);
+      row.append(identityCell);
+
+      row.append(tableCell(contact.company || "—"));
+
+      const platformsCell = document.createElement("td");
+      platformsCell.className = "contact-platforms-col";
       const logos = element("span", "contact-platform-logos");
       const platforms = [...new Set(
         (contact.identities || [])
           .map((item) => connectorPlatform(item.platform || item.connectorType))
           .filter(Boolean),
       )];
-      // Prefer messaging platforms under the name; fall back to email if that is all they have.
+      // Prefer messaging platforms; fall back to email if that is all they have.
       const messagingPlatforms = platforms.filter((platform) => platform !== "email");
       (messagingPlatforms.length ? messagingPlatforms : platforms).forEach((platform) => {
         logos.append(providerLogo(platformConnectorType(platform), "contact-list-platform-logo"));
       });
-      if (logos.childNodes.length) identity.append(logos);
-      identityCell.append(identity);
-      row.append(identityCell);
-
-      row.append(tableCell(contact.company || "—"));
+      if (logos.childNodes.length) platformsCell.append(logos);
+      else platformsCell.textContent = "—";
+      row.append(platformsCell);
 
       const tagCell = document.createElement("td");
       const tagWrap = element("div", "tag-list");
