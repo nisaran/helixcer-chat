@@ -9625,10 +9625,6 @@
     if (createButton) createButton.hidden = state.campaigns.mode !== "history";
     if (state.campaigns.mode === "create") {
       renderCampaignCreateForm();
-      ensureCampaignContactCatalogue().catch((error) => {
-        state.campaigns.catalogueError = error.message || "Could not load contacts.";
-        renderCampaignContactPicker();
-      });
     } else renderCampaignHistory();
   }
 
@@ -9644,7 +9640,7 @@
   }
 
   async function ensureCampaignContactCatalogue({ force = false } = {}) {
-    if (!state.api?.listContacts) return;
+    if (!selectedCampaignChannel() || !state.api?.listContacts) return;
     if (!force && state.campaigns.catalogueLoaded && state.campaigns.catalogue.length) return;
     if (state.campaigns.catalogueLoading) return;
     state.campaigns.catalogueLoading = true;
@@ -10236,9 +10232,22 @@
   }
 
   function setCampaignChannel(channelId, { silent = false } = {}) {
-    updateCampaignChannelTrigger(channelId);
+    const previousPlatform = connectorPlatform(selectedCampaignChannel()?.connectorType);
+    const channel = updateCampaignChannelTrigger(channelId);
     closeCampaignChannelMenu();
-    if (!silent) renderCampaignMessageComposer();
+    if (!silent) {
+      const platform = connectorPlatform(channel?.connectorType);
+      if (platform !== previousPlatform) {
+        state.campaigns.selectedContactIds = new Set();
+        state.campaigns.audienceContactIds = new Set();
+        state.campaigns.contactPage = 1;
+      }
+      renderCampaignMultiFilters();
+      renderCampaignContactPicker();
+      renderCampaignSelectedContacts();
+      renderCampaignMessageComposer();
+      ensureCampaignContactCatalogue().catch(() => {});
+    }
   }
 
   function campaignChannelSearchHaystack(channel) {
@@ -10390,8 +10399,11 @@
   }
 
   function filteredCampaignContactRows() {
+    const platform = connectorPlatform(selectedCampaignChannel()?.connectorType);
+    if (!platform) return [];
     const selectedPlatforms = state.campaigns.contactFilters?.platforms || new Set();
-    let rows = filteredCampaignContacts().flatMap(campaignContactPlatformRows);
+    let rows = filteredCampaignContacts().flatMap(campaignContactPlatformRows)
+      .filter((row) => row.platform === platform && String(contactPlatformIds(row.contact)[platform] || "").trim());
     if (selectedPlatforms.size) {
       rows = rows.filter((row) => row.platform && selectedPlatforms.has(row.platform));
     }
@@ -10619,7 +10631,9 @@
     }
     if (table) table.classList.toggle("is-loading", loading);
     host.replaceChildren();
-    if (loading && !rows.length) {
+    if (!selectedCampaignChannel()) {
+      host.innerHTML = `<div class="campaign-empty-state">Select a channel to load contacts.</div>`;
+    } else if (loading && !rows.length) {
       host.innerHTML = `<div class="campaign-empty-state">Loading contacts…</div>`;
     } else if (state.campaigns.catalogueError && !rows.length) {
       host.innerHTML = `<div class="campaign-empty-state">${escapeHtml(state.campaigns.catalogueError)}</div>`;
