@@ -11599,7 +11599,6 @@
           language: { code: template.language?.code || template.language || "en" },
         };
         payload.variableMappings = variableMappings;
-        payload.previewText = template.name;
         if (mediaPreview) payload.mediaPreview = mediaPreview;
       } else {
         const text = $("campaignMessageText")?.value?.trim() || "";

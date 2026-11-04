@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import {
   applyTextVariables,
+  campaignTemplatePreview,
   buildTemplateComponentsFromMappings,
   campaignCountsFromRows,
   campaignFinalStatus,
@@ -72,4 +73,11 @@ test('campaigns migration creates campaign tables', async () => {
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name);
   assert.ok(tables.includes('campaigns'));
   assert.ok(tables.includes('campaign_recipients'));
+});
+
+test('campaign template previews defer to approved copy for new and legacy name-only previews', () => {
+  assert.equal(campaignTemplatePreview('', 'outstanding_reminder_amt'), '');
+  assert.equal(campaignTemplatePreview('outstanding_reminder_amt', 'outstanding_reminder_amt'), '');
+  assert.equal(campaignTemplatePreview('  outstanding_reminder_amt  ', 'outstanding_reminder_amt'), '');
+  assert.equal(campaignTemplatePreview('Hello Ada, your payment is due.', 'outstanding_reminder_amt'), 'Hello Ada, your payment is due.');
 });

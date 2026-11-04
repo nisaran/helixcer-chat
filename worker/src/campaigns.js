@@ -230,3 +230,10 @@ function safeJson(value, fallback) {
     return fallback;
   }
 }
+
+// An empty preview lets the template presentation renderer resolve approved copy
+// and recipient-specific component values instead of displaying the template name.
+export function campaignTemplatePreview(previewText, templateName) {
+  const preview = String(previewText || '').trim();
+  return preview === String(templateName || '').trim() ? '' : preview;
+}

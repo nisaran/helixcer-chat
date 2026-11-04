@@ -73,6 +73,7 @@ import {
   CAMPAIGN_MESSAGE_TYPES,
   MAX_CAMPAIGN_RECIPIENTS,
   applyTextVariables,
+  campaignTemplatePreview,
   buildTemplateComponentsFromMappings,
   campaignCountsFromRows,
   campaignFinalStatus,
@@ -7957,7 +7958,7 @@ async function processCampaign(env, workspaceId, campaignId, principal) {
           language: { code: campaign.templateLanguage },
           ...(components.length ? { components } : {})
         });
-        const previewText = previewTextBase || applyTextVariables(campaign.messageBody || campaign.templateName, textVariables, context);
+        const previewText = campaignTemplatePreview(previewTextBase, campaign.templateName);
         sendResult = await createConversationTemplateMessage(env, workspaceId, prepared.conversationId, {
           name: template.name,
           language: template.language,
