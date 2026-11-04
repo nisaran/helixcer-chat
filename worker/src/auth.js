@@ -1,4 +1,4 @@
-export const SESSION_COOKIE = '__Host-helixcer_session';
+﻿export const SESSION_COOKIE = '__Host-helixcer_session';
 export const OAUTH_COOKIE = '__Host-helixcer_oauth';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -803,6 +803,39 @@ export async function loginWithPassword(env, payload = {}) {
     .bind(user.user_id, new Date().toISOString()).run();
   await auditAuthAction(env, principal, 'login', 'session', session.sessionId, { authProvider: 'password' });
   return sessionResponse(session, principal);
+}
+
+/** Android email/password sign-in: same bearer mobile session as Google. */
+export async function createPasswordMobileSession(env, payload = {}) {
+  const email = normalizeEmail(payload.email);
+  const password = String(payload.password ?? '');
+  if (!email || !email.includes('@') || email.length > 254) throw authError(400, 'A valid email is required.');
+  if (!password) throw authError(400, 'Password is required.');
+  const deviceId = cleanMobileDeviceId(payload?.deviceId);
+  const deviceName = cleanDeviceName(payload?.deviceName);
+  const user = await env.DB.prepare(`SELECT user_id,email,password_hash FROM users WHERE lower(email)=?1`).bind(email).first();
+  if (!user?.password_hash) throw authError(401, 'Invalid email or password.');
+  const valid = await verifyPassword(password, user.password_hash);
+  if (!valid) throw authError(401, 'Invalid email or password.');
+  const principal = await activePrincipalForUser(env, user.user_id);
+  if (!principal) throw authError(403, 'Your account has not been invited to this workspace.');
+  const session = await createSession(env, principal, { sessionType: 'mobile', deviceId });
+  await env.DB.prepare('UPDATE users SET last_login_at=?2,updated_at=?2 WHERE user_id=?1')
+    .bind(user.user_id, new Date().toISOString()).run();
+  await auditAuthAction(env, principal, 'login', 'session', session.sessionId, {
+    authProvider: 'password_mobile',
+    client: 'android',
+    packageName: 'com.helixcer.chat',
+    deviceId,
+    ...(deviceName ? { deviceName } : {})
+  });
+  return {
+    ok: true,
+    token: session.token,
+    tokenType: 'Bearer',
+    expiresAt: session.expiresAt,
+    me: principalView(principal)
+  };
 }
 
 export async function requestPasswordReset(env, payload = {}) {
