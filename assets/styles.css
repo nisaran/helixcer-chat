@@ -2491,5 +2491,6 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-expand-col > button { display: block; width: 100%; margin: 0; }
 .campaign-expand-col > .campaign-full-details-button { margin-top: 8px; }
 
-.campaign-recipient-detail { max-width: 0; width: 70%; }
-.campaign-recipient-detail-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+.campaign-recipient-detail { width: 320px; max-width: 320px; }
+.campaign-recipient-detail-text { display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+.campaign-recipient-updated { white-space: nowrap; }
