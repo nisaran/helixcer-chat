@@ -2549,7 +2549,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-create-form { grid-template-columns: minmax(0,1.5fr) minmax(320px,1fr); gap: 20px; align-items: start; }
 #campaignSettingsSection { grid-column: 1; grid-row: 1; }
 #campaignAudienceSection { grid-column: 1; grid-row: 2; }
-#campaignMessageFieldset { grid-column: 2; grid-row: 1 / span 2; position: sticky; top: 18px; }
+#campaignMessageFieldset { grid-column: 2; grid-row: 1 / span 2; position: static; }
 .campaign-create-form .campaign-fieldset { border: 1px solid #e4e4ef; border-radius: 14px; background: white; padding: 22px 18px 18px; box-shadow: 0 3px 12px #24213e03; scroll-margin-top: 20px; }
 .campaign-create-form .campaign-fieldset legend { font-size: 14px; font-weight: 750; padding: 0 7px; color: #25243e; }
 .campaign-create-form .field-label { font-size: 11px; color: #4e526b; }
@@ -2617,3 +2617,34 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .campaign-create-form .campaign-fieldset { grid-template-columns: minmax(0,1fr); }
 .campaign-create-form .campaign-fieldset > * { min-width: 0; max-width: 100%; }
 #campaignContactsAudience, #campaignUploadAudience { min-width: 0; width: 100%; }
+/* Keep the review controls visible without floating content over them. */
+.campaigns-route.is-creating .campaigns-heading { display: none; }
+.campaigns-route.is-creating .campaign-create-panel > .campaign-panel-toolbar { padding: 0 0 12px; }
+.campaigns-route.is-creating .campaign-create-panel > .campaign-panel-toolbar strong { font-size: 23px; letter-spacing: -.5px; }
+.campaigns-route.is-creating .campaign-steps { margin: 0 0 16px; padding: 9px 14px; }
+.campaign-create-form { gap: 16px; isolation: isolate; padding-bottom: 4px; }
+.campaign-create-form .campaign-fieldset { padding: 16px 16px 14px; }
+.campaign-create-form .campaign-variable-row { grid-template-columns: minmax(0,1fr) minmax(0,1fr); padding: 10px; }
+.campaign-create-form .campaign-message-layout { gap: 14px; }
+.campaign-create-form .campaign-message-preview { padding: 12px; }
+.campaign-create-form .campaign-message-preview-phone { min-height: 110px; padding: 14px; }
+.campaign-create-actions { position: sticky; bottom: 0; z-index: 12; grid-row: 3; margin-top: 4px; box-shadow: 0 -8px 24px #2520390b; padding: 14px 18px; }
+.campaign-create-action-buttons { flex-wrap: nowrap; flex-shrink: 0; }
+.campaign-create-action-buttons button { min-height: 40px; white-space: nowrap; }
+.campaign-create-form .campaign-filter-toolbar { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; }
+.campaign-create-form .campaign-filter-grid { grid-template-columns: repeat(4,minmax(0,1fr)); }
+.campaign-create-form .campaign-filter-search { grid-column: 1 / -1; max-width: none; }
+.campaign-create-form .campaign-contact-table, .campaign-create-form .campaign-audience-table { min-height: 90px; }
+.campaign-create-form .campaign-contact-list, .campaign-create-form .campaign-audience-rows { max-height: 210px; }
+@media (max-width: 1100px) { .campaign-create-form .campaign-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 960px) { .campaign-create-actions { grid-row: auto; } }
+@media (max-width: 640px) {
+  .campaign-create-form .campaign-variable-row { grid-template-columns: 1fr; }
+  .campaign-create-actions { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; }
+  .campaign-create-action-buttons { justify-content: flex-end; }
+  .campaign-create-actions .subtle { font-size: 10px; }
+  .campaign-create-form .campaign-filter-toolbar { grid-template-columns: 1fr; }
+}
+.campaign-create-form .campaign-contact-head, .campaign-create-form .campaign-contact-item,
+.campaign-create-form .campaign-audience-head, .campaign-create-form .campaign-audience-row { min-width: 640px; }
+.campaign-create-form .campaign-contact-list, .campaign-create-form .campaign-audience-rows { min-width: 640px; overflow-x: hidden; }

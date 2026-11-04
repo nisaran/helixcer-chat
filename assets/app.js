@@ -9655,6 +9655,7 @@
 
   function showCampaignMode(mode) {
     state.campaigns.mode = mode === "create" ? "create" : "history";
+    $("campaignsRoute")?.classList.toggle("is-creating", state.campaigns.mode === "create");
     const history = $("campaignHistoryPanel");
     const create = $("campaignCreatePanel");
     const historyButton = $("campaignHistoryButton");
