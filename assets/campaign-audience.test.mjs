@@ -52,6 +52,15 @@ test("full campaign details show saved filters, escape content, and label legacy
   assert.ok(markup.includes("Original channel"));
   assert.ok(markup.includes("&lt;script&gt;"));
   assert.ok(!markup.includes("<script>"));
+  context.campaign = { variableMapping: { variableMappings: [{ id: "body_1", source: "contact.displayName" }], textVariables: [{ key: "company", value: "Acme" }], previewText: "Hello customer", mediaPreview: { filename: "notice.pdf" } } };
+  markup = vm.runInContext("campaignFullDetailsMarkup(campaign)", context);
+  assert.ok(markup.includes("body_1"));
+  assert.ok(markup.includes("Acme"));
+  assert.ok(markup.includes("Hello customer"));
+  assert.ok(markup.includes("notice.pdf"));
+  context.campaign = { variableMapping: [{ id: "legacy", value: "Legacy value" }] };
+  markup = vm.runInContext("campaignFullDetailsMarkup(campaign)", context);
+  assert.ok(markup.includes("Legacy value"));
   context.campaign = {};
   markup = vm.runInContext("campaignFullDetailsMarkup(campaign)", context);
   assert.ok(markup.includes("Not recorded for this campaign"));
