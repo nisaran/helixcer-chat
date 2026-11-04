@@ -2656,3 +2656,12 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .campaign-audience-column, #campaignMessageFieldset { grid-column: 1; grid-row: auto; }
   .campaign-create-actions { grid-row: auto; }
 }
+/* Separate flex sections: no shared grid rows or row-height redistribution. */
+.campaign-create-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; }
+.campaign-audience-column { flex: 1.5 1 0; display: flex; flex-direction: column; gap: 16px; min-width: 0; align-self: flex-start; }
+.campaign-message-column { flex: 1 1 0; min-width: 0; align-self: flex-start; }
+.campaign-message-column > #campaignMessageFieldset { width: 100%; min-width: 0; margin: 0; position: static; }
+.campaign-create-form > .campaign-create-actions { flex: 0 0 100%; width: 100%; box-sizing: border-box; }
+@media (max-width: 960px) {
+  .campaign-audience-column, .campaign-message-column { flex: 0 0 100%; width: 100%; }
+}

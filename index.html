@@ -615,7 +615,7 @@
             <button type="button" data-action="campaign-section" data-target="campaignReviewSection"><span>4</span> Review</button>
           </nav>
           <form class="campaign-create-form" id="campaignCreateForm" autocomplete="off">
-            <div class="campaign-audience-column">
+            <section class="campaign-audience-column" aria-label="Campaign settings and audience">
             <fieldset class="campaign-fieldset campaign-card" id="campaignSettingsSection">
               <legend>Campaign settings</legend>
               <div class="campaign-create-grid">
@@ -754,7 +754,8 @@
               </div>
             </fieldset>
 
-            </div>
+            </section>
+            <section class="campaign-message-column" aria-label="Campaign message and preview">
             <fieldset class="campaign-fieldset campaign-card" id="campaignMessageFieldset">
               <legend>Message</legend>
               <p class="campaign-message-empty" id="campaignMessageEmpty">Choose a sending channel to compose your message. WhatsApp channels use approved templates.</p>
@@ -794,6 +795,7 @@
               </div>
             </fieldset>
 
+            </section>
             <div class="campaign-create-actions" id="campaignReviewSection">
               <p class="subtle" id="campaignCreateHelp">Existing chats keep their open or closed status. New upload contacts stay closed in the inbox.</p>
               <div class="campaign-create-action-buttons">
