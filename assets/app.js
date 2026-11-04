@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261103-search-focus-matching-message";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261104-contacts-platforms-column";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -3625,9 +3625,15 @@
       const nameRow = element("span", "conversation-name-row");
       nameRow.append(element("strong", "", conversation.subject));
       if (conversation.priority === "high") nameRow.append(element("i", "priority-mark"));
-      copy.append(nameRow, element("span", "conversation-preview", conversationPreviewText(
+      const preview = element("span", "conversation-preview");
+      const previewConnector = conversationPreviewConnectorType(conversation);
+      if (previewConnector) {
+        preview.append(providerLogo(previewConnector, "conversation-preview-logo"));
+      }
+      preview.append(element("span", "conversation-preview-text", conversationPreviewText(
         conversation.lastMessage, conversation.lastMessageType, conversation,
       )));
+      copy.append(nameRow, preview);
 
       const side = element("span", "conversation-side");
       side.append(element("span", "conversation-time", relativeTime(conversation.lastMessageAt)));
@@ -4338,6 +4344,17 @@
     const generatedType = generatedMediaPreviewMatch(text);
     if (generatedType) return attachmentPreviewLabel(messageType || generatedType, { type: generatedType });
     return text || attachmentPreviewLabel(messageType);
+  }
+
+  function conversationPreviewConnectorType(conversation) {
+    if (!conversation) return "";
+    const route = defaultConversationRoute(conversation);
+    return String(
+      route?.connectorType
+      || conversation.connectorType
+      || channelFor(conversation.channelId)?.connectorType
+      || "",
+    );
   }
 
   function templateMessagePresentation(message, value) {
@@ -5602,7 +5619,7 @@
     if (pagination) pagination.hidden = false;
     const selectHeader = $("contactSelectHeader");
     if (selectHeader) selectHeader.hidden = !state.contactSelectMode;
-    const columnCount = state.contactSelectMode ? 6 : 5;
+    const columnCount = state.contactSelectMode ? 7 : 6;
     const tbody = $("contactTableBody");
     tbody.replaceChildren();
     renderContactBulkBar(contacts);
@@ -5654,15 +5671,28 @@
       }
       const identityCell = document.createElement("td");
       const identity = element("div", "contact-cell");
-      const count = contact.identities.length;
-      identity.append(
-        element("strong", "", contact.displayName),
-        element("span", "contact-count-copy", `${count} messaging ID${count === 1 ? "" : "s"}`),
-      );
+      identity.append(element("strong", "", contact.displayName));
       identityCell.append(identity);
       row.append(identityCell);
 
       row.append(tableCell(contact.company || "—"));
+
+      const platformsCell = document.createElement("td");
+      platformsCell.className = "contact-platforms-col";
+      const logos = element("span", "contact-platform-logos");
+      const platforms = [...new Set(
+        (contact.identities || [])
+          .map((item) => connectorPlatform(item.platform || item.connectorType))
+          .filter(Boolean),
+      )];
+      // Prefer messaging platforms; fall back to email if that is all they have.
+      const messagingPlatforms = platforms.filter((platform) => platform !== "email");
+      (messagingPlatforms.length ? messagingPlatforms : platforms).forEach((platform) => {
+        logos.append(providerLogo(platformConnectorType(platform), "contact-list-platform-logo"));
+      });
+      if (logos.childNodes.length) platformsCell.append(logos);
+      else platformsCell.textContent = "—";
+      row.append(platformsCell);
 
       const tagCell = document.createElement("td");
       const tagWrap = element("div", "tag-list");
