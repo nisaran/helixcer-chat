@@ -7809,7 +7809,7 @@
       button.setAttribute("aria-pressed", String(role.roleKey === state.roles.selectedKey));
       const icon = element("span", "role-list-icon", String(role.name || "R").slice(0,2).toUpperCase()); icon.setAttribute("aria-hidden", "true");
       const copy = element("span", "role-list-copy");
-      copy.append(element("strong", "", role.name),element("span", "role-list-description", role.description || "Workspace access and permissions"));
+      copy.append(element("strong", "", role.name));
       const meta = element("em", "role-list-meta");
       meta.append(element("span", "role-kind-badge" + (role.isSystem ? " is-system" : ""), role.isLocked ? "Locked" : role.isSystem ? "System" : "Custom"));
       meta.append(element("span", "role-member-count", (role.memberCount || 0) + " member" + (Number(role.memberCount || 0) === 1 ? "" : "s")));
