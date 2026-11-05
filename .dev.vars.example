@@ -5,6 +5,9 @@ GOOGLE_CLIENT_ID="your-google-oauth-client-id.apps.googleusercontent.com"
 GOOGLE_ANDROID_CLIENT_IDS="your-android-oauth-client-id.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET="your-google-oauth-client-secret"
 GOOGLE_REDIRECT_URI="http://localhost:8787/auth/google/callback"
+# Separate callback for Google Business / Reviews channel connect (same OAuth client).
+# Add this exact URI in Google Cloud Console → Credentials → Authorized redirect URIs.
+GOOGLE_BUSINESS_REDIRECT_URI="http://localhost:8787/auth/google-business/callback"
 BOOTSTRAP_OWNER_EMAIL="owner@example.com"
 ADMIN_TOKEN="generate-a-long-random-emergency-token"
 RECOVERY_MODE="false"

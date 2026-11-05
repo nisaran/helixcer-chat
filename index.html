@@ -1249,7 +1249,7 @@
       <input type="hidden" name="channelId" id="channelIdInput">
       <input type="hidden" name="metaVerifyToken" id="channelMetaVerifyToken">
       <div class="form-grid channel-form-grid">
-        <label class="field-label">Provider<select class="text-field" name="connectorType" id="channelProvider" required><option value="whatsapp_cloud">WhatsApp Cloud</option><option value="telegram">Telegram Bot</option><option value="instagram">Instagram</option><option value="facebook_messenger">Facebook Messenger</option></select></label>
+        <label class="field-label">Provider<select class="text-field" name="connectorType" id="channelProvider" required><option value="whatsapp_cloud">WhatsApp Cloud</option><option value="telegram">Telegram Bot</option><option value="instagram">Instagram</option><option value="facebook_messenger">Facebook Messenger</option><option value="google_reviews">Google Reviews</option></select></label>
         <label class="field-label">Connection name<input class="text-field" name="name" id="channelNameInput" required maxlength="80" placeholder="Sales WhatsApp"></label>
       </div>
 
@@ -1293,11 +1293,37 @@
         </div>
       </section>
 
+      <section class="provider-fields" data-provider-fields="google_reviews" hidden>
+        <div class="provider-form-head"><img class="provider-mark google" src="./assets/provider-google.svg" alt=""><div><strong>Google Reviews</strong><span>Connect a Google Business Profile location with Google sign-in. No API keys or tokens to paste.</span></div></div>
+        <div class="google-oauth-connect" id="googleReviewsConnectPanel">
+          <p class="field-help">Your client signs in with Google, chooses the business location, and Helixcer stores the connection securely.</p>
+          <button class="primary-button" type="button" id="googleReviewsConnectButton" data-action="connect-google-reviews">Connect with Google</button>
+          <p class="field-help" id="googleReviewsConnectedNote" hidden>This location is already linked. Connect with Google again only when you need to re-authorize the same location.</p>
+        </div>
+      </section>
+
       <label class="channel-enabled"><input type="checkbox" name="enabled" id="channelEnabledInput" checked><span><strong>Connection enabled</strong><small>Disabled channels keep their history but stop sending and receiving.</small></span></label>
       <div class="modal-actions">
         <button class="danger-button modal-danger-action" id="channelDeleteButton" type="button" data-action="delete-channel" hidden>Delete channel</button>
         <button class="secondary-button" type="button" data-action="close-channel-dialog">Cancel</button>
         <button class="primary-button" id="channelSubmit" type="submit">Save connection</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="googleReviewsLocationDialog" aria-labelledby="googleReviewsLocationDialogTitle">
+    <form class="modal-card" id="googleReviewsLocationForm" autocomplete="off">
+      <div class="modal-head">
+        <div><p class="eyebrow">Google Reviews</p><h2 id="googleReviewsLocationDialogTitle">Choose a business location</h2></div>
+        <button class="icon-button" type="button" data-action="close-google-reviews-location" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="modal-copy" id="googleReviewsLocationCopy">Pick the Google Business Profile location to connect. No API keys are required.</p>
+      <input type="hidden" name="pendingToken" id="googleReviewsPendingToken">
+      <label class="field-label">Connection name<input class="text-field" name="name" id="googleReviewsLocationName" required maxlength="80" placeholder="Store reviews"></label>
+      <div class="google-location-list" id="googleReviewsLocationList" role="listbox" aria-label="Google Business locations"></div>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-google-reviews-location">Cancel</button>
+        <button class="primary-button" id="googleReviewsLocationSubmit" type="submit" disabled>Connect location</button>
       </div>
     </form>
   </dialog>

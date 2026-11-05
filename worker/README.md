@@ -80,7 +80,9 @@ Create a Google Web OAuth client and register the exact callback configured by `
 https://api.chat.helixcer.com/auth/google/callback
 ```
 
-No Google refresh token is requested or stored; Google is used only to verify identity during sign-in. Callback failures clear stale OAuth state and return the browser to the configured app origin with a safe error code and message. If no app origin is configured, the Worker renders a small branded fallback page instead of exposing a raw exception.
+No Google refresh token is requested or stored for sign-in; Google is used only to verify identity during login. Callback failures clear stale OAuth state and return the browser to the configured app origin with a safe error code and message. If no app origin is configured, the Worker renders a small branded fallback page instead of exposing a raw exception.
+
+Google Reviews channel connect is a separate OAuth flow. Register an additional authorized redirect URI for `GOOGLE_BUSINESS_REDIRECT_URI` (default `/auth/google-business/callback`) on the same Web OAuth client, enable the Google Business Profile APIs (Account Management, Business Information, and My Business), and request the `https://www.googleapis.com/auth/business.manage` scope. Clients connect with Google sign-in and pick a Business location; Helixcer stores the refresh token in the encrypted channel credentials vault. No Place ID or API key is pasted by the client.
 
 ## Database and deployment
 
@@ -190,6 +192,10 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `PATCH|DELETE /api/channels/:channelId`
 - `POST /api/channels/:channelId/verify`
 - `GET /api/channels/:channelId/verify-token` (owner/admin; audited, no-store response)
+- `GET /api/channels/oauth/google-reviews/start` (owner/admin; redirects to Google Business OAuth)
+- `GET /auth/google-business/callback` (Google Business OAuth callback; not an `/api` route)
+- `GET /api/channels/oauth/google-reviews/pending`
+- `POST /api/channels/oauth/google-reviews/confirm`
 - `GET /api/conversations`
 - `POST /api/conversations` (opens or reuses one conversation for an exact contact identity and connected channel)
 - `PATCH /api/conversations/:id`
@@ -231,6 +237,7 @@ Provider payloads use these fields:
 
 - WhatsApp Cloud: `config` contains `wabaId`, `phoneNumberId`, and optional `apiVersion`; `credentials` contains `accessToken`, `appSecret`, and `verifyToken`. A valid Meta-signed webhook for the configured Phone Number ID is stored in the Inbox immediately, even before API/provider verification succeeds, and marks the connection as inbound-receiving. Provider verification remains a separate outbound-readiness step: it requires the configured Phone Number ID to belong to the WABA, then subscribes the app with `POST /{WABA_ID}/subscribed_apps`; it completes only when both operations succeed. The Meta dashboard callback and `messages` webhook field still need to be configured manually.
 - Telegram Bot: `config` is empty; `credentials` contains `botToken` and `webhookSecret`. Verification calls `getMe` and registers the channel-specific webhook with Telegram.
+- Google Reviews: `config` contains `accountId`, `locationId`, and display names. `credentials` contains OAuth `accessToken` and `refreshToken` saved only through Connect with Google. Verification refreshes the access token when needed and checks the Business Profile reviews endpoint. There is no webhook callback.
 - Instagram Messaging with Instagram Login: `config` contains `instagramAccountId` and may contain `username`, `appId`, `apiVersion`, and `authMode` (`instagram_login`); `credentials` contains `accessToken`, `appSecret`, and `verifyToken`. A Facebook Page ID is not required.
 - Facebook Messenger: `config` contains `pageId` and may contain `pageName`, `appId`, and `apiVersion`; `credentials` contains a Page `accessToken`, `appSecret`, and `verifyToken`. Rows are stored as `generic_http` in `connector_type` for the legacy CHECK constraint; runtime routing uses `provider_type='facebook_messenger'`. Contact identities map to the existing `facebook` platform (Page-scoped IDs).
 
