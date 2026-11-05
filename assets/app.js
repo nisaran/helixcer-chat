@@ -7798,21 +7798,31 @@
     if (!list || !matrix) return;
     $("rolesCount").textContent = `${state.roles.items.length} role${state.roles.items.length === 1 ? "" : "s"}`;
     list.replaceChildren();
-    state.roles.items.forEach((role) => {
-      const button = element("button", `role-list-item${role.roleKey === state.roles.selectedKey ? " is-active" : ""}`);
-      button.type = "button";
-      button.dataset.selectRole = role.roleKey;
-      button.setAttribute("role", "listitem");
-      button.append(
-        element("strong", "", role.name),
-        element("span", "", role.description || `${role.memberCount || 0} member${Number(role.memberCount || 0) === 1 ? "" : "s"}`)
-      );
-      if (role.isSystem) button.append(element("em", "", role.isLocked ? "System · locked" : "System"));
-      list.append(button);
+    const query = String($("roleListSearch")?.value || "").trim().toLocaleLowerCase();
+    const systemCount = state.roles.items.filter((role) => role.isSystem).length;
+    if ($("rolesTotalStat")) $("rolesTotalStat").textContent = state.roles.items.length;
+    if ($("rolesSystemStat")) $("rolesSystemStat").textContent = systemCount;
+    if ($("rolesCustomStat")) $("rolesCustomStat").textContent = state.roles.items.length - systemCount;
+    state.roles.items.filter((role) => [role.name,role.description,role.isSystem ? "system" : "custom"].join(" ").toLocaleLowerCase().includes(query)).forEach((role) => {
+      const button = element("button", "role-list-item" + (role.roleKey === state.roles.selectedKey ? " is-active" : ""));
+      button.type = "button"; button.dataset.selectRole = role.roleKey;
+      button.setAttribute("aria-pressed", String(role.roleKey === state.roles.selectedKey));
+      const icon = element("span", "role-list-icon", String(role.name || "R").slice(0,2).toUpperCase()); icon.setAttribute("aria-hidden", "true");
+      const copy = element("span", "role-list-copy");
+      copy.append(element("strong", "", role.name),element("span", "role-list-description", role.description || "Workspace access and permissions"));
+      const meta = element("em", "role-list-meta");
+      meta.append(element("span", "role-kind-badge" + (role.isSystem ? " is-system" : ""), role.isLocked ? "Locked" : role.isSystem ? "System" : "Custom"));
+      meta.append(element("span", "role-member-count", (role.memberCount || 0) + " member" + (Number(role.memberCount || 0) === 1 ? "" : "s")));
+      copy.append(meta); button.append(icon,copy);
+      const item = element("div", "role-list-entry"); item.setAttribute("role", "listitem"); item.append(button); list.append(item);
     });
+    if (!list.childElementCount) list.append(element("p", "roles-search-empty", state.roles.items.length ? "No roles match your search." : "No roles available."));
 
     const draft = state.roles.draft;
     const locked = Boolean(draft?.isLocked);
+    const badge = $("roleEditorBadge");
+    if (badge) {badge.hidden = !draft; badge.textContent = locked ? "Locked" : draft?.isSystem ? "System role" : "Custom role";}
+    updateRoleSaveState();
     $("roleEditorTitle").textContent = draft ? draft.name : "Select a role";
     $("roleEditorMeta").textContent = draft
       ? (locked ? "Owner access is always full and cannot be reduced." : "Adjust what this role can view, edit, and manage.")
@@ -7832,16 +7842,21 @@
     catalog.forEach((group) => {
       const section = element("section", "role-permission-group");
       const header = document.createElement("header");
-      header.append(element("strong", "", group.label), element("span", "", `${group.fields.length} setting${group.fields.length === 1 ? "" : "s"}`));
+      const title = element("div", "role-permission-group-title");
+      const icon = element("span", "role-section-icon", ({chats:"◌",contacts:"◎",campaigns:"↗",channels:"⊞",developer:"⌘",team:"♧",roles:"◇",workspace:"▣"}[group.key] || "◇")); icon.setAttribute("aria-hidden", "true");
+      title.append(icon, element("strong", "", group.label));
+      header.append(title, element("span", "role-settings-count", group.fields.length + " setting" + (group.fields.length === 1 ? "" : "s")));
       const rows = element("div", "role-permission-rows");
       group.fields.forEach((field) => {
         const row = element("div", "role-permission-row");
+        row.dataset.permissionSearch = (group.label + " " + field.label).toLocaleLowerCase();
         const label = document.createElement("label");
         label.append(element("strong", "", field.label));
         const controlWrap = element("div", "role-permission-control");
         const current = draft.permissions?.[group.key]?.[field.key];
         if (field.type === "scope") {
           const select = element("select", "compact-select");
+          select.setAttribute("aria-label", group.label + ": " + field.label);
           select.dataset.permissionGroup = group.key;
           select.dataset.permissionField = field.key;
           select.disabled = locked;
@@ -7860,6 +7875,7 @@
           input.type = "checkbox";
           input.checked = Boolean(current);
           input.disabled = locked;
+          input.setAttribute("aria-label", group.label + ": " + field.label);
           input.dataset.permissionGroup = group.key;
           input.dataset.permissionField = field.key;
           toggle.append(input, document.createElement("span"), Object.assign(document.createElement("em"), { textContent: "Allow" }));
@@ -7871,10 +7887,33 @@
       section.append(header, rows);
       matrix.append(section);
     });
+    applyRolePermissionSearch();
+  }
+
+  function updateRoleSaveState() {
+    const status = $("rolesSaveState");
+    if (!status) return;
+    status.textContent = state.roles.saving ? "Saving…" : state.roles.dirty ? "Unsaved changes" : "";
+    status.classList.toggle("is-dirty", state.roles.dirty);
+  }
+
+  function applyRolePermissionSearch() {
+    const query = String($("rolePermissionSearch")?.value || "").trim().toLocaleLowerCase();
+    let visible = 0;
+    document.querySelectorAll("#rolesPermissionMatrix .role-permission-group").forEach((group) => {
+      let count = 0;
+      group.querySelectorAll(".role-permission-row").forEach((row) => {
+        row.hidden = !String(row.dataset.permissionSearch || "").includes(query);
+        if (!row.hidden) count++;
+      });
+      group.hidden = count === 0; visible += count;
+    });
+    if ($("rolePermissionEmpty")) $("rolePermissionEmpty").hidden = !state.roles.draft || visible > 0;
   }
 
   function markRoleDraftDirty() {
     state.roles.dirty = true;
+    updateRoleSaveState();
     $("saveRoleButton").disabled = Boolean(state.roles.draft?.isLocked) || state.roles.saving;
   }
 
@@ -7894,6 +7933,7 @@
     const draft = state.roles.draft;
     if (!draft || draft.isLocked || state.roles.saving) return;
     state.roles.saving = true;
+    updateRoleSaveState();
     $("saveRoleButton").disabled = true;
     try {
       const result = await state.api.updateRole(draft.roleKey, {
@@ -7913,6 +7953,7 @@
       showToast("Role was not saved", error.message, true);
     } finally {
       state.roles.saving = false;
+      updateRoleSaveState();
       $("saveRoleButton").disabled = !state.roles.dirty || Boolean(state.roles.draft?.isLocked);
     }
   }
@@ -15017,6 +15058,8 @@
     $("inviteChannelOptions")?.addEventListener("change", (event) => {
       if (event.target?.matches?.('input[type="checkbox"]')) updateInviteSelectAllLabel();
     });
+    $("roleListSearch")?.addEventListener("input", renderRolesPage);
+    $("rolePermissionSearch")?.addEventListener("input", applyRolePermissionSearch);
     $("rolesList")?.addEventListener("click", (event) => {
       const button = event.target.closest("[data-select-role]");
       if (!button) return;

@@ -9,20 +9,20 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://api.chat.helixcer.com wss://api.chat.helixcer.com; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'">
   <meta name="helixcer-api-base" content="https://api.chat.helixcer.com">
   <title>Helixcer Chat</title>
-  <link rel="icon" href="./assets/helixcer-chat-32.png?v=20261105-pdf-preview" type="image/png">
-  <link rel="apple-touch-icon" href="./assets/helixcer-chat-180.png?v=20261105-pdf-preview">
-  <link rel="manifest" href="./manifest.webmanifest?v=20261105-pdf-preview">
+  <link rel="icon" href="./assets/helixcer-chat-32.png?v=20261105-roles-design" type="image/png">
+  <link rel="apple-touch-icon" href="./assets/helixcer-chat-180.png?v=20261105-roles-design">
+  <link rel="manifest" href="./manifest.webmanifest?v=20261105-roles-design">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261105-pdf-preview">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261105-roles-design">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261105-pdf-preview" defer></script>
+  <script src="./assets/app.js?v=20261105-roles-design" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
 
   <section class="session-splash" id="sessionSplash" role="status" aria-live="polite">
-    <img src="./assets/helixcer-chat-192.png?v=20261105-pdf-preview" alt="">
+    <img src="./assets/helixcer-chat-192.png?v=20261105-roles-design" alt="">
     <span class="auth-spinner" aria-hidden="true"></span>
     <span class="sr-only">Opening Helixcer Chat…</span>
   </section>
@@ -31,7 +31,7 @@
     <div class="auth-backdrop" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="auth-card">
       <div class="auth-brand">
-        <img class="auth-brand-logo" src="./assets/helixcer-chat-192.png?v=20261105-pdf-preview" alt="Helixcer">
+        <img class="auth-brand-logo" src="./assets/helixcer-chat-192.png?v=20261105-roles-design" alt="Helixcer">
         <span>Helixcer <strong>Chat</strong></span>
       </div>
       <div class="auth-signed-out" id="signedOutContent">
@@ -79,7 +79,7 @@
   <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar" aria-label="Primary navigation">
       <a class="brand" href="#inbox" aria-label="Helixcer Chat home">
-        <span class="brand-mark" aria-hidden="true"><img src="./assets/helixcer-chat-192.png?v=20261105-pdf-preview" alt=""></span>
+        <span class="brand-mark" aria-hidden="true"><img src="./assets/helixcer-chat-192.png?v=20261105-roles-design" alt=""></span>
         <span class="brand-copy">Helixcer <strong>Chat</strong></span>
       </a>
 
@@ -995,25 +995,32 @@
         </div>
       </section>
 
-      <section class="route content-route" id="rolesRoute" data-route-panel="roles" aria-labelledby="rolesTitle" hidden>
+      <section class="route content-route roles-route" id="rolesRoute" data-route-panel="roles" aria-labelledby="rolesTitle" hidden>
         <div class="route-heading">
-          <div><p class="eyebrow">Access control</p><h2 id="rolesTitle">User roles</h2><p>Define what Admins, Agents, and custom roles can view, edit, and manage.</p></div>
+          <div><p class="eyebrow">Access control</p><h2 id="rolesTitle">Roles &amp; permissions</h2><p>Give your team the right access to every part of your workspace.</p></div>
           <button class="primary-button" type="button" data-action="open-create-role"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create role</button>
+        </div>
+        <div class="roles-overview" aria-label="Role overview">
+          <div><span class="roles-stat-icon" aria-hidden="true">◇</span><span><strong id="rolesTotalStat">0</strong><small>Total roles</small></span></div>
+          <div><span class="roles-stat-icon is-system" aria-hidden="true">▣</span><span><strong id="rolesSystemStat">0</strong><small>System roles</small></span></div>
+          <div><span class="roles-stat-icon is-custom" aria-hidden="true">✦</span><span><strong id="rolesCustomStat">0</strong><small>Custom roles</small></span></div>
         </div>
         <div class="roles-layout">
           <aside class="surface roles-list-surface" aria-label="Roles">
             <div class="surface-toolbar">
-              <div><strong>Roles</strong><span class="subtle" id="rolesCount">0 roles</span></div>
+              <div><strong>Workspace roles</strong><span class="subtle" id="rolesCount">0 roles</span></div>
             </div>
+            <div class="roles-search"><label class="sr-only" for="roleListSearch">Search roles</label><input class="text-field" id="roleListSearch" type="search" placeholder="Search roles…" autocomplete="off"></div>
             <div class="roles-list" id="rolesList" role="list"></div>
           </aside>
           <section class="surface roles-editor-surface" aria-labelledby="roleEditorTitle">
             <div class="surface-toolbar roles-editor-toolbar">
               <div>
-                <strong id="roleEditorTitle">Select a role</strong>
+                <div class="role-editor-title-row"><strong id="roleEditorTitle">Select a role</strong><span class="role-kind-badge" id="roleEditorBadge" hidden></span></div>
                 <span class="subtle" id="roleEditorMeta">Choose a role to review or change its permissions.</span>
               </div>
               <div class="roles-editor-actions">
+                <span class="roles-save-state" id="rolesSaveState" role="status" aria-live="polite"></span>
                 <button class="danger-button compact-button" type="button" id="deleteRoleButton" data-action="delete-role" hidden>Delete</button>
                 <button class="primary-button compact-button" type="button" id="saveRoleButton" data-action="save-role" disabled>Save changes</button>
               </div>
@@ -1024,7 +1031,9 @@
                 <label class="field-label form-span"><span>Description <span class="field-optional">Optional</span></span><input class="text-field" id="roleDescriptionInput" name="description" maxlength="240" placeholder="What this role is for"></label>
               </div>
               <div class="role-locked-note" id="roleLockedNote" hidden>Owner permissions are fixed and always include full workspace access.</div>
+              <div class="roles-permissions-head"><div><h3>Permissions</h3><p>Control what this role can see and do.</p></div><label class="sr-only" for="rolePermissionSearch">Search permissions</label><input class="text-field" id="rolePermissionSearch" type="search" placeholder="Find a permission…" autocomplete="off"></div>
               <div class="roles-permission-matrix" id="rolesPermissionMatrix"></div>
+              <p class="roles-search-empty" id="rolePermissionEmpty" hidden>No permissions match your search.</p>
               <p class="roles-empty-hint" id="rolesEmptyHint">Select a role from the list to edit chats, contacts, developer access, and more.</p>
             </form>
           </section>
