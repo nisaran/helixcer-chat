@@ -11449,10 +11449,10 @@
   function fillTemplatePreviewText(text, values) {
     return String(text || "").replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, rawKey) => {
       const key = String(rawKey || "").trim();
-      if (Object.prototype.hasOwnProperty.call(values, key)) return values[key] || "";
+      if (Object.prototype.hasOwnProperty.call(values, key)) return String(values[key] ?? "").trim() ? String(values[key]) : match;
       const index = Number(key);
       if (Number.isInteger(index) && Object.prototype.hasOwnProperty.call(values, String(index))) {
-        return values[String(index)] || "";
+        return String(values[String(index)] ?? "").trim() ? String(values[String(index)]) : match;
       }
       return match;
     });
