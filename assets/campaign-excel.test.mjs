@@ -22,3 +22,12 @@ test('exports all recipients with full message and literal formula-like names',(
  const rows=context.campaignRecipientExportRows(data);assert.equal(rows.length,26);assert.equal(rows[25][4],'Full\nmessage 24');
  const sheet=XLSX.utils.aoa_to_sheet(rows);assert.equal(sheet.A2.t,'s');assert.equal(sheet.A2.f,undefined);assert.equal(sheet.B2.v,'001234');
 });
+
+test('Excel campaign import retains rows beyond the old 500-contact limit',async()=>{
+ const workbook=XLSX.utils.book_new();XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['Name','Phone'],...Array.from({length:1200},(_,i)=>['Contact '+i,'001'+i])]),'Contacts');
+ const bytes=XLSX.write(workbook,{type:'array',bookType:'xlsx'});let rows;
+ const context=vm.createContext({XLSX,applyCampaignCsvText:async text=>{rows=text.trim().split('\n');}});
+ const start=app.indexOf('  async function applyCampaignUploadFile('),end=app.indexOf('  async function applyCampaignCsvText(',start);vm.runInContext(app.slice(start,end),context);
+ await context.applyCampaignUploadFile({name:'large.xlsx',size:bytes.byteLength,arrayBuffer:async()=>bytes});
+ assert.equal(rows.length,1201);assert.match(rows[1200],/Contact 1199/);
+});

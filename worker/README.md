@@ -266,3 +266,11 @@ node --test worker/test/*.test.mjs
 ```
 
 The tests cover migrations and legacy-row backfill, Google RSA/JWK verification and key rotation, OAuth state/nonce/PKCE and abuse limits, configured-owner bootstrap, hashed sessions, one-time email-bound invitations, role boundaries, last-owner protection, exact origins, realtime session revalidation, workspace-scoped data, API-key lifecycle, template validation and encryption, approved-template pagination and sanitization, contact profile updates and identity conflicts, idempotent external sends, rate limits, fast Meta status webhooks, cross-key isolation, platform administrator authorization, client workspace creation and owner invitations, profile updates, member and invitation management, suspension enforcement, and slug-confirmed tenant deletion.
+
+## Continuous campaign delivery
+
+Campaigns have no fixed total recipient count. The browser uploads bounded, replay-safe chunks and explicitly finalizes the held upload before any sends begin. CSV and Excel imports retain all rows. Partially uploaded campaigns can be cancelled, but cannot be resumed to dispatch an incomplete audience.
+
+A per-campaign instance of the existing InboxHub Durable Object drives alarms. Each pass prepares a bounded work page with three tasks in flight, then immediately services its campaign outbox with three tasks in flight. The next alarm continues after one second or at the next retry time. Cron wakes registered unfinished jobs as recovery and handles ordinary inbox retries. Leases, deterministic message IDs, outbox claims, and Pause/Cancel checks remain in place. No legacy campaigns are registered or resumed by migration. Meta throughput, provider/account messaging limits, D1/Worker quotas, request size, and browser memory still apply.
+
+Apply migration 0026_campaign_upload_chunks.sql before deploying the Worker; then deploy the frontend. Processing batch size is independent of total audience size.

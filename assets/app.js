@@ -1689,10 +1689,32 @@
         : this.request(`/api/campaigns/${encodeURIComponent(campaignId)}`);
     }
 
-    createCampaign(payload) {
-      return this.isDemo
-        ? this.demo.createCampaign(payload)
-        : this.request("/api/campaigns", { method: "POST", body: JSON.stringify(payload) });
+    async createCampaign(payload, onProgress = () => {}) {
+      if (this.isDemo) return this.demo.createCampaign(payload);
+      const chunks = campaignRecipientChunks(payload.recipients);
+      let result = await this.request("/api/campaigns", {method:"POST",body:JSON.stringify({...payload,recipients:chunks[0],uploading:true})});
+      const campaignId = result.campaignId;
+      let uploaded = chunks[0].length; onProgress(uploaded,payload.recipients.length);
+      try {
+        for (let index=1; index<chunks.length; index++) {
+          result = await this.request('/api/campaigns/' + encodeURIComponent(campaignId) + '/recipients', {
+            method:"POST",body:JSON.stringify({chunkId:'recipients-'+index,recipients:chunks[index]})
+          });
+          uploaded += chunks[index].length; onProgress(uploaded,payload.recipients.length);
+        }
+      } catch (error) {
+        throw new Error('Campaign upload did not finish. It remains held and will not send. Cancel the incomplete campaign in history before trying again. ' + error.message);
+      }
+      // Finalization is idempotent. A lost response must not lead to starting a duplicate campaign.
+      for (let attempt=0; attempt<3; attempt++) {
+        try {
+          return await this.request('/api/campaigns/' + encodeURIComponent(campaignId) + '/recipients', {
+            method:"POST",body:JSON.stringify({chunkId:'finalize',recipients:[],finalize:true})
+          });
+        } catch (error) {
+          if (attempt===2) throw new Error('Campaign ' + campaignId + ' was uploaded, but start confirmation was lost. Check its status in history before creating another campaign. ' + error.message);
+        }
+      }
     }
 
     uploadCampaignTemplateMedia(formData) {
@@ -9906,7 +9928,7 @@
       let total = state.campaigns.catalogueExpectedTotal || Infinity;
       let requestLimit = CAMPAIGN_CATALOGUE_PAGE_SIZE;
       let stagnantPages = 0;
-      while (page <= 80) {
+      while (true) {
         let data;
         try {
           data = await state.api.listContacts({
@@ -11828,11 +11850,24 @@
     return { headers, records };
   }
 
+  function campaignRecipientChunks(recipients) {
+    if (!Array.isArray(recipients) || !recipients.length) throw new Error("Select at least one recipient.");
+    const chunks = []; let chunk = []; let bytes = 0;
+    for (const recipient of recipients) {
+      const size = new TextEncoder().encode(JSON.stringify(recipient)).length + 1;
+      if (size > 128 * 1024) throw new Error("One contact row is too large. Remove unused columns and try again.");
+      if (chunk.length && (chunk.length >= 50 || bytes + size > 128 * 1024)) { chunks.push(chunk); chunk = []; bytes = 0; }
+      chunk.push(recipient); bytes += size;
+    }
+    if (chunk.length) chunks.push(chunk);
+    return chunks;
+  }
+
   async function applyCampaignUploadFile(file) {
     if (file.size > 10 * 1024 * 1024) throw new Error("Choose a file smaller than 10 MB.");
     if (!/\.(csv|txt|xlsx|xls)$/i.test(file.name)) throw new Error("Choose a CSV, XLSX, or XLS file.");
     if (/\.(xlsx|xls)$/i.test(file.name)) {
-      const workbook = XLSX.read(await file.arrayBuffer(), {type:"array", sheetRows:501, cellFormula:false, cellHTML:false});
+      const workbook = XLSX.read(await file.arrayBuffer(), {type:"array", cellFormula:false, cellHTML:false});
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       if (!sheet || !sheet["!ref"]) throw new Error("The first worksheet is empty. Place contacts in the first worksheet.");
       await applyCampaignCsvText(XLSX.utils.sheet_to_csv(sheet, {blankrows:false}), file.name);
@@ -11845,7 +11880,7 @@
     const parsed = parseCampaignCsv(text);
     if (!parsed.headers.length) throw new Error("The CSV file has no header row.");
     state.campaigns.uploadHeaders = parsed.headers;
-    state.campaigns.uploadRows = parsed.records.slice(0, 500);
+    state.campaigns.uploadRows = parsed.records;
     const lower = Object.fromEntries(parsed.headers.map((header) => [header.toLocaleLowerCase(), header]));
     state.campaigns.fieldMapping = {
       displayName: lower.name || lower.display_name || lower.fullname || "",
@@ -12033,7 +12068,9 @@
         payload.textVariables = textVariables;
       }
 
-      const result = await state.api.createCampaign(payload);
+      const result = await state.api.createCampaign(payload, (uploaded,total) => {
+        if (submit) submit.textContent = `Uploading ${uploaded.toLocaleString()} / ${total.toLocaleString()}`;
+      });
       if (result?.item) upsertCampaignItem(result.item);
       showToast("Campaign queued", `${name} is sending. Delivery updates appear in history and the inbox.`);
       resetCampaignCreateForm();

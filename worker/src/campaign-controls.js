@@ -15,6 +15,10 @@ export async function applyCampaignActions(env, workspaceId, ids, action, princi
       .bind(workspaceId, id).first();
     if (!row) throw Object.assign(new Error('Campaign not found.'), { status: 404 });
     authorize(principal, row.channel_id);
+    if (action === 'resume') {
+      const job = await env.DB.prepare('SELECT state FROM campaign_jobs WHERE workspace_id=?1 AND campaign_id=?2').bind(workspaceId,id).first();
+      if (job?.state === 'uploading') throw Object.assign(new Error('This campaign upload is incomplete. Cancel it and upload again.'),{status:409});
+    }
     if (campaignActionEligible(action, row.status)) rows.push(row);
   }
   const now = new Date().toISOString();
@@ -34,7 +38,7 @@ export async function applyCampaignActions(env, workspaceId, ids, action, princi
         ON CONFLICT(campaign_id) DO UPDATE SET state='active',principal_json=excluded.principal_json`)
         .bind(workspaceId, id, snapshot, now));
     } else {
-      statements.push(env.DB.prepare('UPDATE campaign_jobs SET state=?3 WHERE workspace_id=?1 AND campaign_id=?2')
+      statements.push(env.DB.prepare("UPDATE campaign_jobs SET state=CASE WHEN state='uploading' AND ?3='paused' THEN 'uploading' ELSE ?3 END WHERE workspace_id=?1 AND campaign_id=?2")
         .bind(workspaceId, id, action === 'pause' ? 'paused' : 'done'));
     }
     if (action === 'cancel') {

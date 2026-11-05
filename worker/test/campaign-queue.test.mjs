@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { runCampaignConcurrent } from '../src/campaigns.js';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,9 +9,10 @@ const migration = await readFile(new URL('../migrations/0025_campaign_jobs.sql',
 function extract(name, next) { return source.slice(source.indexOf('async function '+name+'('), source.indexOf('async function '+next+'(')); }
 function setup() {
  const db = new DatabaseSync(':memory:');
+ let batchTail=Promise.resolve();
  db.exec("CREATE TABLE campaigns (campaign_id TEXT PRIMARY KEY,workspace_id TEXT,status TEXT); CREATE TABLE campaign_recipients (recipient_id TEXT PRIMARY KEY,campaign_id TEXT,workspace_id TEXT,status TEXT,message_id TEXT DEFAULT '',conversation_id TEXT DEFAULT '',updated_at TEXT); CREATE TABLE messages (message_id TEXT PRIMARY KEY,workspace_id TEXT,status TEXT); CREATE TABLE outbox (outbox_id TEXT PRIMARY KEY,message_id TEXT UNIQUE,attempts INTEGER,max_attempts INTEGER,next_attempt_at TEXT,status TEXT,last_error TEXT,created_at TEXT,updated_at TEXT,workspace_id TEXT);");
- const DB = { prepare(sql) { return { bind(...values) { return { async first() { return db.prepare(sql).get(...values); }, async all() { return {results:db.prepare(sql).all(...values)}; }, async run() { return {meta: { changes: db.prepare(sql).run(...values).changes }}; } }; } }; }, async batch(statements) { db.exec('BEGIN'); try { const result=[]; for(const s of statements) result.push(await s.run()); db.exec('COMMIT'); return result; } catch(e) { db.exec('ROLLBACK'); throw e; } } };
- const context=vm.createContext({ crypto, env:{DB}, Date, console:{error() {}}, safeJsonParse:(s,f)=>{try{return JSON.parse(s);}catch{return f;}}, cleanError:e=>e.message });
+ const DB = { prepare(sql) { return { bind(...values) { return { async first() { return db.prepare(sql).get(...values); }, async all() { return {results:db.prepare(sql).all(...values)}; }, async run() { return {meta: { changes: db.prepare(sql).run(...values).changes }}; } }; } }; }, async batch(statements) { const previous=batchTail; let release; batchTail=new Promise(resolve=>release=resolve); await previous; db.exec('BEGIN'); try { const result=[]; for(const s of statements) result.push(await s.run()); db.exec('COMMIT'); return result; } catch(e) { db.exec('ROLLBACK'); throw e; } finally { release(); } } };
+ const context=vm.createContext({ runCampaignConcurrent, crypto, env:{DB}, Date, console:{error() {}}, safeJsonParse:(s,f)=>{try{return JSON.parse(s);}catch{return f;}}, cleanError:e=>e.message });
  return {db, context};
 }
 function seed(h,id,count,job) {

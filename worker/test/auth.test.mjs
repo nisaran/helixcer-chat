@@ -145,6 +145,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0023_workspace_roles.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0024_password_auth.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0025_campaign_jobs.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0026_campaign_upload_chunks.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -1484,7 +1485,7 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
     assert.equal(conversation.subject, 'Asha');
     assert.equal(conversation.unread_count, 1);
     const message = database.prepare(`SELECT message_id,identity_id,direction,text,status,provider_message_id FROM messages
-      WHERE channel_id=?`).get(channelId);
+      WHERE channel_id=? AND direction='inbound'`).get(channelId);
     assert.ok(message.identity_id);
     assert.equal(message.direction, 'inbound');
     assert.equal(message.text, 'Hello Helixcer');
@@ -1549,8 +1550,8 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signed.signature }, body: signed.raw
     }), env);
     assert.equal((await replay.json()).received, 0);
-    assert.equal(broadcasts.filter(event => event.type === 'message.created').length, 1);
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 1);
+    assert.equal(broadcasts.filter(event => event.type === 'message.created' && event.message.direction === 'inbound').length, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE channel_id=? AND direction='inbound'").get(channelId).count, 1);
     assert.equal(database.prepare('SELECT unread_count FROM conversations WHERE conversation_id=?').get(conversation.conversation_id).unread_count, 1);
 
     database.prepare("UPDATE conversations SET status='closed',unread_count=0 WHERE conversation_id=?")
@@ -1588,7 +1589,7 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
       WHERE channel_id=?`).get(channelId) }, {
       conversation_id: conversation.conversation_id, status: 'open', unread_count: 1
     });
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 2);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE channel_id=? AND direction='inbound'").get(channelId).count, 2);
 
     const mismatched = structuredClone(payload);
     mismatched.entry[0].changes[0].value.metadata.phone_number_id = '999999999999999';
@@ -1597,7 +1598,7 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': mismatchedSigned.signature }, body: mismatchedSigned.raw
     }), env);
     assert.equal(rejected.status, 403);
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messages WHERE channel_id=?').get(channelId).count, 2);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE channel_id=? AND direction='inbound'").get(channelId).count, 2);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();
@@ -1943,7 +1944,7 @@ test('shared Instagram app webhook verifies all matches and routes each account 
     'the same Instagram-scoped id on two accounts must create separate contacts');
   assert.equal(scopedRoutes[0].display_name, 'Meera Iyer');
   assert.equal(scopedRoutes[1].display_name, 'Meera Iyer');
-  const createdEvents = broadcasts.filter(event => event.type === 'message.created');
+  const createdEvents = broadcasts.filter(event => event.type === 'message.created' && event.message.direction === 'inbound');
   assert.equal(createdEvents.length, 2);
   const firstCreated = createdEvents.find(event => event.message.channelMessageId === 'ig-app-message-one');
   const secondCreated = createdEvents.find(event => event.message.channelMessageId === 'ig-app-message-two');

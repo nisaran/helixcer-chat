@@ -8,7 +8,7 @@ export const CAMPAIGN_STATUSES = Object.freeze([
 export const CAMPAIGN_RECIPIENT_STATUSES = Object.freeze([
   'pending', 'queued', 'sent', 'delivered', 'read', 'failed'
 ]);
-export const MAX_CAMPAIGN_RECIPIENTS = 500;
+
 
 export const CAMPAIGN_CONTACT_FIELD_TARGETS = Object.freeze([
   { key: 'displayName', label: 'Name', required: false },
@@ -237,4 +237,17 @@ function safeJson(value, fallback) {
 export function campaignTemplatePreview(previewText, templateName) {
   const preview = String(previewText || '').trim();
   return preview === String(templateName || '').trim() ? '' : preview;
+}
+
+// Bound work in flight, never the number of recipients in a campaign.
+export async function runCampaignConcurrent(items, concurrency, task) {
+  let next = 0;
+  const errors = [];
+  await Promise.all(Array.from({length:Math.min(concurrency, items.length)}, async () => {
+    while (next < items.length) {
+      const item = items[next++];
+      try { await task(item); } catch (error) { errors.push(error); }
+    }
+  }));
+  if (errors.length) throw errors[0];
 }
