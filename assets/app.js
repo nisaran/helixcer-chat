@@ -20,6 +20,11 @@
     filters: new Set(["open"]),
     search: "",
     contactSearch: "",
+    contactListFilters: {companies: new Set(), tags: new Set(), platforms: new Set(), channels: new Set()},
+    contactListCatalogue: null,
+    contactListCatalogueApi: null,
+    contactListCatalogueAt: 0,
+    contactListCataloguePromise: null,
     conversationNextCursor: "",
     conversationsLoadingMore: false,
     conversationsSearching: false,
@@ -3289,6 +3294,7 @@
       renderAll();
       if (state.selectedConversationId) await selectConversation(state.selectedConversationId, { markRead: false, updateUrl: false });
       if (searchQuery) await refreshInboxCatalogue({ reset: true });
+      if (contactListFiltersActive()) { state.contactListCatalogueAt = 0; await loadContactsPage(1); }
     } catch (error) {
       state.conversations = [];
       applyConversationPageMeta("");
@@ -3350,7 +3356,7 @@
       const fetchedContacts = asItems(data.contacts).map(normalizeContact);
       const resolvedTotal = resolveContactTotal(data, fetchedContacts);
       // Contacts are page-backed; only replace rows when viewing page 1 with no search.
-      if (!state.contactSearch.trim() && state.contactPage <= 1 && !state.contactsLoadingMore) {
+      if (!contactListFiltersActive() && !state.contactSearch.trim() && state.contactPage <= 1 && !state.contactsLoadingMore) {
         state.contacts = fetchedContacts;
         applyContactPageMeta({
           nextCursor: data.contactNextCursor,
@@ -3358,10 +3364,10 @@
           page: data.contactPage || 1,
           pageSize: data.contactPageSize || CONTACT_PAGE_SIZE,
         });
-      } else if (Number.isFinite(Number(data.contactTotal))) {
+      } else if (!contactListFiltersActive() && Number.isFinite(Number(data.contactTotal))) {
         state.contactTotal = Math.max(0, Number(data.contactTotal));
       }
-      if (!state.contacts.length && !state.contactSearch.trim()) {
+      if (!contactListFiltersActive() && !state.contacts.length && !state.contactSearch.trim()) {
         state.contacts = deriveContacts(state.conversations);
       }
       const activeSelectedId = state.selectedConversationId;
@@ -5810,6 +5816,128 @@
     setContactSelectAll(!allSelected);
   }
 
+  function contactListFiltersActive() {
+    return Object.values(state.contactListFilters).some((values) => values.size);
+  }
+
+  async function ensureContactListCatalogue() {
+    const api = state.api;
+    if (state.contactListCatalogueApi === api && state.contactListCatalogue && Date.now() - state.contactListCatalogueAt < 5000) return state.contactListCatalogue;
+    if (state.contactListCatalogueApi === api && state.contactListCataloguePromise) return state.contactListCataloguePromise;
+    state.contactListCatalogueApi = api;
+    const pending = (async () => {
+      const contacts = new Map();
+      for (let page = 1; ; page++) {
+        const data = await api.listContacts({page, limit: 500, q: ""});
+        const items = asItems(data.items || data).map(normalizeContact);
+        const before = contacts.size;
+        items.forEach((contact) => contacts.set(contact.contactId, contact));
+        if (!items.length || contacts.size === before || contacts.size >= Number(data.total) || (!data.nextCursor && items.length < Number(data.pageSize || 500))) break;
+      }
+      const result = [...contacts.values()];
+      if (state.api === api) {
+        state.contactListCatalogue = result;
+        state.contactListCatalogueAt = Date.now();
+      }
+      return result;
+    })();
+    state.contactListCataloguePromise = pending;
+    try { return await pending; } finally {
+      if (state.contactListCataloguePromise === pending) state.contactListCataloguePromise = null;
+    }
+  }
+
+  function filteredContactCatalogue(pool, filters, query = "") {
+    const needle = String(query || "").trim().toLocaleLowerCase();
+    const selectedChannels = filters.channels || new Set();
+    const selectedPlatforms = filters.platforms || new Set();
+    const selectedCompanies = filters.companies || new Set();
+    const selectedTags = filters.tags || new Set();
+    return pool.filter((contact) => {
+      if (selectedChannels.size) {
+        const bound = new Set(contactBoundChannelIds(contact));
+        if (![...selectedChannels].some((channelId) => bound.has(channelId))) return false;
+      }
+      if (selectedPlatforms.size) {
+        const platforms = new Set(contactActivePlatforms(contact));
+        if (![...selectedPlatforms].some((platform) => platforms.has(platform))) return false;
+      }
+      if (selectedCompanies.size) {
+        if (!selectedCompanies.has(String(contact.company || "").trim())) return false;
+      }
+      if (selectedTags.size) {
+        const tags = new Set((contact.tags || []).map((tag) => String(tag || "").trim()));
+        if (![...selectedTags].some((tag) => tags.has(tag))) return false;
+      }
+      if (!needle) return true;
+      const ids = contactPlatformIds(contact);
+      const haystack = [
+        contact.displayName,
+        contact.company,
+        ...(contact.tags || []),
+        contact.channelProfileId,
+        contact.phone,
+        contact.email,
+        ...Object.values(ids),
+        ...contactBoundChannelIds(contact).map((channelId) => state.channels.find((channel) => channel.channelId === channelId)?.name || channelId),
+      ].join(" ").toLocaleLowerCase();
+      return haystack.includes(needle);
+    });
+  }
+
+  function renderContactListFilterOptions(host) {
+    const key = host.dataset.contactListFilter;
+    const pool = state.contactListCatalogueApi === state.api ? state.contactListCatalogue || state.contacts : state.contacts;
+    let options;
+    if (key === "channels") options = state.channels.map((channel) => ({value:channel.channelId,label:[channel.name,campaignChannelIdentifier(channel)].filter(Boolean).join(" · ")}));
+    else if (key === "platforms") options = Object.entries(identityPlatforms).map(([value, platform]) => ({value,label:platform.label}));
+    else options = [...new Set(pool.flatMap((contact) => key === "tags" ? contact.tags || [] : [contact.company]).map((value) => String(value || "").trim()).filter(Boolean))].map((value) => ({value,label:value}));
+    const selected = state.contactListFilters[key];
+    selected.forEach((value) => { if (!options.some((item) => item.value === value)) options.push({value,label:value}); });
+    const query = host.querySelector("input[type=search]").value.trim().toLocaleLowerCase();
+    const list = host.querySelector(".contact-filter-options");
+    list.replaceChildren();
+    options.sort((a,b) => a.label.localeCompare(b.label)).filter((item) => item.label.toLocaleLowerCase().includes(query)).forEach((item) => {
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.value = item.value; checkbox.checked = selected.has(item.value);
+      const text = document.createElement("span"); text.textContent = item.label;
+      label.append(checkbox,text); list.append(label);
+    });
+    if (!list.childElementCount) list.textContent = "No matching options";
+    host.querySelector("summary span").textContent = selected.size ? selected.size + " selected" : "Any " + ({companies:"company",tags:"tag",platforms:"platform",channels:"channel"}[key]);
+  }
+
+  function bindContactListFilters() {
+    document.querySelectorAll("[data-contact-list-filter]").forEach((host) => {
+      host.addEventListener("toggle", async () => {
+        if (!host.open) return;
+        document.querySelectorAll("[data-contact-list-filter]").forEach((other) => { if(other !== host) other.open = false; });
+        renderContactListFilterOptions(host);
+        try { await ensureContactListCatalogue(); renderContactListFilterOptions(host); }
+        catch (error) { host.querySelector(".contact-filter-options").textContent = "Could not load options. Close and reopen to retry."; }
+      });
+      host.querySelector("input[type=search]").addEventListener("input", () => renderContactListFilterOptions(host));
+      host.addEventListener("change", (event) => {
+        if (event.target.type !== "checkbox") return;
+        const selected = state.contactListFilters[host.dataset.contactListFilter];
+        if(event.target.checked) selected.add(event.target.value); else selected.delete(event.target.value);
+        renderContactListFilterOptions(host);
+        state.selectedContactIds.clear(); loadContactsPage(1, {keepSelection:false});
+      });
+    });
+    $("contactClearFilters").addEventListener("click", () => {
+      Object.values(state.contactListFilters).forEach((selected) => selected.clear());
+      document.querySelectorAll("[data-contact-list-filter]").forEach((host) => { host.querySelector("input[type=search]").value = ""; host.open = false; renderContactListFilterOptions(host); });
+      state.selectedContactIds.clear(); loadContactsPage(1, {keepSelection:false});
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-contact-list-filter]")) document.querySelectorAll("[data-contact-list-filter]").forEach((host) => {host.open = false;});
+    });
+    document.addEventListener("keydown", (event) => {
+      if(event.key === "Escape") document.querySelectorAll("[data-contact-list-filter][open]").forEach((host) => {host.open = false; host.querySelector("summary").focus();});
+    });
+  }
+
   async function loadContactsPage(page = 1, { keepSelection = true } = {}) {
     if (!state.api) return;
     const requestId = ++state.contactSearchRequestId;
@@ -5820,11 +5948,17 @@
     state.contactPage = safePage;
     renderContacts();
     try {
-      const data = await state.api.listContacts({
-        page: safePage,
-        limit: CONTACT_PAGE_SIZE,
-        q,
-      });
+      let data;
+      if (contactListFiltersActive()) {
+        const pool = await ensureContactListCatalogue();
+        if (requestId !== state.contactSearchRequestId) return;
+        const filtered = filteredContactCatalogue(pool, state.contactListFilters, q);
+        const currentPage = Math.min(safePage, Math.max(1, Math.ceil(filtered.length / CONTACT_PAGE_SIZE)));
+        state.contactPage = currentPage;
+        data = {items:filtered.slice((currentPage-1)*CONTACT_PAGE_SIZE,currentPage*CONTACT_PAGE_SIZE),total:filtered.length,page:currentPage,pageSize:CONTACT_PAGE_SIZE,nextCursor:""};
+      } else {
+        data = await state.api.listContacts({page:safePage,limit:CONTACT_PAGE_SIZE,q});
+      }
       if (requestId !== state.contactSearchRequestId) return;
       const fetched = asItems(data.items || data).map(normalizeContact);
       state.contacts = fetched;
@@ -9620,7 +9754,7 @@
     if (route === "campaigns") renderCampaignsPage();
     if (route === "roles") loadRoles().catch(() => {});
     if (route === "contacts") {
-      const hasFreshPage = !state.contactSearch.trim()
+      const hasFreshPage = !contactListFiltersActive() && !state.contactSearch.trim()
         && state.contactPage === 1
         && state.contacts.length
         && Number(state.contactTotal) > 0
@@ -14209,6 +14343,7 @@
       }, 250);
     });
     let contactSearchTimer = 0;
+    bindContactListFilters();
     $("contactSearch").addEventListener("input", (event) => {
       state.contactSearch = event.target.value;
       window.clearTimeout(contactSearchTimer);
