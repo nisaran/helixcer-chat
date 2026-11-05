@@ -5889,7 +5889,7 @@
     const key = host.dataset.contactListFilter;
     const pool = state.contactListCatalogueApi === state.api ? state.contactListCatalogue || state.contacts : state.contacts;
     let options;
-    if (key === "channels") options = state.channels.map((channel) => ({value:channel.channelId,label:[channel.name,campaignChannelIdentifier(channel)].filter(Boolean).join(" · ")}));
+    if (key === "channels") options = state.channels.map((channel) => ({value:channel.channelId,connectorType:channel.connectorType,label:[channel.name,campaignChannelIdentifier(channel)].filter(Boolean).join(" · ")}));
     else if (key === "platforms") options = Object.entries(identityPlatforms).map(([value, platform]) => ({value,label:platform.label}));
     else options = [...new Set(pool.flatMap((contact) => key === "tags" ? contact.tags || [] : [contact.company]).map((value) => String(value || "").trim()).filter(Boolean))].map((value) => ({value,label:value}));
     const selected = state.contactListFilters[key];
@@ -5901,7 +5901,9 @@
       const label = document.createElement("label");
       const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.value = item.value; checkbox.checked = selected.has(item.value);
       const text = document.createElement("span"); text.textContent = item.label;
-      label.append(checkbox,text); list.append(label);
+      label.append(checkbox);
+      if (key === "channels") label.append(providerLogo(item.connectorType, "contact-filter-channel-logo"));
+      label.append(text); list.append(label);
     });
     if (!list.childElementCount) list.textContent = "No matching options";
     host.querySelector("summary span").textContent = selected.size ? selected.size + " selected" : "Any " + ({companies:"company",tags:"tag",platforms:"platform",channels:"channel"}[key]);

@@ -623,7 +623,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261105-contact-filters/);
+  assert.match(html, /app\.js\?v=20261105-contact-channel-logos/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -993,8 +993,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261105-contact-filters/);
-  assert.match(html, /assets\/styles\.css\?v=20261105-contact-filters/);
+  assert.match(html, /assets\/app\.js\?v=20261105-contact-channel-logos/);
+  assert.match(html, /assets\/styles\.css\?v=20261105-contact-channel-logos/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -1208,9 +1208,9 @@ test("direct chat URLs show only the visited conversation with filters cleared",
 });
 
 test("Helixcer mark brands the login, sidebar, and favicon", () => {
-  assert.match(html, /rel="icon" href="\.\/assets\/helixcer-chat-32\.png\?v=20261105-contact-filters"/);
-  assert.match(html, /class="auth-brand-logo" src="\.\/assets\/helixcer-chat-192\.png\?v=20261105-contact-filters" alt="Helixcer"/);
-  assert.match(html, /class="brand-mark"[^>]*>[\s\S]*?src="\.\/assets\/helixcer-chat-192\.png\?v=20261105-contact-filters"/);
+  assert.match(html, /rel="icon" href="\.\/assets\/helixcer-chat-32\.png\?v=20261105-contact-channel-logos"/);
+  assert.match(html, /class="auth-brand-logo" src="\.\/assets\/helixcer-chat-192\.png\?v=20261105-contact-channel-logos" alt="Helixcer"/);
+  assert.match(html, /class="brand-mark"[^>]*>[\s\S]*?src="\.\/assets\/helixcer-chat-192\.png\?v=20261105-contact-channel-logos"/);
 });
 
 test("Developer API keys are managed by admins and shown only once", () => {

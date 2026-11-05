@@ -2711,3 +2711,5 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .contact-filter-options label:hover { background:#f4f0ff; }
 .contact-filter-options input { flex-shrink:0; accent-color:#713aff; }
 .contact-list-surface:has(.contact-list-filter[open]) { overflow:visible; }
+
+.contact-filter-channel-logo { display: inline-block; width: 18px; height: 18px; flex: 0 0 18px; object-fit: contain; }
