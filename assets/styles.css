@@ -2719,3 +2719,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .company-picker-options button { display:block; width:100%; padding:10px; border:0; border-radius:6px; background:white; color:var(--ink); font:inherit; text-align:left; cursor:pointer; overflow-wrap:anywhere; }
 .company-picker-options button:hover, .company-picker-options button[aria-selected="true"] { background:#f1ebff; color:#6132cf; }
 .company-picker-options p { margin:8px; font-size:12px; color:#64748b; }
+
+#contactForm .field-label, #contactEditForm .field-label { align-content: start; }
+#contactForm input[name="displayName"], #contactEditName, #contactCreateCompany, #contactEditCompany { height: 46px; min-height: 46px; box-sizing: border-box; margin-top: 0; }
+.company-picker-options { padding:4px; border-radius:6px; box-shadow:0 3px 10px #21164114; max-height:180px; }
+.company-picker-options button { padding:7px 10px; font-size:12px; font-weight:400; }

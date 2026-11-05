@@ -6471,36 +6471,39 @@
     if (!input) return;
     const menu = $(input.getAttribute("aria-controls"));
     let activeIndex = -1;
-    const close = () => { menu.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); activeIndex = -1; };
+    let suggestionRevision = 0;
+    const close = () => { suggestionRevision++; menu.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); activeIndex = -1; };
     const choose = (name) => { input.value = name; close(); input.dispatchEvent(new Event("change", {bubbles:true})); };
     const render = () => {
       menu.replaceChildren(); activeIndex = -1; input.removeAttribute("aria-activedescendant");
-      const names = contactCompanySuggestions(input.value);
       const draft = input.value.trim();
-      const options = names.map((name) => ({name,label:name}));
-      if (draft && !contactCompanySuggestions().some((name) => name.toLocaleLowerCase() === draft.toLocaleLowerCase())) options.push({name:draft,label:'Add "' + draft + '" as a new company'});
+      if (!draft) { close(); return; }
+      const options = contactCompanySuggestions(draft).map((name) => ({name,label:name}));
+      if (!options.length) { close(); return; }
       options.forEach((option,index) => {
         const button = document.createElement("button"); button.type = "button"; button.role = "option"; button.id = input.id + "Option" + index; button.tabIndex = -1;
         button.textContent = option.label; button.setAttribute("aria-selected", "false");
         button.addEventListener("mousedown", (event) => event.preventDefault());
         button.addEventListener("click", () => choose(option.name)); menu.append(button);
       });
-      if (!options.length) { const hint = document.createElement("p"); hint.textContent = "Type a company name to add it."; menu.append(hint); }
       menu.hidden = false; input.setAttribute("aria-expanded", "true");
     };
-    const open = async () => {
+    input.addEventListener("focus", () => {
+      close();
+      ensureContactListCatalogue().catch(() => {});
+    });
+    input.addEventListener("input", async () => {
       render();
-      try { await ensureContactListCatalogue(); if (document.activeElement === input && input.getAttribute("aria-expanded") === "true") render(); }
-      catch { if (!menu.querySelector("button")) { const hint = document.createElement("p"); hint.textContent = "Company list unavailable. You can still enter a company name."; menu.append(hint); } }
-    };
-    input.addEventListener("focus", open); input.addEventListener("click", () => { if(menu.hidden) open(); });
-    input.addEventListener("input", render);
+      const revision = ++suggestionRevision;
+      try { await ensureContactListCatalogue(); if (document.activeElement === input && revision === suggestionRevision) render(); } catch {}
+    });
     input.addEventListener("blur", () => { input.value = canonicalContactCompany(input.value); close(); });
     input.addEventListener("keydown", (event) => {
       const buttons = [...menu.querySelectorAll("button")];
       if (event.key === "Escape") {event.preventDefault(); event.stopPropagation(); close();}
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        event.preventDefault(); if(menu.hidden) render();
+        if (menu.hidden) return;
+        event.preventDefault();
         const options = [...menu.querySelectorAll("button")]; if(!options.length) return;
         activeIndex = (activeIndex + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
         options.forEach((button,index) => button.setAttribute("aria-selected", String(index === activeIndex)));
