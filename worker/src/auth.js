@@ -995,15 +995,23 @@ async function createUserFromInvitation(env, {
       now
     });
   } catch (error) {
-    await env.DB.prepare('DELETE FROM users WHERE user_id=?1 AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=?1)')
-      .bind(userId).run();
+    try {
+      await env.DB.prepare('DELETE FROM users WHERE user_id=?1 AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=?1)')
+        .bind(userId).run();
+    } catch (cleanupError) {
+      console.error('invite_user_cleanup_failed', {
+        message: cleanupError?.message || 'Unknown cleanup failure',
+        userId
+      });
+    }
     throw error;
   }
   return { userId };
 }
 
 async function acceptPendingInvitation(env, { invitationId, invitationTokenHash, email, userId, now }) {
-  const [membershipResult, invitationResult] = await env.DB.batch([
+  const normalizedEmail = normalizeEmail(email);
+  await env.DB.batch([
     env.DB.prepare(`INSERT INTO memberships
         (membership_id,workspace_id,user_id,role,status,invited_by_user_id,created_at,updated_at,allowed_channel_ids_json)
       SELECT ?1,i.workspace_id,?2,i.role,'active',i.invited_by_user_id,?3,?3,i.allowed_channel_ids_json
@@ -1013,15 +1021,22 @@ async function acceptPendingInvitation(env, { invitationId, invitationTokenHash,
       ON CONFLICT(workspace_id,user_id) DO UPDATE SET role=excluded.role,status='active',
         invited_by_user_id=excluded.invited_by_user_id,updated_at=excluded.updated_at,
         allowed_channel_ids_json=excluded.allowed_channel_ids_json`)
-      .bind(crypto.randomUUID(), userId, now, invitationId, invitationTokenHash, normalizeEmail(email)),
+      .bind(crypto.randomUUID(), userId, now, invitationId, invitationTokenHash, normalizedEmail),
     env.DB.prepare(`UPDATE invitations SET status='accepted',accepted_at=?4,updated_at=?4
       WHERE invitation_id=?1 AND token_hash=?2 AND lower(email)=?3
         AND status='pending' AND expires_at>?4`)
-      .bind(invitationId, invitationTokenHash, normalizeEmail(email), now)
+      .bind(invitationId, invitationTokenHash, normalizedEmail, now)
   ]);
-  if (!membershipResult?.meta?.changes || !invitationResult?.meta?.changes) {
-    throw authError(403, 'This invitation is invalid or expired.');
-  }
+  // D1 batch meta.changes is not always reliable for INSERT…SELECT / ON CONFLICT.
+  // Confirm acceptance by reading the resulting rows instead of trusting write meta.
+  const accepted = await env.DB.prepare(`SELECT workspace_id FROM invitations
+    WHERE invitation_id=?1 AND token_hash=?2 AND lower(email)=?3 AND status='accepted'`)
+    .bind(invitationId, invitationTokenHash, normalizedEmail).first();
+  if (!accepted) throw authError(403, 'This invitation is invalid or expired.');
+  const membership = await env.DB.prepare(`SELECT membership_id FROM memberships
+    WHERE workspace_id=?1 AND user_id=?2 AND status='active'`)
+    .bind(accepted.workspace_id, userId).first();
+  if (!membership) throw authError(403, 'This invitation is invalid or expired.');
 }
 
 async function activePrincipalForUser(env, userId, preferredWorkspaceId = '') {
