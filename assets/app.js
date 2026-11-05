@@ -6451,6 +6451,65 @@
     return true;
   }
 
+  function contactCompanySuggestions(query = "") {
+    const pool = state.contactListCatalogueApi === state.api ? state.contactListCatalogue || state.contacts : state.contacts;
+    const unique = new Map();
+    pool.forEach((contact) => {
+      const company = String(contact.company || "").trim();
+      if (company && !unique.has(company.toLocaleLowerCase())) unique.set(company.toLocaleLowerCase(), company);
+    });
+    const needle = String(query).trim().toLocaleLowerCase();
+    return [...unique.values()].filter((company) => company.toLocaleLowerCase().includes(needle)).sort((a,b) => a.localeCompare(b));
+  }
+
+  function canonicalContactCompany(value) {
+    const name = String(value || "").trim();
+    return contactCompanySuggestions().find((company) => company.toLocaleLowerCase() === name.toLocaleLowerCase()) || name;
+  }
+
+  function bindCompanyPicker(input) {
+    if (!input) return;
+    const menu = $(input.getAttribute("aria-controls"));
+    let activeIndex = -1;
+    const close = () => { menu.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); activeIndex = -1; };
+    const choose = (name) => { input.value = name; close(); input.dispatchEvent(new Event("change", {bubbles:true})); };
+    const render = () => {
+      menu.replaceChildren(); activeIndex = -1; input.removeAttribute("aria-activedescendant");
+      const names = contactCompanySuggestions(input.value);
+      const draft = input.value.trim();
+      const options = names.map((name) => ({name,label:name}));
+      if (draft && !contactCompanySuggestions().some((name) => name.toLocaleLowerCase() === draft.toLocaleLowerCase())) options.push({name:draft,label:'Add "' + draft + '" as a new company'});
+      options.forEach((option,index) => {
+        const button = document.createElement("button"); button.type = "button"; button.role = "option"; button.id = input.id + "Option" + index; button.tabIndex = -1;
+        button.textContent = option.label; button.setAttribute("aria-selected", "false");
+        button.addEventListener("mousedown", (event) => event.preventDefault());
+        button.addEventListener("click", () => choose(option.name)); menu.append(button);
+      });
+      if (!options.length) { const hint = document.createElement("p"); hint.textContent = "Type a company name to add it."; menu.append(hint); }
+      menu.hidden = false; input.setAttribute("aria-expanded", "true");
+    };
+    const open = async () => {
+      render();
+      try { await ensureContactListCatalogue(); if (document.activeElement === input && input.getAttribute("aria-expanded") === "true") render(); }
+      catch { if (!menu.querySelector("button")) { const hint = document.createElement("p"); hint.textContent = "Company list unavailable. You can still enter a company name."; menu.append(hint); } }
+    };
+    input.addEventListener("focus", open); input.addEventListener("click", () => { if(menu.hidden) open(); });
+    input.addEventListener("input", render);
+    input.addEventListener("blur", () => { input.value = canonicalContactCompany(input.value); close(); });
+    input.addEventListener("keydown", (event) => {
+      const buttons = [...menu.querySelectorAll("button")];
+      if (event.key === "Escape") {event.preventDefault(); event.stopPropagation(); close();}
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault(); if(menu.hidden) render();
+        const options = [...menu.querySelectorAll("button")]; if(!options.length) return;
+        activeIndex = (activeIndex + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+        options.forEach((button,index) => button.setAttribute("aria-selected", String(index === activeIndex)));
+        input.setAttribute("aria-activedescendant", options[activeIndex].id); options[activeIndex].scrollIntoView({block:"nearest"});
+      }
+      if (event.key === "Enter" && !menu.hidden) {event.preventDefault(); if(buttons[activeIndex]) buttons[activeIndex].click(); else choose(canonicalContactCompany(input.value));}
+    });
+  }
+
   function bindTagInput(root) {
     if (!root || root.dataset.bound === "true") return;
     root.dataset.bound = "true";
@@ -6643,7 +6702,7 @@
     commitTagInputDraft(editTagInput);
     const payload = {
       displayName: String(data.get("displayName") || "").trim(),
-      company: String(data.get("company") || "").trim(),
+      company: canonicalContactCompany(data.get("company")),
       tags: readTagInputValues(editTagInput),
     };
     if (!contactId || !payload.displayName) {
@@ -13178,7 +13237,7 @@
     commitTagInputDraft(createTagInput);
     const payload = {
       displayName: String(formData.get("displayName") || "").trim(),
-      company: String(formData.get("company") || "").trim(),
+      company: canonicalContactCompany(formData.get("company")),
       tags: readTagInputValues(createTagInput),
       platformIds,
     };
@@ -14828,6 +14887,8 @@
         document.querySelectorAll("[data-tag-input]").forEach((root) => setTagInputMenuOpen(root, false));
       }
     });
+    bindCompanyPicker($("contactEditCompany"));
+    bindCompanyPicker($("contactCreateCompany"));
     bindTagInput(tagInputRoot("edit"));
     bindTagInput(tagInputRoot("create"));
     renderTagInput(tagInputRoot("edit"), []);
