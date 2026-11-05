@@ -4276,7 +4276,14 @@
       card.append(mediaLoadingIndicator(awaitingPreview ? "Media is uploading" : "Loading media"));
     }
     const info = element("div", "message-attachment-info");
-    info.append(element("strong", "", filename));
+    const filenameLabel = element("strong", "", filename);
+    if (url && isPdfAttachment(attachment)) {
+      filenameLabel.classList.add("message-pdf-open"); filenameLabel.tabIndex = 0; filenameLabel.setAttribute("role", "button");
+      filenameLabel.setAttribute("aria-label", "Preview " + filename);
+      filenameLabel.addEventListener("click", () => openAttachmentPreview(message.messageId));
+      filenameLabel.addEventListener("keydown", (event) => { if(event.key === "Enter" || event.key === " ") {event.preventDefault();openAttachmentPreview(message.messageId);} });
+    }
+    info.append(filenameLabel);
     info.append(element("span", "", [attachment.mimeType, attachment.size ? formatFileSize(attachment.size) : ""].filter(Boolean).join(" · ") || capitalize(type)));
     if (url) {
       const actions = element("div", "message-attachment-actions");
@@ -4854,6 +4861,53 @@
     setTimeout(() => row.classList.remove("is-located"), 1400);
   }
 
+  let attachmentPdfRequest = 0;
+  let attachmentPdfAbort = null;
+  let attachmentPdfObjectUrl = "";
+
+  function isPdfAttachment(attachment = {}) {
+    return String(attachment.mimeType || "").toLowerCase().split(";", 1)[0].trim() === "application/pdf"
+      || /\.pdf$/i.test(String(attachment.filename || "").trim());
+  }
+
+  function cleanupAttachmentPdfPreview() {
+    attachmentPdfRequest++;
+    attachmentPdfAbort?.abort(); attachmentPdfAbort = null;
+    if (attachmentPdfObjectUrl) URL.revokeObjectURL(attachmentPdfObjectUrl);
+    attachmentPdfObjectUrl = "";
+    $("attachmentPreviewDialog")?.classList.remove("is-pdf-preview");
+  }
+
+  async function loadAttachmentPdfPreview(url, attachment, filename) {
+    const body = $("attachmentPreviewBody");
+    const requestId = attachmentPdfRequest;
+    const controller = new AbortController(); attachmentPdfAbort = controller;
+    body.append(element("p", "pdf-preview-status", "Loading PDF…"));
+    try {
+      // Fetch protected documents with the same session used for their original download.
+      // External providers never receive the Helixcer session or authorization headers.
+      const response = await fetch(url, {credentials: attachment.external === true ? "omit" : "include",referrerPolicy:"no-referrer",signal:controller.signal});
+      if (!response.ok) throw new Error("Could not load PDF (" + response.status + ").");
+      const bytes = await response.arrayBuffer();
+      const header = new TextDecoder("latin1").decode(bytes.slice(0,1024));
+      if (!header.includes("%PDF-")) throw new Error("The attachment did not return a valid PDF file.");
+      if (requestId !== attachmentPdfRequest || !$("attachmentPreviewDialog").open) return;
+      attachmentPdfObjectUrl = URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
+      const viewer = document.createElement("iframe");
+      viewer.className = "attachment-pdf-viewer";
+      viewer.title = "PDF preview: " + filename;
+      viewer.src = attachmentPdfObjectUrl + "#toolbar=1&navpanes=1&view=FitH";
+      body.replaceChildren(viewer);
+      if (navigator.pdfViewerEnabled === false) {
+        const hint = element("p", "pdf-preview-status", "Your browser may not support embedded PDF previews. Use Download to open the PDF in your PDF app.");
+        body.append(hint);
+      }
+    } catch (error) {
+      if (controller.signal.aborted || requestId !== attachmentPdfRequest) return;
+      body.replaceChildren(element("p", "pdf-preview-status", error.message + " You can still use Download below."));
+    }
+  }
+
   function closeAttachmentPreview() {
     const dialog = $("attachmentPreviewDialog");
     dialog.querySelectorAll("video,audio").forEach((media) => {
@@ -4861,6 +4915,7 @@
       media.removeAttribute("src");
       media.load();
     });
+    cleanupAttachmentPdfPreview();
     $("attachmentPreviewBody").replaceChildren();
     if (dialog.open) dialog.close();
   }
@@ -4873,6 +4928,9 @@
       showToast("Preview unavailable", "This attachment is not available from the channel yet.", true);
       return;
     }
+    cleanupAttachmentPdfPreview();
+    const pdf = isPdfAttachment(attachment);
+    $("attachmentPreviewDialog").classList.toggle("is-pdf-preview", pdf);
     const type = String(attachment.type || message.messageType || "document");
     const filename = attachment.filename || `${capitalize(type)} attachment`;
     const body = $("attachmentPreviewBody");
@@ -4896,7 +4954,7 @@
       else media.crossOrigin = "use-credentials";
       media.src = url;
       body.append(media);
-    } else {
+    } else if (!pdf) {
       const documentPreview = element("div", "attachment-document-preview");
       documentPreview.append(element("span", "attachment-document-icon", "DOC"));
       documentPreview.append(element("strong", "", filename));
@@ -4909,6 +4967,7 @@
     download.download = filename;
     download.referrerPolicy = "no-referrer";
     $("attachmentPreviewDialog").showModal();
+    if (pdf) loadAttachmentPdfPreview(url, attachment, filename);
   }
 
   function renderAttachmentQueue() {
@@ -14939,6 +14998,7 @@
       state.templateConversationId = null;
     });
     $("attachmentPreviewDialog").addEventListener("close", () => {
+      cleanupAttachmentPdfPreview();
       $("attachmentPreviewDialog").querySelectorAll("video,audio").forEach((media) => media.pause());
       $("attachmentPreviewBody").replaceChildren();
     });

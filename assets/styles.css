@@ -2724,3 +2724,16 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 #contactForm input[name="displayName"], #contactEditName, #contactCreateCompany, #contactEditCompany { height: 46px; min-height: 46px; box-sizing: border-box; margin-top: 0; }
 .company-picker-options { padding:4px; border-radius:6px; box-shadow:0 3px 10px #21164114; max-height:180px; }
 .company-picker-options button { padding:7px 10px; font-size:12px; font-weight:400; }
+
+dialog.attachment-preview-dialog.is-pdf-preview { width: min(1500px, calc(100vw - 24px)); height: calc(100dvh - 24px); max-height: calc(100dvh - 24px); padding: 0; }
+.is-pdf-preview .attachment-preview-card { width: 100%; max-width: none; height: 100%; max-height: 100%; min-height: 0; padding: 18px; box-sizing: border-box; }
+.is-pdf-preview .modal-head { flex: 0 0 auto; min-width: 0; }
+.is-pdf-preview .modal-head > div { min-width: 0; }
+.is-pdf-preview #attachmentPreviewTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 20px; }
+.is-pdf-preview .attachment-preview-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; width: 100%; overflow: hidden; border-radius: 8px; background: #525659; }
+.attachment-pdf-viewer { width: 100%; height: 100%; min-height: 0; flex: 1 1 auto; border: 0; background: #525659; }
+.pdf-preview-status { padding: 24px; color: white; text-align: center; line-height: 1.5; }
+.is-pdf-preview .attachment-preview-actions { flex: 0 0 auto; margin-top: 12px; padding-top: 12px; }
+.message-pdf-open { cursor: pointer; }
+.message-pdf-open:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 4px; }
+@media (max-width: 640px) { dialog.attachment-preview-dialog.is-pdf-preview { width: 100vw; height: 100dvh; max-height: 100dvh; } .is-pdf-preview .attachment-preview-card { padding: 10px; } .is-pdf-preview #attachmentPreviewTitle { font-size: 15px; } }
