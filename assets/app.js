@@ -9324,8 +9324,8 @@
       const registration = await subscribeBrowserPush();
       await registration.showNotification("Helixcer notifications enabled", {
         body: "This device can now receive new customer message alerts in the background.",
-        icon: "/assets/helixcer-mark.jpg?v=fc5bb333",
-        badge: "/assets/helixcer-mark.jpg?v=fc5bb333",
+        icon: "/assets/helixcer-chat-192.png?v=20261105-logo",
+        badge: "/assets/helixcer-chat-192.png?v=20261105-logo",
         tag: "helixcer-notification-test",
         data: { url: "/#inbox" }
       }).catch(() => {});
@@ -9401,8 +9401,8 @@
     const title = conversation.subject;
     const options = {
       body: channelPlainText(message.text, conversation) || "A new customer message arrived.",
-      icon: "/assets/helixcer-mark.jpg?v=fc5bb333",
-      badge: "/assets/helixcer-mark.jpg?v=fc5bb333",
+      icon: "/assets/helixcer-chat-192.png?v=20261105-logo",
+      badge: "/assets/helixcer-chat-192.png?v=20261105-logo",
       tag: `helixcer-${conversation.conversationId}`,
       data: { url: conversationUrl(conversation.conversationId), conversationId: conversation.conversationId },
     };
@@ -9429,8 +9429,8 @@
     const title = "Chat assigned to you";
     const options = {
       body: conversation.subject || "A conversation was assigned to you.",
-      icon: "/assets/helixcer-mark.jpg?v=fc5bb333",
-      badge: "/assets/helixcer-mark.jpg?v=fc5bb333",
+      icon: "/assets/helixcer-chat-192.png?v=20261105-logo",
+      badge: "/assets/helixcer-chat-192.png?v=20261105-logo",
       tag: `helixcer-assign-${conversation.conversationId}`,
       data: { url: conversationUrl(conversation.conversationId), conversationId: conversation.conversationId },
     };
