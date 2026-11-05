@@ -13399,7 +13399,7 @@
     conversationStatusToastTimer = setTimeout(() => {
       hideConversationStatusToast();
       conversationStatusToastTimer = 0;
-    }, isError ? 5000 : 2200);
+    }, isError ? 5000 : 3000);
   }
 
   function openMobileMenu() {
@@ -14774,7 +14774,7 @@
             hideConversationStatusToast();
             if (state.selectedConversationId === conversation.conversationId) clearSelectedConversation();
             else renderConversationList();
-          }, 1600);
+          }, 3000);
         } else {
           renderConversationList();
         }

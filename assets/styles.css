@@ -641,21 +641,21 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   top: calc(100% + 8px);
   right: 0;
   display: grid;
-  gap: 2px;
+  gap: 4px;
   width: max-content;
-  max-width: min(240px, calc(100vw - 24px));
+  max-width: min(280px, calc(100vw - 24px));
   border: 1px solid rgba(255,255,255,.12);
   border-radius: 11px;
   background: #1d292a;
   color: white;
   box-shadow: 0 14px 34px rgba(22,28,27,.22);
-  padding: 10px 12px;
+  padding: 13px 16px;
   pointer-events: none;
   animation: toast-in .2s ease;
 }
 .conversation-status-toast[hidden] { display: none; }
-.conversation-status-toast strong { display: block; font-size: 11px; font-weight: 750; }
-.conversation-status-toast span { display: block; color: #c5cfcd; font-size: 10px; line-height: 1.4; }
+.conversation-status-toast strong { display: block; font-size: 14px; font-weight: 750; }
+.conversation-status-toast span { display: block; color: #c5cfcd; font-size: 12px; line-height: 1.4; }
 .conversation-status-toast.is-error { border-color: rgba(255,138,117,.35); }
 .conversation-status-toast.is-error::before,
 .conversation-status-toast::before {
