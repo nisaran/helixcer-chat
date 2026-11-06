@@ -8,6 +8,7 @@ import { applyCampaignActions, campaignDispatchState } from './campaign-controls
   createPasswordMobileSession,
   createInvitation,
   finishGoogleOAuthResponse,
+  hashToken,
   listTeam,
   loginWithPassword,
   logout,
@@ -21,8 +22,21 @@ import { applyCampaignActions, campaignDispatchState } from './campaign-controls
   startGoogleOAuth,
   updateInvitation,
   updateMembership,
-  updateUserProfile
+  updateUserProfile,
+  validateReturnTo
 } from './auth.js';
+import {
+  buildGoogleBusinessAuthorizeUrl,
+  clearGoogleBusinessOAuthCookieHeader,
+  exchangeGoogleBusinessCode,
+  fetchGoogleBusinessEmail,
+  googleBusinessOAuthCookieHeader,
+  listGoogleBusinessLocations,
+  parseGoogleBusinessLocationSelection,
+  readGoogleBusinessOAuthCookie,
+  refreshGoogleBusinessToken,
+  verifyGoogleBusinessLocation
+} from './google-business.js';
 import {
   assertChatAccess,
   attachPrincipalPermissions,
@@ -107,7 +121,7 @@ const EXTERNAL_API_IDEMPOTENCY_DAYS = 7;
 const LEGACY_WORKSPACE_ID = 'ws_default';
 const WHATSAPP_TEMPLATE_CACHE_SECONDS = 5 * 60;
 const WHATSAPP_TEMPLATE_CACHE_ORIGIN = 'https://template-cache.helixcer.internal';
-const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram', 'facebook_messenger']);
+const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram', 'facebook_messenger', 'google_reviews']);
 const CONTACT_ID_PLATFORMS = Object.freeze(['whatsapp', 'telegram', 'instagram', 'facebook', 'email']);
 const CONTACT_ID_PLATFORM_SET = new Set(CONTACT_ID_PLATFORMS);
 // Only these providers expose an address that is portable between connected
@@ -139,6 +153,12 @@ const CONNECTOR_DEFINITIONS = {
     configFields: ['pageId', 'pageName', 'appId', 'apiVersion'],
     requiredConfig: ['pageId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret'],
     capabilities: ['text', 'attachments']
+  },
+  google_reviews: {
+    label: 'Google Reviews', webhookPath: 'google-reviews',
+    configFields: ['accountId', 'locationId', 'accountName', 'locationName'],
+    requiredConfig: ['accountId', 'locationId'], requiredCredentials: ['accessToken', 'refreshToken'],
+    capabilities: ['reviews']
   }
 };
 
@@ -326,6 +346,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return await startGoogleOAuth(request, env);
     }
     if (request.method === 'GET' && url.pathname === '/auth/google/callback') return await finishGoogleOAuthResponse(request, env);
+    if (request.method === 'GET' && url.pathname === '/auth/google-business/callback') {
+      return await finishGoogleBusinessOAuthResponse(request, env);
+    }
     if (request.method === 'GET' && url.pathname === '/auth/mobile/config') {
       return json(mobileAuthConfiguration(env));
     }
@@ -580,7 +603,8 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
           { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: CONNECTOR_DEFINITIONS.whatsapp_cloud.capabilities },
           { value: 'telegram', label: 'Telegram Bot', capabilities: CONNECTOR_DEFINITIONS.telegram.capabilities },
           { value: 'instagram', label: 'Instagram Messaging', capabilities: CONNECTOR_DEFINITIONS.instagram.capabilities },
-          { value: 'facebook_messenger', label: 'Facebook Messenger', capabilities: CONNECTOR_DEFINITIONS.facebook_messenger.capabilities }
+          { value: 'facebook_messenger', label: 'Facebook Messenger', capabilities: CONNECTOR_DEFINITIONS.facebook_messenger.capabilities },
+          { value: 'google_reviews', label: 'Google Reviews', capabilities: CONNECTOR_DEFINITIONS.google_reviews.capabilities }
         ]
       }), cors);
     }
@@ -670,6 +694,22 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       requirePermission(principal, 'campaigns.view');
       const campaignId = decodeURIComponent(campaignMatch[1]);
       return withCors(json(await getCampaignDetail(env, workspaceId, campaignId, principal)), cors);
+    }
+    if (url.pathname === '/api/channels/oauth/google-reviews/start' && request.method === 'GET') {
+      requirePermission(principal, 'channels.manage');
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return withCors(limited, cors);
+      return await startGoogleBusinessChannelOAuth(request, env, principal);
+    }
+    if (url.pathname === '/api/channels/oauth/google-reviews/pending' && request.method === 'GET') {
+      requirePermission(principal, 'channels.manage');
+      return withCors(json(await getGoogleBusinessPending(env, principal, url.searchParams.get('token') || '')), cors);
+    }
+    if (url.pathname === '/api/channels/oauth/google-reviews/confirm' && request.method === 'POST') {
+      requirePermission(principal, 'channels.manage');
+      const result = await confirmGoogleBusinessChannel(env, principal, await readJson(request));
+      await broadcast(env, workspaceId, { type: 'channel.updated', channelId: result.channelId });
+      return withCors(json(result, result.created ? 201 : 200), cors);
     }
     if (url.pathname === '/api/channels' && request.method === 'POST') {
       requirePermission(principal, 'channels.manage');
@@ -2614,6 +2654,8 @@ function channelHealth(row, config = safeJsonParse(row.config_json, {}), credent
     definition.requiredCredentials.every(key => credentialFields.has(key));
   if (!configured) return 'setup_required';
   if (!config.credentialsVerifiedAt) return config.webhookVerifiedAt ? 'receiving' : 'configured';
+  // Google Reviews is OAuth/pull based and does not use provider webhooks.
+  if (connectorType === 'google_reviews') return 'connected';
   if (!config.webhookVerifiedAt) return 'webhook_required';
   return 'connected';
 }
@@ -2623,14 +2665,17 @@ function channelSetupView(row, config = safeJsonParse(row.config_json, {}), cred
   const definition = CONNECTOR_DEFINITIONS[connectorType];
   if (!definition) return {};
   const presence = Object.fromEntries(definition.requiredCredentials.map(key => [key, credentialFields.has(key)]));
-  const callbackPath = connectorType === 'instagram' && config.appId
-    ? `/webhooks/instagram-app/${encodeURIComponent(config.appId)}`
-    : connectorType === 'facebook_messenger' && config.appId
-      ? `/webhooks/facebook-messenger-app/${encodeURIComponent(config.appId)}`
-      : `/webhooks/${definition.webhookPath}/${encodeURIComponent(row.channel_id)}`;
+  const callbackPath = connectorType === 'google_reviews'
+    ? ''
+    : connectorType === 'instagram' && config.appId
+      ? `/webhooks/instagram-app/${encodeURIComponent(config.appId)}`
+      : connectorType === 'facebook_messenger' && config.appId
+        ? `/webhooks/facebook-messenger-app/${encodeURIComponent(config.appId)}`
+        : `/webhooks/${definition.webhookPath}/${encodeURIComponent(row.channel_id)}`;
   return {
     credentialsPresent: definition.requiredConfig.every(key => Boolean(config[key])) && Object.values(presence).every(Boolean),
     credentialFields: presence,
+    authMode: connectorType === 'google_reviews' ? 'google_oauth' : '',
     callbackPath,
     credentialsVerifiedAt: config.credentialsVerifiedAt || '',
     subscribedAppsAt: config.subscribedAppsAt || '',
@@ -2639,7 +2684,9 @@ function channelSetupView(row, config = safeJsonParse(row.config_json, {}), cred
     verifiedPhoneNumber: config.verifiedPhoneNumber || '',
     verifiedName: config.verifiedName || '',
     verifiedUsername: config.verifiedUsername || '',
-    verifiedProviderId: config.verifiedProviderId || ''
+    verifiedProviderId: config.verifiedProviderId || '',
+    accountName: config.accountName || '',
+    locationName: config.locationName || ''
   };
 }
 
@@ -2662,6 +2709,7 @@ async function verifyChannel(env, workspaceId, channelId, request) {
   if (channel.connectorType === 'telegram') return verifyTelegramChannel(env, channel, request);
   if (channel.connectorType === 'instagram') return verifyInstagramChannel(env, channel);
   if (channel.connectorType === 'facebook_messenger') return verifyFacebookMessengerChannel(env, channel);
+  if (channel.connectorType === 'google_reviews') return verifyGoogleReviewsChannel(env, channel);
   throw httpError(400, 'This connector cannot be verified automatically.');
 }
 
@@ -2867,6 +2915,274 @@ async function updateChannelRuntimeConfig(env, channel, patch) {
   return config;
 }
 
+async function verifyGoogleReviewsChannel(env, channel, fetchImpl = fetch) {
+  const accountId = String(channel.config?.accountId || '');
+  const locationId = String(channel.config?.locationId || '');
+  const credentials = await readChannelCredentials(env, channel);
+  if (!credentials.refreshToken || !accountId || !locationId) {
+    throw httpError(409, 'Connect Google Reviews with Google before verifying this location.');
+  }
+  let accessToken = credentials.accessToken || '';
+  let reviewSummary;
+  try {
+    if (!accessToken) throw httpError(422, 'Google access token is missing.');
+    reviewSummary = await verifyGoogleBusinessLocation(accessToken, accountId, locationId, fetchImpl);
+  } catch (firstError) {
+    if (Number(firstError?.status) === 400) throw firstError;
+    const refreshed = await refreshGoogleBusinessToken(env, credentials.refreshToken, fetchImpl);
+    accessToken = refreshed.accessToken;
+    await storeChannelCredentials(env, channel, {
+      accessToken,
+      refreshToken: refreshed.refreshToken || credentials.refreshToken
+    });
+    reviewSummary = await verifyGoogleBusinessLocation(accessToken, accountId, locationId, fetchImpl);
+  }
+  const now = new Date().toISOString();
+  const config = await updateChannelRuntimeConfig(env, channel, {
+    credentialsVerifiedAt: now,
+    webhookVerifiedAt: now,
+    verifiedProviderId: locationId,
+    verifiedName: String(channel.config?.locationName || channel.config?.accountName || locationId)
+  });
+  return {
+    ok: true,
+    channelId: channel.channelId,
+    health: 'connected',
+    verifiedName: config.verifiedName,
+    credentialsVerifiedAt: now,
+    webhookVerifiedAt: now,
+    totalReviewCount: reviewSummary.totalReviewCount,
+    averageRating: reviewSummary.averageRating
+  };
+}
+
+async function startGoogleBusinessChannelOAuth(request, env, principal) {
+  const url = new URL(request.url);
+  const returnTo = validateReturnTo(url.searchParams.get('return_to') || url.searchParams.get('returnTo') || '/#channels', env);
+  const channelName = String(url.searchParams.get('name') || '').trim().slice(0, 80);
+  const channelIdRaw = String(url.searchParams.get('channelId') || '').trim();
+  let channelId = '';
+  if (channelIdRaw) {
+    channelId = cleanId(channelIdRaw, 'Channel ID');
+    const existing = await env.DB.prepare(`SELECT channel_id,provider_type,name FROM channels
+      WHERE channel_id=?1 AND workspace_id=?2`).bind(channelId, principal.workspace.workspaceId).first();
+    if (!existing) throw httpError(404, 'Channel not found.');
+    if (logicalConnectorType(existing) !== 'google_reviews') {
+      throw httpError(400, 'Only Google Reviews connections can be linked with Google Business OAuth.');
+    }
+  }
+  const previousState = readGoogleBusinessOAuthCookie(request);
+  if (previousState) {
+    await env.DB.prepare('DELETE FROM google_business_oauth_states WHERE state_hash=?1')
+      .bind(await hashToken(previousState)).run();
+  }
+  const state = randomOAuthToken(32);
+  const codeVerifier = randomOAuthToken(48);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+  await env.DB.prepare(`INSERT INTO google_business_oauth_states
+      (state_hash,code_verifier,workspace_id,user_id,channel_id,channel_name,return_to,expires_at,created_at)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`)
+    .bind(await hashToken(state), codeVerifier, principal.workspace.workspaceId, principal.user.userId,
+      channelId || null, channelName, returnTo, expiresAt, now.toISOString()).run();
+  const authorizeUrl = await buildGoogleBusinessAuthorizeUrl({ request, env, state, codeVerifier });
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: authorizeUrl,
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'Set-Cookie': googleBusinessOAuthCookieHeader(state, 10 * 60)
+    }
+  });
+}
+
+async function finishGoogleBusinessOAuthResponse(request, env, fetchImpl = fetch) {
+  try {
+    return await finishGoogleBusinessOAuth(request, env, fetchImpl);
+  } catch (error) {
+    const message = String(error?.message || 'Google Business connection failed.');
+    const target = googleBusinessFailureTarget(env);
+    const headers = new Headers({
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'Set-Cookie': clearGoogleBusinessOAuthCookieHeader()
+    });
+    if (!target) {
+      return new Response(`Google Business connection failed: ${message}`, {
+        status: Number(error?.status) >= 500 ? 503 : (Number(error?.status) || 400),
+        headers: { ...Object.fromEntries(headers), 'Content-Type': 'text/plain; charset=utf-8' }
+      });
+    }
+    target.searchParams.set('google_reviews_error', message.slice(0, 240));
+    target.hash = 'channels';
+    headers.set('Location', target.toString());
+    return new Response(null, { status: 302, headers });
+  }
+}
+
+async function finishGoogleBusinessOAuth(request, env, fetchImpl = fetch) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('error')) throw httpError(401, 'Google Business authorization was cancelled or denied.');
+  const code = url.searchParams.get('code') || '';
+  const state = url.searchParams.get('state') || '';
+  const cookieState = readGoogleBusinessOAuthCookie(request) || '';
+  if (!code || !state || !cookieState || !timingSafeEqual(state, cookieState)) {
+    throw httpError(400, 'Invalid Google Business OAuth state.');
+  }
+  const stateHash = await hashToken(state);
+  const stored = await env.DB.prepare(`SELECT state_hash,code_verifier,workspace_id,user_id,channel_id,channel_name,return_to,expires_at
+    FROM google_business_oauth_states WHERE state_hash=?1`).bind(stateHash).first();
+  if (!stored || stored.expires_at <= new Date().toISOString()) throw httpError(400, 'Google Business OAuth state expired.');
+  await env.DB.prepare('DELETE FROM google_business_oauth_states WHERE state_hash=?1').bind(stateHash).run();
+
+  const tokens = await exchangeGoogleBusinessCode({
+    request, env, code, codeVerifier: stored.code_verifier, fetchImpl
+  });
+  if (!tokens.refreshToken) {
+    throw httpError(422, 'Google did not return a refresh token. Remove Helixcer access in your Google Account permissions, then connect again.');
+  }
+  const locations = await listGoogleBusinessLocations(tokens.accessToken, fetchImpl);
+  if (!locations.length) {
+    throw httpError(422, 'No Google Business locations were found for this Google account.');
+  }
+  const googleEmail = await fetchGoogleBusinessEmail(tokens.accessToken, fetchImpl);
+  const pendingId = crypto.randomUUID();
+  const pendingToken = randomOAuthToken(32);
+  const vaultChannelId = `pending:${pendingId}`;
+  const encryptedAccessToken = await encryptChannelCredential(tokens.accessToken, env.CHANNEL_CREDENTIALS_KEY,
+    stored.workspace_id, vaultChannelId, 'accessToken');
+  const encryptedRefreshToken = await encryptChannelCredential(tokens.refreshToken, env.CHANNEL_CREDENTIALS_KEY,
+    stored.workspace_id, vaultChannelId, 'refreshToken');
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+  await env.DB.prepare(`INSERT INTO google_business_pending
+      (pending_id,pending_token_hash,workspace_id,user_id,channel_id,channel_name,encrypted_access_token,
+       encrypted_refresh_token,google_email,locations_json,expires_at,created_at)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`)
+    .bind(pendingId, await hashToken(pendingToken), stored.workspace_id, stored.user_id, stored.channel_id,
+      stored.channel_name || '', encryptedAccessToken, encryptedRefreshToken, googleEmail,
+      JSON.stringify(locations.slice(0, 200)), expiresAt, now.toISOString()).run();
+
+  const returnTo = new URL(stored.return_to);
+  returnTo.searchParams.set('google_reviews_pending', pendingToken);
+  returnTo.searchParams.delete('google_reviews_error');
+  if (!returnTo.hash) returnTo.hash = 'channels';
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: returnTo.toString(),
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'Set-Cookie': clearGoogleBusinessOAuthCookieHeader()
+    }
+  });
+}
+
+async function getGoogleBusinessPending(env, principal, pendingToken) {
+  const pending = await loadGoogleBusinessPending(env, principal, pendingToken);
+  return {
+    pendingId: pending.pending_id,
+    channelId: pending.channel_id || '',
+    channelName: pending.channel_name || '',
+    googleEmail: pending.google_email || '',
+    locations: safeJsonParse(pending.locations_json, []),
+    expiresAt: pending.expires_at
+  };
+}
+
+async function confirmGoogleBusinessChannel(env, principal, payload, fetchImpl = fetch) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw httpError(400, 'Google Reviews confirmation is invalid.');
+  const pending = await loadGoogleBusinessPending(env, principal, payload.token || payload.pendingToken || '');
+  const { accountId, locationId } = parseGoogleBusinessLocationSelection(payload);
+  const locations = safeJsonParse(pending.locations_json, []);
+  const selected = locations.find(item => item.accountId === accountId && item.locationId === locationId);
+  if (!selected) throw httpError(400, 'Choose one of the Google Business locations returned by Google.');
+  const vaultChannelId = `pending:${pending.pending_id}`;
+  const accessToken = await decryptChannelCredential(pending.encrypted_access_token, env.CHANNEL_CREDENTIALS_KEY,
+    pending.workspace_id, vaultChannelId, 'accessToken');
+  const refreshToken = await decryptChannelCredential(pending.encrypted_refresh_token, env.CHANNEL_CREDENTIALS_KEY,
+    pending.workspace_id, vaultChannelId, 'refreshToken');
+  await verifyGoogleBusinessLocation(accessToken, accountId, locationId, fetchImpl);
+
+  const channelId = pending.channel_id || crypto.randomUUID();
+  const channelName = cleanRequired(payload.name || pending.channel_name || selected.locationName || 'Google Reviews', 'Channel name', 80);
+  const now = new Date().toISOString();
+  const config = {
+    accountId,
+    locationId,
+    accountName: String(selected.accountName || '').slice(0, 160),
+    locationName: String(selected.locationName || '').slice(0, 160),
+    credentialsVerifiedAt: now,
+    webhookVerifiedAt: now,
+    verifiedProviderId: locationId,
+    verifiedName: String(selected.locationName || locationId).slice(0, 160)
+  };
+  await assertUniqueManagedConfig(env, pending.workspace_id, 'google_reviews', channelId, config);
+  const existing = await env.DB.prepare('SELECT channel_id FROM channels WHERE channel_id=?1 AND workspace_id=?2')
+    .bind(channelId, pending.workspace_id).first();
+  const capabilities = CONNECTOR_DEFINITIONS.google_reviews.capabilities;
+  try {
+    const saved = await env.DB.prepare(`INSERT INTO channels
+        (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,'generic_http','google_reviews',1,?3,?4,'DATABASE',?5,?5,?6)
+      ON CONFLICT(channel_id) DO UPDATE SET name=excluded.name,connector_type=excluded.connector_type,
+        provider_type=excluded.provider_type,enabled=excluded.enabled,capabilities_json=excluded.capabilities_json,
+        config_json=excluded.config_json,secret_key='DATABASE',updated_at=excluded.updated_at
+        WHERE channels.workspace_id=excluded.workspace_id`)
+      .bind(channelId, channelName, JSON.stringify(capabilities), JSON.stringify(config), now, pending.workspace_id).run();
+    if (!saved.meta?.changes) throw httpError(409, 'Channel ID is already used by another workspace.');
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw httpError(409, 'This Google Business location is already connected in the workspace.');
+    throw error;
+  }
+  await storeChannelCredentials(env, {
+    workspaceId: pending.workspace_id,
+    channelId,
+    connectorType: 'google_reviews'
+  }, { accessToken, refreshToken }, principal.user.userId || '');
+  await env.DB.prepare('DELETE FROM google_business_pending WHERE pending_id=?1').bind(pending.pending_id).run();
+  await audit(env, principal, existing ? 'update' : 'create', 'channel', channelId, {
+    name: channelName, connectorType: 'google_reviews', enabled: true, authMode: 'google_oauth',
+    updatedCredentialFields: ['accessToken', 'refreshToken']
+  });
+  return { ok: true, created: !existing, channelId, name: channelName, health: 'connected' };
+}
+
+async function loadGoogleBusinessPending(env, principal, pendingToken) {
+  const token = String(pendingToken || '').trim();
+  if (!token || token.length > 256) throw httpError(400, 'Google Reviews connection token is invalid.');
+  const pending = await env.DB.prepare(`SELECT pending_id,pending_token_hash,workspace_id,user_id,channel_id,channel_name,
+      encrypted_access_token,encrypted_refresh_token,google_email,locations_json,expires_at
+    FROM google_business_pending WHERE pending_token_hash=?1`)
+    .bind(await hashToken(token)).first();
+  if (!pending || pending.expires_at <= new Date().toISOString()) {
+    throw httpError(400, 'This Google Reviews connection expired. Connect with Google again.');
+  }
+  if (pending.workspace_id !== principal.workspace.workspaceId || pending.user_id !== principal.user.userId) {
+    throw httpError(403, 'This Google Reviews connection belongs to another signed-in user.');
+  }
+  return pending;
+}
+
+function googleBusinessFailureTarget(env) {
+  const candidates = [env.APP_ORIGIN, ...String(env.ALLOWED_ORIGINS || '').split(',')]
+    .map(value => String(value || '').trim()).filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const target = new URL(candidate);
+      if (target.protocol === 'https:' || target.protocol === 'http:') return target;
+    } catch { /* Try the next configured app origin. */ }
+  }
+  return null;
+}
+
+function randomOAuthToken(bytes) {
+  const value = new Uint8Array(bytes);
+  crypto.getRandomValues(value);
+  return base64UrlEncode(value);
+}
+
 async function saveChannel(env, workspaceId, payload, principal, forcedChannelId = '') {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw httpError(400, 'Channel payload is invalid.');
   const channelId = cleanId(forcedChannelId || payload.channelId || crypto.randomUUID(), 'Channel ID');
@@ -2895,7 +3211,7 @@ async function saveChannel(env, workspaceId, payload, principal, forcedChannelId
   invalidateChannelVerification(connectorType, config, changedConfigFields, Object.keys(credentialUpdates));
   const collision = await env.DB.prepare('SELECT workspace_id FROM channels WHERE channel_id=?1').bind(channelId).first();
   if (collision && collision.workspace_id !== workspaceId) throw httpError(409, 'Channel ID is already used by another workspace.');
-  const storageType = ['instagram', 'facebook_messenger'].includes(connectorType) ? 'generic_http' : connectorType;
+  const storageType = ['instagram', 'facebook_messenger', 'google_reviews'].includes(connectorType) ? 'generic_http' : connectorType;
   const capabilities = CONNECTOR_DEFINITIONS[connectorType]?.capabilities || ['text'];
   const enabled = payload.enabled === undefined ? (existing ? Boolean(existing.enabled) : true) : payload.enabled !== false;
   let saved;
@@ -3051,6 +3367,14 @@ function normalizeChannelConfigValue(key, value) {
     if (text !== 'instagram_login') throw httpError(400, 'Instagram authentication mode is invalid.');
     return text;
   }
+  if (key === 'accountId' || key === 'locationId') {
+    if (!/^[A-Za-z0-9_.-]{1,128}$/.test(text)) throw httpError(400, `${key} is invalid.`);
+    return text;
+  }
+  if (key === 'accountName' || key === 'locationName') {
+    if (text.length > 160 || /[\u0000-\u001f\u007f]/.test(text)) throw httpError(400, `${key} is invalid.`);
+    return text.slice(0, 160);
+  }
   return cleanMetaIdentifier(text, key);
 }
 
@@ -3067,7 +3391,9 @@ async function assertProviderIdentityConfigMutable(env, workspaceId, existing, c
       ? new Set(['instagramAccountId', 'appId'])
       : connectorType === 'facebook_messenger'
         ? new Set(['pageId', 'appId'])
-        : new Set();
+        : connectorType === 'google_reviews'
+          ? new Set(['accountId', 'locationId'])
+          : new Set();
   if (!changedConfigFields.some(key => providerIdentityFields.has(key))) return;
   const usage = await env.DB.prepare(`SELECT
       EXISTS(SELECT 1 FROM channel_identity_bindings WHERE workspace_id=?1 AND channel_id=?2) AS has_bindings,
@@ -3093,7 +3419,9 @@ function invalidateChannelVerification(connectorType, config, changedConfigField
 
   const webhookCredentialChanged = connectorType === 'telegram'
     ? changedCredentialFields.some(key => key === 'botToken' || key === 'webhookSecret')
-    : changedCredentialFields.includes('verifyToken');
+    : connectorType === 'google_reviews'
+      ? false
+      : changedCredentialFields.includes('verifyToken');
   if (changedConfigFields.length || webhookCredentialChanged) delete config.webhookVerifiedAt;
 
   const providerIdentityFields = connectorType === 'whatsapp_cloud'
@@ -3102,25 +3430,32 @@ function invalidateChannelVerification(connectorType, config, changedConfigField
       ? new Set(['instagramAccountId', 'appId'])
       : connectorType === 'facebook_messenger'
         ? new Set(['pageId', 'appId'])
-        : new Set();
+        : connectorType === 'google_reviews'
+          ? new Set(['accountId', 'locationId'])
+          : new Set();
   if (changedConfigFields.some(key => providerIdentityFields.has(key))) delete config.lastWebhookAt;
 }
 
 async function assertUniqueManagedConfig(env, workspaceId, connectorType, channelId, config) {
   const field = connectorType === 'whatsapp_cloud' ? 'phoneNumberId'
     : connectorType === 'instagram' ? 'instagramAccountId'
-      : connectorType === 'facebook_messenger' ? 'pageId' : '';
+      : connectorType === 'facebook_messenger' ? 'pageId'
+        : connectorType === 'google_reviews' ? 'locationId' : '';
   const value = field ? String(config[field] || '') : '';
   if (!value) return;
   const jsonPath = field === 'phoneNumberId' ? '$.phoneNumberId'
-    : field === 'instagramAccountId' ? '$.instagramAccountId' : '$.pageId';
+    : field === 'instagramAccountId' ? '$.instagramAccountId'
+      : field === 'locationId' ? '$.locationId'
+        : '$.pageId';
   const duplicate = await env.DB.prepare(`SELECT channel_id FROM channels
     WHERE workspace_id=?1 AND channel_id<>?2 AND provider_type=?3
       AND json_extract(config_json,?4)=?5 LIMIT 1`)
     .bind(workspaceId, channelId, connectorType, jsonPath, value).first();
   if (duplicate) {
     const label = connectorType === 'whatsapp_cloud' ? 'WhatsApp phone number'
-      : connectorType === 'instagram' ? 'Instagram account' : 'Facebook Page';
+      : connectorType === 'instagram' ? 'Instagram account'
+        : connectorType === 'google_reviews' ? 'Google Business location'
+          : 'Facebook Page';
     throw httpError(409, `This ${label} is already connected in the workspace.`);
   }
 }
@@ -3152,6 +3487,7 @@ function validateCredentialPayload(connectorType, supplied) {
     if (value.length > MAX_CREDENTIAL_LENGTH) throw httpError(400, `${credentialLabel(key)} is too long.`);
     if (/[\u0000-\u001f\u007f]/.test(value)) throw httpError(400, `${credentialLabel(key)} contains invalid characters.`);
     if (key === 'accessToken' && value.length < 16) throw httpError(400, 'Access token is too short.');
+    if (key === 'refreshToken' && value.length < 16) throw httpError(400, 'Refresh token is too short.');
     if (key === 'appSecret') {
       if (value.length < 16) throw httpError(400, 'App secret is too short.');
       assertMetaAppSecret(value);
@@ -3174,7 +3510,7 @@ function assertMetaAppSecret(value, status = 400) {
 }
 
 function credentialLabel(key) {
-  return ({ accessToken: 'Access token', appSecret: 'App secret', verifyToken: 'Verify token',
+  return ({ accessToken: 'Access token', refreshToken: 'Refresh token', appSecret: 'App secret', verifyToken: 'Verify token',
     botToken: 'Telegram bot token', webhookSecret: 'Telegram webhook secret' })[key] || 'Credential';
 }
 
@@ -6888,6 +7224,9 @@ async function dispatchOutbound(env, messageId) {
   else if (channel.connectorType === 'facebook_messenger') {
     result = await sendFacebookMessenger(env, channel, row.channel_profile_id, row.text);
   }
+  else if (channel.connectorType === 'google_reviews') {
+    throw nonRetryableError('Google Reviews connections sync reviews and do not send chat messages.');
+  }
   else if (channel.connectorType === 'generic_http') result = await sendGeneric(env, channel, row);
   else if (channel.connectorType === 'web_chat') result = { status: 'sent', providerMessageId: row.message_id, httpStatus: 200 };
   else throw new Error(`Outbound connector ${channel.connectorType} is not implemented yet.`);
@@ -6908,7 +7247,9 @@ function assertManagedOutboundVerified(channel) {
       ? String(config.instagramAccountId || '').trim()
       : channel.connectorType === 'facebook_messenger'
         ? String(config.pageId || '').trim()
-        : '';
+        : channel.connectorType === 'google_reviews'
+          ? String(config.locationId || '').trim()
+          : '';
   if (configuredProviderId && configuredProviderId !== verifiedProviderId) {
     throw nonRetryableError('The verified provider identity does not match the channel configuration.');
   }
@@ -9456,6 +9797,8 @@ async function cleanupExpiredAuth(env) {
   const now = new Date().toISOString();
   await env.DB.batch([
     env.DB.prepare('DELETE FROM oauth_states WHERE expires_at<=?1').bind(now),
+    env.DB.prepare('DELETE FROM google_business_oauth_states WHERE expires_at<=?1').bind(now),
+    env.DB.prepare('DELETE FROM google_business_pending WHERE expires_at<=?1').bind(now),
     env.DB.prepare('DELETE FROM mobile_auth_challenges WHERE expires_at<=?1 OR consumed_at IS NOT NULL').bind(now),
     env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?1 OR revoked_at IS NOT NULL').bind(now),
     env.DB.prepare('DELETE FROM password_reset_tokens WHERE expires_at<=?1 OR consumed_at IS NOT NULL').bind(now),

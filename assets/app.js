@@ -206,6 +206,8 @@
     facebook: { label: "Facebook", short: "FB", color: "#2768b2", soft: "#eaf2fb" },
     facebook_messenger: { label: "Facebook", short: "FB", color: "#2768b2", soft: "#eaf2fb" },
     messenger: { label: "Facebook", short: "FB", color: "#2768b2", soft: "#eaf2fb" },
+    google_reviews: { label: "Google Reviews", short: "GR", color: "#4285f4", soft: "#e8f0fe" },
+    google: { label: "Google Reviews", short: "GR", color: "#4285f4", soft: "#e8f0fe" },
     generic: { label: "Custom", short: "API", color: "#5e6c69", soft: "#edf0ef" },
   };
 
@@ -219,6 +221,8 @@
     facebook_messenger: "./assets/provider-facebook.svg",
     facebook: "./assets/provider-facebook.svg",
     messenger: "./assets/provider-facebook.svg",
+    google_reviews: "./assets/provider-google.svg",
+    google: "./assets/provider-google.svg",
   };
 
   const providerProfiles = {
@@ -245,6 +249,12 @@
       help: "Use the Page-scoped ID (PSID) supplied by the Messenger webhook.",
       description: "Send and receive Facebook Messenger conversations for a Page.",
       setupUrl: "https://developers.facebook.com/apps/", setupLabel: "Open Meta",
+    },
+    google_reviews: {
+      label: "Google Reviews", noun: "Google Business location", placeholder: "",
+      help: "Connect with Google, then choose the Business Profile location.",
+      description: "Pull Google Business Profile reviews through Google sign-in. No API keys to paste.",
+      setupUrl: "https://business.google.com/", setupLabel: "Open Business Profile",
     },
   };
 
@@ -1510,6 +1520,38 @@
       return url.toString();
     }
 
+    googleReviewsConnectUrl({ name = "", channelId = "" } = {}) {
+      if (this.isDemo) return "#";
+      const url = new URL("/api/channels/oauth/google-reviews/start", this.base);
+      const returnTo = new URL(location.pathname || "/", location.origin);
+      returnTo.hash = "#channels";
+      url.searchParams.set("return_to", returnTo.toString());
+      if (name) url.searchParams.set("name", name);
+      if (channelId) url.searchParams.set("channelId", channelId);
+      return url.toString();
+    }
+
+    getGoogleReviewsPending(token) {
+      if (this.isDemo) {
+        return Promise.resolve({
+          channelId: "",
+          channelName: "Demo Google Reviews",
+          googleEmail: "owner@example.com",
+          locations: [
+            { accountId: "accounts/123", locationId: "456", accountName: "Demo account", locationName: "Demo Store", address: "Bengaluru" },
+          ],
+        });
+      }
+      const path = `/api/channels/oauth/google-reviews/pending?token=${encodeURIComponent(token)}`;
+      return this.request(path);
+    }
+
+    confirmGoogleReviewsLocation(payload) {
+      return this.isDemo
+        ? Promise.resolve({ ok: true, created: true, channelId: "google-reviews-demo", name: payload?.name || "Google Reviews", health: "connected" })
+        : this.request("/api/channels/oauth/google-reviews/confirm", { method: "POST", body: JSON.stringify(payload) });
+    }
+
     loginWithPassword(payload) {
       return this.isDemo
         ? Promise.reject(Object.assign(new Error("Password sign-in is unavailable in demo mode."), { status: 400 }))
@@ -2427,6 +2469,7 @@
         prepareBrowserPush(),
       ]);
       await applyLocationRoute();
+      await consumeGoogleReviewsOAuthReturn();
     } catch (error) {
       const message = error.status === 403
         ? "Your account does not currently have access to this workspace."
@@ -2495,6 +2538,7 @@
       prepareBrowserPush(),
     ]);
     await applyLocationRoute();
+    await consumeGoogleReviewsOAuthReturn();
   }
 
   async function submitPasswordLogin(form) {
@@ -6880,7 +6924,7 @@
       empty.append(
         element("span", "channel-empty-icon", "+"),
         element("h3", "", "Connect your first messaging account"),
-        element("p", "", "Add WhatsApp, Telegram, Instagram, or Messenger now. You can connect more accounts at any time.")
+        element("p", "", "Add WhatsApp, Telegram, Instagram, Messenger, or Google Reviews now. You can connect more accounts at any time.")
       );
       const add = element("button", "primary-button", "Add channel");
       add.type = "button";
@@ -6953,20 +6997,31 @@
     if (verifiedIdentity) body.append(element("p", "verified-identity", verifiedIdentity));
 
     const setup = element("section", "connection-setup");
+    const isGoogleReviews = channel.connectorType === "google_reviews";
     const credentialsReady = Boolean(channel.setup?.credentialsPresent || ["configured", "receiving", "webhook_required", "connected"].includes(channel.health));
     const identityVerified = Boolean(channel.setup?.credentialsVerifiedAt || ["webhook_required", "connected"].includes(channel.health));
-    const webhookVerified = Boolean(channel.setup?.webhookVerifiedAt || channel.health === "connected");
-    const progress = [credentialsReady, identityVerified, webhookVerified].filter(Boolean).length;
+    const webhookVerified = Boolean(channel.setup?.webhookVerifiedAt || channel.health === "connected" || isGoogleReviews);
+    const progressItems = isGoogleReviews
+      ? [credentialsReady, identityVerified]
+      : [credentialsReady, identityVerified, webhookVerified];
+    const progress = progressItems.filter(Boolean).length;
     const setupHead = element("div", "connection-setup-head");
-    setupHead.append(element("strong", "", "Connection setup"), element("span", "meta-progress", `${progress}/3 ready`));
+    setupHead.append(element("strong", "", "Connection setup"), element("span", "meta-progress", `${progress}/${progressItems.length} ready`));
     setup.append(setupHead, element("p", "channel-setup-note", health.summary));
 
     const readiness = element("div", "readiness-list");
-    readiness.append(
-      readinessItem("Credentials", credentialsReady),
-      readinessItem("Provider identity", identityVerified),
-      readinessItem("Webhook", webhookVerified)
-    );
+    if (isGoogleReviews) {
+      readiness.append(
+        readinessItem("Google sign-in", credentialsReady),
+        readinessItem("Business location", identityVerified)
+      );
+    } else {
+      readiness.append(
+        readinessItem("Credentials", credentialsReady),
+        readinessItem("Provider identity", identityVerified),
+        readinessItem("Webhook", webhookVerified)
+      );
+    }
     setup.append(readiness);
 
     const channelIdBlock = element("div", "callback-block channel-id-block");
@@ -6983,17 +7038,31 @@
     channelIdBlock.append(channelIdRow);
     setup.append(channelIdBlock);
 
+    if (isGoogleReviews) {
+      const locationBlock = element("div", "callback-block");
+      locationBlock.append(element("span", "callback-label", "Google Business location"));
+      locationBlock.append(element("code", "channel-callback",
+        channel.setup?.locationName || channel.config?.locationName || channel.setup?.verifiedName || "Connected with Google"));
+      if (channel.config?.accountName || channel.setup?.accountName) {
+        locationBlock.append(element("span", "callback-token-help",
+          `Account: ${channel.config?.accountName || channel.setup?.accountName}`));
+      }
+      setup.append(locationBlock);
+    }
+
     const callbackUrl = channel.setup?.webhookUrl || state.api.webhookUrl(channel);
     const callbackBlock = element("div", "callback-block");
-    callbackBlock.append(element("span", "callback-label", "Webhook callback"));
-    const callbackRow = element("div", "meta-callback-row");
-    callbackRow.append(element("code", "channel-callback", callbackUrl));
-    const copyButton = element("button", "secondary-button compact-button", "Copy URL");
-    copyButton.type = "button";
-    copyButton.dataset.action = "copy-webhook-callback";
-    copyButton.dataset.copyValue = callbackUrl;
-    callbackRow.append(copyButton);
-    callbackBlock.append(callbackRow);
+    if (!isGoogleReviews) {
+      callbackBlock.append(element("span", "callback-label", "Webhook callback"));
+      const callbackRow = element("div", "meta-callback-row");
+      callbackRow.append(element("code", "channel-callback", callbackUrl));
+      const copyButton = element("button", "secondary-button compact-button", "Copy URL");
+      copyButton.type = "button";
+      copyButton.dataset.action = "copy-webhook-callback";
+      copyButton.dataset.copyValue = callbackUrl;
+      callbackRow.append(copyButton);
+      callbackBlock.append(callbackRow);
+    }
 
     if (channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram" ||
         channel.connectorType === "facebook_messenger") {
@@ -7032,7 +7101,7 @@
             : "Set this to the same private value used in Meta's webhook configuration."));
       callbackBlock.append(tokenBlock);
     }
-    setup.append(callbackBlock);
+    if (!isGoogleReviews) setup.append(callbackBlock);
 
     const actions = element("div", "channel-card-actions");
     const verify = element("button", "primary-button", channel.health === "connected"
@@ -7046,7 +7115,15 @@
     toggle.type = "button";
     toggle.dataset.action = "toggle-channel";
     toggle.dataset.channelId = channel.channelId;
-    actions.append(toggle, verify);
+    if (isGoogleReviews && !credentialsReady) {
+      const connect = element("button", "primary-button", "Connect with Google");
+      connect.type = "button";
+      connect.dataset.action = "connect-google-reviews";
+      connect.dataset.channelId = channel.channelId;
+      actions.append(toggle, connect);
+    } else {
+      actions.append(toggle, verify);
+    }
     setup.append(actions);
 
     if ((channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram" ||
@@ -7391,6 +7468,14 @@
       disconnected: { label: "Disabled", className: "is-disconnected", summary: "The history is preserved, but messaging is paused." },
     };
     if (!channel.enabled) return states.disconnected;
+    if (channel.connectorType === "google_reviews") {
+      if (channel.health === "setup_required") {
+        return { label: "Connect Google", className: "is-warning", summary: "Connect with Google and choose a Business Profile location. No API keys are required." };
+      }
+      if (channel.health === "connected") {
+        return { label: "Live", className: "", summary: "Google Business reviews are connected through Google sign-in." };
+      }
+    }
     return states[channel.health] || states.setup_required;
   }
 
@@ -13204,6 +13289,20 @@
         }
       });
     });
+    const googleConnected = Boolean(editing && setup.credentialsPresent);
+    const googleNote = $("googleReviewsConnectedNote");
+    if (googleNote) googleNote.hidden = !(provider === "google_reviews" && googleConnected);
+    const submit = $("channelSubmit");
+    if (submit) {
+      if (provider === "google_reviews" && !editing) {
+        submit.hidden = true;
+        submit.disabled = true;
+      } else {
+        submit.hidden = false;
+        submit.disabled = false;
+        submit.textContent = editing ? "Save changes" : "Save connection";
+      }
+    }
     if (!editing && !$("channelNameInput").value.trim()) {
       $("channelNameInput").value = `${providerProfiles[provider]?.label || "Channel"} connection`;
     }
@@ -13235,7 +13334,9 @@
         ? { botToken: credentialValue("telegramBotToken"), webhookSecret: credentialValue("telegramWebhookSecret") }
         : connectorType === "facebook_messenger"
           ? { accessToken: credentialValue("messengerAccessToken"), appSecret: credentialValue("messengerAppSecret"), verifyToken: credentialValue("metaVerifyToken") }
-          : { accessToken: credentialValue("instagramAccessToken"), appSecret: credentialValue("instagramAppSecret"), verifyToken: credentialValue("metaVerifyToken") };
+          : connectorType === "google_reviews"
+            ? {}
+            : { accessToken: credentialValue("instagramAccessToken"), appSecret: credentialValue("instagramAppSecret"), verifyToken: credentialValue("metaVerifyToken") };
     const credentials = Object.fromEntries(Object.entries(credentialMap)
       .map(([key, value]) => [key, String(value || "").trim()])
       .filter(([, value]) => value));
@@ -13248,9 +13349,114 @@
     };
   }
 
+  function startGoogleReviewsConnect({ name = "", channelId = "" } = {}) {
+    if (state.api.isDemo) {
+      showToast("Demo mode", "Google Reviews OAuth is simulated in demo mode. Use a live workspace to connect a Business location.");
+      openGoogleReviewsLocationDialog("demo");
+      return;
+    }
+    const url = state.api.googleReviewsConnectUrl({ name, channelId });
+    location.assign(url);
+  }
+
+  async function consumeGoogleReviewsOAuthReturn() {
+    const params = new URLSearchParams(location.search);
+    const pendingToken = String(params.get("google_reviews_pending") || "").trim();
+    const oauthError = String(params.get("google_reviews_error") || "").trim();
+    if (!pendingToken && !oauthError) return;
+    params.delete("google_reviews_pending");
+    params.delete("google_reviews_error");
+    const cleanQuery = params.toString();
+    history.replaceState(null, "", `${location.pathname}${cleanQuery ? `?${cleanQuery}` : ""}${location.hash || "#channels"}`);
+    setRoute("channels");
+    if (oauthError) {
+      showToast("Google Reviews was not connected", oauthError, true);
+      return;
+    }
+    await openGoogleReviewsLocationDialog(pendingToken);
+  }
+
+  async function openGoogleReviewsLocationDialog(pendingToken) {
+    const dialog = $("googleReviewsLocationDialog");
+    const list = $("googleReviewsLocationList");
+    const submit = $("googleReviewsLocationSubmit");
+    const nameInput = $("googleReviewsLocationName");
+    list.replaceChildren(element("p", "modal-copy", "Loading Google Business locations…"));
+    submit.disabled = true;
+    $("googleReviewsPendingToken").value = pendingToken;
+    dialog.showModal();
+    try {
+      const pending = await state.api.getGoogleReviewsPending(pendingToken);
+      nameInput.value = pending.channelName || "Google Reviews connection";
+      const locations = Array.isArray(pending.locations) ? pending.locations : [];
+      list.replaceChildren();
+      if (!locations.length) {
+        list.append(element("p", "modal-copy", "No Google Business locations were returned for this Google account."));
+        return;
+      }
+      locations.forEach((location, index) => {
+        const option = document.createElement("label");
+        option.className = "google-location-option";
+        option.setAttribute("role", "option");
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = "googleLocation";
+        radio.value = `${location.accountId}::${location.locationId}`;
+        radio.required = true;
+        if (index === 0) radio.checked = true;
+        radio.addEventListener("change", () => { submit.disabled = false; });
+        const copy = document.createElement("span");
+        copy.append(
+          element("strong", "", location.locationName || location.locationId),
+          element("small", "", [location.accountName, location.address].filter(Boolean).join(" · ") || location.locationId)
+        );
+        option.append(radio, copy);
+        list.append(option);
+      });
+      submit.disabled = false;
+      if (pending.googleEmail) {
+        $("googleReviewsLocationCopy").textContent = `Signed in as ${pending.googleEmail}. Choose the Business Profile location to connect.`;
+      }
+    } catch (error) {
+      dialog.close();
+      showToast("Google Reviews connection expired", error.message, true);
+    }
+  }
+
+  async function confirmGoogleReviewsLocation(form) {
+    const values = new FormData(form);
+    const selected = String(values.get("googleLocation") || "");
+    const [accountId, locationId] = selected.split("::");
+    const submit = $("googleReviewsLocationSubmit");
+    submit.disabled = true;
+    submit.textContent = "Connecting…";
+    try {
+      const result = await state.api.confirmGoogleReviewsLocation({
+        token: String(values.get("pendingToken") || ""),
+        name: String(values.get("name") || "").trim(),
+        accountId,
+        locationId,
+      });
+      $("googleReviewsLocationDialog").close();
+      $("channelDialog").close();
+      await loadAll();
+      setRoute("channels");
+      showToast("Google Reviews connected", `${result.name || "Google Reviews"} is linked through Google sign-in.`);
+    } catch (error) {
+      showToast("Location was not connected", error.message, true);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = "Connect location";
+    }
+  }
+
   async function saveChannel(form) {
     const channelId = $("channelIdInput").value;
     const payload = channelPayload(form);
+    if (payload.connectorType === "google_reviews" && !channelId) {
+      startGoogleReviewsConnect({ name: payload.name });
+      return;
+    }
     const submit = $("channelSubmit");
     let savedChannelId = channelId;
     submit.disabled = true;
@@ -14235,6 +14441,17 @@
           verifyChannelConnection(actionButton.dataset.channelId, actionButton);
           return;
         }
+        if (actionButton.dataset.action === "connect-google-reviews") {
+          const channel = state.channels.find((item) => item.channelId === actionButton.dataset.channelId);
+          const name = $("channelNameInput")?.value?.trim() || channel?.name || "Google Reviews connection";
+          const channelId = actionButton.dataset.channelId || $("channelIdInput")?.value || "";
+          startGoogleReviewsConnect({ name, channelId });
+          return;
+        }
+        if (actionButton.dataset.action === "close-google-reviews-location") {
+          $("googleReviewsLocationDialog")?.close();
+          return;
+        }
         if (actionButton.dataset.action === "edit-channel") {
           openChannelDialog(actionButton.dataset.channelId);
           return;
@@ -14944,9 +15161,13 @@
 
     $("channelForm").addEventListener("submit", (event) => { event.preventDefault(); saveChannel(event.currentTarget); });
     $("webhookTokenForm").addEventListener("submit", (event) => { event.preventDefault(); saveWebhookVerifyToken(event.currentTarget); });
+    $("googleReviewsLocationForm")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      confirmGoogleReviewsLocation(event.currentTarget);
+    });
     $("channelProvider").addEventListener("change", (event) => {
       const nameInput = $("channelNameInput");
-      if (!nameInput.value.trim() || /^(WhatsApp|Telegram|Instagram) connection$/.test(nameInput.value.trim())) {
+      if (!nameInput.value.trim() || /^(WhatsApp|Telegram|Instagram|Messenger|Google Reviews) connection$/.test(nameInput.value.trim())) {
         nameInput.value = `${providerProfiles[event.target.value]?.label || "Channel"} connection`;
       }
       syncChannelForm(event.target.value, false, {});
