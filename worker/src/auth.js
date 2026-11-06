@@ -774,7 +774,7 @@ export async function updateUserProfile(env, principal, payload = {}) {
 
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 128;
-const PASSWORD_PBKDF2_ITERATIONS = 600000;
+const PASSWORD_PBKDF2_ITERATIONS = 100000;
 const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
 
 export async function previewInvitation(env, token) {
