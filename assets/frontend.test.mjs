@@ -593,6 +593,8 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(app, /queueConversationListFill/);
   assert.match(app, /conversationList"\)\.addEventListener\("scroll"/);
   assert.match(app, /bulkCloseConversations|bulkDeleteConversations|bulkDeleteContacts/);
+  assert.match(app, /\/api\/conversations\/bulk-close/);
+  assert.match(app, /keepalive:\s*true/);
   assert.match(app, /toggleContactSelectAll|toggleInboxSelectAll/);
   assert.match(app, /CONVERSATION_PAGE_SIZE = 100/);
   const contactsStart = app.indexOf("function renderContacts()");
