@@ -9,13 +9,23 @@ test("global search bypasses status filters and clearing restores them", () => {
   let permission = "all";
   const items = [
     { conversationId: "open", status: "open", assigned: true, unreadCount: 1, lastMessageAt: "2026-11-04" },
-    { conversationId: "closed", status: "closed", assigned: false, unreadCount: 0, lastMessageAt: "2026-11-03" },
+    { conversationId: "closed", status: "closed", storedStatus: "closed", assigned: false, unreadCount: 0, lastMessageAt: "2026-11-03" },
     {
       conversationId: "campaign-closed",
-      status: "closed",
+      status: "open",
+      storedStatus: "closed",
       assigned: true,
       unreadCount: 0,
-      lastMessageAt: "2026-11-05",
+      lastMessageAt: "2026-11-05T12:00:00.000Z",
+      lastMessageType: "template",
+    },
+    {
+      conversationId: "campaign-dismissed",
+      status: "closed",
+      storedStatus: "closed",
+      assigned: true,
+      unreadCount: 0,
+      lastMessageAt: "2026-11-05T11:00:00.000Z",
       lastMessageType: "template",
     },
   ];
@@ -25,16 +35,16 @@ test("global search bypasses status filters and clearing restores them", () => {
     isAllConversationFilters: selected => selected.size === 4 });
   vm.runInContext(app.slice(start, end), context);
   const ids = () => Array.from(vm.runInContext("filteredConversations()", context), item => item.conversationId);
-  assert.deepEqual(ids(), ["campaign-closed", "open", "closed"]);
+  assert.deepEqual(ids(), ["campaign-closed", "campaign-dismissed", "open", "closed"]);
   state.search = "";
   assert.deepEqual(ids(), ["campaign-closed", "open"]);
   assert.deepEqual([...state.filters], ["open"]);
   state.filters = new Set(["closed"]);
-  assert.deepEqual(ids(), ["campaign-closed", "closed"]);
+  assert.deepEqual(ids(), ["campaign-closed", "campaign-dismissed", "closed"]);
   state.filters = new Set(["open"]);
   state.search = "Ada";
   permission = "assigned";
-  assert.deepEqual(ids(), ["campaign-closed", "open"]);
+  assert.deepEqual(ids(), ["campaign-closed", "campaign-dismissed", "open"]);
   permission = "none";
   assert.deepEqual(ids(), []);
 });
