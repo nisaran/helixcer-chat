@@ -60,6 +60,7 @@ test('interrupted recipient preparation reuses its persisted message across all 
  h.context.getChannel=async()=>({channelId:'channel'});
  h.context.platformForChannel=()=> 'telegram';
  h.context.prepareCampaignRecipientTarget=async()=>({conversationId:'conversation',contactId:'contact',contact:{displayName:'Recipient'},profileId:'123'});
+ h.context.openCampaignConversation=async()=>{};
  h.context.applyTextVariables=text=>text;
  h.context.broadcast=async()=>{};h.context.getConversationItem=async()=>({});h.context.finalizeCampaign=async()=>({});
  let creations=0,interrupted=false;
@@ -75,4 +76,19 @@ test('interrupted recipient preparation reuses its persisted message across all 
  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM messages').get().n,38);
  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM outbox').get().n,38);
  assert.equal(h.db.prepare("SELECT COUNT(*) AS n FROM campaign_recipients WHERE message_id='' ").get().n,0);
+});
+
+test('campaign outreach reopens closed conversations for the open inbox', async () => {
+  const h = setup();
+  h.db.exec(`CREATE TABLE conversations (
+    conversation_id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT, updated_at TEXT
+  )`);
+  h.db.prepare("INSERT INTO conversations VALUES ('conversation','ws','closed','2026-11-01')").run();
+  const start = source.indexOf('async function openCampaignConversation(');
+  const end = source.indexOf('\nfunction pickCampaignIdentity(');
+  vm.runInContext(source.slice(start, end), h.context);
+  await vm.runInContext("openCampaignConversation(env,'ws','conversation')", h.context);
+  assert.equal(h.db.prepare("SELECT status FROM conversations WHERE conversation_id='conversation'").get().status, 'open');
+  await vm.runInContext("openCampaignConversation(env,'ws','conversation')", h.context);
+  assert.equal(h.db.prepare("SELECT status FROM conversations WHERE conversation_id='conversation'").get().status, 'open');
 });

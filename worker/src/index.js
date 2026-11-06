@@ -8512,6 +8512,7 @@ async function processCampaign(env, workspaceId, campaignId, principal, batchSiz
       const existing = await env.DB.prepare('SELECT message_id,conversation_id FROM messages WHERE workspace_id=?1 AND message_id=?2')
         .bind(workspaceId, recipient.recipientId).first();
       if (existing) {
+        await openCampaignConversation(env, workspaceId, existing.conversation_id);
         await queueCampaignRecipientMessage(env, workspaceId, campaignId, recipient, existing.message_id, existing.conversation_id);
         return;
       }
@@ -8592,8 +8593,8 @@ async function prepareCampaignRecipientTarget(env, workspaceId, channel, platfor
         metadata: {}
       }, now);
     }
-    const conversationId = await ensureIdentityConversation(env, workspaceId, contactId, identity.identityId,
-      channel.channelId, principal?.user?.email || '', 'closed');
+    const conversationId = await ensureCampaignConversation(env, workspaceId, contactId, identity.identityId,
+      channel.channelId, principal?.user?.email || '');
     return {
       contactId,
       identityId: identity.identityId,
@@ -8649,9 +8650,10 @@ async function prepareCampaignRecipientTarget(env, workspaceId, channel, platfor
     });
   }
 
-  // New chats from campaign uploads stay closed; existing chats keep their status.
-  const conversationId = await ensureIdentityConversation(env, workspaceId, contactId, identityId,
-    channel.channelId, '', 'closed');
+  // Campaign outreach should surface in the default Open inbox, including uploads and
+  // previously closed chats that receive another campaign message.
+  const conversationId = await ensureCampaignConversation(env, workspaceId, contactId, identityId,
+    channel.channelId, '');
   const contact = await getContactDetail(env, workspaceId, contactId);
   return {
     contactId,
@@ -8665,6 +8667,21 @@ async function prepareCampaignRecipientTarget(env, workspaceId, channel, platfor
       profileId
     }
   };
+}
+
+async function ensureCampaignConversation(env, workspaceId, contactId, identityId, channelId, assignedTo = '') {
+  const conversationId = await ensureIdentityConversation(env, workspaceId, contactId, identityId,
+    channelId, assignedTo, 'open');
+  await openCampaignConversation(env, workspaceId, conversationId);
+  return conversationId;
+}
+
+async function openCampaignConversation(env, workspaceId, conversationId) {
+  if (!conversationId) return;
+  const now = new Date().toISOString();
+  await env.DB.prepare(`UPDATE conversations SET status='open',updated_at=?3
+    WHERE workspace_id=?1 AND conversation_id=?2 AND status!='open'`)
+    .bind(workspaceId, conversationId, now).run();
 }
 
 function pickCampaignIdentity(contact, platform, channelId) {
