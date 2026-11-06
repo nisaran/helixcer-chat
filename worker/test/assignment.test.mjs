@@ -386,6 +386,49 @@ test('closing and reopening a chat inserts timeline events with actor names', as
   assert.ok(openedBroadcast);
 });
 
+test('bulk close closes many chats in one request including already-closed dismiss', async () => {
+  const { database, env, ownerToken, broadcasts, headersFor, workspaceId } = await fixture();
+  const now = '2026-11-06T10:00:00.000Z';
+  database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+    VALUES ('bulk-contact','Bulk Contact',?,?,?)`).run(now, now, workspaceId);
+  database.prepare(`INSERT INTO contact_identities
+      (identity_id,workspace_id,contact_id,platform,profile_id,display_name,created_at,updated_at)
+    VALUES ('bulk-identity',?,'bulk-contact','generic_http','bulk-profile','Bulk Contact',?,?)`)
+    .run(workspaceId, now, now);
+  database.prepare(`INSERT INTO channel_identity_bindings
+      (binding_id,workspace_id,identity_id,channel_id,scoped_profile_id,active,first_seen_at,last_seen_at,created_at,updated_at)
+    VALUES ('bulk-binding',?,'bulk-identity','assign-channel','bulk-profile',1,?,?,?,?)`)
+    .run(workspaceId, now, now, now, now);
+  database.prepare(`INSERT INTO conversations
+      (conversation_id,contact_id,channel_id,identity_id,status,assigned_to,subject,last_message_at,unread_count,tags_json,created_at,updated_at,workspace_id)
+    VALUES ('bulk-closed','bulk-contact','assign-channel','bulk-identity','closed','','Bulk Closed',?,0,'[]',?,?,?)`)
+    .run(now, now, now, workspaceId);
+  database.prepare(`INSERT INTO messages
+      (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,status,timestamp,payload_json,workspace_id)
+    VALUES ('bulk-template','bulk-closed','bulk-contact','assign-channel','bulk-identity','outbound','template','Recharge','sent',?,'{}',?)`)
+    .run(now, workspaceId);
+
+  const response = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/bulk-close', {
+    method: 'POST',
+    headers: headersFor(ownerToken),
+    body: JSON.stringify({ conversationIds: ['assign-conversation', 'bulk-closed', 'assign-conversation'] })
+  }), env, { waitUntil() {} });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.closed, 2);
+  assert.equal(body.failed, 0);
+  assert.equal(body.items.length, 2);
+  assert.equal(database.prepare(`SELECT status FROM conversations WHERE conversation_id='assign-conversation'`).get().status, 'closed');
+  assert.equal(database.prepare(`SELECT status FROM conversations WHERE conversation_id='bulk-closed'`).get().status, 'closed');
+  assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM messages
+    WHERE conversation_id IN ('assign-conversation','bulk-closed') AND direction='internal' AND text LIKE 'Chat closed by%'`).get().count, 2);
+  assert.ok(broadcasts.some((event) => event.type === 'conversation.updated' && event.conversationId === 'assign-conversation'));
+  assert.ok(broadcasts.some((event) => event.type === 'conversation.updated' && event.conversationId === 'bulk-closed'));
+  const closedTemplate = body.items.find((item) => item.conversationId === 'bulk-closed');
+  assert.equal(closedTemplate?.storedStatus, 'closed');
+  assert.equal(closedTemplate?.status, 'closed');
+});
+
 test('setting pending does not insert an open or close timeline event', async () => {
   const { database, env, ownerToken, headersFor } = await fixture();
   const response = await handleRequest(new Request('https://api.chat.helixcer.com/api/conversations/assign-conversation', {

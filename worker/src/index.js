@@ -761,6 +761,34 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       await broadcast(env, workspaceId, { type: 'conversation.created', conversationId: result.conversationId });
       return withCors(json(result, 201), cors);
     }
+    if (url.pathname === '/api/conversations/bulk-close' && request.method === 'POST') {
+      if (chatScope(principal, 'view') === 'none') {
+        throw httpError(403, 'You do not have permission to access chats.');
+      }
+      const result = await bulkCloseConversations(env, workspaceId, await readJson(request), principal);
+      for (const item of result.items) {
+        await broadcast(env, workspaceId, {
+          type: 'conversation.updated',
+          conversationId: item.conversationId,
+          conversation: item
+        });
+      }
+      for (const statusEvent of result.statusEvents) {
+        await broadcast(env, workspaceId, {
+          type: 'message.created',
+          conversationId: statusEvent.conversationId,
+          messageId: statusEvent.messageId,
+          message: statusEvent
+        });
+      }
+      return withCors(json({
+        ok: true,
+        closed: result.closed,
+        failed: result.failed,
+        items: result.items,
+        failures: result.failures
+      }), cors);
+    }
     if (url.pathname === '/api/search/messages' && request.method === 'GET') {
       return withCors(json({
         items: await searchMessages(env, workspaceId, url, {
@@ -5431,6 +5459,49 @@ function templateMessageView(payload) {
   };
 }
 
+async function bulkCloseConversations(env, workspaceId, payload, principal) {
+  rejectUnknownKeys(payload || {}, new Set(['conversationIds']), 'request');
+  const rawIds = Array.isArray(payload?.conversationIds) ? payload.conversationIds : null;
+  if (!rawIds) throw httpError(400, 'conversationIds must be an array.');
+  const conversationIds = [...new Set(rawIds.map((id) => String(id || '').trim()).filter(Boolean))].slice(0, 200);
+  if (!conversationIds.length) throw httpError(400, 'Select at least one conversation to close.');
+  if (rawIds.length > 200) throw httpError(400, 'Close at most 200 conversations at a time.');
+
+  const items = [];
+  const statusEvents = [];
+  const failures = [];
+  // Keep this on the server so backgrounded browser tabs do not throttle the close loop.
+  await runCampaignConcurrent(conversationIds, 4, async (conversationId) => {
+    try {
+      await assertConversationChannelAccess(env, workspaceId, conversationId, principal);
+      const existing = await getConversation(env, workspaceId, conversationId);
+      assertChatAccess(principal, existing, 'view');
+      const result = await updateConversation(env, workspaceId, conversationId, { status: 'closed' }, principal);
+      const item = result.item || result;
+      items.push(item);
+      if (result.statusEvent) {
+        statusEvents.push({
+          ...result.statusEvent,
+          conversationId: item.conversationId || conversationId
+        });
+      }
+    } catch (error) {
+      failures.push({
+        conversationId,
+        error: cleanError(error)
+      });
+    }
+  });
+
+  return {
+    closed: items.length,
+    failed: failures.length,
+    items,
+    statusEvents,
+    failures
+  };
+}
+
 async function updateConversation(env, workspaceId, id, payload, principal) {
   const existing = await env.DB.prepare('SELECT * FROM conversations WHERE conversation_id=?1 AND workspace_id=?2').bind(id, workspaceId).first();
   if (!existing) throw httpError(404, 'Conversation not found.');
@@ -5468,14 +5539,14 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
     .bind(id, workspaceId, hasStatusPatch ? 1 : 0, status, hasAssigneePatch ? 1 : 0, assignedTo,
       markRead ? 1 : 0, knownUnreadCount, now).run();
   await audit(env, principal, 'update', 'conversation', id, { status, assignedTo, markRead });
-  const item = await getConversationItem(env, workspaceId, id) ||
-    { conversationId: id, status, assignedTo, unreadCount: fallbackUnreadCount, updatedAt: now };
   const actor = outboundSenderAttribution(principal);
   let statusEvent = null;
   const statusChanged = hasStatusPatch && status !== previousStatus;
   // Closing an already-closed chat still records a close event so campaign/template
   // threads leave the Open inbox after an explicit bulk/single close.
   const dismissClosedCampaign = hasStatusPatch && status === 'closed' && previousStatus === 'closed';
+  // Persist lifecycle events before building the list item so Open-inbox bridging
+  // can see the dismiss/close timestamp immediately in this response.
   if ((statusChanged && status === 'closed') || dismissClosedCampaign) {
     statusEvent = await insertLifecycleEventMessage(env, workspaceId, existing, {
       action: 'closed',
@@ -5491,6 +5562,8 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
       timestamp: now
     });
   }
+  const item = await getConversationItem(env, workspaceId, id) ||
+    { conversationId: id, status, assignedTo, unreadCount: fallbackUnreadCount, updatedAt: now };
   const assignmentChanged = hasAssigneePatch
     && String(assignedTo || '').trim().toLowerCase() !== previousAssignee.toLowerCase();
   let assignmentEvent = null;

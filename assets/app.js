@@ -1213,6 +1213,22 @@
       return { ok: true, item: clone(item) };
     }
 
+    async bulkCloseConversations(conversationIds) {
+      const ids = [...new Set((Array.isArray(conversationIds) ? conversationIds : [])
+        .map((id) => String(id || "").trim()).filter(Boolean))];
+      const items = [];
+      const failures = [];
+      for (const conversationId of ids) {
+        try {
+          const result = await this.updateConversation(conversationId, { status: "closed" });
+          if (result?.item) items.push(result.item);
+        } catch (error) {
+          failures.push({ conversationId, error: error.message || "Could not close conversation." });
+        }
+      }
+      return { ok: true, closed: items.length, failed: failures.length, items, failures };
+    }
+
     async deleteConversation(conversationId) {
       await smallDelay(100);
       const index = this.data.conversations.findIndex((entry) => entry.conversationId === conversationId);
@@ -1785,6 +1801,17 @@
         : this.request(`/api/conversations/${encodeURIComponent(conversationId)}`, {
           method: "PATCH",
           body: JSON.stringify(patch),
+        });
+    }
+
+    bulkCloseConversations(conversationIds) {
+      return this.isDemo
+        ? this.demo.bulkCloseConversations(conversationIds)
+        : this.request("/api/conversations/bulk-close", {
+          method: "POST",
+          body: JSON.stringify({ conversationIds }),
+          // Keep the single server-side close running if the tab is backgrounded.
+          keepalive: true,
         });
     }
 
@@ -13886,25 +13913,23 @@
     if (!confirmed) return;
     state.bulkActionBusy = true;
     renderInboxBulkBar();
-    let closed = 0;
-    let failed = 0;
     try {
-      for (const conversationId of openIds) {
-        try {
-          const result = await state.api.updateConversation(conversationId, { status: "closed" });
-          const conversation = state.conversations.find((item) => item.conversationId === conversationId);
-          if (conversation) {
-            const item = result?.item || result?.conversation || result;
-            conversation.status = "closed";
-            conversation.storedStatus = item?.storedStatus || "closed";
-            if (item?.lastMessageType) conversation.lastMessageType = item.lastMessageType;
-          }
-          closed += 1;
-          if (conversationId === state.selectedConversationId) clearSelectedConversation({ updateUrl: false });
-        } catch {
-          failed += 1;
-        }
+      // One server request keeps closing even if this tab is backgrounded mid-run.
+      const result = await state.api.bulkCloseConversations(openIds);
+      const closedItems = asItems(result.items);
+      const closedIds = new Set(closedItems.map((item) => String(item.conversationId || "")).filter(Boolean));
+      for (const item of closedItems) {
+        const conversation = state.conversations.find((entry) => entry.conversationId === item.conversationId);
+        if (!conversation) continue;
+        conversation.status = "closed";
+        conversation.storedStatus = item.storedStatus || "closed";
+        if (item.lastMessageType) conversation.lastMessageType = item.lastMessageType;
       }
+      if (state.selectedConversationId && closedIds.has(state.selectedConversationId)) {
+        clearSelectedConversation({ updateUrl: false });
+      }
+      const closed = Number(result.closed ?? closedItems.length);
+      const failed = Number(result.failed || Math.max(0, openIds.length - closed));
       state.selectedConversationIds = new Set();
       state.inboxSelectMode = false;
       renderCounts();
@@ -13912,6 +13937,8 @@
       if (closed && !failed) showToast("Chats closed", closed === 1 ? "1 conversation was closed." : `${closed} conversations were closed.`);
       else if (closed) showToast("Some chats closed", `${closed} closed, ${failed} could not be updated.`, true);
       else showToast("Chats were not closed", "None of the selected conversations could be updated.", true);
+    } catch (error) {
+      showToast("Chats were not closed", error.message || "None of the selected conversations could be updated.", true);
     } finally {
       state.bulkActionBusy = false;
       renderInboxBulkBar();
