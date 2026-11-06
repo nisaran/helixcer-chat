@@ -3617,7 +3617,14 @@
     return unifiedConversations()
       .filter((item) => {
         if (viewScope === "assigned" && !isAssignedToCurrentUser(item)) return false;
-        if (statusFilters.length && !statusFilters.some((filter) => filter === "open" ? item.status !== "closed" : item.status === "closed")) return false;
+        if (statusFilters.length && !statusFilters.some((filter) => {
+          if (filter === "open") {
+            // Keep closed status intact, but still surface campaign/template sends in Open.
+            if (item.status !== "closed") return true;
+            return String(item.lastMessageType || "").toLowerCase() === "template";
+          }
+          return item.status === "closed";
+        })) return false;
         if (unassignedOnly && item.assignedTo && item.assignedTo !== "Unassigned") return false;
         if (!showingAll && selected.has("unread") && item.unreadCount <= 0) return false;
         return true;

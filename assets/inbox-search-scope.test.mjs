@@ -10,6 +10,14 @@ test("global search bypasses status filters and clearing restores them", () => {
   const items = [
     { conversationId: "open", status: "open", assigned: true, unreadCount: 1, lastMessageAt: "2026-11-04" },
     { conversationId: "closed", status: "closed", assigned: false, unreadCount: 0, lastMessageAt: "2026-11-03" },
+    {
+      conversationId: "campaign-closed",
+      status: "closed",
+      assigned: true,
+      unreadCount: 0,
+      lastMessageAt: "2026-11-05",
+      lastMessageType: "template",
+    },
   ];
   const state = { filters: new Set(["open"]), search: "Ada" };
   const context = vm.createContext({ state, chatPermissionScope: () => permission,
@@ -17,13 +25,16 @@ test("global search bypasses status filters and clearing restores them", () => {
     isAllConversationFilters: selected => selected.size === 4 });
   vm.runInContext(app.slice(start, end), context);
   const ids = () => Array.from(vm.runInContext("filteredConversations()", context), item => item.conversationId);
-  assert.deepEqual(ids(), ["open", "closed"]);
+  assert.deepEqual(ids(), ["campaign-closed", "open", "closed"]);
   state.search = "";
-  assert.deepEqual(ids(), ["open"]);
+  assert.deepEqual(ids(), ["campaign-closed", "open"]);
   assert.deepEqual([...state.filters], ["open"]);
+  state.filters = new Set(["closed"]);
+  assert.deepEqual(ids(), ["campaign-closed", "closed"]);
+  state.filters = new Set(["open"]);
   state.search = "Ada";
   permission = "assigned";
-  assert.deepEqual(ids(), ["open"]);
+  assert.deepEqual(ids(), ["campaign-closed", "open"]);
   permission = "none";
   assert.deepEqual(ids(), []);
 });
