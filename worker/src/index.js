@@ -97,7 +97,7 @@ import {
   serializeCampaignRecipient
 } from './campaigns.js';
 
-const API_VERSION = '2026-11-05-continuous-campaigns';
+const API_VERSION = '2026-11-06-campaign-chat-state';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -5829,7 +5829,9 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
   await audit(env, principal, 'send_message', 'conversation', conversationId, {
     channelId: row.channel_id, messageId, senderName, ...(reply ? { replyToMessageId: reply.messageId } : {})
   });
-  const assignment = await claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal);
+  // Campaign delivery is not a manual reply: preserve the chat's status and assignee.
+  const assignment = campaignMessageId ? null
+    : await claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal);
   return { message: {
     messageId, conversationId, channelId: row.channel_id, contactIdentityId: row.identity_id || '',
     identityId: row.identity_id || '', direction: 'outbound', messageType: 'text',
@@ -6545,7 +6547,9 @@ async function createConversationTemplateMessage(env, workspaceId, conversationI
   await audit(env, principal, 'send_template', 'conversation', conversationId, {
     channelId: target.channel_id, messageId, templateName: template.name, senderName
   });
-  const assignment = await claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal);
+  // Campaign delivery is not a manual reply: preserve the chat's status and assignee.
+  const assignment = campaignMessageId ? null
+    : await claimUnassignedConversationOnReply(env, workspaceId, conversationId, principal);
   return { message: {
     messageId, conversationId, channelId: target.channel_id, contactIdentityId: target.identity_id,
     identityId: target.identity_id, direction: 'outbound', messageType: 'template',
