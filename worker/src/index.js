@@ -3807,13 +3807,21 @@ export async function searchMessages(env, workspaceId, url, options = {}) {
 
 function conversationListItem(row) {
   const connectorType = logicalConnectorType(row);
+  const lastMessageType = row.last_message_type || '';
+  const storedStatus = row.status;
+  // Keep DB status unchanged. Older Open-inbox clients only keep non-closed rows, so
+  // closed chats whose latest message is a campaign/template are surfaced as open in
+  // list payloads. Newer clients prefer storedStatus for the real closed/open state.
+  const status = (storedStatus === 'closed' && String(lastMessageType).toLowerCase() === 'template')
+    ? 'open'
+    : storedStatus;
   return {
     conversationId: row.conversation_id, contactId: row.contact_id, channelId: row.channel_id,
     contactIdentityId: row.identity_id || '', identityId: row.identity_id || '',
-    channelName: row.channel_name, connectorType, status: row.status, assignedTo: row.assigned_to,
+    channelName: row.channel_name, connectorType, status, storedStatus, assignedTo: row.assigned_to,
     subject: row.subject, lastMessageAt: row.last_message_at, unreadCount: Number(row.unread_count || 0),
     tags: safeJsonParse(row.tags_json, []), lastMessage: row.last_message || '',
-    lastMessageType: row.last_message_type || '',
+    lastMessageType,
     channelProfileId: row.channel_profile_id || '',
     ...whatsappReplyWindowState(connectorType, row.last_inbound_at)
   };

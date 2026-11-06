@@ -2844,7 +2844,8 @@
       subject: raw.subject || raw.contactName || raw.displayName || raw.contact?.displayName || "Unknown contact",
       channelId: String(raw.channelId || raw.channel?.channelId || raw.channel?.id || "unknown"),
       connectorType: raw.connectorType || raw.channel?.connectorType || "",
-      status: raw.status || "open",
+      status: raw.storedStatus || raw.status || "open",
+      storedStatus: raw.storedStatus || raw.status || "open",
       assignedTo: raw.assignedTo || raw.assignee || "Unassigned",
       unreadCount: Number(raw.unreadCount ?? raw.unread ?? 0),
       lastMessage: String(lastMessage),
@@ -3498,8 +3499,8 @@
 
   function renderCounts() {
     const conversations = unifiedConversations();
-    const open = conversations.filter((item) => item.status !== "closed").length;
-    const closed = conversations.filter((item) => item.status === "closed").length;
+    const open = conversations.filter((item) => (item.storedStatus || item.status) !== "closed").length;
+    const closed = conversations.filter((item) => (item.storedStatus || item.status) === "closed").length;
     const unread = conversations.filter((item) => item.unreadCount > 0).length;
     const unassigned = conversations.filter((item) => !item.assignedTo || item.assignedTo === "Unassigned").length;
     const counts = { all: conversations.length, unassigned, open, unread, closed };
@@ -3618,12 +3619,13 @@
       .filter((item) => {
         if (viewScope === "assigned" && !isAssignedToCurrentUser(item)) return false;
         if (statusFilters.length && !statusFilters.some((filter) => {
+          const status = item.storedStatus || item.status;
           if (filter === "open") {
             // Keep closed status intact, but still surface campaign/template sends in Open.
-            if (item.status !== "closed") return true;
+            if (status !== "closed") return true;
             return String(item.lastMessageType || "").toLowerCase() === "template";
           }
-          return item.status === "closed";
+          return status === "closed";
         })) return false;
         if (unassignedOnly && item.assignedTo && item.assignedTo !== "Unassigned") return false;
         if (!showingAll && selected.has("unread") && item.unreadCount <= 0) return false;
