@@ -116,10 +116,16 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /id="channelDialog"/);
   assert.match(html, /id="channelForm"/);
   assert.match(html, /id="channelProvider"/);
+  assert.match(html, /<option value="" selected>Select a provider<\/option>/);
   assert.match(html, /<option value="whatsapp_cloud">WhatsApp Cloud<\/option>/);
   assert.match(html, /<option value="telegram">Telegram Bot<\/option>/);
   assert.match(html, /<option value="instagram">Instagram<\/option>/);
   assert.match(html, /<option value="facebook_messenger">Facebook Messenger<\/option>/);
+  assert.match(html, /data-provider-fields="whatsapp_cloud" hidden/);
+  assert.match(html, /id="whatsappSetupChooser"/);
+  assert.match(html, /data-action="whatsapp-setup-manual"/);
+  assert.match(html, /data-action="whatsapp-setup-facebook"[^>]*disabled/);
+  assert.match(html, /id="whatsappManualFields" hidden/);
   assert.match(html, /Instagram Business or Creator account/);
   assert.match(html, /Instagram User access token/);
   assert.match(html, /Facebook Page ID/);
@@ -143,8 +149,14 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(app, /Helixcer routes messages by Page ID/);
   assert.match(app, /function identityChannels\(platform, bindings = \[\]\)/);
   assert.match(app, /connectorPlatform\(channel\.connectorType\) === platform/);
+  assert.match(app, /function setWhatsappSetupMode/);
+  assert.match(app, /whatsappSetupMode/);
+  assert.doesNotMatch(app, /\$\("channelProvider"\)\.value = channel\?\.connectorType \|\| "whatsapp_cloud"/);
+  assert.doesNotMatch(app, /\$\{providerProfiles\[provider\]\?\.label \|\| "Channel"\} connection/);
   assert.doesNotMatch(app, /channelId:\s*"wa-main"/);
   assert.doesNotMatch(`${html}\n${app}`, /WA_MAIN_(?:ACCESS_TOKEN|APP_SECRET|VERIFY_TOKEN|PHONE_NUMBER_ID)/);
+  assert.match(styles, /\.whatsapp-setup-chooser/);
+  assert.match(styles, /\.whatsapp-setup-option\.is-active/);
 });
 
 test("Channel navigation is collapsed by default and nests the WhatsApp template library", () => {
@@ -214,7 +226,7 @@ test("channel secrets are masked, optional on edit, and never prefilled", () => 
   assert.match(html, /id="webhookTokenDialog"/);
   assert.match(html, /id="webhookTokenInput" name="verifyToken" type="password"/);
   assert.match(app, /setup\.credentialFields/);
-  assert.match(app, /input\.required = active && !saved/);
+  assert.match(app, /input\.required = fieldActive && !saved/);
   assert.match(app, /input\.dataset\.defaultPlaceholder/);
   assert.match(app, /const SAVED_SECRET_MASK/);
   assert.match(app, /input\.value = SAVED_SECRET_MASK/);
@@ -623,7 +635,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261106-role-cards/);
+  assert.match(html, /app\.js\?v=20261106-channel-form-setup/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -993,8 +1005,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261106-role-cards/);
-  assert.match(html, /assets\/styles\.css\?v=20261106-role-cards/);
+  assert.match(html, /assets\/app\.js\?v=20261106-channel-form-setup/);
+  assert.match(html, /assets\/styles\.css\?v=20261106-channel-form-setup/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);

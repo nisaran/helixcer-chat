@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261106-role-cards">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261106-channel-form-setup">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261106-role-cards" defer></script>
+  <script src="./assets/app.js?v=20261106-channel-form-setup" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1249,17 +1249,23 @@
       <input type="hidden" name="channelId" id="channelIdInput">
       <input type="hidden" name="metaVerifyToken" id="channelMetaVerifyToken">
       <div class="form-grid channel-form-grid">
-        <label class="field-label">Provider<select class="text-field" name="connectorType" id="channelProvider" required><option value="whatsapp_cloud">WhatsApp Cloud</option><option value="telegram">Telegram Bot</option><option value="instagram">Instagram</option><option value="facebook_messenger">Facebook Messenger</option><option value="google_reviews">Google Reviews</option></select></label>
-        <label class="field-label">Connection name<input class="text-field" name="name" id="channelNameInput" required maxlength="80" placeholder="Sales WhatsApp"></label>
+        <label class="field-label">Provider<select class="text-field" name="connectorType" id="channelProvider" required><option value="" selected>Select a provider</option><option value="whatsapp_cloud">WhatsApp Cloud</option><option value="telegram">Telegram Bot</option><option value="instagram">Instagram</option><option value="facebook_messenger">Facebook Messenger</option><option value="google_reviews">Google Reviews</option></select></label>
+        <label class="field-label">Connection name<input class="text-field" name="name" id="channelNameInput" required maxlength="80" placeholder="e.g. Sales WhatsApp"></label>
       </div>
 
-      <section class="provider-fields" data-provider-fields="whatsapp_cloud">
-        <div class="provider-form-head"><img class="provider-mark whatsapp" src="./assets/provider-whatsapp.svg" alt=""><div><strong>WhatsApp Cloud API</strong><span>Use the values shown in Meta's WhatsApp API setup.</span></div></div>
-        <div class="form-grid channel-form-grid">
-          <label class="field-label">WhatsApp Business Account ID <span class="field-hint">Messaging account ID in Meta</span><input class="text-field" name="wabaId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
-          <label class="field-label">Phone Number ID <span class="field-hint">Shown directly below the selected From number</span><input class="text-field" name="phoneNumberId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
-          <label class="field-label form-span">Access token<input class="text-field secret-field" name="whatsappAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a Meta access token" required><span class="field-help secret-help">Paste only the token value from WhatsApp → API setup—without quotes, labels, or JSON. The temporary token is fine for testing; replace it with a permanent System User token later. A green masked value means it is saved securely; focus the field only to replace it.</span></label>
-          <label class="field-label form-span">Meta App Secret<input class="text-field secret-field" name="whatsappAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">Use App settings → Basic → App secret for this same Meta app—not the Client Token. A green masked value means it is saved securely.</span></label>
+      <section class="provider-fields" data-provider-fields="whatsapp_cloud" hidden>
+        <div class="provider-form-head"><img class="provider-mark whatsapp" src="./assets/provider-whatsapp.svg" alt=""><div><strong>WhatsApp Cloud API</strong><span>Choose how you want to connect this WhatsApp account.</span></div></div>
+        <div class="whatsapp-setup-chooser" id="whatsappSetupChooser" role="group" aria-label="WhatsApp setup method">
+          <button class="secondary-button whatsapp-setup-option" type="button" id="whatsappSetupManual" data-action="whatsapp-setup-manual" aria-pressed="false">Manual Setup</button>
+          <button class="secondary-button whatsapp-setup-option" type="button" id="whatsappSetupFacebook" data-action="whatsapp-setup-facebook" disabled aria-disabled="true" title="Coming soon">Login with Facebook</button>
+        </div>
+        <div class="whatsapp-manual-fields" id="whatsappManualFields" hidden>
+          <div class="form-grid channel-form-grid">
+            <label class="field-label">WhatsApp Business Account ID <span class="field-hint">Messaging account ID in Meta</span><input class="text-field" name="wabaId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
+            <label class="field-label">Phone Number ID <span class="field-hint">Shown directly below the selected From number</span><input class="text-field" name="phoneNumberId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
+            <label class="field-label form-span">Access token<input class="text-field secret-field" name="whatsappAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a Meta access token" required><span class="field-help secret-help">Paste only the token value from WhatsApp → API setup—without quotes, labels, or JSON. The temporary token is fine for testing; replace it with a permanent System User token later. A green masked value means it is saved securely; focus the field only to replace it.</span></label>
+            <label class="field-label form-span">Meta App Secret<input class="text-field secret-field" name="whatsappAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">Use App settings → Basic → App secret for this same Meta app—not the Client Token. A green masked value means it is saved securely.</span></label>
+          </div>
         </div>
       </section>
 

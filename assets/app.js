@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261104-contacts-platforms-column";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261106-channel-form-setup";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -150,6 +150,7 @@
     composerRoutes: new Map(),
     composerDrafts: new Map(),
     recentVerifyTokens: new Map(),
+    whatsappSetupMode: "",
     selectedConversationId: null,
     selectedContactId: null,
     contactCreateIdentityDrafts: [],
@@ -13236,7 +13237,7 @@
     });
     $("channelIdInput").value = channel?.channelId || "";
     $("channelMetaVerifyToken").value = channel ? "" : generatePrivateToken();
-    $("channelProvider").value = channel?.connectorType || "whatsapp_cloud";
+    $("channelProvider").value = channel?.connectorType || "";
     $("channelProvider").disabled = Boolean(channel);
     $("channelNameInput").value = channel?.name || "";
     $("channelEnabledInput").checked = channel?.enabled !== false;
@@ -13251,8 +13252,16 @@
     $("channelDialogTitle").textContent = channel ? `Edit ${channel.name}` : "Add a channel";
     $("channelSubmit").textContent = channel ? "Save changes" : "Save connection";
     $("channelDeleteButton").hidden = !channel;
-    syncChannelForm(channel?.connectorType || "whatsapp_cloud", Boolean(channel), channel?.setup || {});
+    // Editing an existing WhatsApp connection opens Manual Setup directly.
+    state.whatsappSetupMode = channel?.connectorType === "whatsapp_cloud" ? "manual" : "";
+    syncChannelForm(channel?.connectorType || "", Boolean(channel), channel?.setup || {});
     $("channelDialog").showModal();
+  }
+
+  function setWhatsappSetupMode(mode = "") {
+    state.whatsappSetupMode = mode === "manual" ? "manual" : "";
+    const provider = $("channelProvider")?.value || "";
+    syncChannelForm(provider, Boolean($("channelIdInput")?.value), {});
   }
 
   function syncChannelForm(provider, editing = Boolean($("channelIdInput").value), setup = {}) {
@@ -13262,11 +13271,17 @@
       instagramAccessToken: "accessToken", instagramAppSecret: "appSecret",
       messengerAccessToken: "accessToken", messengerAppSecret: "appSecret",
     };
+    const selectedProvider = String(provider || "").trim();
+    if (selectedProvider !== "whatsapp_cloud") state.whatsappSetupMode = "";
+    const whatsappManual = selectedProvider === "whatsapp_cloud"
+      && (editing || state.whatsappSetupMode === "manual");
     document.querySelectorAll("[data-provider-fields]").forEach((section) => {
-      const active = section.dataset.providerFields === provider;
+      const active = Boolean(selectedProvider) && section.dataset.providerFields === selectedProvider;
       section.hidden = !active;
       section.querySelectorAll("input,select,textarea").forEach((input) => {
-        input.disabled = !active;
+        const inWhatsappManual = Boolean(input.closest("#whatsappManualFields"));
+        const fieldActive = active && (!inWhatsappManual || whatsappManual);
+        input.disabled = !fieldActive;
         if (input.classList.contains("secret-field")) {
           if (!Object.prototype.hasOwnProperty.call(input.dataset, "defaultPlaceholder")) {
             input.dataset.defaultPlaceholder = input.placeholder;
@@ -13274,8 +13289,8 @@
           const key = credentialKeys[input.name];
           const hasFieldState = key && setup.credentialFields && Object.prototype.hasOwnProperty.call(setup.credentialFields, key);
           const saved = Boolean(editing && (hasFieldState ? setup.credentialFields[key] : setup.credentialsPresent));
-          const showingSaved = Boolean(active && saved && (!input.value || input.value === SAVED_SECRET_MASK));
-          input.required = active && !saved;
+          const showingSaved = Boolean(fieldActive && saved && (!input.value || input.value === SAVED_SECRET_MASK));
+          input.required = fieldActive && !saved;
           input.placeholder = input.dataset.defaultPlaceholder;
           input.classList.toggle("is-saved", showingSaved);
           if (showingSaved) {
@@ -13286,15 +13301,31 @@
             delete input.dataset.savedCredential;
             input.removeAttribute("aria-label");
           }
+        } else if (inWhatsappManual) {
+          input.required = fieldActive;
         }
       });
     });
+    const whatsappChooser = $("whatsappSetupChooser");
+    const whatsappManualFields = $("whatsappManualFields");
+    const whatsappManualButton = $("whatsappSetupManual");
+    if (whatsappChooser) whatsappChooser.hidden = selectedProvider !== "whatsapp_cloud";
+    if (whatsappManualFields) whatsappManualFields.hidden = !whatsappManual;
+    if (whatsappManualButton) {
+      whatsappManualButton.classList.toggle("is-active", whatsappManual);
+      whatsappManualButton.setAttribute("aria-pressed", String(whatsappManual));
+    }
     const googleConnected = Boolean(editing && setup.credentialsPresent);
     const googleNote = $("googleReviewsConnectedNote");
-    if (googleNote) googleNote.hidden = !(provider === "google_reviews" && googleConnected);
+    if (googleNote) googleNote.hidden = !(selectedProvider === "google_reviews" && googleConnected);
+    const enabledRow = document.querySelector("#channelForm .channel-enabled");
+    if (enabledRow) enabledRow.hidden = !selectedProvider;
     const submit = $("channelSubmit");
     if (submit) {
-      if (provider === "google_reviews" && !editing) {
+      const hideSubmit = !selectedProvider
+        || (selectedProvider === "google_reviews" && !editing)
+        || (selectedProvider === "whatsapp_cloud" && !whatsappManual);
+      if (hideSubmit) {
         submit.hidden = true;
         submit.disabled = true;
       } else {
@@ -13302,9 +13333,6 @@
         submit.disabled = false;
         submit.textContent = editing ? "Save changes" : "Save connection";
       }
-    }
-    if (!editing && !$("channelNameInput").value.trim()) {
-      $("channelNameInput").value = `${providerProfiles[provider]?.label || "Channel"} connection`;
     }
   }
 
@@ -14441,6 +14469,13 @@
           verifyChannelConnection(actionButton.dataset.channelId, actionButton);
           return;
         }
+        if (actionButton.dataset.action === "whatsapp-setup-manual") {
+          setWhatsappSetupMode("manual");
+          return;
+        }
+        if (actionButton.dataset.action === "whatsapp-setup-facebook") {
+          return;
+        }
         if (actionButton.dataset.action === "connect-google-reviews") {
           const channel = state.channels.find((item) => item.channelId === actionButton.dataset.channelId);
           const name = $("channelNameInput")?.value?.trim() || channel?.name || "Google Reviews connection";
@@ -15166,11 +15201,8 @@
       confirmGoogleReviewsLocation(event.currentTarget);
     });
     $("channelProvider").addEventListener("change", (event) => {
-      const nameInput = $("channelNameInput");
-      if (!nameInput.value.trim() || /^(WhatsApp|Telegram|Instagram|Messenger|Google Reviews) connection$/.test(nameInput.value.trim())) {
-        nameInput.value = `${providerProfiles[event.target.value]?.label || "Channel"} connection`;
-      }
-      syncChannelForm(event.target.value, false, {});
+      state.whatsappSetupMode = "";
+      syncChannelForm(event.target.value, Boolean($("channelIdInput")?.value), {});
     });
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
     $("contactEditForm").addEventListener("submit", (event) => { event.preventDefault(); saveContactEdits(event.currentTarget); });
