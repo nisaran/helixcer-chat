@@ -2844,7 +2844,9 @@
       subject: raw.subject || raw.contactName || raw.displayName || raw.contact?.displayName || "Unknown contact",
       channelId: String(raw.channelId || raw.channel?.channelId || raw.channel?.id || "unknown"),
       connectorType: raw.connectorType || raw.channel?.connectorType || "",
-      status: raw.storedStatus || raw.status || "open",
+      // `status` may be list-virtualized as open for closed campaign templates.
+      // `storedStatus` is the durable open/closed/pending value from the database.
+      status: raw.status || "open",
       storedStatus: raw.storedStatus || raw.status || "open",
       assignedTo: raw.assignedTo || raw.assignee || "Unassigned",
       unreadCount: Number(raw.unreadCount ?? raw.unread ?? 0),
@@ -3499,7 +3501,7 @@
 
   function renderCounts() {
     const conversations = unifiedConversations();
-    const open = conversations.filter((item) => (item.storedStatus || item.status) !== "closed").length;
+    const open = conversations.filter((item) => item.status !== "closed").length;
     const closed = conversations.filter((item) => (item.storedStatus || item.status) === "closed").length;
     const unread = conversations.filter((item) => item.unreadCount > 0).length;
     const unassigned = conversations.filter((item) => !item.assignedTo || item.assignedTo === "Unassigned").length;
@@ -3619,13 +3621,11 @@
       .filter((item) => {
         if (viewScope === "assigned" && !isAssignedToCurrentUser(item)) return false;
         if (statusFilters.length && !statusFilters.some((filter) => {
-          const status = item.storedStatus || item.status;
           if (filter === "open") {
-            // Keep closed status intact, but still surface campaign/template sends in Open.
-            if (status !== "closed") return true;
-            return String(item.lastMessageType || "").toLowerCase() === "template";
+            // API list status already includes closed campaign/template threads until dismissed.
+            return item.status !== "closed";
           }
-          return status === "closed";
+          return (item.storedStatus || item.status) === "closed";
         })) return false;
         if (unassignedOnly && item.assignedTo && item.assignedTo !== "Unassigned") return false;
         if (!showingAll && selected.has("unread") && item.unreadCount <= 0) return false;
@@ -4195,7 +4195,7 @@
     chatLogo.hidden = !logoPath;
     if (logoPath) chatLogo.src = logoPath;
     $("chatPresence").textContent = `Active ${relativeTime(conversation.lastMessageAt)}`;
-    $("conversationStatus").value = conversation.status;
+    $("conversationStatus").value = conversation.storedStatus || conversation.status;
     populateAssigneeSelect(conversation);
 
     $("detailsAvatar").textContent = initials(conversation.subject);
@@ -13865,6 +13865,8 @@
   async function bulkCloseConversations() {
     const ids = [...state.selectedConversationIds];
     if (!ids.length || state.bulkActionBusy) return;
+    // Include Open-inbox campaign threads that are already closed in storage but still
+    // listed as open until an agent dismisses them.
     const openIds = ids.filter((id) => {
       const conversation = state.conversations.find((item) => item.conversationId === id);
       return conversation && conversation.status !== "closed";
@@ -13889,9 +13891,14 @@
     try {
       for (const conversationId of openIds) {
         try {
-          await state.api.updateConversation(conversationId, { status: "closed" });
+          const result = await state.api.updateConversation(conversationId, { status: "closed" });
           const conversation = state.conversations.find((item) => item.conversationId === conversationId);
-          if (conversation) conversation.status = "closed";
+          if (conversation) {
+            const item = result?.item || result?.conversation || result;
+            conversation.status = "closed";
+            conversation.storedStatus = item?.storedStatus || "closed";
+            if (item?.lastMessageType) conversation.lastMessageType = item.lastMessageType;
+          }
           closed += 1;
           if (conversationId === state.selectedConversationId) clearSelectedConversation({ updateUrl: false });
         } catch {
@@ -15114,6 +15121,7 @@
         if (["pending", "closed"].includes(next)) conversationStatusDeferClearId = conversation.conversationId;
         const result = await state.api.updateConversation(conversation.conversationId, { status: next });
         conversation.status = next;
+        conversation.storedStatus = result?.item?.storedStatus || result?.storedStatus || next;
         if (result?.statusEvent) {
           const eventMessage = normalizeMessage(result.statusEvent);
           upsertMessage(conversation.conversationId, eventMessage);

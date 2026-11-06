@@ -85,10 +85,27 @@ test('campaign outreach keeps conversation status closed and does not reopen cha
 });
 
 test('conversation list surfaces closed template chats as open without changing stored status', () => {
+  assert.match(source, /function openInboxListStatus\(/);
+  assert.match(source, /closedAt >= messageAt\) return 'closed'/);
+  assert.match(source, /dismissClosedCampaign/);
   const start = source.indexOf('function conversationListItem(row) {');
   const end = source.indexOf('\nasync function getConversation(', start);
   const fn = source.slice(start, end);
   assert.match(fn, /storedStatus/);
-  assert.match(fn, /storedStatus === 'closed' && String\(lastMessageType\)\.toLowerCase\(\) === 'template'/);
+  assert.match(fn, /openInboxListStatus\(/);
   assert.match(fn, /status, storedStatus, assignedTo/);
+});
+
+test('open inbox list status hides dismissed closed template chats', () => {
+  const start = source.indexOf('function openInboxListStatus(');
+  const end = source.indexOf('\nfunction conversationListItem(', start);
+  const context = vm.createContext({});
+  vm.runInContext(`${source.slice(start, end)}\nthis.openInboxListStatus = openInboxListStatus;`, context);
+  assert.equal(context.openInboxListStatus('closed', 'template', '2026-11-06T10:00:00.000Z', ''), 'open');
+  assert.equal(
+    context.openInboxListStatus('closed', 'template', '2026-11-06T10:00:00.000Z', '2026-11-06T11:00:00.000Z'),
+    'closed'
+  );
+  assert.equal(context.openInboxListStatus('closed', 'text', '2026-11-06T10:00:00.000Z', ''), 'closed');
+  assert.equal(context.openInboxListStatus('open', 'template', '2026-11-06T10:00:00.000Z', ''), 'open');
 });

@@ -3662,6 +3662,15 @@ async function listConversations(env, workspaceId, url, options = {}) {
       (SELECT message_type FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
         AND m.direction!='internal'
         ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message_type,
+      (SELECT timestamp FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
+        AND m.direction!='internal'
+        ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message_timestamp,
+      (SELECT MAX(closed_event.timestamp) FROM messages closed_event
+        WHERE closed_event.workspace_id=c.workspace_id
+          AND closed_event.conversation_id=c.conversation_id
+          AND closed_event.direction='internal'
+          AND closed_event.message_type='event'
+          AND json_extract(closed_event.payload_json,'$.event')='closed') AS last_closed_event_at,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
     FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id
@@ -3805,16 +3814,29 @@ export async function searchMessages(env, workspaceId, url, options = {}) {
   }));
 }
 
+function openInboxListStatus(storedStatus, lastMessageType, lastMessageTimestamp, lastClosedEventAt) {
+  if (storedStatus !== 'closed') return storedStatus;
+  // Closed campaign/template threads surface in Open until an agent explicitly closes them.
+  if (String(lastMessageType || '').toLowerCase() !== 'template') return storedStatus;
+  const closedAt = String(lastClosedEventAt || '');
+  const messageAt = String(lastMessageTimestamp || '');
+  if (closedAt && messageAt && closedAt >= messageAt) return 'closed';
+  return 'open';
+}
+
 function conversationListItem(row) {
   const connectorType = logicalConnectorType(row);
   const lastMessageType = row.last_message_type || '';
   const storedStatus = row.status;
   // Keep DB status unchanged. Older Open-inbox clients only keep non-closed rows, so
   // closed chats whose latest message is a campaign/template are surfaced as open in
-  // list payloads. Newer clients prefer storedStatus for the real closed/open state.
-  const status = (storedStatus === 'closed' && String(lastMessageType).toLowerCase() === 'template')
-    ? 'open'
-    : storedStatus;
+  // list payloads until an agent closes/dismisses them. Newer clients prefer storedStatus.
+  const status = openInboxListStatus(
+    storedStatus,
+    lastMessageType,
+    row.last_message_timestamp || row.last_message_at,
+    row.last_closed_event_at
+  );
   return {
     conversationId: row.conversation_id, contactId: row.contact_id, channelId: row.channel_id,
     contactIdentityId: row.identity_id || '', identityId: row.identity_id || '',
@@ -3855,6 +3877,15 @@ async function getConversationItem(env, workspaceId, conversationId) {
       (SELECT message_type FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
         AND m.direction!='internal'
         ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message_type,
+      (SELECT timestamp FROM messages m WHERE m.workspace_id=c.workspace_id AND m.conversation_id=c.conversation_id
+        AND m.direction!='internal'
+        ORDER BY timestamp DESC,message_id DESC LIMIT 1) AS last_message_timestamp,
+      (SELECT MAX(closed_event.timestamp) FROM messages closed_event
+        WHERE closed_event.workspace_id=c.workspace_id
+          AND closed_event.conversation_id=c.conversation_id
+          AND closed_event.direction='internal'
+          AND closed_event.message_type='event'
+          AND json_extract(closed_event.payload_json,'$.event')='closed') AS last_closed_event_at,
       (SELECT MAX(timestamp) FROM messages inbound WHERE inbound.workspace_id=c.workspace_id
         AND inbound.conversation_id=c.conversation_id AND inbound.direction='inbound') AS last_inbound_at
     FROM conversations c JOIN channels ch ON ch.channel_id=c.channel_id AND ch.workspace_id=c.workspace_id
@@ -5442,7 +5473,10 @@ async function updateConversation(env, workspaceId, id, payload, principal) {
   const actor = outboundSenderAttribution(principal);
   let statusEvent = null;
   const statusChanged = hasStatusPatch && status !== previousStatus;
-  if (statusChanged && status === 'closed') {
+  // Closing an already-closed chat still records a close event so campaign/template
+  // threads leave the Open inbox after an explicit bulk/single close.
+  const dismissClosedCampaign = hasStatusPatch && status === 'closed' && previousStatus === 'closed';
+  if ((statusChanged && status === 'closed') || dismissClosedCampaign) {
     statusEvent = await insertLifecycleEventMessage(env, workspaceId, existing, {
       action: 'closed',
       actorLogin: actor.login,

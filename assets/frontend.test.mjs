@@ -1108,9 +1108,10 @@ test("conversation filters are multi-selectable with responsive desktop and mobi
   assert.ok(app.includes("const showingAll = searchActive || selected.size === 0 || isAllConversationFilters(selected)"));
   assert.match(app, /input\.checked = input\.value === "all" \? showingAll : selected\.has\(input\.value\)/);
   assert.match(app, /const statusFilters = showingAll \? \[\] : \["open", "closed"\]\.filter/);
-  assert.match(app, /lastMessageType \|\| ""\)\.toLowerCase\(\) === "template"/);
-  assert.match(app, /status: raw\.storedStatus \|\| raw\.status \|\| "open"/);
-  assert.match(app, /const status = item\.storedStatus \|\| item\.status/);
+  assert.match(app, /status: raw\.status \|\| "open"/);
+  assert.match(app, /storedStatus: raw\.storedStatus \|\| raw\.status \|\| "open"/);
+  assert.match(app, /return item\.status !== "closed"/);
+  assert.match(app, /return \(item\.storedStatus \|\| item\.status\) === "closed"/);
   assert.match(app, /const unassignedOnly = !showingAll && selected\.has\("unassigned"\)/);
   assert.match(app, /!showingAll && selected\.has\("unread"\)/);
   assert.match(app, /toggleConversationFilter\(button\.dataset\.filter\)/);
