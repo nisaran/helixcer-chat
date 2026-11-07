@@ -25,8 +25,13 @@ test("normal authentication uses a top-level link and cookie credentials", () =>
   assert.match(html, /id="forgotPasswordForm"/);
   assert.match(html, /id="resetPasswordForm"/);
   assert.match(html, /id="invitePasswordForm"/);
-  assert.match(html, /data-action="open-password"/);
-  assert.match(html, /id="passwordDialog"/);
+  assert.doesNotMatch(html, /data-action="open-password"/);
+  assert.doesNotMatch(html, /id="passwordDialog"/);
+  assert.match(html, /id="profileDialog"/);
+  assert.match(html, /id="passwordForm"/);
+  assert.match(html, /profile-password-section/);
+  assert.match(app, /resetProfilePasswordSection\(\)/);
+  assert.doesNotMatch(app, /openPasswordDialog|passwordDialog/);
   assert.doesNotMatch(html, /Sign in with your approved Google account/);
   assert.doesNotMatch(html, /Only workspace members can sign in/);
   assert.match(html, /name="helixcer-api-base" content="https:\/\/api\.chat\.helixcer\.com"/);
@@ -635,7 +640,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261106-channel-form-setup/);
+  assert.match(html, /app\.js\?v=20261107-profile-password/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -1005,8 +1010,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261106-channel-form-setup/);
-  assert.match(html, /assets\/styles\.css\?v=20261106-channel-form-setup/);
+  assert.match(html, /assets\/app\.js\?v=20261107-profile-password/);
+  assert.match(html, /assets\/styles\.css\?v=20261107-profile-password/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);

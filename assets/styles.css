@@ -2053,12 +2053,36 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
-.modal.profile-modal .modal-card { width: auto; }
-.modal.profile-modal .modal-actions {
+.modal.profile-modal .modal-card,
+.modal.profile-modal .profile-modal-card { width: auto; }
+.modal.profile-modal .profile-details-actions {
   position: sticky;
   bottom: 0;
   z-index: 2;
   margin-top: 16px;
+  margin-inline: -21px;
+  border-top: 1px solid var(--line);
+  background: white;
+  padding: 14px 21px;
+}
+.profile-password-section {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+.profile-password-head {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+.profile-password-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 750;
+}
+.profile-password-actions {
+  margin-top: 14px;
   margin-inline: -21px;
   margin-bottom: -21px;
   border-top: 1px solid var(--line);
@@ -2472,8 +2496,10 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .contact-modal { max-height: calc(100dvh - 16px); }
   .contact-modal .modal-card { padding: 18px 15px; }
   .modal.profile-modal { max-height: calc(100dvh - 16px); }
-  .modal.profile-modal .modal-card { padding: 18px 15px; }
-  .modal.profile-modal .modal-actions { margin-inline: -15px; margin-bottom: -18px; padding: 14px 15px 18px; }
+  .modal.profile-modal .modal-card,
+  .modal.profile-modal .profile-modal-card { padding: 18px 15px; }
+  .modal.profile-modal .profile-details-actions { margin-inline: -15px; padding: 14px 15px; }
+  .modal.profile-modal .profile-password-actions { margin-inline: -15px; margin-bottom: -18px; padding: 14px 15px 18px; }
   .channel-modal { max-height: calc(100dvh - 16px); }
   .channel-modal .modal-card { padding: 18px 15px; }
   .channel-modal .modal-actions { flex-wrap: wrap; }
