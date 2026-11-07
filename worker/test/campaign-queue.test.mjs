@@ -76,3 +76,19 @@ test('interrupted recipient preparation reuses its persisted message across all 
  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM outbox').get().n,38);
  assert.equal(h.db.prepare("SELECT COUNT(*) AS n FROM campaign_recipients WHERE message_id='' ").get().n,0);
 });
+
+test('campaign outreach keeps conversation status closed and does not reopen chats', () => {
+  assert.match(source, /ensureIdentityConversation\([\s\S]*?'closed'\)/);
+  assert.doesNotMatch(source, /async function openCampaignConversation\(/);
+  assert.doesNotMatch(source, /async function ensureCampaignConversation\(/);
+  assert.doesNotMatch(source, /SET status='open',updated_at=\?3\s+WHERE workspace_id=\?1 AND conversation_id=\?2 AND status!='open'/);
+});
+
+test('conversation list surfaces closed template chats as open without changing stored status', () => {
+  const start = source.indexOf('function conversationListItem(row) {');
+  const end = source.indexOf('\nasync function getConversation(', start);
+  const fn = source.slice(start, end);
+  assert.match(fn, /storedStatus/);
+  assert.match(fn, /storedStatus === 'closed' && String\(lastMessageType\)\.toLowerCase\(\) === 'template'/);
+  assert.match(fn, /status, storedStatus, assignedTo/);
+});
