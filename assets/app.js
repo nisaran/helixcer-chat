@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261106-channel-form-setup";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261107-profile-password";
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
   const DEFAULT_WORKSPACE = "Helixcer workspace";
@@ -13018,6 +13018,23 @@
     $("profileSaveButton").disabled = busy;
   }
 
+  function resetProfilePasswordSection() {
+    const user = state.currentUser;
+    if (!user) return;
+    const hasPassword = Boolean(user.hasPassword);
+    $("passwordSectionTitle").textContent = hasPassword ? "Change password" : "Set password";
+    $("passwordSectionHelp").textContent = hasPassword
+      ? "Update the password used for email sign-in."
+      : "Create a password so you can also sign in with email.";
+    $("profileCurrentPasswordField").hidden = !hasPassword;
+    $("profileCurrentPassword").required = hasPassword;
+    $("profileCurrentPassword").value = "";
+    $("profileNewPassword").value = "";
+    $("profileNewPasswordConfirm").value = "";
+    $("passwordSaveState").textContent = "";
+    $("passwordSaveButton").disabled = false;
+  }
+
   function openProfileDialog() {
     const user = state.currentUser;
     if (!user) return;
@@ -13035,25 +13052,9 @@
     $("profileCountry").value = user.country || "";
     $("profileSaveState").textContent = "";
     setProfileFormBusy(false);
+    resetProfilePasswordSection();
     $("profileDialog").showModal();
     $("profileDisplayName").focus();
-  }
-
-  function openPasswordDialog() {
-    const user = state.currentUser;
-    if (!user) return;
-    toggleUserMenu(false);
-    const hasPassword = Boolean(user.hasPassword);
-    $("passwordDialogTitle").textContent = hasPassword ? "Change password" : "Set password";
-    $("profileCurrentPasswordField").hidden = !hasPassword;
-    $("profileCurrentPassword").required = hasPassword;
-    $("profileCurrentPassword").value = "";
-    $("profileNewPassword").value = "";
-    $("profileNewPasswordConfirm").value = "";
-    $("passwordSaveState").textContent = "";
-    $("passwordSaveButton").disabled = false;
-    $("passwordDialog").showModal();
-    (hasPassword ? $("profileCurrentPassword") : $("profileNewPassword")).focus();
   }
 
   async function savePassword(form) {
@@ -13076,9 +13077,9 @@
         ...normalizeAuth(response),
         hasPassword: true,
       };
+      resetProfilePasswordSection();
       $("passwordSaveState").textContent = "Saved";
       showToast(hasPassword ? "Password updated" : "Password set");
-      $("passwordDialog").close();
     } catch (error) {
       $("passwordSaveState").textContent = "Not saved";
       $("passwordSaveButton").disabled = false;
@@ -14561,8 +14562,6 @@
           "toggle-user-menu": () => toggleUserMenu(),
           "open-profile": openProfileDialog,
           "close-profile": () => $("profileDialog").close(),
-          "open-password": openPasswordDialog,
-          "close-password": () => $("passwordDialog").close(),
           "show-forgot-password": () => {
             setAuthPanel("forgot");
             setAuthAlert("");

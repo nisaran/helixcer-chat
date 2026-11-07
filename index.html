@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261106-channel-form-setup">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261107-profile-password">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261106-channel-form-setup" defer></script>
+  <script src="./assets/app.js?v=20261107-profile-password" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -201,7 +201,6 @@
             <div class="user-menu" id="userMenu" hidden>
               <div class="user-menu-identity"><strong id="userMenuName">Account</strong><span id="userMenuEmail">—</span><em id="userMenuRole">Agent</em></div>
               <button type="button" data-action="open-profile">Profile</button>
-              <button type="button" data-action="open-password">Change password</button>
               <button class="logout-button" type="button" data-action="logout">Sign out</button>
             </div>
           </div>
@@ -1105,53 +1104,53 @@
   <div class="mobile-scrim" id="mobileScrim" hidden></div>
 
   <dialog class="modal profile-modal" id="profileDialog" aria-labelledby="profileDialogTitle">
-    <form class="modal-card" id="profileForm" autocomplete="on">
-      <div class="modal-head">
-        <div><p class="eyebrow">Your account</p><h2 id="profileDialogTitle">Edit profile</h2></div>
-        <button class="icon-button" type="button" data-action="close-profile" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
-      </div>
-      <div class="form-grid">
-        <label class="field-label form-span"><span>Login ID <span class="field-optional">Read only</span></span><input class="text-field" id="profileEmail" name="email" type="email" readonly aria-readonly="true" autocomplete="username"></label>
-        <label class="field-label form-span">Name<input class="text-field" id="profileDisplayName" name="displayName" required maxlength="120" autocomplete="name" placeholder="Your name"></label>
-        <label class="field-label form-span"><span>Phone number</span>
-          <span class="phone-fields">
-            <input class="text-field phone-country-code" id="profilePhoneCountryCode" name="phoneCountryCode" maxlength="6" inputmode="tel" autocomplete="tel-country-code" placeholder="+91" aria-label="Country code">
-            <input class="text-field phone-local-number" id="profilePhoneNumber" name="phoneNumber" maxlength="24" inputmode="tel" autocomplete="tel-national" placeholder="98765 43210" aria-label="Phone number">
-          </span>
-          <span class="field-help">Include a country code such as +91.</span>
-        </label>
-        <label class="field-label form-span">Address line 1<input class="text-field" id="profileAddressLine1" name="addressLine1" maxlength="180" autocomplete="address-line1" placeholder="Building, street or area"></label>
-        <label class="field-label form-span"><span>Address line 2 <span class="field-optional">Optional</span></span><input class="text-field" id="profileAddressLine2" name="addressLine2" maxlength="180" autocomplete="address-line2" placeholder="Suite, floor or landmark"></label>
-        <label class="field-label">City<input class="text-field" id="profileCity" name="city" maxlength="100" autocomplete="address-level2"></label>
-        <label class="field-label">State / region<input class="text-field" id="profileState" name="state" maxlength="100" autocomplete="address-level1"></label>
-        <label class="field-label">Postal code<input class="text-field" id="profilePostalCode" name="postalCode" maxlength="24" autocomplete="postal-code"></label>
-        <label class="field-label">Country<input class="text-field" id="profileCountry" name="country" maxlength="100" autocomplete="country-name" placeholder="India"></label>
-      </div>
-      <div class="modal-actions">
-        <span class="profile-save-state" id="profileSaveState" role="status" aria-live="polite"></span>
-        <button class="secondary-button" type="button" data-action="close-profile">Cancel</button>
-        <button class="primary-button" id="profileSaveButton" type="submit">Save profile</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog class="modal profile-modal" id="passwordDialog" aria-labelledby="passwordDialogTitle">
-    <form class="modal-card" id="passwordForm" autocomplete="on">
-      <div class="modal-head">
-        <div><p class="eyebrow">Your account</p><h2 id="passwordDialogTitle">Change password</h2></div>
-        <button class="icon-button" type="button" data-action="close-password" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
-      </div>
-      <div class="form-grid">
-        <label class="field-label form-span" id="profileCurrentPasswordField"><span>Current password</span><input class="text-field" id="profileCurrentPassword" name="currentPassword" type="password" maxlength="128" autocomplete="current-password"></label>
-        <label class="field-label form-span">New password<input class="text-field" id="profileNewPassword" name="newPassword" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
-        <label class="field-label form-span">Confirm password<input class="text-field" id="profileNewPasswordConfirm" name="newPasswordConfirm" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
-      </div>
-      <div class="modal-actions">
-        <span class="profile-save-state" id="passwordSaveState" role="status" aria-live="polite"></span>
-        <button class="secondary-button" type="button" data-action="close-password">Cancel</button>
-        <button class="primary-button" id="passwordSaveButton" type="submit">Save password</button>
-      </div>
-    </form>
+    <div class="modal-card profile-modal-card">
+      <form id="profileForm" autocomplete="on">
+        <div class="modal-head">
+          <div><p class="eyebrow">Your account</p><h2 id="profileDialogTitle">Edit profile</h2></div>
+          <button class="icon-button" type="button" data-action="close-profile" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="form-grid">
+          <label class="field-label form-span"><span>Login ID <span class="field-optional">Read only</span></span><input class="text-field" id="profileEmail" name="email" type="email" readonly aria-readonly="true" autocomplete="username"></label>
+          <label class="field-label form-span">Name<input class="text-field" id="profileDisplayName" name="displayName" required maxlength="120" autocomplete="name" placeholder="Your name"></label>
+          <label class="field-label form-span"><span>Phone number</span>
+            <span class="phone-fields">
+              <input class="text-field phone-country-code" id="profilePhoneCountryCode" name="phoneCountryCode" maxlength="6" inputmode="tel" autocomplete="tel-country-code" placeholder="+91" aria-label="Country code">
+              <input class="text-field phone-local-number" id="profilePhoneNumber" name="phoneNumber" maxlength="24" inputmode="tel" autocomplete="tel-national" placeholder="98765 43210" aria-label="Phone number">
+            </span>
+            <span class="field-help">Include a country code such as +91.</span>
+          </label>
+          <label class="field-label form-span">Address line 1<input class="text-field" id="profileAddressLine1" name="addressLine1" maxlength="180" autocomplete="address-line1" placeholder="Building, street or area"></label>
+          <label class="field-label form-span"><span>Address line 2 <span class="field-optional">Optional</span></span><input class="text-field" id="profileAddressLine2" name="addressLine2" maxlength="180" autocomplete="address-line2" placeholder="Suite, floor or landmark"></label>
+          <label class="field-label">City<input class="text-field" id="profileCity" name="city" maxlength="100" autocomplete="address-level2"></label>
+          <label class="field-label">State / region<input class="text-field" id="profileState" name="state" maxlength="100" autocomplete="address-level1"></label>
+          <label class="field-label">Postal code<input class="text-field" id="profilePostalCode" name="postalCode" maxlength="24" autocomplete="postal-code"></label>
+          <label class="field-label">Country<input class="text-field" id="profileCountry" name="country" maxlength="100" autocomplete="country-name" placeholder="India"></label>
+        </div>
+        <div class="modal-actions profile-details-actions">
+          <span class="profile-save-state" id="profileSaveState" role="status" aria-live="polite"></span>
+          <button class="secondary-button" type="button" data-action="close-profile">Cancel</button>
+          <button class="primary-button" id="profileSaveButton" type="submit">Save profile</button>
+        </div>
+      </form>
+      <section class="profile-password-section" aria-labelledby="passwordSectionTitle">
+        <form id="passwordForm" autocomplete="on">
+          <div class="profile-password-head">
+            <h3 id="passwordSectionTitle">Change password</h3>
+            <p class="field-help" id="passwordSectionHelp">Update the password used for email sign-in.</p>
+          </div>
+          <div class="form-grid">
+            <label class="field-label form-span" id="profileCurrentPasswordField"><span>Current password</span><input class="text-field" id="profileCurrentPassword" name="currentPassword" type="password" maxlength="128" autocomplete="current-password"></label>
+            <label class="field-label form-span">New password<input class="text-field" id="profileNewPassword" name="newPassword" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+            <label class="field-label form-span">Confirm password<input class="text-field" id="profileNewPasswordConfirm" name="newPasswordConfirm" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+          </div>
+          <div class="modal-actions profile-password-actions">
+            <span class="profile-save-state" id="passwordSaveState" role="status" aria-live="polite"></span>
+            <button class="primary-button" id="passwordSaveButton" type="submit">Save password</button>
+          </div>
+        </form>
+      </section>
+    </div>
   </dialog>
 
   <dialog class="modal" id="createRoleDialog" aria-labelledby="createRoleTitle">
