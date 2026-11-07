@@ -1403,10 +1403,24 @@ function externalMessageResponse(item, requestId, replayed, includeReplayHeader)
 }
 
 async function ensureWhatsAppConversation(env, workspaceId, channel, recipient, displayName, now) {
-  let identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id
-    FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
-    WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
-    .bind(workspaceId, channel.channelId, recipient).first();
+  let identity = await resolveWhatsAppIdentity(env, workspaceId, channel.channelId, recipient);
+  if (identity?.matchedBy === 'alias') {
+    identity = await canonicalizeWhatsAppIdentityProfile(env, workspaceId, channel.channelId,
+      identity, recipient, now);
+  }
+  if (identity?.matchedBy === 'alias') {
+    try {
+      await ensureIdentityBinding(env, workspaceId, identity.contact_id, identity.identity_id, {
+        platform: 'whatsapp', profileId: recipient, phoneNumber: recipient,
+        displayName: String(displayName || identity.contact_display_name || recipient).slice(0, 120),
+        metadata: {}, channelId: channel.channelId, scopedProfileId: recipient
+      }, now);
+    } catch (error) {
+      const winner = await resolveWhatsAppIdentity(env, workspaceId, channel.channelId, recipient);
+      if (!winner) throw error;
+      identity = winner;
+    }
+  }
   if (!identity) {
     const candidates = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id
       FROM contact_identities ci
@@ -1421,10 +1435,7 @@ async function ensureWhatsAppConversation(env, workspaceId, channel, recipient, 
           channelId: channel.channelId, scopedProfileId: recipient
         }, now);
       } catch (error) {
-        const winner = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id
-          FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
-          WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
-          .bind(workspaceId, channel.channelId, recipient).first();
+        const winner = await resolveWhatsAppIdentity(env, workspaceId, channel.channelId, recipient);
         if (!winner) throw error;
         identity = winner;
       }
@@ -7668,12 +7679,21 @@ async function storeInbound(env, channel, event, rawPayload) {
   const timestamp = normalizeTimestamp(event.timestamp, now);
   const profileId = String(event.channelProfileId);
   const platform = platformForChannel(channel);
-  let identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
-    FROM channel_identity_bindings b
-    JOIN contact_identities ci ON ci.identity_id=b.identity_id AND ci.workspace_id=b.workspace_id
-    JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
-    WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
-    .bind(channel.workspaceId, channel.channelId, String(event.channelProfileId)).first();
+  let identity = null;
+  if (platform === 'whatsapp') {
+    identity = await resolveWhatsAppIdentity(env, channel.workspaceId, channel.channelId, profileId);
+    if (identity?.matchedBy === 'alias') {
+      identity = await canonicalizeWhatsAppIdentityProfile(env, channel.workspaceId, channel.channelId,
+        identity, profileId, now);
+    }
+  } else {
+    identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+      FROM channel_identity_bindings b
+      JOIN contact_identities ci ON ci.identity_id=b.identity_id AND ci.workspace_id=b.workspace_id
+      JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+      WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
+      .bind(channel.workspaceId, channel.channelId, String(event.channelProfileId)).first();
+  }
   if (!identity) {
     const candidates = PORTABLE_IDENTITY_PLATFORMS.has(platform)
       ? await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
@@ -7691,11 +7711,13 @@ async function storeInbound(env, channel, event, rawPayload) {
           metadata: {}, channelId: channel.channelId
         }, now);
       } catch (error) {
-        const winner = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
-          FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
-          JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
-          WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
-          .bind(channel.workspaceId, channel.channelId, profileId).first();
+        const winner = platform === 'whatsapp'
+          ? await resolveWhatsAppIdentity(env, channel.workspaceId, channel.channelId, profileId)
+          : await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+              FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
+              JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+              WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
+            .bind(channel.workspaceId, channel.channelId, profileId).first();
         if (!winner) throw error;
         identity = winner;
       }
@@ -7715,13 +7737,34 @@ async function storeInbound(env, channel, event, rawPayload) {
         await env.DB.prepare(`DELETE FROM contacts WHERE workspace_id=?1 AND contact_id=?2
           AND NOT EXISTS (SELECT 1 FROM conversations WHERE workspace_id=?1 AND contact_id=?2)`)
           .bind(channel.workspaceId, contactId).run().catch(() => {});
-        const winner = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
-          FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
-          JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
-          WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
-          .bind(channel.workspaceId, channel.channelId, profileId).first();
+        const winner = platform === 'whatsapp'
+          ? await resolveWhatsAppIdentity(env, channel.workspaceId, channel.channelId, profileId)
+          : await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+              FROM channel_identity_bindings b JOIN contact_identities ci ON ci.identity_id=b.identity_id
+              JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+              WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.scoped_profile_id=?3 AND b.active=1 LIMIT 1`)
+            .bind(channel.workspaceId, channel.channelId, profileId).first();
         if (!winner) throw error;
         identity = winner;
+      }
+    }
+  }
+  if (platform === 'whatsapp' && identity?.identity_id) {
+    const activeRoute = await env.DB.prepare(`SELECT binding_id,scoped_profile_id FROM channel_identity_bindings
+      WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 AND active=1 LIMIT 1`)
+      .bind(channel.workspaceId, identity.identity_id, channel.channelId).first();
+    if (!activeRoute || (identity.matchedBy === 'alias'
+        && String(activeRoute.scoped_profile_id || '') !== profileId
+        && whatsappProfileIdsEquivalent(activeRoute.scoped_profile_id, profileId))) {
+      try {
+        await ensureIdentityBinding(env, channel.workspaceId, identity.contact_id, identity.identity_id, {
+          platform, profileId, scopedProfileId: profileId, username: '',
+          phoneNumber: /^\d{6,20}$/.test(profileId) ? profileId : '',
+          displayName: String(event.displayName || identity.contact_display_name || profileId).slice(0, 120),
+          metadata: {}, channelId: channel.channelId
+        }, now);
+      } catch {
+        // In-place canonicalize above is enough when history blocks a route replace.
       }
     }
   }
@@ -8613,27 +8656,49 @@ async function prepareCampaignRecipientTarget(env, workspaceId, channel, platfor
   }
 
   const mapped = recipient.row?.__mapped || mapUploadRecipient(recipient.row || {}, campaign.fieldMapping, 0);
-  const profileId = normalizeIdentityProfileValue(platform, mapped.profileId || recipient.profileId, 'Messaging ID');
+  let profileId = normalizeIdentityProfileValue(platform, mapped.profileId || recipient.profileId, 'Messaging ID');
+  if (platform === 'whatsapp') {
+    try {
+      profileId = expandWhatsAppRecipientForBusiness(profileId, channel.config?.verifiedPhoneNumber || '');
+    } catch {
+      // keep normalized profileId when business phone is unavailable/invalid
+    }
+  }
   const displayName = String(mapped.displayName || recipient.displayName || profileId).slice(0, 120);
   const company = String(mapped.company || '').slice(0, 160);
   const tags = Array.isArray(mapped.tags) ? mapped.tags : [];
 
-  let identity = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,ci.display_name,c.display_name AS contact_name,
-      c.company,c.tags_json
-    FROM contact_identities ci
-    JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
-    WHERE ci.workspace_id=?1 AND ci.platform=?2 AND ci.profile_id=?3
-    ORDER BY ci.created_at,ci.identity_id LIMIT 1`).bind(workspaceId, platform, profileId).first();
+  let identity = platform === 'whatsapp'
+    ? await resolveWhatsAppIdentity(env, workspaceId, channel.channelId, profileId)
+    : await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,ci.display_name,c.display_name AS contact_name,
+        c.company,c.tags_json
+      FROM contact_identities ci
+      JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+      WHERE ci.workspace_id=?1 AND ci.platform=?2 AND ci.profile_id=?3
+      ORDER BY ci.created_at,ci.identity_id LIMIT 1`).bind(workspaceId, platform, profileId).first();
+  if (platform === 'whatsapp' && identity?.matchedBy === 'alias') {
+    identity = await canonicalizeWhatsAppIdentityProfile(env, workspaceId, channel.channelId,
+      identity, profileId, now);
+  }
 
   let contactId;
   let identityId;
   if (identity) {
     contactId = identity.contact_id;
     identityId = identity.identity_id;
+    const activeRoute = await env.DB.prepare(`SELECT scoped_profile_id FROM channel_identity_bindings
+      WHERE workspace_id=?1 AND identity_id=?2 AND channel_id=?3 AND active=1 LIMIT 1`)
+      .bind(workspaceId, identityId, channel.channelId).first();
+    const routeProfileId = platform === 'whatsapp'
+      && activeRoute?.scoped_profile_id
+      && whatsappProfileIdsEquivalent(activeRoute.scoped_profile_id, profileId)
+      ? String(activeRoute.scoped_profile_id)
+      : profileId;
     await ensureIdentityBinding(env, workspaceId, contactId, identityId, {
-      platform, profileId, channelId: channel.channelId, scopedProfileId: profileId,
+      platform, profileId: routeProfileId, channelId: channel.channelId, scopedProfileId: routeProfileId,
       displayName, metadata: {}
     }, now);
+    profileId = routeProfileId;
   } else {
     contactId = crypto.randomUUID();
     await env.DB.prepare(`INSERT INTO contacts
@@ -9193,6 +9258,154 @@ export function normalizeWhatsAppRecipient(value) {
     throw error;
   }
   return digits;
+}
+
+export function whatsappPhoneDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+/** True when two WhatsApp profile ids are the same number with/without a 1–3 digit country code. */
+export function whatsappProfileIdsEquivalent(left, right) {
+  const a = whatsappPhoneDigits(left);
+  const b = whatsappPhoneDigits(right);
+  if (!a || !b || !/^[1-9]\d{7,14}$/.test(a) || !/^[1-9]\d{7,14}$/.test(b)) return false;
+  if (a === b) return true;
+  const [longer, shorter] = a.length >= b.length ? [a, b] : [b, a];
+  if (shorter.length < 8) return false;
+  const ccLen = longer.length - shorter.length;
+  return ccLen >= 1 && ccLen <= 3 && longer.endsWith(shorter);
+}
+
+/**
+ * Prefer the contact that already has campaign/outbound history when Excel used a
+ * local number and WhatsApp webhooks later arrive with the country-coded wa_id.
+ */
+function preferWhatsAppIdentityMatch(matches = []) {
+  if (!matches.length) return null;
+  if (matches.length === 1) return matches[0];
+  const score = (row) => (Number(row.campaign_count || 0) > 0 ? 1000 : 0)
+    + (Number(row.outbound_count || 0) > 0 ? 100 : 0)
+    + (row.matched_exact ? 10 : 0);
+  return [...matches].sort((left, right) => {
+    const diff = score(right) - score(left);
+    if (diff) return diff;
+    return String(left.contact_created_at || '').localeCompare(String(right.contact_created_at || ''))
+      || String(left.identity_id || '').localeCompare(String(right.identity_id || ''));
+  })[0];
+}
+
+async function listWhatsAppBindingMatches(env, workspaceId, channelId, profileId) {
+  const digits = whatsappPhoneDigits(profileId);
+  if (!digits) return [];
+  const suffix = digits.length >= 10 ? digits.slice(-10) : digits.slice(-Math.min(8, digits.length));
+  const rows = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name,
+      b.scoped_profile_id,ci.profile_id,b.binding_id,c.created_at AS contact_created_at,
+      (SELECT COUNT(*) FROM messages m
+        WHERE m.workspace_id=ci.workspace_id AND m.contact_id=ci.contact_id AND m.direction='outbound') AS outbound_count,
+      (SELECT COUNT(*) FROM campaign_recipients r
+        WHERE r.workspace_id=ci.workspace_id AND r.contact_id=ci.contact_id) AS campaign_count
+    FROM channel_identity_bindings b
+    JOIN contact_identities ci ON ci.identity_id=b.identity_id AND ci.workspace_id=b.workspace_id
+    JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+    WHERE b.workspace_id=?1 AND b.channel_id=?2 AND b.active=1
+      AND (b.scoped_profile_id=?3 OR b.scoped_profile_id LIKE ?4)
+    ORDER BY c.created_at,ci.identity_id LIMIT 40`)
+    .bind(workspaceId, channelId, digits, `%${suffix}`).all();
+  return (rows.results || [])
+    .filter((row) => String(row.scoped_profile_id || '') === digits
+      || whatsappProfileIdsEquivalent(row.scoped_profile_id || row.profile_id, digits))
+    .map((row) => ({
+      ...row,
+      matched_exact: String(row.scoped_profile_id || '') === digits
+    }));
+}
+
+async function listWhatsAppIdentityMatches(env, workspaceId, profileId) {
+  const digits = whatsappPhoneDigits(profileId);
+  if (!digits) return [];
+  const suffix = digits.length >= 10 ? digits.slice(-10) : digits.slice(-Math.min(8, digits.length));
+  const rows = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name,
+      ci.profile_id,c.created_at AS contact_created_at,
+      (SELECT COUNT(*) FROM messages m
+        WHERE m.workspace_id=ci.workspace_id AND m.contact_id=ci.contact_id AND m.direction='outbound') AS outbound_count,
+      (SELECT COUNT(*) FROM campaign_recipients r
+        WHERE r.workspace_id=ci.workspace_id AND r.contact_id=ci.contact_id) AS campaign_count
+    FROM contact_identities ci
+    JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+    WHERE ci.workspace_id=?1 AND ci.platform='whatsapp'
+      AND (ci.profile_id=?2 OR ci.profile_id LIKE ?3)
+    ORDER BY c.created_at,ci.identity_id LIMIT 40`)
+    .bind(workspaceId, digits, `%${suffix}`).all();
+  return (rows.results || [])
+    .filter((row) => String(row.profile_id || '') === digits
+      || whatsappProfileIdsEquivalent(row.profile_id, digits))
+    .map((row) => ({
+      ...row,
+      scoped_profile_id: row.profile_id,
+      matched_exact: String(row.profile_id || '') === digits
+    }));
+}
+
+async function resolveWhatsAppIdentity(env, workspaceId, channelId, profileId) {
+  const bindingMatch = preferWhatsAppIdentityMatch(
+    await listWhatsAppBindingMatches(env, workspaceId, channelId, profileId));
+  if (bindingMatch) {
+    return { ...bindingMatch, matchedBy: bindingMatch.matched_exact ? 'exact' : 'alias' };
+  }
+  const identityMatch = preferWhatsAppIdentityMatch(
+    await listWhatsAppIdentityMatches(env, workspaceId, profileId));
+  if (!identityMatch) return null;
+  return { ...identityMatch, matchedBy: identityMatch.matched_exact ? 'exact' : 'alias' };
+}
+
+async function canonicalizeWhatsAppIdentityProfile(env, workspaceId, channelId, identity, canonicalProfileId, now) {
+  if (!identity?.identity_id || !identity?.contact_id) return identity;
+  const canonical = whatsappPhoneDigits(canonicalProfileId);
+  const current = whatsappPhoneDigits(identity.scoped_profile_id || identity.profile_id || '');
+  if (!canonical || !current || canonical === current) return identity;
+  if (!whatsappProfileIdsEquivalent(current, canonical)) return identity;
+  // Keep the longer (country-coded) form WhatsApp returns on webhooks.
+  if (canonical.length < current.length) return identity;
+  const conflict = await env.DB.prepare(`SELECT binding_id,identity_id FROM channel_identity_bindings
+    WHERE workspace_id=?1 AND channel_id=?2 AND scoped_profile_id=?3 AND active=1 LIMIT 1`)
+    .bind(workspaceId, channelId, canonical).first();
+  if (conflict && conflict.identity_id !== identity.identity_id) return identity;
+  try {
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE channel_identity_bindings SET scoped_profile_id=?4,updated_at=?5
+        WHERE workspace_id=?1 AND channel_id=?2 AND identity_id=?3 AND active=1`)
+        .bind(workspaceId, channelId, identity.identity_id, canonical, now),
+      env.DB.prepare(`UPDATE contact_identities SET profile_id=?3,phone_number=?3,updated_at=?4
+        WHERE workspace_id=?1 AND identity_id=?2`)
+        .bind(workspaceId, identity.identity_id, canonical, now),
+      env.DB.prepare(`UPDATE contact_platform_ids SET profile_id=?4,updated_at=?5
+        WHERE workspace_id=?1 AND contact_id=?2 AND platform='whatsapp' AND identity_id=?3`)
+        .bind(workspaceId, identity.contact_id, identity.identity_id, canonical, now)
+    ]);
+  } catch {
+    return identity;
+  }
+  return { ...identity, scoped_profile_id: canonical, profile_id: canonical };
+}
+
+/** When Excel omits the country code, store the form Meta will deliver (business CC + national). */
+export function expandWhatsAppRecipientForBusiness(recipient, businessPhone) {
+  const digits = normalizeWhatsAppRecipient(recipient);
+  const business = whatsappPhoneDigits(businessPhone);
+  if (!business) return digits;
+  let countryCode = '';
+  for (const len of [1, 2, 3]) {
+    const rest = business.length - len;
+    if (rest >= 8 && rest <= 10 && /^[1-9]\d*$/.test(business.slice(0, len))) {
+      countryCode = business.slice(0, len);
+      break;
+    }
+  }
+  if (!countryCode) return digits;
+  if (digits.startsWith(countryCode) && digits.length > countryCode.length) return digits;
+  if (digits.length !== business.length - countryCode.length) return digits;
+  const expanded = `${countryCode}${digits}`;
+  return /^[1-9]\d{7,14}$/.test(expanded) ? expanded : digits;
 }
 
 export function isRetryableWhatsAppStatus(status) {
