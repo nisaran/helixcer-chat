@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261107-profile-password">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261108-provider-setup-choosers">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261107-profile-password" defer></script>
+  <script src="./assets/app.js?v=20261108-provider-setup-choosers" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1254,11 +1254,11 @@
 
       <section class="provider-fields" data-provider-fields="whatsapp_cloud" hidden>
         <div class="provider-form-head"><img class="provider-mark whatsapp" src="./assets/provider-whatsapp.svg" alt=""><div><strong>WhatsApp Cloud API</strong><span>Choose how you want to connect this WhatsApp account.</span></div></div>
-        <div class="whatsapp-setup-chooser" id="whatsappSetupChooser" role="group" aria-label="WhatsApp setup method">
-          <button class="secondary-button whatsapp-setup-option" type="button" id="whatsappSetupManual" data-action="whatsapp-setup-manual" aria-pressed="false">Manual Setup</button>
-          <button class="secondary-button whatsapp-setup-option" type="button" id="whatsappSetupFacebook" data-action="whatsapp-setup-facebook" disabled aria-disabled="true" title="Coming soon">Login with Facebook</button>
+        <div class="provider-setup-chooser" id="whatsappSetupChooser" role="group" aria-label="WhatsApp setup method">
+          <button class="secondary-button provider-setup-option" type="button" id="whatsappSetupManual" data-action="provider-setup-manual" data-provider="whatsapp_cloud" aria-pressed="false">Manual Setup</button>
+          <button class="secondary-button provider-setup-option" type="button" id="whatsappSetupFacebook" data-action="provider-setup-login" data-provider="whatsapp_cloud" disabled aria-disabled="true" title="Coming soon">Login with Facebook</button>
         </div>
-        <div class="whatsapp-manual-fields" id="whatsappManualFields" hidden>
+        <div class="provider-manual-fields" id="whatsappManualFields" hidden>
           <div class="form-grid channel-form-grid">
             <label class="field-label">WhatsApp Business Account ID <span class="field-hint">Messaging account ID in Meta</span><input class="text-field" name="wabaId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
             <label class="field-label">Phone Number ID <span class="field-hint">Shown directly below the selected From number</span><input class="text-field" name="phoneNumberId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
@@ -1277,24 +1277,36 @@
       </section>
 
       <section class="provider-fields" data-provider-fields="instagram" hidden>
-        <div class="provider-form-head"><img class="provider-mark instagram" src="./assets/provider-instagram.svg" alt=""><div><strong>Instagram Messaging</strong><span>Connect an Instagram Business or Creator account through its Meta app.</span></div></div>
-        <div class="form-grid channel-form-grid">
-          <label class="field-label">Instagram account ID<input class="text-field" name="instagramAccountId" inputmode="numeric" maxlength="40" placeholder="17841400000000000" required></label>
-          <label class="field-label"><span>Meta App ID <span class="optional-label">Optional</span></span><input class="text-field" name="instagramAppId" inputmode="numeric" maxlength="40" placeholder="Your Meta app ID"></label>
-          <label class="field-label form-span"><span>Instagram username <span class="optional-label">Optional</span></span><input class="text-field" name="instagramUsername" maxlength="60" autocomplete="off" placeholder="your_business"></label>
-          <label class="field-label form-span">Instagram User access token<input class="text-field secret-field" name="instagramAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a long-lived Instagram User access token" required><span class="field-help secret-help">A green masked value means the token is saved securely; focus the field only to replace it.</span></label>
-          <label class="field-label form-span">Meta App Secret<input class="text-field secret-field" name="instagramAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">A green masked value means it is saved securely; focus the field only to replace it.</span></label>
+        <div class="provider-form-head"><img class="provider-mark instagram" src="./assets/provider-instagram.svg" alt=""><div><strong>Instagram Messaging</strong><span>Choose how you want to connect this Instagram account.</span></div></div>
+        <div class="provider-setup-chooser" id="instagramSetupChooser" role="group" aria-label="Instagram setup method">
+          <button class="secondary-button provider-setup-option" type="button" id="instagramSetupManual" data-action="provider-setup-manual" data-provider="instagram" aria-pressed="false">Manual Setup</button>
+          <button class="secondary-button provider-setup-option" type="button" id="instagramSetupLogin" data-action="provider-setup-login" data-provider="instagram" disabled aria-disabled="true" title="Coming soon">Login with Instagram</button>
+        </div>
+        <div class="provider-manual-fields" id="instagramManualFields" hidden>
+          <div class="form-grid channel-form-grid">
+            <label class="field-label">Instagram account ID<input class="text-field" name="instagramAccountId" inputmode="numeric" maxlength="40" placeholder="17841400000000000" required></label>
+            <label class="field-label"><span>Meta App ID <span class="optional-label">Optional</span></span><input class="text-field" name="instagramAppId" inputmode="numeric" maxlength="40" placeholder="Your Meta app ID"></label>
+            <label class="field-label form-span"><span>Instagram username <span class="optional-label">Optional</span></span><input class="text-field" name="instagramUsername" maxlength="60" autocomplete="off" placeholder="your_business"></label>
+            <label class="field-label form-span">Instagram User access token<input class="text-field secret-field" name="instagramAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a long-lived Instagram User access token" required><span class="field-help secret-help">A green masked value means the token is saved securely; focus the field only to replace it.</span></label>
+            <label class="field-label form-span">Meta App Secret<input class="text-field secret-field" name="instagramAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">A green masked value means it is saved securely; focus the field only to replace it.</span></label>
+          </div>
         </div>
       </section>
 
       <section class="provider-fields" data-provider-fields="facebook_messenger" hidden>
-        <div class="provider-form-head"><img class="provider-mark facebook" src="./assets/provider-facebook.svg" alt=""><div><strong>Facebook Messenger</strong><span>Connect a Facebook Page through its Meta app with the Messenger product.</span></div></div>
-        <div class="form-grid channel-form-grid">
-          <label class="field-label">Facebook Page ID<input class="text-field" name="messengerPageId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
-          <label class="field-label"><span>Meta App ID <span class="optional-label">Optional</span></span><input class="text-field" name="messengerAppId" inputmode="numeric" maxlength="40" placeholder="Your Meta app ID"></label>
-          <label class="field-label form-span"><span>Page name <span class="optional-label">Optional</span></span><input class="text-field" name="messengerPageName" maxlength="100" autocomplete="off" placeholder="Your Page name"></label>
-          <label class="field-label form-span">Page access token<input class="text-field secret-field" name="messengerAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a Page access token" required><span class="field-help secret-help">Use a Page token with pages_messaging. A green masked value means it is saved securely; focus the field only to replace it.</span></label>
-          <label class="field-label form-span">Meta App Secret<input class="text-field secret-field" name="messengerAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">Use App settings → Basic → App secret for this same Meta app. A green masked value means it is saved securely.</span></label>
+        <div class="provider-form-head"><img class="provider-mark facebook" src="./assets/provider-facebook.svg" alt=""><div><strong>Facebook Messenger</strong><span>Choose how you want to connect this Facebook Page.</span></div></div>
+        <div class="provider-setup-chooser" id="messengerSetupChooser" role="group" aria-label="Messenger setup method">
+          <button class="secondary-button provider-setup-option" type="button" id="messengerSetupManual" data-action="provider-setup-manual" data-provider="facebook_messenger" aria-pressed="false">Manual Setup</button>
+          <button class="secondary-button provider-setup-option" type="button" id="messengerSetupFacebook" data-action="provider-setup-login" data-provider="facebook_messenger" disabled aria-disabled="true" title="Coming soon">Login with Facebook</button>
+        </div>
+        <div class="provider-manual-fields" id="messengerManualFields" hidden>
+          <div class="form-grid channel-form-grid">
+            <label class="field-label">Facebook Page ID<input class="text-field" name="messengerPageId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
+            <label class="field-label"><span>Meta App ID <span class="optional-label">Optional</span></span><input class="text-field" name="messengerAppId" inputmode="numeric" maxlength="40" placeholder="Your Meta app ID"></label>
+            <label class="field-label form-span"><span>Page name <span class="optional-label">Optional</span></span><input class="text-field" name="messengerPageName" maxlength="100" autocomplete="off" placeholder="Your Page name"></label>
+            <label class="field-label form-span">Page access token<input class="text-field secret-field" name="messengerAccessToken" type="password" maxlength="4096" spellcheck="false" placeholder="Paste a Page access token" required><span class="field-help secret-help">Use a Page token with pages_messaging. A green masked value means it is saved securely; focus the field only to replace it.</span></label>
+            <label class="field-label form-span">Meta App Secret<input class="text-field secret-field" name="messengerAppSecret" type="password" maxlength="512" spellcheck="false" placeholder="Paste the App Secret" required><span class="field-help">Use App settings → Basic → App secret for this same Meta app. A green masked value means it is saved securely.</span></label>
+          </div>
         </div>
       </section>
 

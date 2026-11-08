@@ -2305,26 +2305,26 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .provider-form-head strong, .provider-form-head span { display: block; }
 .provider-form-head strong { font-size: 12px; }
 .provider-form-head div span { color: var(--muted); margin-top: 1px; font-size: 10px; }
-.whatsapp-setup-chooser {
+.provider-setup-chooser {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 14px;
 }
-.whatsapp-setup-option {
+.provider-setup-option {
   min-height: 36px;
   padding: 0 14px;
 }
-.whatsapp-setup-option.is-active {
+.provider-setup-option.is-active {
   border-color: #b9a4ef;
   background: #f4efff;
   color: #4b2f9b;
 }
-.whatsapp-setup-option:disabled {
+.provider-setup-option:disabled {
   opacity: .55;
   cursor: not-allowed;
 }
-.whatsapp-manual-fields { margin-top: 4px; }
+.provider-manual-fields { margin-top: 4px; }
 .google-oauth-connect { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--line, #d9dfdb); border-radius: 16px; background: linear-gradient(180deg, #f7fafc, #eef4fb); }
 .google-oauth-connect .primary-button { justify-self: start; }
 .google-location-list { display: grid; gap: 8px; max-height: min(42vh, 360px); overflow: auto; margin: 12px 0 4px; }
