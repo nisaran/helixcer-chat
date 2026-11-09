@@ -649,7 +649,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261108-provider-setup-choosers/);
+  assert.match(html, /app\.js\?v=20261109-campaign-confirm-cancel-keep-draft/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -1019,8 +1019,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261108-provider-setup-choosers/);
-  assert.match(html, /assets\/styles\.css\?v=20261108-provider-setup-choosers/);
+  assert.match(html, /assets\/app\.js\?v=20261109-campaign-confirm-cancel-keep-draft/);
+  assert.match(html, /assets\/styles\.css\?v=20261109-campaign-confirm-cancel-keep-draft/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -1512,6 +1512,9 @@ test("Campaign page supports create flow, contact/upload audiences, and expandab
   assert.match(app, /function renderCampaignMessagePreview/);
   assert.match(app, /function bindCampaignConstantAutoSelect/);
   assert.match(app, /function campaignSendConfirmationDetails/);
+  assert.match(app, /"Send this campaign\?"/);
+  assert.match(app, /\/\/ Cancel only closes the confirm dialog and keeps the draft inputs\/filters\.\s*if \(!confirmed\) return;/);
+  assert.doesNotMatch(app, /if \(!confirmed\) \{\s*resetCampaignCreateForm\(\);\s*return;\s*\}/);
   assert.match(app, /function clearCampaignContactFilters/);
   assert.match(app, /function addSelectedContactsToCampaign/);
   assert.match(app, /function ensureCampaignContactCatalogue/);
