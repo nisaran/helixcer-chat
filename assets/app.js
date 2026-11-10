@@ -4,7 +4,7 @@
   const RECOVERY_TOKEN_KEY = "helixcer_recovery_token";
   const NOTIFICATION_PREFERENCE_KEY = "helixcer_browser_notifications";
   const PUSH_DEVICE_KEY = "helixcer_push_device_id";
-  const SERVICE_WORKER_URL = "/sw.js?v=20261109-campaign-confirm-cancel-keep-draft";
+  const SERVICE_WORKER_URL = "/sw.js?v=20261110-reply-highlight-duration";
   const PROVIDER_SETUP_CHOOSERS = new Set(["whatsapp_cloud", "instagram", "facebook_messenger"]);
   const CAMPAIGN_CONTACT_PAGE_SIZE = 100;
   const CAMPAIGN_CATALOGUE_PAGE_SIZE = 200;
@@ -4904,7 +4904,7 @@
     row.scrollIntoView({ block: "center", behavior: "smooth" });
     row.classList.remove("is-located");
     requestAnimationFrame(() => row.classList.add("is-located"));
-    setTimeout(() => row.classList.remove("is-located"), 1400);
+    setTimeout(() => row.classList.remove("is-located"), 4500);
   }
 
   let attachmentPdfRequest = 0;
