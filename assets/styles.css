@@ -729,8 +729,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .message-reply-button { align-self: center; width: 28px; height: 28px; border: 1px solid transparent; border-radius: 50%; background: transparent; color: #8a9491; opacity: 0; font-size: 16px; transition: opacity .15s ease, background .15s ease, color .15s ease; }
 .message-row:hover .message-reply-button, .message-reply-button:focus-visible { opacity: 1; }
 .message-reply-button:hover { border-color: var(--line); background: white; color: var(--brand); }
-.message-row.is-located .message-bubble { animation: located-message 1.3s ease; }
-@keyframes located-message { 20%, 70% { box-shadow: 0 0 0 4px rgba(109,59,234,.2), 0 8px 24px rgba(16,24,40,.1); } }
+.message-row.is-located .message-bubble { animation: located-message 4.5s ease; }
+@keyframes located-message { 5%, 85% { box-shadow: 0 0 0 4px rgba(109,59,234,.2), 0 8px 24px rgba(16,24,40,.1); } }
 .message-row.is-outbound .message-bubble { border-color: transparent; border-radius: 18px 18px 5px 18px; background: var(--chat-outgoing); }
 .message-route-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; }
 .message-route-meta { display: inline-flex; align-items: center; gap: 4px; min-width: 0; flex: 1 1 auto; color: var(--chat-meta); font-size: 9px; font-weight: 400; line-height: 1.25; text-align: left; }
