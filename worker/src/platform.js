@@ -41,7 +41,7 @@ export async function platformProfile(env, principal) {
     role: 'platform_admin',
     isBootstrap: Boolean(bootstrap) && email === bootstrap,
     user: { email: principal.user.email, displayName: principal.user.displayName || principal.user.email },
-    clientSignInUrl: env.APP_ORIGIN || 'https://chat.helixcer.com'
+    clientSignInUrl: env.APP_ORIGIN || 'https://app.chat.helixcer.com'
   };
 }
 
@@ -544,7 +544,7 @@ async function internalWorkspace(env) {
 }
 
 function inviteLink(request, env, token) {
-  const base = String(env.APP_ORIGIN || '').trim() || 'https://chat.helixcer.com';
+  const base = String(env.APP_ORIGIN || '').trim() || 'https://app.chat.helixcer.com';
   const url = new URL(base.endsWith('/') ? base : `${base}/`);
   url.searchParams.set('invite', token);
   return url.toString();

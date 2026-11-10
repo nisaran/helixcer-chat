@@ -202,6 +202,19 @@ test('return_to accepts only exact configured origins', () => {
   assert.throws(() => validateReturnTo('javascript:alert(1)', env), /not allowed|protocol/);
 });
 
+test('return_to accepts the app dashboard origin when allowlisted', () => {
+  const env = envFor(null, {
+    APP_ORIGIN: 'https://app.chat.helixcer.com',
+    ALLOWED_ORIGINS: 'https://app.chat.helixcer.com,https://chat.helixcer.com,https://admin.chat.helixcer.com'
+  });
+  assert.equal(
+    validateReturnTo('https://app.chat.helixcer.com/#inbox/4a7ab0c3-23e9-495b-92fe-22c9da6d', env),
+    'https://app.chat.helixcer.com/#inbox/4a7ab0c3-23e9-495b-92fe-22c9da6d'
+  );
+  assert.equal(validateReturnTo('/#inbox', env), 'https://app.chat.helixcer.com/#inbox');
+  assert.throws(() => validateReturnTo('https://evil.example/#inbox', env), /not allowed/);
+});
+
 test('role hierarchy rejects an agent and accepts admins and owners', () => {
   assert.throws(() => requireRole({ membership: { role: 'agent' } }, 'admin'), /Insufficient/);
   assert.doesNotThrow(() => requireRole({ membership: { role: 'admin' } }, 'admin'));

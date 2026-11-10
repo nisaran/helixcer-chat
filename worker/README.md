@@ -27,7 +27,7 @@ The initial migration seeds one empty workspace, never an administrator. On the 
 Public Worker variables in `wrangler.toml`:
 
 - `APP_ORIGIN`: dashboard origin used for safe post-login redirects.
-- `ALLOWED_ORIGINS`: exact comma-separated browser origins; wildcards are not accepted. Include both the client dashboard and the admin panel, for example `https://chat.helixcer.com,https://admin.chat.helixcer.com`.
+- `ALLOWED_ORIGINS`: exact comma-separated browser origins; wildcards are not accepted. Include the client dashboard and the admin panel, for example `https://app.chat.helixcer.com,https://chat.helixcer.com,https://admin.chat.helixcer.com`.
 - No workspace ID variable is required. The single workspace is resolved from D1 by its `default` slug (or as the only workspace), and its internal ID is a generated UUID.
 - `SESSION_TTL_SECONDS`: defaults to seven days and is capped at 30 days.
 - `RECOVERY_MODE`: leave `false`; set to `true` only for a short, supervised recovery window.

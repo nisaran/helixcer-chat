@@ -1086,7 +1086,7 @@ function sessionResponse(session, principal) {
 }
 
 function appInviteUrl(env, token, returnTo = '/') {
-  const base = String(env.APP_ORIGIN || '').trim() || 'https://chat.helixcer.com';
+  const base = String(env.APP_ORIGIN || '').trim() || 'https://app.chat.helixcer.com';
   const url = new URL(base.endsWith('/') ? base : `${base}/`);
   url.searchParams.set('invite', token);
   try {
@@ -1098,7 +1098,7 @@ function appInviteUrl(env, token, returnTo = '/') {
 }
 
 function appResetUrl(env, token) {
-  const base = String(env.APP_ORIGIN || '').trim() || 'https://chat.helixcer.com';
+  const base = String(env.APP_ORIGIN || '').trim() || 'https://app.chat.helixcer.com';
   const url = new URL(base.endsWith('/') ? base : `${base}/`);
   url.searchParams.set('reset', token);
   return url.toString();
