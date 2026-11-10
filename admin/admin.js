@@ -591,7 +591,7 @@ $('signOut').addEventListener('click', async () => {
 });
 
 (async function boot() {
-  $('inboxLink').href = 'https://chat.helixcer.com';
+  $('inboxLink').href = 'https://app.chat.helixcer.com';
   try {
     const me = await api('/api/platform/me');
     state.me = me;
