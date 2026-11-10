@@ -1874,6 +1874,92 @@ test('Messenger verification uses Page Graph lookup and shared app webhooks rout
   }
 });
 
+test('Messenger inbound names fall back to message from when User Profile API is denied', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const appId = '998877665544332';
+  const appSecret = 'fedcba0987654321fedcba0987654321';
+  const verifyToken = 'messenger-profile-fallback-token';
+  const pageId = '209876543210988';
+  const psid = '29819418407663697';
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      channelId: 'messenger-page-fallback', name: 'Messenger Fallback', connectorType: 'facebook_messenger',
+      config: { pageId, appId, pageName: 'Helixcer', apiVersion: 'v26.0' },
+      credentials: { accessToken: 'messenger-page-access-token-fallback', appSecret, verifyToken }
+    })
+  }), env);
+  assert.equal(created.status, 201);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/v26.0/${pageId}` && url.searchParams.get('fields') === 'id,name') {
+      return new Response(JSON.stringify({ id: pageId, name: 'Helixcer' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (url.pathname === `/v26.0/${pageId}/subscribed_apps`) {
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (url.pathname === `/v26.0/${psid}` && url.searchParams.get('fields') === 'name,first_name,last_name') {
+      return new Response(JSON.stringify({
+        error: { message: 'Unsupported get request. Object with ID does not exist', type: 'GraphMethodException', code: 100 }
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.pathname === '/v26.0/m_mid.kate1' && url.searchParams.get('fields') === 'from') {
+      return new Response(JSON.stringify({
+        from: { id: psid, name: 'Kate', first_name: 'Kate' }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response('{}', { status: 404 });
+  };
+  try {
+    const verified = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/messenger-page-fallback/verify', {
+      method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(verified.status, 200);
+
+    const payload = {
+      object: 'page',
+      entry: [{ id: pageId, messaging: [
+        { sender: { id: psid }, recipient: { id: pageId }, timestamp: Date.now(),
+          message: { mid: 'm_mid.kate1', text: 'Hi! My name is Kate' } }
+      ] }]
+    };
+    const raw = JSON.stringify(payload);
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(appSecret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(raw));
+    const signature = `sha256=${Buffer.from(digest).toString('hex')}`;
+    const delivered = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/facebook-messenger-app/${appId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature },
+      body: raw
+    }), env);
+    assert.equal(delivered.status, 200);
+    assert.equal((await delivered.json()).received, 1);
+    const identity = database.prepare(`SELECT display_name FROM contact_identities
+      WHERE profile_id=?`).get(psid);
+    assert.equal(identity.display_name, 'Kate');
+    const contact = database.prepare(`SELECT display_name FROM contacts
+      WHERE contact_id=(SELECT contact_id FROM contact_identities WHERE profile_id=? LIMIT 1)`).get(psid);
+    assert.equal(contact.display_name, 'Kate');
+    const conversation = database.prepare(`SELECT subject FROM conversations
+      WHERE contact_id=(SELECT contact_id FROM contact_identities WHERE profile_id=? LIMIT 1)`).get(psid);
+    assert.equal(conversation.subject, 'Kate');
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
 test('shared Instagram app webhook verifies all matches and routes each account fail-closed', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB, {

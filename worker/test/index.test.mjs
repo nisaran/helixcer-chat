@@ -15,7 +15,9 @@ import {
   isRetryableWhatsAppStatus,
   normalizeGeneric,
   normalizeGenericStatuses,
+  facebookMessengerNameFromMessageGraph,
   facebookMessengerProfileNameFromGraph,
+  fetchFacebookMessengerNameFromMessage,
   fetchFacebookMessengerProfileName,
   fetchInstagramProfileName,
   instagramProfileNameFromGraph,
@@ -458,22 +460,57 @@ test('builds Messenger profile names from Graph user fields', async () => {
   assert.equal(facebookMessengerProfileNameFromGraph({ first_name: 'Asha', last_name: 'Rao' }), 'Asha Rao');
   assert.equal(facebookMessengerProfileNameFromGraph({ first_name: 'Asha' }), 'Asha');
   assert.equal(facebookMessengerProfileNameFromGraph({}), '');
+  assert.equal(facebookMessengerNameFromMessageGraph({ from: { name: 'Kate ProfitOn', id: '29819418407663697' } }), 'Kate ProfitOn');
+  assert.equal(facebookMessengerNameFromMessageGraph({ from: { first_name: 'Kate' } }), 'Kate');
+  assert.equal(facebookMessengerNameFromMessageGraph({}), '');
   const name = await fetchFacebookMessengerProfileName(
     { config: { apiVersion: 'v26.0' } },
     { accessToken: 'page-token' },
     '3618960714878059',
-    async (input, init) => {
+    async (input) => {
       const url = new URL(String(input));
       assert.equal(url.origin, 'https://graph.facebook.com');
       assert.equal(url.pathname, '/v26.0/3618960714878059');
       assert.equal(url.searchParams.get('fields'), 'name,first_name,last_name');
-      assert.equal(init.headers.Authorization, 'Bearer page-token');
+      assert.equal(url.searchParams.get('access_token'), 'page-token');
       return new Response(JSON.stringify({ name: 'Nisar Khan', first_name: 'Nisar', last_name: 'Khan' }), {
         status: 200, headers: { 'Content-Type': 'application/json' }
       });
     }
   );
   assert.equal(name, 'Nisar Khan');
+});
+
+test('falls back to Messenger message from.name when User Profile API is denied', async () => {
+  const calls = [];
+  const name = await fetchFacebookMessengerNameFromMessage(
+    { config: { apiVersion: 'v26.0' } },
+    { accessToken: 'page-token' },
+    'm_mid.ABC123',
+    async (input) => {
+      const url = new URL(String(input));
+      calls.push(url.pathname + '?' + url.searchParams.get('fields'));
+      assert.equal(url.origin, 'https://graph.facebook.com');
+      assert.equal(url.pathname, '/v26.0/m_mid.ABC123');
+      assert.equal(url.searchParams.get('fields'), 'from');
+      assert.equal(url.searchParams.get('access_token'), 'page-token');
+      return new Response(JSON.stringify({
+        from: { id: '29819418407663697', name: 'Kate', first_name: 'Kate' }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+  );
+  assert.equal(name, 'Kate');
+  assert.deepEqual(calls, ['/v26.0/m_mid.ABC123?from']);
+
+  const deniedProfile = await fetchFacebookMessengerProfileName(
+    { config: { apiVersion: 'v26.0' } },
+    { accessToken: 'page-token' },
+    '29819418407663697',
+    async () => new Response(JSON.stringify({
+      error: { message: 'Unsupported get request', code: 100, type: 'GraphMethodException' }
+    }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+  );
+  assert.equal(deniedProfile, '');
 });
 
 test('builds Instagram profile names from Graph user fields', async () => {

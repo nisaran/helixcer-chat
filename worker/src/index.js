@@ -9743,6 +9743,19 @@ export function facebookMessengerProfileNameFromGraph(data) {
   return composed.slice(0, 120);
 }
 
+export function facebookMessengerNameFromMessageGraph(data) {
+  if (!data?.from || typeof data.from !== 'object') return '';
+  return facebookMessengerProfileNameFromGraph(data.from);
+}
+
+function facebookMessengerGraphMessageId(value) {
+  const mid = String(value || '').trim();
+  if (!mid || mid.length > 256) return '';
+  // Synthetic normalize fallbacks look like "pageId:timestamp:psid".
+  if (mid.includes(':') && !/^m[_./]/i.test(mid)) return '';
+  return mid;
+}
+
 export async function fetchFacebookMessengerProfileName(channel, credentials, psid, fetchImpl = fetch) {
   const profileId = String(psid || '').trim();
   const token = String(credentials?.accessToken || '');
@@ -9750,12 +9763,52 @@ export async function fetchFacebookMessengerProfileName(channel, credentials, ps
   const version = metaApiVersion(channel?.config?.apiVersion);
   const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(profileId)}`);
   endpoint.searchParams.set('fields', 'name,first_name,last_name');
-  const response = await fetchImpl(endpoint, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  // Page tokens are conventionally passed as access_token (Meta User Profile API docs).
+  endpoint.searchParams.set('access_token', token);
+  const response = await fetchImpl(endpoint);
   const data = safeJsonParse(await response.text(), {});
-  if (!response.ok) return '';
+  if (!response.ok) {
+    console.warn('facebook_messenger_profile_lookup_failed', {
+      psid: profileId,
+      status: response.status,
+      code: data?.error?.code || null,
+      message: String(data?.error?.message || '').slice(0, 240)
+    });
+    return '';
+  }
   return facebookMessengerProfileNameFromGraph(data);
+}
+
+export async function fetchFacebookMessengerNameFromMessage(channel, credentials, messageId, fetchImpl = fetch) {
+  const mid = facebookMessengerGraphMessageId(messageId);
+  const token = String(credentials?.accessToken || '');
+  if (!mid || !token) return '';
+  const version = metaApiVersion(channel?.config?.apiVersion);
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(mid)}`);
+  endpoint.searchParams.set('fields', 'from');
+  endpoint.searchParams.set('access_token', token);
+  const response = await fetchImpl(endpoint);
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) {
+    console.warn('facebook_messenger_message_from_lookup_failed', {
+      mid,
+      status: response.status,
+      code: data?.error?.code || null,
+      message: String(data?.error?.message || '').slice(0, 240)
+    });
+    return '';
+  }
+  return facebookMessengerNameFromMessageGraph(data);
+}
+
+async function resolveFacebookMessengerDisplayName(channel, credentials, psid, messageId = '', fetchImpl = fetch) {
+  const profileId = String(psid || '').trim();
+  if (!profileId) return '';
+  const fromProfile = await fetchFacebookMessengerProfileName(channel, credentials, profileId, fetchImpl).catch(() => '');
+  if (fromProfile) return fromProfile;
+  // User Profile API often needs Advanced Access for Business Asset User Profile Access.
+  // Message `from` still returns the sender name with a Page token when profile reads fail.
+  return fetchFacebookMessengerNameFromMessage(channel, credentials, messageId, fetchImpl).catch(() => '');
 }
 
 async function enrichFacebookMessengerDisplayNames(env, channel, credentials, messages, fetchImpl = fetch) {
@@ -9766,9 +9819,11 @@ async function enrichFacebookMessengerDisplayNames(env, channel, credentials, me
     if (!psid) continue;
     const current = String(event.displayName || '').trim();
     if (current && current !== psid) continue;
-    if (!cache.has(psid)) {
-      const name = await fetchFacebookMessengerProfileName(channel, credentials, psid, fetchImpl).catch(() => '');
-      cache.set(psid, name);
+    if (!cache.has(psid) || !cache.get(psid)) {
+      const name = await resolveFacebookMessengerDisplayName(
+        channel, credentials, psid, event?.providerMessageId, fetchImpl
+      );
+      if (name || !cache.has(psid)) cache.set(psid, name);
     }
     const resolved = cache.get(psid);
     if (resolved) event.displayName = resolved;
@@ -9843,7 +9898,21 @@ async function refreshFacebookMessengerPlaceholderProfiles(env, channel, credent
     const profileId = String(row.profile_id || '');
     const current = String(row.contact_display_name || '');
     if (!profileId || (current && current !== profileId)) continue;
-    const name = await fetchFacebookMessengerProfileName(channel, credentials, profileId, fetchImpl).catch(() => '');
+    const latestInbound = await env.DB.prepare(`SELECT m.provider_message_id
+      FROM messages m
+      JOIN conversations c ON c.conversation_id=m.conversation_id AND c.workspace_id=m.workspace_id
+      WHERE m.workspace_id=?1 AND m.channel_id=?2 AND m.direction='inbound'
+        AND m.provider_message_id<>''
+        AND c.contact_id=?3 AND c.identity_id=?4
+      ORDER BY m.timestamp DESC LIMIT 1`)
+      .bind(workspaceId, channelId, row.contact_id, row.identity_id).first().catch(() => null);
+    const name = await resolveFacebookMessengerDisplayName(
+      channel,
+      credentials,
+      profileId,
+      latestInbound?.provider_message_id || '',
+      fetchImpl
+    );
     if (!name) continue;
     await upgradeInboundContactDisplayName(env, workspaceId, {
       identity_id: row.identity_id,
