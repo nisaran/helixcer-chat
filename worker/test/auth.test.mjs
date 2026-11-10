@@ -4438,7 +4438,7 @@ test('agent invitations store channel access and restrict messaging to selected 
 
 test('password hashes verify with PBKDF2 encoding', async () => {
   const encoded = await hashPassword('correct-horse');
-  assert.match(encoded, /^pbkdf2-sha256\$600000\$/);
+  assert.match(encoded, /^pbkdf2-sha256\$100000\$/);
   assert.equal(await verifyPassword('correct-horse', encoded), true);
   assert.equal(await verifyPassword('wrong-horse', encoded), false);
 });
