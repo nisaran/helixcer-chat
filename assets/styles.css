@@ -1929,6 +1929,19 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 }
 
 .settings-surface { margin-top: 0; }
+.support-surface { display: grid; gap: 0; max-width: 720px; overflow: hidden; }
+.support-contact-row + .support-contact-row { border-top: 1px solid var(--line); }
+.support-contact-link {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--brand-deep);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.support-contact-link:hover { text-decoration: underline; }
+.support-contact-action { flex: 0 0 auto; text-decoration: none; }
+.setting-icon.is-whatsapp { background: #e8f8ef; color: #128c7e; }
 .single-workspace-badge { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; border: 1px solid #d9d0f7; border-radius: 999px; background: var(--brand-soft); color: var(--brand-deep); padding: 6px 10px; font-size: 10px; font-weight: 750; }
 .single-workspace-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
 .workspace-profile-surface { max-width: 980px; }
