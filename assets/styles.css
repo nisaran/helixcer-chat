@@ -1941,6 +1941,34 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 }
 .support-contact-link:hover { text-decoration: underline; }
 .support-contact-action { flex: 0 0 auto; text-decoration: none; }
+.automation-surface { display: grid; gap: 18px; max-width: 760px; padding: 22px; }
+.automation-card {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fbfcfb;
+  padding: 18px 18px 16px;
+}
+.automation-card legend { color: var(--ink); padding: 0; font-size: 14px; font-weight: 760; }
+.automation-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.automation-card-head .subtle { margin: 4px 0 0; max-width: 46ch; line-height: 1.5; }
+.automation-card .field-label { display: grid; gap: 7px; margin-top: 12px; }
+.automation-card .field-help { color: var(--muted); font-size: 10px; font-weight: 600; }
+.automation-time-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.automation-window-help { margin: 10px 0 0; }
+.automation-actions { margin-top: 4px; border-top: 0; padding-top: 4px; }
 .setting-icon.is-whatsapp { background: #e8f8ef; color: #128c7e; }
 .single-workspace-badge { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; border: 1px solid #d9d0f7; border-radius: 999px; background: var(--brand-soft); color: var(--brand-deep); padding: 6px 10px; font-size: 10px; font-weight: 750; }
 .single-workspace-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
@@ -2496,6 +2524,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   .workspace-id-row { align-items: stretch; }
   .workspace-form-actions { align-items: stretch; flex-direction: column; }
   .workspace-form-actions .primary-button { width: 100%; }
+  .automation-card-head { align-items: stretch; flex-direction: column; }
+  .automation-time-grid { grid-template-columns: 1fr; }
   .form-grid { grid-template-columns: 1fr; }
   .form-span { grid-column: auto; }
   .template-variable-row { grid-template-columns: 1fr; }

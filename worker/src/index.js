@@ -97,6 +97,17 @@ import {
   serializeCampaignRecipient
 } from './campaigns.js';
 
+import {
+  AUTOMATION_TIMEZONES,
+  defaultAutomationSettings,
+  localDayKey,
+  parseTimeToMinutes,
+  renderAutomationMessage,
+  serializeAutomationSettings,
+  shouldSendGreeting,
+  shouldSendOutOfOffice
+} from './automation.js';
+
 const API_VERSION = '2026-11-06-campaign-chat-state';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
@@ -615,6 +626,16 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       requirePermission(principal, 'workspace.edit');
       const item = await updateWorkspaceProfile(env, workspaceId, await readJson(request), principal);
       await broadcast(env, workspaceId, { type: 'workspace.updated', workspace: item });
+      return withCors(json({ ok: true, item }), cors);
+    }
+    if (url.pathname === '/api/automation' && request.method === 'GET') {
+      requirePermission(principal, 'workspace.edit');
+      return withCors(json({ item: await getAutomationSettings(env, workspaceId) }), cors);
+    }
+    if (url.pathname === '/api/automation' && request.method === 'PATCH') {
+      requirePermission(principal, 'workspace.edit');
+      const item = await updateAutomationSettings(env, workspaceId, await readJson(request), principal);
+      await broadcast(env, workspaceId, { type: 'automation.updated', automation: item });
       return withCors(json({ ok: true, item }), cors);
     }
     if (url.pathname === '/api/roles' && request.method === 'GET') {
@@ -1869,7 +1890,7 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
   if (received || normalized.statuses.length) await broadcast(env, channel.workspaceId, {
     type: 'webhook.received', channelId, received, statuses: normalized.statuses.length, granular: true
   });
-  if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
+  if (latestInbound) afterInboundStored(ctx, env, channel, latestInbound);
   return json({ ok: true, received, statuses: normalized.statuses.length });
 }
 
@@ -1906,7 +1927,7 @@ async function handleGenericWebhook(request, env, channelId, ctx) {
       type: 'webhook.received', channelId, received, statuses: updatedStatuses, granular: true
     });
   }
-  if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
+  if (latestInbound) afterInboundStored(ctx, env, channel, latestInbound);
   return json({ ok: true, received });
 }
 
@@ -1928,7 +1949,7 @@ async function handleTelegramWebhook(request, env, channelId, ctx) {
   if (received) await broadcast(env, channel.workspaceId, {
     type: 'webhook.received', channelId, received, statuses: 0, granular: true
   });
-  if (storedInbound) scheduleInboundPush(ctx, env, channel, storedInbound);
+  if (storedInbound) afterInboundStored(ctx, env, channel, storedInbound);
   return json({ ok: true, received });
 }
 
@@ -1994,7 +2015,7 @@ async function handleInstagramWebhook(request, env, channelId, ctx) {
       type: 'webhook.received', channelId, received, statuses: updatedStatuses, granular: true
     });
   }
-  if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
+  if (latestInbound) afterInboundStored(ctx, env, channel, latestInbound);
   return json({ ok: true, received });
 }
 
@@ -2090,7 +2111,7 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
         statuses: channelStatuses, granular: true
       });
     }
-    if (latestInbound) scheduleInboundPush(ctx, env, route.channel, latestInbound);
+    if (latestInbound) afterInboundStored(ctx, env, route.channel, latestInbound);
   }
   return json({ ok: true, received, channels: routes.length });
 }
@@ -2157,7 +2178,7 @@ async function handleFacebookMessengerWebhook(request, env, channelId, ctx) {
       type: 'webhook.received', channelId, received, statuses: updatedStatuses, granular: true
     });
   }
-  if (latestInbound) scheduleInboundPush(ctx, env, channel, latestInbound);
+  if (latestInbound) afterInboundStored(ctx, env, channel, latestInbound);
   return json({ ok: true, received });
 }
 
@@ -2253,7 +2274,7 @@ async function handleFacebookMessengerAppWebhook(request, env, requestedAppId, c
         statuses: channelStatuses, granular: true
       });
     }
-    if (latestInbound) scheduleInboundPush(ctx, env, route.channel, latestInbound);
+    if (latestInbound) afterInboundStored(ctx, env, route.channel, latestInbound);
   }
   return json({ ok: true, received, channels: routes.length });
 }
@@ -2272,6 +2293,24 @@ function scheduleInboundPush(ctx, env, channel, inbound) {
   }));
   if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(delivery);
 }
+
+function afterInboundStored(ctx, env, channel, inbound) {
+  scheduleInboundPush(ctx, env, channel, inbound);
+  scheduleAutomationReplies(ctx, env, channel, inbound);
+}
+
+function scheduleAutomationReplies(ctx, env, channel, inbound) {
+  const work = maybeRunAutomationReplies(env, channel, inbound).catch((error) => {
+    console.error('automation_reply_failed', {
+      workspaceId: channel.workspaceId,
+      channelId: channel.channelId,
+      conversationId: inbound?.conversationId || '',
+      message: cleanError(error)
+    });
+  });
+  if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(work);
+}
+
 
 function scheduleAssignmentPush(ctx, env, workspaceId, conversation, notify) {
   const membershipId = String(notify?.membershipId || '').trim();
@@ -2539,6 +2578,175 @@ async function getWorkspaceProfile(env, workspaceId) {
     FROM workspaces WHERE workspace_id=?1 LIMIT 1`).bind(workspaceId).first();
   if (!row) throw httpError(404, 'Workspace not found.');
   return workspaceProfileView(row);
+}
+
+async function getAutomationSettings(env, workspaceId) {
+  try {
+    const row = await env.DB.prepare(`SELECT * FROM workspace_automation_settings WHERE workspace_id=?1`)
+      .bind(workspaceId).first();
+    return serializeAutomationSettings(row, workspaceId);
+  } catch (error) {
+    if (/no such table/i.test(String(error?.message || error))) return defaultAutomationSettings(workspaceId);
+    throw error;
+  }
+}
+
+async function updateAutomationSettings(env, workspaceId, payload, principal) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Automation settings must be an object.');
+  rejectUnknownKeys(payload, new Set([
+    'greetingEnabled', 'greetingMessage', 'greetingIntervalHours',
+    'oooEnabled', 'oooMessage', 'oooTimezone', 'oooStartTime', 'oooEndTime'
+  ]), 'automation settings');
+  const current = await getAutomationSettings(env, workspaceId);
+  const next = { ...current };
+  if (payload.greetingEnabled !== undefined) next.greetingEnabled = Boolean(payload.greetingEnabled);
+  if (payload.oooEnabled !== undefined) next.oooEnabled = Boolean(payload.oooEnabled);
+  if (payload.greetingMessage !== undefined) {
+    next.greetingMessage = cleanOptionalText(payload.greetingMessage, 'Greeting message', MAX_TEXT_LENGTH);
+  }
+  if (payload.oooMessage !== undefined) {
+    next.oooMessage = cleanOptionalText(payload.oooMessage, 'Out of office message', MAX_TEXT_LENGTH);
+  }
+  if (payload.greetingIntervalHours !== undefined) {
+    const hours = Number(payload.greetingIntervalHours);
+    if (!Number.isFinite(hours) || hours < 0 || hours > 8760) {
+      throw httpError(400, 'Greeting interval must be between 0 and 8760 hours.');
+    }
+    next.greetingIntervalHours = Math.round(hours * 100) / 100;
+  }
+  if (payload.oooTimezone !== undefined) {
+    const timezone = String(payload.oooTimezone || '').trim();
+    if (!AUTOMATION_TIMEZONES.includes(timezone)) {
+      throw httpError(400, 'Choose a supported out-of-office timezone.');
+    }
+    next.oooTimezone = timezone;
+  }
+  if (payload.oooStartTime !== undefined) {
+    if (parseTimeToMinutes(payload.oooStartTime) == null) throw httpError(400, 'Out of office start time is invalid.');
+    next.oooStartTime = String(payload.oooStartTime).trim();
+  }
+  if (payload.oooEndTime !== undefined) {
+    if (parseTimeToMinutes(payload.oooEndTime) == null) throw httpError(400, 'Out of office end time is invalid.');
+    next.oooEndTime = String(payload.oooEndTime).trim();
+  }
+  if (next.greetingEnabled && !next.greetingMessage) {
+    throw httpError(400, 'Enter a greeting message before enabling greeting automation.');
+  }
+  if (next.oooEnabled && !next.oooMessage) {
+    throw httpError(400, 'Enter an out of office message before enabling it.');
+  }
+  const now = new Date().toISOString();
+  const updatedBy = String(principal?.user?.email || principal?.user?.displayName || '').slice(0, 254);
+  await env.DB.prepare(`INSERT INTO workspace_automation_settings
+      (workspace_id,greeting_enabled,greeting_message,greeting_interval_hours,ooo_enabled,ooo_message,
+       ooo_timezone,ooo_start_time,ooo_end_time,updated_at,updated_by)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+    ON CONFLICT(workspace_id) DO UPDATE SET
+      greeting_enabled=excluded.greeting_enabled,
+      greeting_message=excluded.greeting_message,
+      greeting_interval_hours=excluded.greeting_interval_hours,
+      ooo_enabled=excluded.ooo_enabled,
+      ooo_message=excluded.ooo_message,
+      ooo_timezone=excluded.ooo_timezone,
+      ooo_start_time=excluded.ooo_start_time,
+      ooo_end_time=excluded.ooo_end_time,
+      updated_at=excluded.updated_at,
+      updated_by=excluded.updated_by`)
+    .bind(
+      workspaceId,
+      next.greetingEnabled ? 1 : 0,
+      next.greetingMessage,
+      next.greetingIntervalHours,
+      next.oooEnabled ? 1 : 0,
+      next.oooMessage,
+      next.oooTimezone,
+      next.oooStartTime,
+      next.oooEndTime,
+      now,
+      updatedBy
+    ).run();
+  await audit(env, principal, 'update', 'automation', workspaceId, {
+    greetingEnabled: next.greetingEnabled,
+    oooEnabled: next.oooEnabled
+  });
+  return getAutomationSettings(env, workspaceId);
+}
+
+async function maybeRunAutomationReplies(env, channel, inbound) {
+  const workspaceId = channel?.workspaceId;
+  const conversationId = inbound?.conversationId;
+  const inboundMessageId = inbound?.messageId || inbound?.message?.messageId || '';
+  if (!workspaceId || !conversationId) return;
+  const settings = await getAutomationSettings(env, workspaceId);
+  if (!settings.greetingEnabled && !settings.oooEnabled) return;
+
+  const previous = await env.DB.prepare(`SELECT MAX(timestamp) AS previous_at FROM messages
+    WHERE workspace_id=?1 AND conversation_id=?2 AND direction='inbound'
+      AND (?3='' OR message_id<>?3)`).bind(workspaceId, conversationId, inboundMessageId).first();
+  const previousInboundAt = previous?.previous_at || '';
+
+  const contact = await env.DB.prepare(`SELECT c.display_name,c.company FROM conversations conv
+    JOIN contacts c ON c.contact_id=conv.contact_id AND c.workspace_id=conv.workspace_id
+    WHERE conv.workspace_id=?1 AND conv.conversation_id=?2`)
+    .bind(workspaceId, conversationId).first();
+  const context = {
+    contactName: contact?.display_name || inbound?.senderName || '',
+    company: contact?.company || '',
+    channelName: channel?.name || ''
+  };
+  const principal = {
+    authType: 'automation',
+    user: { userId: 'automation', email: '', displayName: 'Automation' },
+    workspace: { workspaceId }
+  };
+
+  const sendAutomation = async (ruleType, template) => {
+    const text = renderAutomationMessage(template, context);
+    if (!text) return null;
+    const created = await createOutboundMessage(env, workspaceId, conversationId, { text }, principal, crypto.randomUUID());
+    await broadcast(env, workspaceId, {
+      type: 'message.created',
+      conversationId,
+      messageId: created.message.messageId,
+      message: created.message
+    });
+    await sendOrQueue(env, created.message.messageId);
+    const now = new Date().toISOString();
+    let dayKey = '';
+    try { dayKey = localDayKey(new Date(), settings.oooTimezone); } catch { dayKey = now.slice(0, 10); }
+    await env.DB.prepare(`INSERT INTO automation_send_log
+      (log_id,workspace_id,conversation_id,rule_type,message_id,sent_at,day_key)
+      VALUES (?1,?2,?3,?4,?5,?6,?7)`)
+      .bind(crypto.randomUUID(), workspaceId, conversationId, ruleType, created.message.messageId, now, dayKey).run();
+    return created.message;
+  };
+
+  if (shouldSendGreeting({
+    enabled: settings.greetingEnabled,
+    intervalHours: settings.greetingIntervalHours,
+    previousInboundAt
+  })) {
+    const recentGreeting = await env.DB.prepare(`SELECT log_id FROM automation_send_log
+      WHERE workspace_id=?1 AND conversation_id=?2 AND rule_type='greeting'
+        AND sent_at>=?3 LIMIT 1`)
+      .bind(workspaceId, conversationId, new Date(Date.now() - (settings.greetingIntervalHours * 60 * 60 * 1000)).toISOString())
+      .first();
+    if (!recentGreeting) await sendAutomation('greeting', settings.greetingMessage);
+  }
+
+  if (shouldSendOutOfOffice({
+    enabled: settings.oooEnabled,
+    timezone: settings.oooTimezone,
+    startTime: settings.oooStartTime,
+    endTime: settings.oooEndTime
+  })) {
+    let dayKey = '';
+    try { dayKey = localDayKey(new Date(), settings.oooTimezone); } catch { dayKey = new Date().toISOString().slice(0, 10); }
+    const alreadyToday = await env.DB.prepare(`SELECT log_id FROM automation_send_log
+      WHERE workspace_id=?1 AND conversation_id=?2 AND rule_type='ooo' AND day_key=?3 LIMIT 1`)
+      .bind(workspaceId, conversationId, dayKey).first();
+    if (!alreadyToday) await sendAutomation('ooo', settings.oooMessage);
+  }
 }
 
 function workspaceProfileView(row) {

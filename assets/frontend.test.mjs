@@ -109,7 +109,7 @@ test("single workspace profile stores organisation, address, and GST details", (
   assert.match(app, /if \(data\.workspace\)[\s\S]*?state\.workspaceProfileLoaded = true/);
   assert.match(app, /const editable = editablePermission && state\.workspaceProfileLoaded/);
   assert.match(html, /Only workspace owners and admins can edit these details/);
-  assert.match(app, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"\]/);
+  assert.match(app, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
   assert.match(styles, /\.workspace-form-grid \{[^}]*grid-template-columns: repeat\(2/);
   assert.match(styles, /\.workspace-profile-form \.text-field\[readonly\]/);
   assert.doesNotMatch(`${html}\n${app}`, /createWorkspace|deleteWorkspace|workspaceSwitcher/i);
@@ -649,7 +649,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261110-reply-highlight-duration/);
+  assert.match(html, /app\.js\?v=20261112-automation/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -1019,8 +1019,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261110-reply-highlight-duration/);
-  assert.match(html, /assets\/styles\.css\?v=20261110-reply-highlight-duration/);
+  assert.match(html, /assets\/app\.js\?v=20261112-automation/);
+  assert.match(html, /assets\/styles\.css\?v=20261112-automation/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -1198,11 +1198,34 @@ test("conversation URLs deep-link safely without auto-selecting plain inbox", ()
   assert.match(reconcile, /routedId === activeSelectedId[\s\S]*?openPendingConversation\(\{ refreshIfMissing: true \}\)/);
 });
 
+test("Automation menu configures greeting and out of office replies", () => {
+  assert.match(html, /data-route="automation" data-permission="workspace\.edit"/);
+  assert.match(html, /id="automationRoute" data-route-panel="automation"/);
+  assert.match(html, /id="automationForm"/);
+  assert.match(html, /id="automationGreetingEnabled"/);
+  assert.match(html, /id="automationGreetingMessage"/);
+  assert.match(html, /id="automationGreetingInterval"/);
+  assert.match(html, /id="automationOooEnabled"/);
+  assert.match(html, /id="automationOooMessage"/);
+  assert.match(html, /id="automationOooTimezone"/);
+  assert.match(html, /id="automationOooStart"/);
+  assert.match(html, /id="automationOooEnd"/);
+  assert.match(html, /\{\{name\}\}/);
+  assert.match(app, /getAutomation\(\)[\s\S]*?request\("\/api\/automation"\)/);
+  assert.match(app, /updateAutomation\(payload\)[\s\S]*?request\("\/api\/automation", \{ method: "PATCH"/);
+  assert.match(app, /async function loadAutomationSettings/);
+  assert.match(app, /async function saveAutomationSettings/);
+  assert.match(app, /if \(route === "automation"\) loadAutomationSettings/);
+  assert.match(app, /if \(!hasPermission\("workspace\.edit"\) && route === "automation"\) route = "inbox"/);
+  assert.match(styles, /\.automation-surface/);
+  assert.match(styles, /\.automation-time-grid/);
+});
+
 test("roles hash survives reload and stays aligned with setRoute", () => {
   const parseHash = app.slice(app.indexOf("function parseAppHash"), app.indexOf("async function openPendingConversation"));
-  assert.match(parseHash, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"\]/);
+  assert.match(parseHash, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
   const setRouteFn = app.slice(app.indexOf("function setRoute"), app.indexOf("function whatsappImportChannels"));
-  assert.match(setRouteFn, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"\]/);
+  assert.match(setRouteFn, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
   assert.match(setRouteFn, /if \(!hasPermission\("roles\.manage"\) && route === "roles"\) route = "inbox"/);
 });
 
