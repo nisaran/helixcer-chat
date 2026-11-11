@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261111-campaign-approved-templates">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261111-sidebar-support">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261111-campaign-approved-templates" defer></script>
+  <script src="./assets/app.js?v=20261111-sidebar-support" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -161,6 +161,12 @@
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
           </span>
           <span>Settings</span>
+        </button>
+        <button class="nav-button" type="button" data-route="support">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4.5M12 17.2h.01"/></svg>
+          </span>
+          <span>Support</span>
         </button>
       </nav>
 
@@ -1096,6 +1102,36 @@
               <div><strong id="notificationSettingTitle">Push notifications</strong><span id="notificationSettingHelp">Receive background alerts on this device, including when Helixcer Chat is closed. Android Chrome may show permission in Site controls beside the address bar. On iPhone or iPad, add Helixcer to your Home Screen first.</span><small id="notificationPermissionStatus">Checking browser permission…</small></div>
             </div>
             <label class="switch-control"><input type="checkbox" id="pushNotificationsToggle"><span aria-hidden="true"></span><em>Enable</em></label>
+          </div>
+        </section>
+      </section>
+
+      <section class="route content-route" id="supportRoute" data-route-panel="support" aria-labelledby="supportTitle" hidden>
+        <div class="route-heading">
+          <div><p class="eyebrow">We're here to help</p><h2 id="supportTitle">Support</h2><p>Reach the Helixcer team on WhatsApp or email.</p></div>
+        </div>
+        <section class="surface settings-surface support-surface" aria-label="Support contacts">
+          <div class="setting-row support-contact-row">
+            <div class="setting-copy">
+              <span class="setting-icon is-whatsapp" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.7-1.2A9 9 0 1 0 12 3Zm4.8 12.8c-.2.6-1.2 1.1-2 1.2-.5.1-1.2.2-3.5-.7-2.8-1.2-4.6-4.1-4.7-4.3-.2-.2-1.2-1.6-1.2-3s.8-2.1 1.1-2.4c.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.5l.8 1.9c.1.2.1.4 0 .6l-.4.7c-.1.2-.2.3-.1.5.4.7 1.1 1.5 1.8 2 .8.5 1.4.7 1.6.8.2.1.4.1.5-.1l.8-.9c.2-.2.4-.2.6-.1l1.8.8c.2.1.4.2.4.4 0 .1 0 .6-.2 1.2Z"/></svg></span>
+              <div>
+                <strong>WhatsApp</strong>
+                <span>Chat with support on WhatsApp.</span>
+                <a class="support-contact-link" href="https://wa.me/916282010794" target="_blank" rel="noopener noreferrer">+91 6282010794</a>
+              </div>
+            </div>
+            <a class="secondary-button support-contact-action" href="https://wa.me/916282010794" target="_blank" rel="noopener noreferrer">Open WhatsApp</a>
+          </div>
+          <div class="setting-row support-contact-row">
+            <div class="setting-copy">
+              <span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg></span>
+              <div>
+                <strong>Email</strong>
+                <span>Send a message anytime.</span>
+                <a class="support-contact-link" href="mailto:info@helixcer.com">info@helixcer.com</a>
+              </div>
+            </div>
+            <a class="secondary-button support-contact-action" href="mailto:info@helixcer.com">Send email</a>
           </div>
         </section>
       </section>

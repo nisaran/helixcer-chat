@@ -9918,7 +9918,7 @@
     const raw = String(value || "").replace(/^#/, "");
     const separator = raw.indexOf("/");
     const requestedRoute = separator >= 0 ? raw.slice(0, separator) : raw;
-    const allowedRoutes = ["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"];
+    const allowedRoutes = ["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings", "support"];
     const route = allowedRoutes.includes(requestedRoute) ? requestedRoute : "inbox";
     if (route !== "inbox" || separator < 0) return { route, conversationId: "" };
     let conversationId = "";
@@ -9967,7 +9967,7 @@
   function setRoute(route, { preserveLocation = false } = {}) {
     closeContactRouteMenu();
     closeContactPlatformMenu();
-    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings", "support"].includes(route)) route = "inbox";
     // Permission demotions require an authenticated principal. Before /api/me
     // resolves, hasPermission is false for everything and would collapse every
     // deep link to Settings via the inbox fallback.
@@ -10019,6 +10019,7 @@
       inbox: "Inbox", contacts: "Contacts", campaigns: "Campaign", channels: "Channels",
       "whatsapp-templates": "WhatsApp Templates", "import-chat": "Import Chat",
       developer: "Developer API", team: "Team", roles: "Roles", workspace: "Workspace", settings: "Settings",
+      support: "Support",
     };
     $("pageTitle").textContent = labels[route];
     updateBrowserTitle(labels[route]);
