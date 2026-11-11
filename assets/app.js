@@ -11808,6 +11808,12 @@
     host.append(bubble);
   }
 
+  function isApprovedWhatsAppTemplate(template) {
+    const status = String(template?.status || "").trim().toUpperCase();
+    // Missing status is treated as usable, matching conversation template sends.
+    return !status || status === "APPROVED";
+  }
+
   async function loadCampaignTemplates() {
     const status = $("campaignTemplateStatus");
     const channel = selectedCampaignChannel();
@@ -11817,11 +11823,20 @@
       if (!state.whatsappTemplatesLoaded) await loadWhatsAppTemplateLibrary();
       if (selectedCampaignChannel()?.channelId !== channel.channelId) return;
       state.campaigns.templates = (state.whatsappTemplates || [])
-        .filter((template) => !template.channelId || template.channelId === channel.channelId);
+        .filter((template) => !template.channelId || template.channelId === channel.channelId)
+        .filter(isApprovedWhatsAppTemplate);
+      const selectedKey = state.campaigns.templateKey || $("campaignTemplateSelect")?.value || "";
+      if (selectedKey && !state.campaigns.templates.some((template) => `${template.name}:${template.language?.code || template.language || ""}` === selectedKey)) {
+        state.campaigns.templateKey = "";
+        if ($("campaignTemplateSelect")) $("campaignTemplateSelect").value = "";
+        if ($("campaignTemplateSearch")) $("campaignTemplateSearch").value = "";
+      }
       renderCampaignTemplateOptions();
+      renderCampaignTemplateVariables();
+      renderCampaignMessagePreview();
       if (status) {
         status.textContent = state.campaigns.templates.length
-          ? `${state.campaigns.templates.length} templates available`
+          ? `${state.campaigns.templates.length} approved template${state.campaigns.templates.length === 1 ? "" : "s"} available`
           : "No approved templates found for this channel.";
       }
     } catch (error) {
