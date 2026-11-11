@@ -165,6 +165,9 @@
     workspace: { name: DEFAULT_WORKSPACE, workspaceId: "default", slug: "helixcer" },
     workspaceProfile: null,
     workspaceProfileLoaded: false,
+    automationSettings: null,
+    automationSettingsLoaded: false,
+    automationSettingsLoading: false,
     workspaceProfileLoading: false,
     team: { members: [], invitations: [] },
     roles: { items: [], catalog: [], selectedKey: "", draft: null, dirty: false, loading: false, saving: false },
@@ -734,6 +737,29 @@
         name: this.data.workspaceProfile.displayName,
       };
       return { ok: true, item: clone(this.data.workspaceProfile) };
+    }
+
+    async getAutomation() {
+      await smallDelay(80);
+      if (!this.data.automationSettings) {
+        this.data.automationSettings = {
+          greetingEnabled: false,
+          greetingMessage: "Hi {{name}}, thanks for reaching out. How can we help?",
+          greetingIntervalHours: 24,
+          oooEnabled: false,
+          oooMessage: "Hi {{name}}, we are currently away and will reply soon.",
+          oooTimezone: "Asia/Kolkata",
+          oooStartTime: "18:00",
+          oooEndTime: "09:00",
+        };
+      }
+      return { item: clone(this.data.automationSettings) };
+    }
+
+    async updateAutomation(payload) {
+      await smallDelay(120);
+      this.data.automationSettings = { ...(this.data.automationSettings || {}), ...payload };
+      return { ok: true, item: clone(this.data.automationSettings) };
     }
 
     async logout() {
@@ -1642,6 +1668,16 @@
         : this.request("/api/workspace", { method: "PATCH", body: JSON.stringify(payload) });
     }
 
+    getAutomation() {
+      return this.isDemo ? this.demo.getAutomation() : this.request("/api/automation");
+    }
+
+    updateAutomation(payload) {
+      return this.isDemo
+        ? this.demo.updateAutomation(payload)
+        : this.request("/api/automation", { method: "PATCH", body: JSON.stringify(payload) });
+    }
+
     getMessages(conversationId, { before = "", limit = 100 } = {}) {
       if (this.isDemo) return this.demo.getMessages(conversationId, { before, limit });
       const query = new URLSearchParams();
@@ -2318,6 +2354,125 @@
     }
   }
 
+  function defaultAutomationSettings() {
+    return {
+      greetingEnabled: false,
+      greetingMessage: "",
+      greetingIntervalHours: 24,
+      oooEnabled: false,
+      oooMessage: "",
+      oooTimezone: "Asia/Kolkata",
+      oooStartTime: "18:00",
+      oooEndTime: "09:00",
+    };
+  }
+
+  function normalizeAutomationSettings(raw = {}) {
+    const item = raw && typeof raw === "object" ? raw : {};
+    const interval = Number(item.greetingIntervalHours);
+    return {
+      ...defaultAutomationSettings(),
+      greetingEnabled: Boolean(item.greetingEnabled),
+      greetingMessage: String(item.greetingMessage || ""),
+      greetingIntervalHours: Number.isFinite(interval) ? interval : 24,
+      oooEnabled: Boolean(item.oooEnabled),
+      oooMessage: String(item.oooMessage || ""),
+      oooTimezone: String(item.oooTimezone || "Asia/Kolkata"),
+      oooStartTime: String(item.oooStartTime || "18:00"),
+      oooEndTime: String(item.oooEndTime || "09:00"),
+    };
+  }
+
+  function setAutomationFormBusy(busy) {
+    state.automationSettingsLoading = busy;
+    const editable = hasPermission("workspace.edit") && state.automationSettingsLoaded && !busy;
+    const form = $("automationForm");
+    if (!form) return;
+    form.querySelectorAll("input, textarea, select, button").forEach((field) => {
+      field.disabled = !editable;
+    });
+    if ($("automationSaveButton")) $("automationSaveButton").disabled = !editable;
+  }
+
+  function renderAutomationSettings(settings = state.automationSettings) {
+    const form = $("automationForm");
+    if (!form) return;
+    const item = normalizeAutomationSettings(settings || defaultAutomationSettings());
+    state.automationSettings = item;
+    $("automationGreetingEnabled").checked = item.greetingEnabled;
+    $("automationGreetingMessage").value = item.greetingMessage;
+    $("automationGreetingInterval").value = String(item.greetingIntervalHours);
+    $("automationOooEnabled").checked = item.oooEnabled;
+    $("automationOooMessage").value = item.oooMessage;
+    $("automationOooTimezone").value = item.oooTimezone;
+    $("automationOooStart").value = item.oooStartTime;
+    $("automationOooEnd").value = item.oooEndTime;
+    setAutomationFormBusy(false);
+  }
+
+  async function loadAutomationSettings({ force = false } = {}) {
+    if (!state.api || state.authStatus !== "authenticated") return;
+    if (state.automationSettingsLoading || (state.automationSettingsLoaded && !force)) {
+      if (state.automationSettingsLoaded) renderAutomationSettings();
+      return;
+    }
+    $("automationSaveState").textContent = "Loading…";
+    setAutomationFormBusy(true);
+    try {
+      const response = await state.api.getAutomation();
+      state.automationSettings = normalizeAutomationSettings(response?.item || response);
+      state.automationSettingsLoaded = true;
+      renderAutomationSettings();
+      $("automationSaveState").textContent = "";
+    } catch (error) {
+      $("automationSaveState").textContent = "Unable to load automation settings";
+      setAutomationFormBusy(false);
+      if (state.route === "automation") showToast("Automation settings were not loaded", error.message, true);
+    }
+  }
+
+  async function saveAutomationSettings(form) {
+    if (!hasPermission("workspace.edit") || state.automationSettingsLoading) return;
+    if (!form.reportValidity()) return;
+    const data = new FormData(form);
+    const payload = {
+      greetingEnabled: $("automationGreetingEnabled").checked,
+      greetingMessage: String(data.get("greetingMessage") || "").trim(),
+      greetingIntervalHours: Number(data.get("greetingIntervalHours")),
+      oooEnabled: $("automationOooEnabled").checked,
+      oooMessage: String(data.get("oooMessage") || "").trim(),
+      oooTimezone: String(data.get("oooTimezone") || "").trim(),
+      oooStartTime: String(data.get("oooStartTime") || "").trim(),
+      oooEndTime: String(data.get("oooEndTime") || "").trim(),
+    };
+    if (payload.greetingEnabled && !payload.greetingMessage) {
+      $("automationGreetingMessage").setCustomValidity("Enter a greeting message before enabling greeting automation.");
+      form.reportValidity();
+      $("automationGreetingMessage").setCustomValidity("");
+      return;
+    }
+    if (payload.oooEnabled && !payload.oooMessage) {
+      $("automationOooMessage").setCustomValidity("Enter an out of office message before enabling it.");
+      form.reportValidity();
+      $("automationOooMessage").setCustomValidity("");
+      return;
+    }
+    $("automationSaveState").textContent = "Saving…";
+    setAutomationFormBusy(true);
+    try {
+      const response = await state.api.updateAutomation(payload);
+      state.automationSettings = normalizeAutomationSettings(response?.item || { ...state.automationSettings, ...payload });
+      state.automationSettingsLoaded = true;
+      renderAutomationSettings();
+      $("automationSaveState").textContent = "Saved";
+      showToast("Automation saved", "Greeting and out of office settings are up to date.");
+    } catch (error) {
+      $("automationSaveState").textContent = "Changes not saved";
+      setAutomationFormBusy(false);
+      showToast("Automation was not updated", error.message, true);
+    }
+  }
+
   function showAuthChecking() {
     state.authStatus = "checking";
     $("sessionSplash").hidden = false;
@@ -2330,6 +2485,9 @@
     state.currentUser = null;
     state.workspaceProfile = null;
     state.workspaceProfileLoaded = false;
+    state.automationSettings = null;
+    state.automationSettingsLoaded = false;
+    state.automationSettingsLoading = false;
     state.recentVerifyTokens.clear();
     if (state.disconnectRealtime) state.disconnectRealtime();
     state.disconnectRealtime = null;
@@ -2408,6 +2566,7 @@
     });
     document.querySelectorAll("[data-owner-only]").forEach((node) => { node.hidden = !isOwner(); node.disabled = !isOwner(); });
     setWorkspaceFormBusy(state.workspaceProfileLoading);
+    if (state.automationSettingsLoaded) setAutomationFormBusy(state.automationSettingsLoading);
     if (!state.currentUser) return;
     const blockedRoutes = [];
     if (!hasPermission("contacts.view")) blockedRoutes.push("contacts");
@@ -2416,6 +2575,7 @@
     if (!hasPermission("developer.manage")) blockedRoutes.push("developer");
     if (!hasPermission("team.manage")) blockedRoutes.push("team");
     if (!hasPermission("roles.manage")) blockedRoutes.push("roles");
+    if (!hasPermission("workspace.edit")) blockedRoutes.push("automation");
     if (chatPermissionScope("view") === "none") blockedRoutes.push("inbox");
     if (blockedRoutes.includes(state.route)) setRoute(chatPermissionScope("view") === "none" ? "settings" : "inbox");
   }
@@ -9918,7 +10078,7 @@
     const raw = String(value || "").replace(/^#/, "");
     const separator = raw.indexOf("/");
     const requestedRoute = separator >= 0 ? raw.slice(0, separator) : raw;
-    const allowedRoutes = ["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings", "support"];
+    const allowedRoutes = ["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "automation", "settings", "support"];
     const route = allowedRoutes.includes(requestedRoute) ? requestedRoute : "inbox";
     if (route !== "inbox" || separator < 0) return { route, conversationId: "" };
     let conversationId = "";
@@ -9967,7 +10127,7 @@
   function setRoute(route, { preserveLocation = false } = {}) {
     closeContactRouteMenu();
     closeContactPlatformMenu();
-    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "settings", "support"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "automation", "settings", "support"].includes(route)) route = "inbox";
     // Permission demotions require an authenticated principal. Before /api/me
     // resolves, hasPermission is false for everything and would collapse every
     // deep link to Settings via the inbox fallback.
@@ -9978,6 +10138,7 @@
       if (!hasPermission("roles.manage") && route === "roles") route = "inbox";
       if (!hasPermission("contacts.view") && route === "contacts") route = "inbox";
       if (!hasPermission("campaigns.view") && route === "campaigns") route = "inbox";
+      if (!hasPermission("workspace.edit") && route === "automation") route = "inbox";
       if (chatPermissionScope("view") === "none" && route === "inbox") route = "settings";
     }
     if (!preserveLocation) {
@@ -10018,13 +10179,14 @@
     const labels = {
       inbox: "Inbox", contacts: "Contacts", campaigns: "Campaign", channels: "Channels",
       "whatsapp-templates": "WhatsApp Templates", "import-chat": "Import Chat",
-      developer: "Developer API", team: "Team", roles: "Roles", workspace: "Workspace", settings: "Settings",
-      support: "Support",
+      developer: "Developer API", team: "Team", roles: "Roles", workspace: "Workspace", automation: "Automation",
+      settings: "Settings", support: "Support",
     };
     $("pageTitle").textContent = labels[route];
     updateBrowserTitle(labels[route]);
     if (route === "settings") renderNotificationSetting();
     if (route === "workspace") loadWorkspaceProfile().catch(() => {});
+    if (route === "automation") loadAutomationSettings().catch(() => {});
     if (route === "whatsapp-templates") loadWhatsAppTemplateLibrary().catch(() => {});
     if (route === "import-chat") renderImportChatPage();
     if (route === "campaigns") renderCampaignsPage();
@@ -14992,7 +15154,8 @@
     $("refreshButton").addEventListener("click", () => state.route === "whatsapp-templates"
       ? loadWhatsAppTemplateLibrary({ refresh: true })
       : state.route === "import-chat" ? renderImportChatPage()
-      : state.route === "workspace" ? loadWorkspaceProfile({ force: true }) : loadAll());
+      : state.route === "workspace" ? loadWorkspaceProfile({ force: true })
+      : state.route === "automation" ? loadAutomationSettings({ force: true }) : loadAll());
     $("mobileMenu").addEventListener("click", openMobileMenu);
     $("mobileScrim").addEventListener("click", closeMobileMenu);
     $("mobileBack").addEventListener("click", () => clearSelectedConversation());
@@ -15006,6 +15169,10 @@
     $("workspaceProfileForm").addEventListener("submit", (event) => {
       event.preventDefault();
       saveWorkspaceProfile(event.currentTarget);
+    });
+    $("automationForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveAutomationSettings(event.currentTarget);
     });
     $("profileForm").addEventListener("submit", (event) => {
       event.preventDefault();
