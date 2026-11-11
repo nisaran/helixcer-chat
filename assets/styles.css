@@ -1599,6 +1599,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   background: #eef2f1; color: #40514f; font-size: 10px; font-weight: 750;
 }
 .campaign-status-pill.is-sending { background: #eef0ff; color: #4338ca; }
+.campaign-status-pill.is-scheduled { background: #eef7ff; color: #1d4f91; }
 .campaign-status-pill.is-completed { background: #e7f6ef; color: #176b4a; }
 .campaign-status-pill.is-failed, .campaign-status-pill.is-completed_with_errors { background: #fdecec; color: #a43f2b; }
 .campaign-detail-row td { background: #fafbfb; padding: 0; }
@@ -1899,6 +1900,9 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 }
 .campaign-create-action-buttons { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .campaign-create-actions .subtle { margin: 0; max-width: 460px; line-height: 1.5; }
+.confirmation-symbol.is-schedule { background: #eef0ff; color: #4338ca; }
+#campaignScheduleDialog .field-label { display: grid; gap: 6px; margin: 4px 0 2px; text-align: left; }
+#campaignScheduleDialog .text-field { width: 100%; }
 @media (max-width: 980px) {
   .campaign-filter-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .campaign-filter-search { grid-column: 1 / -1; max-width: 280px; }

@@ -3,7 +3,7 @@
 export const CAMPAIGN_AUDIENCE_SOURCES = Object.freeze(['contacts', 'upload']);
 export const CAMPAIGN_MESSAGE_TYPES = Object.freeze(['template', 'text']);
 export const CAMPAIGN_STATUSES = Object.freeze([
-  'queued', 'sending', 'paused', 'completed', 'completed_with_errors', 'failed', 'cancelled'
+  'scheduled', 'queued', 'sending', 'paused', 'completed', 'completed_with_errors', 'failed', 'cancelled'
 ]);
 export const CAMPAIGN_RECIPIENT_STATUSES = Object.freeze([
   'pending', 'queued', 'sent', 'delivered', 'read', 'failed'
@@ -194,6 +194,7 @@ export function serializeCampaign(row, counts = null) {
     variableMapping: safeJson(row.variable_mapping_json, []),
     fieldMapping: safeJson(row.field_mapping_json, {}),
     status: row.status || 'queued',
+    scheduledAt: row.scheduled_at || '',
     ...totals,
     createdBy: row.created_by || '',
     createdAt: row.created_at || '',

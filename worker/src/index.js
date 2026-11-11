@@ -673,7 +673,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       requirePermission(principal, 'campaigns.manage');
       const result = await createCampaign(env, workspaceId, await readCampaignJson(request), principal);
       await broadcast(env, workspaceId, { type: 'campaign.updated', campaignId: result.campaignId, campaign: result.item });
-      if (!result.uploading) ctx.waitUntil(wakeCampaignRunner(env, result.campaignId));
+      if (!result.uploading && !result.scheduled) ctx.waitUntil(wakeCampaignRunner(env, result.campaignId));
       return withCors(json(result, 202), cors);
     }
     const campaignRecipientsMatch = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/recipients$/);
@@ -681,7 +681,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       requirePermission(principal,'campaigns.manage');
       const id = cleanId(decodeURIComponent(campaignRecipientsMatch[1]),'Campaign ID');
       const result = await appendCampaignRecipients(env,workspaceId,id,await readCampaignJson(request),principal);
-      if (!result.uploading) ctx.waitUntil(wakeCampaignRunner(env,id));
+      if (!result.uploading && !result.scheduled) ctx.waitUntil(wakeCampaignRunner(env,id));
       return withCors(json(result),cors);
     }
     const campaignMediaMatch = url.pathname.match(/^\/api\/campaigns\/template-media$/);
@@ -8176,11 +8176,26 @@ async function getCampaignDetail(env, workspaceId, campaignId, principal, { pend
   return { item: serializeCampaign(row, counts), recipients: items };
 }
 
+function parseCampaignScheduledAt(value) {
+  if (value === undefined || value === null || value === '') return '';
+  const raw = String(value).trim();
+  if (!raw || raw.length > 64) throw httpError(400, 'Schedule time is invalid.');
+  const when = new Date(raw);
+  if (Number.isNaN(when.getTime())) throw httpError(400, 'Schedule time is invalid.');
+  const iso = when.toISOString();
+  const min = Date.now() + 30 * 1000;
+  if (when.getTime() < min) throw httpError(400, 'Schedule time must be at least 30 seconds from now.');
+  const max = Date.now() + 366 * 24 * 60 * 60 * 1000;
+  if (when.getTime() > max) throw httpError(400, 'Schedule time must be within one year.');
+  return iso;
+}
+
 function validateCampaignPayload(payload) {
   if (!isPlainObject(payload)) throw httpError(400, 'Campaign must be a JSON object.');
   rejectUnknownKeys(payload, new Set([
     'name', 'channelId', 'audienceSource', 'recipients', 'fieldMapping',
-    'messageType', 'template', 'variableMappings', 'text', 'textVariables', 'previewText', 'mediaPreview', 'uploading'
+    'messageType', 'template', 'variableMappings', 'text', 'textVariables', 'previewText', 'mediaPreview',
+    'uploading', 'scheduledAt'
   ]), 'campaign');
   const name = cleanRequired(payload.name, 'Campaign name', 120);
   const channelId = cleanId(payload.channelId, 'Channel ID');
@@ -8222,6 +8237,7 @@ function validateCampaignPayload(payload) {
     ? ''
     : cleanOptionalText(payload.previewText, 'Preview text', MAX_TEMPLATE_PREVIEW_LENGTH);
   const mediaPreview = payload.mediaPreview === undefined ? null : validateTemplateMediaPreview(payload.mediaPreview);
+  const scheduledAt = parseCampaignScheduledAt(payload.scheduledAt);
   return {
     uploading: payload.uploading === true,
     name,
@@ -8235,7 +8251,8 @@ function validateCampaignPayload(payload) {
     template,
     text,
     previewText,
-    mediaPreview
+    mediaPreview,
+    scheduledAt
   };
 }
 
@@ -8298,14 +8315,17 @@ async function createCampaign(env, workspaceId, payload, principal) {
   const now = new Date().toISOString();
   const campaignId = crypto.randomUUID();
   const recipientRows = await prepareCampaignRecipientRows(env, workspaceId, input);
+  const scheduledAt = input.scheduledAt || '';
+  const campaignStatus = scheduledAt ? 'scheduled' : 'queued';
+  const jobState = input.uploading ? 'uploading' : (scheduledAt ? 'scheduled' : 'active');
 
   const counts = campaignCountsFromRows(recipientRows.map(() => ({ status: 'pending' })));
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO campaigns
         (campaign_id,workspace_id,name,channel_id,audience_source,message_type,template_name,template_language,
          message_body,variable_mapping_json,field_mapping_json,status,total_count,pending_count,sent_count,
-         delivered_count,read_count,failed_count,created_by,created_at,updated_at,completed_at)
-      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'queued',?12,?13,0,0,0,0,?14,?15,?15,'')`)
+         delivered_count,read_count,failed_count,created_by,created_at,updated_at,completed_at,scheduled_at)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?16,?12,?13,0,0,0,0,?14,?15,?15,'',?17)`)
       .bind(
         campaignId, workspaceId, input.name, channel.channelId, input.audienceSource, input.messageType,
         input.template?.name || '', input.template?.language?.code || '', input.text || '',
@@ -8317,10 +8337,11 @@ async function createCampaign(env, workspaceId, payload, principal) {
         }),
         JSON.stringify(input.fieldMapping || {}),
         counts.totalCount, counts.pendingCount,
-        principal?.user?.email || principal?.user?.displayName || '', now
+        principal?.user?.email || principal?.user?.displayName || '', now,
+        campaignStatus, scheduledAt
       ),
     env.DB.prepare("INSERT INTO campaign_jobs (campaign_id,workspace_id,principal_json,state,lease_until,created_at) VALUES (?1,?2,?3,?5,'',?4)")
-      .bind(campaignId, workspaceId, JSON.stringify({ user: { userId: principal?.user?.userId, email: principal?.user?.email, displayName: principal?.user?.displayName }, membership: principal?.membership, workspace: principal?.workspace, permissions: principal?.permissions, authType: principal?.authType }), now, input.uploading ? 'uploading' : 'active'),
+      .bind(campaignId, workspaceId, JSON.stringify({ user: { userId: principal?.user?.userId, email: principal?.user?.email, displayName: principal?.user?.displayName }, membership: principal?.membership, workspace: principal?.workspace, permissions: principal?.permissions, authType: principal?.authType }), now, jobState),
     ...recipientRows.map((recipient) => env.DB.prepare(`INSERT INTO campaign_recipients
         (recipient_id,campaign_id,workspace_id,contact_id,conversation_id,message_id,display_name,profile_id,
          row_json,status,error,created_at,updated_at)
@@ -8331,10 +8352,11 @@ async function createCampaign(env, workspaceId, payload, principal) {
       ))
   ]);
   await audit(env, principal, 'create', 'campaign', campaignId, {
-    channelId: channel.channelId, totalCount: counts.totalCount, messageType: input.messageType
+    channelId: channel.channelId, totalCount: counts.totalCount, messageType: input.messageType,
+    scheduledAt: scheduledAt || undefined
   });
   const item = (await getCampaignDetail(env, workspaceId, campaignId, principal)).item;
-  return { ok: true, campaignId, item, uploading: input.uploading };
+  return { ok: true, campaignId, item, uploading: input.uploading, scheduled: Boolean(scheduledAt) };
 }
 
 function mapUploadRecipient(row, fieldMapping, index) {
@@ -8416,14 +8438,35 @@ async function wakeCampaignRunner(env, campaignId) {
   if (!response.ok) throw new Error('Campaign runner could not be scheduled.');
 }
 
+async function promoteDueScheduledCampaigns(env) {
+  const now = new Date().toISOString();
+  const due = await env.DB.prepare(`SELECT workspace_id,campaign_id FROM campaigns
+    WHERE status='scheduled' AND scheduled_at<>'' AND scheduled_at<=?1
+    ORDER BY scheduled_at ASC LIMIT 50`).bind(now).all();
+  const promoted = [];
+  for (const row of due.results || []) {
+    const changed = await env.DB.prepare(`UPDATE campaigns SET status='queued',updated_at=?3
+      WHERE workspace_id=?1 AND campaign_id=?2 AND status='scheduled' AND scheduled_at<>'' AND scheduled_at<=?3`)
+      .bind(row.workspace_id, row.campaign_id, now).run();
+    if (!changed.meta?.changes) continue;
+    await env.DB.prepare(`UPDATE campaign_jobs SET state='active'
+      WHERE workspace_id=?1 AND campaign_id=?2 AND state IN ('scheduled','done')`)
+      .bind(row.workspace_id, row.campaign_id).run();
+    promoted.push(row.campaign_id);
+  }
+  return promoted;
+}
+
 async function wakeCampaignRunners(env) {
+  const promoted = await promoteDueScheduledCampaigns(env);
   const jobs = await env.DB.prepare(`SELECT j.campaign_id FROM campaign_jobs j JOIN campaigns c
     ON c.workspace_id=j.workspace_id AND c.campaign_id=j.campaign_id
     WHERE j.state IN ('active','done') AND c.status IN ('queued','sending')
       AND (j.state='active' OR EXISTS (SELECT 1 FROM outbox o JOIN campaign_recipients r ON r.message_id=o.message_id
         WHERE r.campaign_id=j.campaign_id AND r.workspace_id=j.workspace_id AND o.status IN ('pending','processing')))
     ORDER BY j.created_at LIMIT 50`).all();
-  await runCampaignConcurrent(jobs.results || [], 3, (job) => wakeCampaignRunner(env, job.campaign_id));
+  const campaignIds = [...new Set([...(promoted || []), ...((jobs.results || []).map((job) => job.campaign_id))])];
+  await runCampaignConcurrent(campaignIds.map((campaignId) => ({ campaign_id: campaignId })), 3, (job) => wakeCampaignRunner(env, job.campaign_id));
 }
 
 async function runCampaignAlarm(env, campaignId) {
@@ -8474,7 +8517,7 @@ async function appendCampaignRecipients(env, workspaceId, campaignId, payload, p
     return {ok:true,campaignId,item:serializeCampaign(campaign),uploading:payload.finalize !== true};
   }
   const job = await env.DB.prepare('SELECT state FROM campaign_jobs WHERE workspace_id=?1 AND campaign_id=?2').bind(workspaceId,campaignId).first();
-  if (job?.state !== 'uploading' || campaign.status !== 'queued') throw httpError(409,'This campaign is no longer accepting recipients.');
+  if (job?.state !== 'uploading' || !['queued','scheduled'].includes(campaign.status)) throw httpError(409,'This campaign is no longer accepting recipients.');
   if (!Array.isArray(payload.recipients)) throw httpError(400,'Recipients must be an array.');
   const rows = await prepareCampaignRecipientRows(env,workspaceId,{audienceSource:campaign.audience_source,fieldMapping:safeJsonParse(campaign.field_mapping_json,{}),recipients:payload.recipients});
   const now = new Date().toISOString();
@@ -8490,11 +8533,16 @@ async function appendCampaignRecipients(env, workspaceId, campaignId, payload, p
   }
   statements.push(env.DB.prepare(`UPDATE campaigns SET total_count=(SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id=?2 AND workspace_id=?1),
     pending_count=(SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id=?2 AND workspace_id=?1 AND status='pending'),updated_at=?3
-    WHERE workspace_id=?1 AND campaign_id=?2 AND status='queued'`).bind(workspaceId,campaignId,now));
-  if (payload.finalize === true) statements.push(env.DB.prepare(`UPDATE campaign_jobs SET state='active' WHERE workspace_id=?1 AND campaign_id=?2 AND state='uploading'
-    AND EXISTS (SELECT 1 FROM campaigns WHERE campaign_id=?2 AND workspace_id=?1 AND status='queued')`).bind(workspaceId,campaignId));
+    WHERE workspace_id=?1 AND campaign_id=?2 AND status IN ('queued','scheduled')`).bind(workspaceId,campaignId,now));
+  if (payload.finalize === true) {
+    const nextJobState = campaign.status === 'scheduled' ? 'scheduled' : 'active';
+    statements.push(env.DB.prepare(`UPDATE campaign_jobs SET state=?4 WHERE workspace_id=?1 AND campaign_id=?2 AND state='uploading'
+      AND EXISTS (SELECT 1 FROM campaigns WHERE campaign_id=?2 AND workspace_id=?1 AND status IN ('queued','scheduled'))`)
+      .bind(workspaceId, campaignId, now, nextJobState));
+  }
   await env.DB.batch(statements);
-  return {ok:true,campaignId,uploading:payload.finalize !== true,item:serializeCampaign(await env.DB.prepare('SELECT * FROM campaigns WHERE workspace_id=?1 AND campaign_id=?2').bind(workspaceId,campaignId).first())};
+  const item = serializeCampaign(await env.DB.prepare('SELECT * FROM campaigns WHERE workspace_id=?1 AND campaign_id=?2').bind(workspaceId,campaignId).first());
+  return {ok:true,campaignId,uploading:payload.finalize !== true,item,scheduled:item.status === 'scheduled'};
 }
 
 async function runCampaignQueue(env) {
@@ -8533,7 +8581,7 @@ async function runCampaignQueue(env) {
 async function processCampaign(env, workspaceId, campaignId, principal, batchSize = 10) {
   const detail = await getCampaignDetail(env, workspaceId, campaignId, principal, {pendingLimit:batchSize});
   const campaign = detail.item;
-  if (['paused', 'cancelled'].includes(campaign.status)) return campaign;
+  if (['paused', 'cancelled', 'scheduled'].includes(campaign.status)) return campaign;
   const now = new Date().toISOString();
   await env.DB.prepare(`UPDATE campaigns SET status='sending',updated_at=?3
     WHERE workspace_id=?1 AND campaign_id=?2 AND status IN ('queued','sending')`).bind(workspaceId, campaignId, now).run();

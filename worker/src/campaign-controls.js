@@ -1,6 +1,6 @@
 export const campaignActionEligible = (action, status) => ({
   pause: ['queued', 'sending'], resume: ['paused', 'queued', 'sending'],
-  cancel: ['paused', 'queued', 'sending']
+  cancel: ['paused', 'queued', 'sending', 'scheduled']
 }[action] || []).includes(status);
 
 export async function applyCampaignActions(env, workspaceId, ids, action, principal, authorize) {
@@ -29,7 +29,7 @@ export async function applyCampaignActions(env, workspaceId, ids, action, princi
     const id = row.campaign_id;
     statements.push(env.DB.prepare(`UPDATE campaigns SET status=?3,updated_at=?4,
       completed_at=CASE WHEN ?3='cancelled' THEN ?4 ELSE completed_at END
-      WHERE workspace_id=?1 AND campaign_id=?2 AND status IN ('queued','sending','paused')`)
+      WHERE workspace_id=?1 AND campaign_id=?2 AND status IN ('queued','sending','paused','scheduled')`)
       .bind(workspaceId, id, action === 'cancel' ? 'cancelled' : action === 'pause' ? 'paused' : 'queued', now));
     if (action === 'resume') {
       statements.push(env.DB.prepare(`INSERT INTO campaign_jobs (campaign_id,workspace_id,principal_json,state,lease_until,created_at)

@@ -1099,6 +1099,7 @@
       const recipients = Array.isArray(payload.recipients) ? payload.recipients : [];
       const campaignId = `campaign-${Date.now().toString(36)}`;
       const now = new Date().toISOString();
+      const scheduledAt = String(payload.scheduledAt || "").trim();
       const item = {
         campaignId,
         name: payload.name || "Campaign",
@@ -1110,17 +1111,18 @@
         templateName: payload.template?.name || "",
         templateLanguage: payload.template?.language?.code || "",
         messageBody: payload.text || "",
-        status: "completed",
+        status: scheduledAt ? "scheduled" : "completed",
+        scheduledAt,
         totalCount: recipients.length,
-        pendingCount: 0,
-        sentCount: recipients.length,
-        deliveredCount: recipients.length,
+        pendingCount: scheduledAt ? recipients.length : 0,
+        sentCount: scheduledAt ? 0 : recipients.length,
+        deliveredCount: scheduledAt ? 0 : recipients.length,
         readCount: 0,
         failedCount: 0,
         createdBy: "Demo",
         createdAt: now,
         updatedAt: now,
-        completedAt: now,
+        completedAt: scheduledAt ? "" : now,
       };
       this.data.campaigns = [item, ...(this.data.campaigns || [])];
       this.data.campaignRecipients = this.data.campaignRecipients || {};
@@ -10452,7 +10454,66 @@
   }
 
   function campaignBulkEligible(action, status) {
-    return ({ pause: ["queued", "sending"], resume: ["paused", "queued", "sending"], cancel: ["paused", "queued", "sending"] }[action] || []).includes(status);
+    return ({ pause: ["queued", "sending"], resume: ["paused", "queued", "sending"], cancel: ["paused", "queued", "sending", "scheduled"] }[action] || []).includes(status);
+  }
+
+  function toDatetimeLocalValue(date = new Date()) {
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function scheduledAtFromLocalInput(value) {
+    const raw = String(value || "").trim();
+    if (!raw) throw new Error("Choose a date and time.");
+    const when = new Date(raw);
+    if (Number.isNaN(when.getTime())) throw new Error("Schedule time is invalid.");
+    if (when.getTime() < Date.now() + 30 * 1000) throw new Error("Schedule time must be at least 30 seconds from now.");
+    return when.toISOString();
+  }
+
+  function requestCampaignSchedule(detailsNote = "") {
+    const dialog = $("campaignScheduleDialog");
+    const form = $("campaignScheduleForm");
+    const input = $("campaignScheduleAt");
+    const note = $("campaignScheduleNote");
+    if (!dialog || !form || !input) return Promise.resolve(null);
+    const min = new Date(Date.now() + 60 * 1000);
+    input.min = toDatetimeLocalValue(min);
+    input.value = toDatetimeLocalValue(new Date(Date.now() + 60 * 60 * 1000));
+    if (note) {
+      note.textContent = detailsNote || "";
+      note.hidden = !detailsNote;
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        form.removeEventListener("submit", onSubmit);
+        dialog.removeEventListener("cancel", onCancel);
+        dialog.removeEventListener("close", onClose);
+        if (dialog.open) dialog.close();
+        resolve(value);
+      };
+      const onSubmit = (event) => {
+        event.preventDefault();
+        try {
+          finish(scheduledAtFromLocalInput(input.value));
+        } catch (error) {
+          showToast("Choose a later time", error.message, true);
+        }
+      };
+      const onCancel = (event) => {
+        event.preventDefault();
+        finish(null);
+      };
+      const onClose = () => finish(null);
+      form.addEventListener("submit", onSubmit);
+      dialog.addEventListener("cancel", onCancel);
+      dialog.addEventListener("close", onClose);
+      dialog.showModal();
+      input.focus();
+    });
   }
 
   function renderCampaignBulkControls(items = filteredCampaignHistory()) {
@@ -10585,7 +10646,7 @@
         <td>${Number(campaign.deliveredCount || 0)}</td>
         <td>${Number(campaign.readCount || 0)}</td>
         <td>${Number(campaign.failedCount || 0)}</td>
-        <td>${escapeHtml(formatCampaignTime(campaign.createdAt))}</td>
+        <td>${escapeHtml(campaign.status === "scheduled" && campaign.scheduledAt ? `Sends ${formatCampaignTime(campaign.scheduledAt)}` : formatCampaignTime(campaign.createdAt))}</td>
         <td class="campaign-expand-col">
           <button class="campaign-expand-button" type="button" data-action="toggle-campaign-detail" data-campaign-id="${escapeHtml(campaign.campaignId)}" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Hide campaign details" : "Show campaign details"}" title="${expanded ? "Collapse" : "Expand"}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
@@ -10734,6 +10795,7 @@
       ["Delivered", campaign.deliveredCount ?? 0],
       ["Read", campaign.readCount ?? 0],
       ["Failed", campaign.failedCount ?? 0],
+      ["Scheduled for", campaign.scheduledAt ? formatCampaignTime(campaign.scheduledAt) : ""],
       ["Created", campaign.createdAt ? formatCampaignTime(campaign.createdAt) : ""],
       ["Updated", campaign.updatedAt ? formatCampaignTime(campaign.updatedAt) : ""],
       ["Completed", campaign.completedAt ? formatCampaignTime(campaign.completedAt) : ""],
@@ -12129,50 +12191,27 @@
     return lines.join("\n");
   }
 
-  async function submitCampaign(event) {
-    event.preventDefault();
-    if (state.campaigns.submitting) return;
-    const name = $("campaignName")?.value?.trim();
-    const channel = selectedCampaignChannel();
-    if (!name) { showToast("Name required", "Enter a campaign name.", true); return; }
-    if (!channel) { showToast("Channel required", "Select a channel for this campaign.", true); return; }
-
+  function collectCampaignRecipients() {
     const audienceSource = state.campaigns.audienceSource === "upload" ? "upload" : "contacts";
     let recipients = [];
     if (audienceSource === "contacts") {
       const seen = new Set();
-      recipients = [];
       for (const rowKey of state.campaigns.audienceContactIds) {
         const { contactId } = parseCampaignAudienceRowKey(rowKey);
         if (!contactId || seen.has(contactId)) continue;
         seen.add(contactId);
         recipients.push({ contactId });
       }
-      if (!recipients.length) { showToast("Add contacts", "Select contacts and add them to the campaign list.", true); return; }
+      if (!recipients.length) throw new Error("Select contacts and add them to the campaign list.");
     } else {
-      if (!state.campaigns.uploadRows.length) { showToast("Upload contacts", "Upload a CSV or load a CSV URL first.", true); return; }
-      if (!state.campaigns.fieldMapping.profileId) {
-        showToast("Map messaging ID", "Map a CSV column to Messaging ID / Phone.", true);
-        return;
-      }
+      if (!state.campaigns.uploadRows.length) throw new Error("Upload a CSV or load a CSV URL first.");
+      if (!state.campaigns.fieldMapping.profileId) throw new Error("Map a CSV column to Messaging ID / Phone.");
       recipients = state.campaigns.uploadRows.map((row) => ({ row }));
     }
-    const confirmed = await requestConfirmation({
-      eyebrow: "Confirm campaign",
-      title: "Send this campaign?",
-      message: "Messages start sending immediately to every recipient in the list.",
-      note: campaignSendConfirmationDetails({
-        name,
-        channel,
-        audienceSource,
-        recipientCount: recipients.length,
-      }),
-      confirmLabel: "Send campaign",
-      danger: false,
-    });
-    // Cancel only closes the confirm dialog and keeps the draft inputs/filters.
-    if (!confirmed) return;
+    return { audienceSource, recipients };
+  }
 
+  async function buildCampaignPayload({ name, channel, audienceSource, recipients, scheduledAt = "" }) {
     const payload = {
       name,
       channelId: channel.channelId,
@@ -12188,84 +12227,157 @@
         },
       },
     };
+    if (scheduledAt) payload.scheduledAt = scheduledAt;
 
-    const submit = $("campaignSubmit");
-    state.campaigns.submitting = true;
-    if (submit) { submit.disabled = true; submit.textContent = "Sending…"; }
-    try {
-      if (isWhatsAppCampaignChannel(channel)) {
-        const template = selectedCampaignTemplate();
-        if (!template) throw new Error("Choose a WhatsApp template.");
-        syncCampaignVariableMappingsFromDom();
-        const variableMappings = [];
-        let mediaPreview = null;
-        for (const mapping of state.campaigns.variableMappings) {
-          const row = $("campaignVariableFields")?.querySelector(`[data-variable-id="${CSS.escape(mapping.id)}"]`);
-          const source = row?.querySelector(".campaign-variable-source")?.value || mapping.source || "";
-          if (mapping.kind === "media") {
-            if (source === "upload") {
-              const file = row?.querySelector(".campaign-variable-file")?.files?.[0];
-              if (!file) throw new Error(`Upload a file for ${mapping.id}.`);
-              const form = new FormData();
-              form.append("file", file, file.name);
-              form.append("type", mapping.mediaType || "image");
-              form.append("channelId", channel.channelId);
-              const uploaded = await state.api.uploadCampaignTemplateMedia(form);
-              variableMappings.push({ ...mapping, source: "upload", value: uploaded.mediaId });
-              mediaPreview = {
-                filename: uploaded.filename || file.name,
-                mimeType: uploaded.mimeType || file.type || "",
-                size: Number(uploaded.size || file.size || 0),
-              };
-            } else {
-              const value = row?.querySelector(".campaign-variable-value")?.value?.trim() || mapping.value || "";
-              if (!value) throw new Error("Enter a media URL.");
-              variableMappings.push({ ...mapping, source: "url", value });
-            }
+    if (isWhatsAppCampaignChannel(channel)) {
+      const template = selectedCampaignTemplate();
+      if (!template) throw new Error("Choose a WhatsApp template.");
+      syncCampaignVariableMappingsFromDom();
+      const variableMappings = [];
+      let mediaPreview = null;
+      for (const mapping of state.campaigns.variableMappings) {
+        const row = $("campaignVariableFields")?.querySelector(`[data-variable-id="${CSS.escape(mapping.id)}"]`);
+        const source = row?.querySelector(".campaign-variable-source")?.value || mapping.source || "";
+        if (mapping.kind === "media") {
+          if (source === "upload") {
+            const file = row?.querySelector(".campaign-variable-file")?.files?.[0];
+            if (!file) throw new Error(`Upload a file for ${mapping.id}.`);
+            const form = new FormData();
+            form.append("file", file, file.name);
+            form.append("type", mapping.mediaType || "image");
+            form.append("channelId", channel.channelId);
+            const uploaded = await state.api.uploadCampaignTemplateMedia(form);
+            variableMappings.push({ ...mapping, source: "upload", value: uploaded.mediaId });
+            mediaPreview = {
+              filename: uploaded.filename || file.name,
+              mimeType: uploaded.mimeType || file.type || "",
+              size: Number(uploaded.size || file.size || 0),
+            };
           } else {
             const value = row?.querySelector(".campaign-variable-value")?.value?.trim() || mapping.value || "";
-            if (!source) throw new Error("Map every template variable.");
-            if ((source === "constant" || source === "manual") && !value) throw new Error("Enter a constant value for every manual variable.");
-            variableMappings.push({ ...mapping, source, value });
+            if (!value) throw new Error("Enter a media URL.");
+            variableMappings.push({ ...mapping, source: "url", value });
           }
+        } else {
+          const value = row?.querySelector(".campaign-variable-value")?.value?.trim() || mapping.value || "";
+          if (!source) throw new Error("Map every template variable.");
+          if ((source === "constant" || source === "manual") && !value) throw new Error("Enter a constant value for every manual variable.");
+          variableMappings.push({ ...mapping, source, value });
         }
-        payload.messageType = "template";
-        payload.template = {
-          name: template.name,
-          language: { code: template.language?.code || template.language || "en" },
-        };
-        payload.variableMappings = variableMappings;
-        if (mediaPreview) payload.mediaPreview = mediaPreview;
-      } else {
-        const text = $("campaignMessageText")?.value?.trim() || "";
-        if (!text) throw new Error("Compose a message.");
-        const textVariables = [...($("campaignTextVariableFields")?.querySelectorAll("[data-text-variable]") || [])].map((row) => ({
-          key: row.dataset.textVariable,
-          source: row.querySelector(".campaign-text-source")?.value || "",
-          value: row.querySelector(".campaign-text-value")?.value?.trim() || "",
-        }));
-        for (const item of textVariables) {
-          if (!item.source) throw new Error(`Map the {{${item.key}}} variable.`);
-          if (item.source === "constant" && !item.value) throw new Error(`Enter a constant for {{${item.key}}}.`);
-        }
-        payload.messageType = "text";
-        payload.text = text;
-        payload.textVariables = textVariables;
       }
+      payload.messageType = "template";
+      payload.template = {
+        name: template.name,
+        language: { code: template.language?.code || template.language || "en" },
+      };
+      payload.variableMappings = variableMappings;
+      if (mediaPreview) payload.mediaPreview = mediaPreview;
+    } else {
+      const text = $("campaignMessageText")?.value?.trim() || "";
+      if (!text) throw new Error("Compose a message.");
+      const textVariables = [...($("campaignTextVariableFields")?.querySelectorAll("[data-text-variable]") || [])].map((row) => ({
+        key: row.dataset.textVariable,
+        source: row.querySelector(".campaign-text-source")?.value || "",
+        value: row.querySelector(".campaign-text-value")?.value?.trim() || "",
+      }));
+      for (const item of textVariables) {
+        if (!item.source) throw new Error(`Map the {{${item.key}}} variable.`);
+        if (item.source === "constant" && !item.value) throw new Error(`Enter a constant for {{${item.key}}}.`);
+      }
+      payload.messageType = "text";
+      payload.text = text;
+      payload.textVariables = textVariables;
+    }
+    return payload;
+  }
 
-      const result = await state.api.createCampaign(payload, (uploaded,total) => {
+  async function submitCampaign(event) {
+    event.preventDefault();
+    await launchCampaign({ mode: "send" });
+  }
+
+  async function scheduleCampaign() {
+    await launchCampaign({ mode: "schedule" });
+  }
+
+  async function launchCampaign({ mode = "send" } = {}) {
+    if (state.campaigns.submitting) return;
+    const name = $("campaignName")?.value?.trim();
+    const channel = selectedCampaignChannel();
+    if (!name) { showToast("Name required", "Enter a campaign name.", true); return; }
+    if (!channel) { showToast("Channel required", "Select a channel for this campaign.", true); return; }
+
+    let audienceSource;
+    let recipients;
+    try {
+      ({ audienceSource, recipients } = collectCampaignRecipients());
+    } catch (error) {
+      const title = mode === "schedule" ? "Cannot schedule" : "Cannot send";
+      showToast(title, error.message, true);
+      return;
+    }
+
+    const details = campaignSendConfirmationDetails({
+      name,
+      channel,
+      audienceSource,
+      recipientCount: recipients.length,
+    });
+
+    let scheduledAt = "";
+    if (mode === "schedule") {
+      scheduledAt = await requestCampaignSchedule(details);
+      if (!scheduledAt) return;
+      const confirmed = await requestConfirmation({
+        eyebrow: "Confirm schedule",
+        title: "Schedule this campaign?",
+        message: `Messages will start sending at ${formatCampaignTime(scheduledAt)}.`,
+        note: details,
+        confirmLabel: "Schedule campaign",
+        danger: false,
+      });
+      if (!confirmed) return;
+    } else {
+      const confirmed = await requestConfirmation({
+        eyebrow: "Confirm campaign",
+        title: "Send this campaign?",
+        message: "Messages start sending immediately to every recipient in the list.",
+        note: details,
+        confirmLabel: "Send campaign",
+        danger: false,
+      });
+      // Cancel only closes the confirm dialog and keeps the draft inputs/filters.
+      if (!confirmed) return;
+    }
+
+    const submit = $("campaignSubmit");
+    const scheduleButton = $("campaignSchedule");
+    state.campaigns.submitting = true;
+    if (submit) {
+      submit.disabled = true;
+      submit.textContent = mode === "schedule" ? "Scheduling…" : "Sending…";
+    }
+    if (scheduleButton) scheduleButton.disabled = true;
+    try {
+      const payload = await buildCampaignPayload({ name, channel, audienceSource, recipients, scheduledAt });
+      const result = await state.api.createCampaign(payload, (uploaded, total) => {
         if (submit) submit.textContent = `Uploading ${uploaded.toLocaleString()} / ${total.toLocaleString()}`;
       });
       if (result?.item) upsertCampaignItem(result.item);
-      showToast("Campaign queued", `${name} is sending. Delivery updates appear in history and the inbox.`);
+      if (mode === "schedule") {
+        showToast("Campaign scheduled", `${name} will start at ${formatCampaignTime(scheduledAt)}.`);
+      } else {
+        showToast("Campaign queued", `${name} is sending. Delivery updates appear in history and the inbox.`);
+      }
       resetCampaignCreateForm();
       showCampaignMode("history");
       await loadCampaigns();
     } catch (error) {
-      showToast("Campaign not sent", error.message, true);
+      showToast(mode === "schedule" ? "Campaign not scheduled" : "Campaign not sent", error.message, true);
     } finally {
       state.campaigns.submitting = false;
       if (submit) { submit.disabled = false; submit.textContent = "Review & send"; }
+      if (scheduleButton) scheduleButton.disabled = false;
     }
   }
 
@@ -14357,6 +14469,15 @@
           resetCampaignCreateForm();
           showCampaignMode("history");
           loadCampaigns().catch(() => {});
+          return;
+        }
+        if (actionButton.dataset.action === "campaign-schedule") {
+          scheduleCampaign().catch(() => {});
+          return;
+        }
+        if (actionButton.dataset.action === "close-campaign-schedule") {
+          const dialog = $("campaignScheduleDialog");
+          if (dialog?.open) dialog.close();
           return;
         }
         if (actionButton.dataset.action === "campaign-show-create") {

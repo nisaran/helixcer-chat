@@ -75,6 +75,14 @@ test('campaigns migration creates campaign tables', async () => {
   assert.ok(tables.includes('campaign_recipients'));
 });
 
+test('campaign schedule migration adds scheduled_at', async () => {
+  const database = new DatabaseSync(':memory:');
+  database.exec(await readFile(new URL('../migrations/0021_campaigns.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0028_campaign_scheduled_at.sql', import.meta.url), 'utf8'));
+  const columns = database.prepare("SELECT name FROM pragma_table_info('campaigns')").all().map((row) => row.name);
+  assert.ok(columns.includes('scheduled_at'));
+});
+
 test('campaign template previews defer to approved copy for new and legacy name-only previews', () => {
   assert.equal(campaignTemplatePreview('', 'outstanding_reminder_amt'), '');
   assert.equal(campaignTemplatePreview('outstanding_reminder_amt', 'outstanding_reminder_amt'), '');

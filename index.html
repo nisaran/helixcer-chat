@@ -801,6 +801,7 @@
               <p class="subtle" id="campaignCreateHelp">Existing chats keep their open or closed status. New upload contacts stay closed in the inbox.</p>
               <div class="campaign-create-action-buttons">
                 <button class="secondary-button" type="button" data-action="campaign-show-history">Discard</button>
+                <button class="secondary-button" type="button" id="campaignSchedule" data-action="campaign-schedule">Schedule</button>
                 <button class="primary-button" id="campaignSubmit" type="submit">Review &amp; send</button>
               </div>
             </div>
@@ -1384,6 +1385,24 @@
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="cancel-confirmation">Cancel</button>
         <button class="danger-button" id="confirmationSubmit" type="submit">Delete</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal confirmation-modal" id="campaignScheduleDialog" aria-labelledby="campaignScheduleTitle" aria-describedby="campaignScheduleMessage">
+    <form class="modal-card confirmation-card" id="campaignScheduleForm">
+      <div class="confirmation-symbol is-schedule" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3v2M17 3v2M4 9h16M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm6 6v4l2.5 1.5"/></svg></div>
+      <p class="eyebrow">Schedule campaign</p>
+      <h2 id="campaignScheduleTitle">Pick a send time</h2>
+      <p class="modal-copy" id="campaignScheduleMessage">Choose when this campaign should start sending.</p>
+      <label class="field-label" for="campaignScheduleAt">
+        Date and time
+        <input class="text-field" id="campaignScheduleAt" name="scheduledAt" type="datetime-local" required>
+      </label>
+      <p class="confirmation-note is-info" id="campaignScheduleNote" hidden></p>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-campaign-schedule">Cancel</button>
+        <button class="primary-button" id="campaignScheduleSubmit" type="submit">Schedule campaign</button>
       </div>
     </form>
   </dialog>

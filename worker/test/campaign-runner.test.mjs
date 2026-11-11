@@ -9,7 +9,7 @@ const source=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
 const extract=(a,b)=>source.slice(source.indexOf('async function '+a+'('),source.indexOf('async function '+b+'('));
 async function harness(){
  const db=new DatabaseSync(':memory:');
- for(const file of ['0021_campaigns.sql','0025_campaign_jobs.sql','0026_campaign_upload_chunks.sql'])db.exec(await readFile(new URL('../migrations/'+file,import.meta.url),'utf8'));
+ for(const file of ['0021_campaigns.sql','0025_campaign_jobs.sql','0026_campaign_upload_chunks.sql','0028_campaign_scheduled_at.sql'])db.exec(await readFile(new URL('../migrations/'+file,import.meta.url),'utf8'));
  db.exec('CREATE TABLE outbox (message_id TEXT,workspace_id TEXT,status TEXT,next_attempt_at TEXT)');
  let tail=Promise.resolve();
  const DB={prepare(sql){return{bind(...values){return{async first(){return db.prepare(sql).get(...values);},async all(){return{results:db.prepare(sql).all(...values)};},async run(){return{meta:{changes:db.prepare(sql).run(...values).changes}};}};}};},async batch(statements){const work=async()=>{db.exec('BEGIN');try{const result=[];for(const statement of statements)result.push(await statement.run());db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}};const next=tail.then(work);tail=next.catch(()=>{});return next;}};
