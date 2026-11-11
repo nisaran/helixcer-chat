@@ -36,6 +36,14 @@ test('cancel is permanent and removes only remaining dispatch work',async()=>{
  const result=await applyCampaignActions(h.env,'ws',['c'],'resume',{},()=>{});
  assert.equal(result.affectedIds.length,0);
 });
+test('scheduled campaigns can be cancelled before they start',async()=>{
+ const h=setup();
+ h.db.exec("UPDATE campaigns SET status='scheduled'");
+ assert.equal(campaignActionEligible('cancel','scheduled'),true);
+ assert.equal(campaignActionEligible('pause','scheduled'),false);
+ await applyCampaignActions(h.env,'ws',['c'],'cancel',{},()=>{});
+ assert.equal(h.db.prepare('SELECT status FROM campaigns').get().status,'cancelled');
+});
 test('entire selection is authorized before mutation and other workspaces cannot act',async()=>{
  const h=setup();await assert.rejects(applyCampaignActions(h.env,'ws',['c','missing'],'pause',{},()=>{}),/not found/);
  assert.equal(h.db.prepare('SELECT status FROM campaigns').get().status,'sending');

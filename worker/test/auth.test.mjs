@@ -147,6 +147,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0025_campaign_jobs.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0026_campaign_upload_chunks.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0027_google_reviews_oauth.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0028_campaign_scheduled_at.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
