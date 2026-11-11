@@ -10476,7 +10476,10 @@
     const form = $("campaignScheduleForm");
     const input = $("campaignScheduleAt");
     const note = $("campaignScheduleNote");
-    if (!dialog || !form || !input) return Promise.resolve(null);
+    if (!dialog || !form || !input) {
+      showToast("Schedule unavailable", "Reload the page to load the latest campaign scheduler.", true);
+      return Promise.resolve(null);
+    }
     const min = new Date(Date.now() + 60 * 1000);
     input.min = toDatetimeLocalValue(min);
     input.value = toDatetimeLocalValue(new Date(Date.now() + 60 * 60 * 1000));
@@ -12307,6 +12310,14 @@
     if (!name) { showToast("Name required", "Enter a campaign name.", true); return; }
     if (!channel) { showToast("Channel required", "Select a channel for this campaign.", true); return; }
 
+    // Open the schedule picker immediately so the button always shows feedback,
+    // then validate audience before the final confirm.
+    let scheduledAt = "";
+    if (mode === "schedule") {
+      scheduledAt = await requestCampaignSchedule();
+      if (!scheduledAt) return;
+    }
+
     let audienceSource;
     let recipients;
     try {
@@ -12324,10 +12335,7 @@
       recipientCount: recipients.length,
     });
 
-    let scheduledAt = "";
     if (mode === "schedule") {
-      scheduledAt = await requestCampaignSchedule(details);
-      if (!scheduledAt) return;
       const confirmed = await requestConfirmation({
         eyebrow: "Confirm schedule",
         title: "Schedule this campaign?",
@@ -14472,7 +14480,10 @@
           return;
         }
         if (actionButton.dataset.action === "campaign-schedule") {
-          scheduleCampaign().catch(() => {});
+          event.preventDefault();
+          scheduleCampaign().catch((error) => {
+            showToast("Schedule failed", error?.message || "Unable to open the schedule picker.", true);
+          });
           return;
         }
         if (actionButton.dataset.action === "close-campaign-schedule") {
@@ -15020,6 +15031,13 @@
     });
     $("importChatForm").addEventListener("submit", runImportChat);
     $("campaignCreateForm")?.addEventListener("submit", submitCampaign);
+    $("campaignSchedule")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      scheduleCampaign().catch((error) => {
+        showToast("Schedule failed", error?.message || "Unable to open the schedule picker.", true);
+      });
+    });
     $("campaignChannelTrigger")?.addEventListener("click", (event) => {
       event.preventDefault();
       document.querySelectorAll("[data-campaign-filter], [data-campaign-history-filter]").forEach((host) => {
