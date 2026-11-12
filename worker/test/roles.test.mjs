@@ -109,6 +109,12 @@ test('role permission defaults and assigned chat scope normalize correctly', () 
   const agent = defaultPermissionsForRole('agent');
   assert.equal(agent.chats.view, 'all');
   assert.equal(agent.developer.manage, false);
+  assert.equal(agent.automation.manage, false);
+  assert.equal(agent.channels.templates, false);
+  assert.equal(agent.channels.import, false);
+  const admin = defaultPermissionsForRole('admin');
+  assert.equal(admin.automation.manage, true);
+  assert.equal(admin.channels.templates, true);
   const assignedOnly = normalizePermissions({
     chats: { view: 'assigned', reply: 'all', assign: true, delete: false },
     contacts: { view: true, create: false, edit: false, delete: false }
@@ -117,6 +123,26 @@ test('role permission defaults and assigned chat scope normalize correctly', () 
   assert.equal(assignedOnly.chats.reply, 'assigned');
   assert.equal(hasPermission({ membership: { role: 'agent' }, permissions: assignedOnly }, 'contacts.create'), false);
   assert.equal(hasPermission({ membership: { role: 'owner' }, permissions: assignedOnly }, 'developer.manage'), true);
+});
+
+test('legacy channel and workspace permissions expand to new page actions', () => {
+  const legacy = normalizePermissions({
+    channels: { manage: true },
+    workspace: { edit: true }
+  }, 'admin');
+  assert.equal(legacy.channels.manage, true);
+  assert.equal(legacy.channels.templates, true);
+  assert.equal(legacy.channels.import, true);
+  assert.equal(legacy.automation.manage, true);
+
+  const split = normalizePermissions({
+    channels: { manage: true, templates: false, import: true },
+    workspace: { edit: true },
+    automation: { manage: false }
+  }, 'admin');
+  assert.equal(split.channels.templates, false);
+  assert.equal(split.channels.import, true);
+  assert.equal(split.automation.manage, false);
 });
 
 test('workspace roles can be listed, customized, and created', async () => {
@@ -164,4 +190,8 @@ test('roles API returns permission catalog for signed-in owners', async () => {
   assert.ok(Array.isArray(payload.items));
   assert.ok(payload.items.some((role) => role.roleKey === 'owner' && role.isLocked));
   assert.ok(payload.catalog.some((group) => group.key === 'chats'));
+  assert.ok(payload.catalog.some((group) => group.key === 'automation'));
+  const channels = payload.catalog.find((group) => group.key === 'channels');
+  assert.ok(channels.fields.some((field) => field.key === 'templates'));
+  assert.ok(channels.fields.some((field) => field.key === 'import'));
 });

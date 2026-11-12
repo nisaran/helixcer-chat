@@ -175,7 +175,9 @@ test("channel management supports multiple provider accounts without hardcoded c
 
 test("Channel navigation is collapsed by default and nests the WhatsApp template library", () => {
   const channelNav = html.match(/<div class="nav-group" id="channelNavGroup"[\s\S]*?<button class="nav-button" type="button" data-route="developer"/)?.[0] || "";
-  assert.match(channelNav, /data-permission="channels\.manage"/);
+  assert.match(channelNav, /data-route="channels" data-permission="channels\.manage"/);
+  assert.match(channelNav, /data-route="whatsapp-templates" data-permission="channels\.templates"/);
+  assert.match(channelNav, /data-route="import-chat" data-permission="channels\.import"/);
   assert.match(channelNav, />Channel<\/span>/);
   assert.match(channelNav, /id="channelNavToggle"[^>]*aria-expanded="false"/);
   assert.match(channelNav, /id="channelNavChildren" hidden/);
@@ -186,7 +188,9 @@ test("Channel navigation is collapsed by default and nests the WhatsApp template
   assert.match(channelNav, /data-route="whatsapp-templates"[\s\S]*?>WhatsApp Templates<\/span>/);
   assert.match(html, /id="whatsappTemplatesRoute" data-route-panel="whatsapp-templates"/);
   assert.match(app, /"whatsapp-templates": "WhatsApp Templates"/);
-  assert.match(app, /if \(!hasPermission\("channels\.manage"\) && \["channels", "whatsapp-templates", "import-chat"\]\.includes\(route\)\)/);
+  assert.match(app, /if \(!hasPermission\("channels\.manage"\) && route === "channels"\)/);
+  assert.match(app, /if \(!hasPermission\("channels\.templates"\) && route === "whatsapp-templates"\)/);
+  assert.match(app, /if \(!hasPermission\("channels\.import"\) && route === "import-chat"\)/);
   assert.match(app, /if \(!hasPermission\("developer\.manage"\) && route === "developer"\)/);
   assert.match(app, /if \(!hasPermission\("team\.manage"\) && route === "team"\)/);
   assert.match(app, /if \(!hasPermission\("roles\.manage"\) && route === "roles"\)/);
@@ -649,7 +653,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261112-automation/);
+  assert.match(html, /app\.js\?v=20261112-roles-pages/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -1019,8 +1023,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261112-automation/);
-  assert.match(html, /assets\/styles\.css\?v=20261112-automation/);
+  assert.match(html, /assets\/app\.js\?v=20261112-roles-pages/);
+  assert.match(html, /assets\/styles\.css\?v=20261112-roles-pages/);
   assert.doesNotMatch(html, /Bulk messaging/);
   assert.doesNotMatch(html, /Send one message to many contacts, then track delivery in history\./);
   assert.doesNotMatch(html, /Choose a channel, build the audience, then compose the message\./);
@@ -1199,7 +1203,7 @@ test("conversation URLs deep-link safely without auto-selecting plain inbox", ()
 });
 
 test("Automation menu configures greeting and out of office replies", () => {
-  assert.match(html, /data-route="automation" data-permission="workspace\.edit"/);
+  assert.match(html, /data-route="automation" data-permission="automation\.manage"/);
   assert.match(html, /id="automationRoute" data-route-panel="automation"/);
   assert.match(html, /id="automationForm"/);
   assert.match(html, /id="automationGreetingEnabled"/);
@@ -1216,7 +1220,7 @@ test("Automation menu configures greeting and out of office replies", () => {
   assert.match(app, /async function loadAutomationSettings/);
   assert.match(app, /async function saveAutomationSettings/);
   assert.match(app, /if \(route === "automation"\) loadAutomationSettings/);
-  assert.match(app, /if \(!hasPermission\("workspace\.edit"\) && route === "automation"\) route = "inbox"/);
+  assert.match(app, /if \(!hasPermission\("automation\.manage"\) && route === "automation"\) route = "inbox"/);
   assert.match(styles, /\.automation-surface/);
   assert.match(styles, /\.automation-time-grid/);
 });
