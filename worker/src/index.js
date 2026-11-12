@@ -2602,10 +2602,10 @@ async function updateAutomationSettings(env, workspaceId, payload, principal) {
   if (payload.greetingEnabled !== undefined) next.greetingEnabled = Boolean(payload.greetingEnabled);
   if (payload.oooEnabled !== undefined) next.oooEnabled = Boolean(payload.oooEnabled);
   if (payload.greetingMessage !== undefined) {
-    next.greetingMessage = cleanOptionalText(payload.greetingMessage, 'Greeting message', MAX_TEXT_LENGTH);
+    next.greetingMessage = cleanWorkspaceMultiline(payload.greetingMessage, 'Greeting message', MAX_TEXT_LENGTH);
   }
   if (payload.oooMessage !== undefined) {
-    next.oooMessage = cleanOptionalText(payload.oooMessage, 'Out of office message', MAX_TEXT_LENGTH);
+    next.oooMessage = cleanWorkspaceMultiline(payload.oooMessage, 'Out of office message', MAX_TEXT_LENGTH);
   }
   if (payload.greetingIntervalHours !== undefined) {
     const hours = Number(payload.greetingIntervalHours);
