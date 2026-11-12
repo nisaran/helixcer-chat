@@ -9,14 +9,14 @@ function rolesError(status, message) {
 export const PERMISSION_CATALOG = [
   {
     key: 'chats',
-    label: 'Chats / Inbox',
+    label: 'Inbox',
     fields: [
-      { key: 'view', label: 'View chats', type: 'scope', options: [
+      { key: 'view', label: 'View conversations', type: 'scope', options: [
         { value: 'all', label: 'All conversations' },
         { value: 'assigned', label: 'Assigned to me only' },
         { value: 'none', label: 'No access' }
       ]},
-      { key: 'reply', label: 'Reply to chats', type: 'scope', options: [
+      { key: 'reply', label: 'Reply to conversations', type: 'scope', options: [
         { value: 'all', label: 'Reply to all' },
         { value: 'assigned', label: 'Reply to assigned only' },
         { value: 'none', label: 'Cannot reply' }
@@ -47,7 +47,9 @@ export const PERMISSION_CATALOG = [
     key: 'channels',
     label: 'Channels',
     fields: [
-      { key: 'manage', label: 'Manage channels, templates, and imports', type: 'boolean' }
+      { key: 'manage', label: 'Manage channels', type: 'boolean' },
+      { key: 'templates', label: 'Manage WhatsApp templates', type: 'boolean' },
+      { key: 'import', label: 'Import chat history', type: 'boolean' }
     ]
   },
   {
@@ -66,7 +68,7 @@ export const PERMISSION_CATALOG = [
   },
   {
     key: 'roles',
-    label: 'User roles',
+    label: 'Roles',
     fields: [
       { key: 'manage', label: 'Create and edit roles and permissions', type: 'boolean' }
     ]
@@ -77,33 +79,29 @@ export const PERMISSION_CATALOG = [
     fields: [
       { key: 'edit', label: 'Edit workspace profile', type: 'boolean' }
     ]
+  },
+  {
+    key: 'automation',
+    label: 'Automation',
+    fields: [
+      { key: 'manage', label: 'Manage greeting and out of office', type: 'boolean' }
+    ]
   }
 ];
 
 export function defaultPermissionsForRole(roleKey) {
   const key = String(roleKey || 'agent');
-  if (key === 'owner') {
+  if (key === 'owner' || key === 'admin') {
     return {
       chats: { view: 'all', reply: 'all', assign: true, delete: true },
       contacts: { view: true, create: true, edit: true, delete: true },
       campaigns: { view: true, manage: true },
-      channels: { manage: true },
+      channels: { manage: true, templates: true, import: true },
       developer: { manage: true },
       team: { manage: true },
       roles: { manage: true },
-      workspace: { edit: true }
-    };
-  }
-  if (key === 'admin') {
-    return {
-      chats: { view: 'all', reply: 'all', assign: true, delete: true },
-      contacts: { view: true, create: true, edit: true, delete: true },
-      campaigns: { view: true, manage: true },
-      channels: { manage: true },
-      developer: { manage: true },
-      team: { manage: true },
-      roles: { manage: true },
-      workspace: { edit: true }
+      workspace: { edit: true },
+      automation: { manage: true }
     };
   }
   // agent and custom roles default to agent-level access
@@ -111,11 +109,12 @@ export function defaultPermissionsForRole(roleKey) {
     chats: { view: 'all', reply: 'all', assign: true, delete: false },
     contacts: { view: true, create: true, edit: true, delete: false },
     campaigns: { view: true, manage: true },
-    channels: { manage: false },
+    channels: { manage: false, templates: false, import: false },
     developer: { manage: false },
     team: { manage: false },
     roles: { manage: false },
-    workspace: { edit: false }
+    workspace: { edit: false },
+    automation: { manage: false }
   };
 }
 
@@ -130,11 +129,15 @@ export function normalizePermissions(raw, roleKey = 'agent') {
   const teamSource = source.team && typeof source.team === 'object' ? source.team : {};
   const rolesSource = source.roles && typeof source.roles === 'object' ? source.roles : {};
   const workspaceSource = source.workspace && typeof source.workspace === 'object' ? source.workspace : {};
+  const automationSource = source.automation && typeof source.automation === 'object' ? source.automation : null;
 
   const view = CHAT_SCOPES.has(chatsSource.view) ? chatsSource.view : defaults.chats.view;
   let reply = CHAT_SCOPES.has(chatsSource.reply) ? chatsSource.reply : defaults.chats.reply;
   if (view === 'none') reply = 'none';
   else if (view === 'assigned' && reply === 'all') reply = 'assigned';
+
+  const channelManage = bool(channelsSource.manage, defaults.channels.manage);
+  const workspaceEdit = bool(workspaceSource.edit, defaults.workspace.edit);
 
   return {
     chats: {
@@ -154,7 +157,14 @@ export function normalizePermissions(raw, roleKey = 'agent') {
       manage: bool(campaignsSource.manage, defaults.campaigns.manage)
     },
     channels: {
-      manage: bool(channelsSource.manage, defaults.channels.manage)
+      manage: channelManage,
+      // Older role JSON only stored channels.manage; inherit that for new channel actions.
+      templates: Object.prototype.hasOwnProperty.call(channelsSource, 'templates')
+        ? bool(channelsSource.templates, defaults.channels.templates)
+        : channelManage,
+      import: Object.prototype.hasOwnProperty.call(channelsSource, 'import')
+        ? bool(channelsSource.import, defaults.channels.import)
+        : channelManage
     },
     developer: {
       manage: bool(developerSource.manage, defaults.developer.manage)
@@ -166,7 +176,13 @@ export function normalizePermissions(raw, roleKey = 'agent') {
       manage: bool(rolesSource.manage, defaults.roles.manage)
     },
     workspace: {
-      edit: bool(workspaceSource.edit, defaults.workspace.edit)
+      edit: workspaceEdit
+    },
+    automation: {
+      // Older role JSON gated Automation through workspace.edit.
+      manage: automationSource
+        ? bool(automationSource.manage, defaults.automation.manage)
+        : workspaceEdit
     }
   };
 }
@@ -191,8 +207,8 @@ export function hasPermission(principal, path) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') return value !== 'none';
   // Fall back to legacy admin/agent ranks when permissions were not attached.
-  if (['channels.manage', 'developer.manage', 'team.manage', 'roles.manage', 'workspace.edit',
-    'contacts.delete', 'chats.delete'].includes(path)) {
+  if (['channels.manage', 'channels.templates', 'channels.import', 'developer.manage', 'team.manage',
+    'roles.manage', 'workspace.edit', 'automation.manage', 'contacts.delete', 'chats.delete'].includes(path)) {
     return ['owner', 'admin'].includes(principal.membership?.role);
   }
   return ['owner', 'admin', 'agent'].includes(principal.membership?.role);
@@ -203,6 +219,19 @@ export function requirePermission(principal, path) {
     throw rolesError(403, 'Insufficient workspace permission.');
   }
   return principal;
+}
+
+export function requireAnyPermission(principal, paths) {
+  const list = Array.isArray(paths) ? paths : [paths];
+  if (!list.some((path) => hasPermission(principal, path))) {
+    throw rolesError(403, 'Insufficient workspace permission.');
+  }
+  return principal;
+}
+
+export function hasAnyChannelPermission(principal) {
+  return ['channels.manage', 'channels.templates', 'channels.import']
+    .some((path) => hasPermission(principal, path));
 }
 
 export function chatScope(principal, action = 'view') {

@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261112-automation">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261112-roles-pages">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261112-automation" defer></script>
+  <script src="./assets/app.js?v=20261112-roles-pages" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -103,7 +103,7 @@
           </span>
           <span>Campaign</span>
         </button>
-        <div class="nav-group" id="channelNavGroup" data-permission="channels.manage">
+        <div class="nav-group" id="channelNavGroup">
           <button class="nav-button nav-group-toggle" id="channelNavToggle" type="button" data-action="toggle-channel-nav" aria-expanded="false" aria-controls="channelNavChildren">
             <span class="nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8m12.8 0a9 9 0 0 0 0-12.8M8.5 8.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7"/></svg>
@@ -121,11 +121,11 @@
               <svg class="nav-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
             </button>
             <div class="nav-submenu nav-submenu-nested" id="channelDataNavChildren" hidden>
-              <button class="nav-button nav-subitem" type="button" data-route="whatsapp-templates" data-permission="channels.manage">
+              <button class="nav-button nav-subitem" type="button" data-route="whatsapp-templates" data-permission="channels.templates">
                 <span class="nav-icon nav-provider-icon" aria-hidden="true"><img src="./assets/provider-whatsapp.svg" alt=""></span>
                 <span>WhatsApp Templates</span>
               </button>
-              <button class="nav-button nav-subitem" type="button" data-route="import-chat" data-permission="channels.manage">
+              <button class="nav-button nav-subitem" type="button" data-route="import-chat" data-permission="channels.import">
                 <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg></span>
                 <span>Import Chat</span>
               </button>
@@ -156,7 +156,7 @@
           </span>
           <span>Workspace</span>
         </button>
-        <button class="nav-button" type="button" data-route="automation" data-permission="workspace.edit">
+        <button class="nav-button" type="button" data-route="automation" data-permission="automation.manage">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.5"/></svg>
           </span>

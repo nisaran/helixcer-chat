@@ -43,8 +43,10 @@ import {
   chatScope,
   createWorkspaceRole,
   deleteWorkspaceRole,
+  hasAnyChannelPermission,
   hasPermission,
   listWorkspaceRoles,
+  requireAnyPermission,
   requirePermission,
   updateWorkspaceRole
 } from './roles.js';
@@ -581,7 +583,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         page: url.searchParams.get('page') || '1'
       });
       const [channelsRaw, conversationPage, contactPage, tags, workspace] = await Promise.all([
-        listChannels(env, workspaceId, hasPermission(principal, 'channels.manage')),
+        listChannels(env, workspaceId, hasAnyChannelPermission(principal)),
         chatScope(principal, 'view') === 'none'
           ? Promise.resolve({ items: [], nextCursor: '' })
           : listConversations(env, workspaceId, bootstrapUrl, {
@@ -629,11 +631,11 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json({ ok: true, item }), cors);
     }
     if (url.pathname === '/api/automation' && request.method === 'GET') {
-      requirePermission(principal, 'workspace.edit');
+      requirePermission(principal, 'automation.manage');
       return withCors(json({ item: await getAutomationSettings(env, workspaceId) }), cors);
     }
     if (url.pathname === '/api/automation' && request.method === 'PATCH') {
-      requirePermission(principal, 'workspace.edit');
+      requirePermission(principal, 'automation.manage');
       const item = await updateAutomationSettings(env, workspaceId, await readJson(request), principal);
       await broadcast(env, workspaceId, { type: 'automation.updated', automation: item });
       return withCors(json({ ok: true, item }), cors);
@@ -658,17 +660,17 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       return withCors(json(result), cors);
     }
     if (url.pathname === '/api/channels' && request.method === 'GET') {
-      requirePermission(principal, 'channels.manage');
+      requireAnyPermission(principal, ['channels.manage', 'channels.templates', 'channels.import']);
       return withCors(json({ items: await listChannels(env, workspaceId, true) }), cors);
     }
     if (url.pathname === '/api/channel-data/whatsapp-templates' && request.method === 'GET') {
-      requirePermission(principal, 'channels.manage');
+      requirePermission(principal, 'channels.templates');
       return withCors(json(await listWorkspaceWhatsAppTemplates(env, workspaceId, {
         forceRefresh: url.searchParams.get('refresh') === '1'
       })), cors);
     }
     if (url.pathname === '/api/channel-data/import-chat' && request.method === 'POST') {
-      requirePermission(principal, 'channels.manage');
+      requirePermission(principal, 'channels.import');
       const result = await importChatHistory(env, workspaceId, principal, await readImportJson(request));
       await broadcast(env, workspaceId, { type: 'bootstrap.changed' });
       return withCors(json(result, 201), cors);

@@ -282,14 +282,14 @@
   const ROLE_PERMISSION_CATALOG = [
     {
       key: "chats",
-      label: "Chats / Inbox",
+      label: "Inbox",
       fields: [
-        { key: "view", label: "View chats", type: "scope", options: [
+        { key: "view", label: "View conversations", type: "scope", options: [
           { value: "all", label: "All conversations" },
           { value: "assigned", label: "Assigned to me only" },
           { value: "none", label: "No access" },
         ]},
-        { key: "reply", label: "Reply to chats", type: "scope", options: [
+        { key: "reply", label: "Reply to conversations", type: "scope", options: [
           { value: "all", label: "Reply to all" },
           { value: "assigned", label: "Reply to assigned only" },
           { value: "none", label: "Cannot reply" },
@@ -319,7 +319,11 @@
     {
       key: "channels",
       label: "Channels",
-      fields: [{ key: "manage", label: "Manage channels, templates, and imports", type: "boolean" }],
+      fields: [
+        { key: "manage", label: "Manage channels", type: "boolean" },
+        { key: "templates", label: "Manage WhatsApp templates", type: "boolean" },
+        { key: "import", label: "Import chat history", type: "boolean" },
+      ],
     },
     {
       key: "developer",
@@ -333,13 +337,18 @@
     },
     {
       key: "roles",
-      label: "User roles",
+      label: "Roles",
       fields: [{ key: "manage", label: "Create and edit roles and permissions", type: "boolean" }],
     },
     {
       key: "workspace",
       label: "Workspace",
       fields: [{ key: "edit", label: "Edit workspace profile", type: "boolean" }],
+    },
+    {
+      key: "automation",
+      label: "Automation",
+      fields: [{ key: "manage", label: "Manage greeting and out of office", type: "boolean" }],
     },
   ];
 
@@ -349,22 +358,24 @@
         chats: { view: "all", reply: "all", assign: true, delete: true },
         contacts: { view: true, create: true, edit: true, delete: true },
         campaigns: { view: true, manage: true },
-        channels: { manage: true },
+        channels: { manage: true, templates: true, import: true },
         developer: { manage: true },
         team: { manage: true },
         roles: { manage: true },
         workspace: { edit: true },
+        automation: { manage: true },
       };
     }
     return {
       chats: { view: "all", reply: "all", assign: true, delete: false },
       contacts: { view: true, create: true, edit: true, delete: false },
       campaigns: { view: true, manage: true },
-      channels: { manage: false },
+      channels: { manage: false, templates: false, import: false },
       developer: { manage: false },
       team: { manage: false },
       roles: { manage: false },
       workspace: { edit: false },
+      automation: { manage: false },
     };
   }
 
@@ -379,12 +390,15 @@
     const team = source.team && typeof source.team === "object" ? source.team : {};
     const roles = source.roles && typeof source.roles === "object" ? source.roles : {};
     const workspace = source.workspace && typeof source.workspace === "object" ? source.workspace : {};
+    const automation = source.automation && typeof source.automation === "object" ? source.automation : null;
     const scopes = new Set(["all", "assigned", "none"]);
     const view = scopes.has(chats.view) ? chats.view : defaults.chats.view;
     let reply = scopes.has(chats.reply) ? chats.reply : defaults.chats.reply;
     if (view === "none") reply = "none";
     else if (view === "assigned" && reply === "all") reply = "assigned";
     const asBool = (value, fallback) => (typeof value === "boolean" ? value : Boolean(fallback));
+    const channelManage = asBool(channels.manage, defaults.channels.manage);
+    const workspaceEdit = asBool(workspace.edit, defaults.workspace.edit);
     return {
       chats: {
         view,
@@ -402,11 +416,24 @@
         view: asBool(campaigns.view, defaults.campaigns.view),
         manage: asBool(campaigns.manage, defaults.campaigns.manage),
       },
-      channels: { manage: asBool(channels.manage, defaults.channels.manage) },
+      channels: {
+        manage: channelManage,
+        templates: Object.prototype.hasOwnProperty.call(channels, "templates")
+          ? asBool(channels.templates, defaults.channels.templates)
+          : channelManage,
+        import: Object.prototype.hasOwnProperty.call(channels, "import")
+          ? asBool(channels.import, defaults.channels.import)
+          : channelManage,
+      },
       developer: { manage: asBool(developer.manage, defaults.developer.manage) },
       team: { manage: asBool(team.manage, defaults.team.manage) },
       roles: { manage: asBool(roles.manage, defaults.roles.manage) },
-      workspace: { edit: asBool(workspace.edit, defaults.workspace.edit) },
+      workspace: { edit: workspaceEdit },
+      automation: {
+        manage: automation
+          ? asBool(automation.manage, defaults.automation.manage)
+          : workspaceEdit,
+      },
     };
   }
 
@@ -2212,10 +2239,11 @@
 
   function canAdmin() {
     return hasPermission("team.manage")
-      || hasPermission("channels.manage")
+      || hasAnyChannelPermission()
       || hasPermission("developer.manage")
       || hasPermission("roles.manage")
-      || hasPermission("workspace.edit");
+      || hasPermission("workspace.edit")
+      || hasPermission("automation.manage");
   }
 
   function isOwner() {
@@ -2229,11 +2257,17 @@
     const value = state.currentUser.permissions?.[group]?.[field];
     if (typeof value === "boolean") return value;
     if (typeof value === "string") return value !== "none";
-    if (["channels.manage", "developer.manage", "team.manage", "roles.manage", "workspace.edit",
-      "contacts.delete", "chats.delete"].includes(path)) {
+    if (["channels.manage", "channels.templates", "channels.import", "developer.manage", "team.manage",
+      "roles.manage", "workspace.edit", "automation.manage", "contacts.delete", "chats.delete"].includes(path)) {
       return ["owner", "admin"].includes(state.currentUser.role);
     }
     return true;
+  }
+
+  function hasAnyChannelPermission() {
+    return hasPermission("channels.manage")
+      || hasPermission("channels.templates")
+      || hasPermission("channels.import");
   }
 
   function chatPermissionScope(action = "view") {
@@ -2385,7 +2419,7 @@
 
   function setAutomationFormBusy(busy) {
     state.automationSettingsLoading = busy;
-    const editable = hasPermission("workspace.edit") && state.automationSettingsLoaded && !busy;
+    const editable = hasPermission("automation.manage") && state.automationSettingsLoaded && !busy;
     const form = $("automationForm");
     if (!form) return;
     form.querySelectorAll("input, textarea, select, button").forEach((field) => {
@@ -2432,7 +2466,7 @@
   }
 
   async function saveAutomationSettings(form) {
-    if (!hasPermission("workspace.edit") || state.automationSettingsLoading) return;
+    if (!hasPermission("automation.manage") || state.automationSettingsLoading) return;
     if (!form.reportValidity()) return;
     const data = new FormData(form);
     const payload = {
@@ -2565,17 +2599,23 @@
       node.hidden = !hasPermission(node.dataset.permission);
     });
     document.querySelectorAll("[data-owner-only]").forEach((node) => { node.hidden = !isOwner(); node.disabled = !isOwner(); });
+    if ($("channelNavGroup")) $("channelNavGroup").hidden = !hasAnyChannelPermission();
+    if ($("channelDataNavToggle")) {
+      $("channelDataNavToggle").hidden = !(hasPermission("channels.templates") || hasPermission("channels.import"));
+    }
     setWorkspaceFormBusy(state.workspaceProfileLoading);
     if (state.automationSettingsLoaded) setAutomationFormBusy(state.automationSettingsLoading);
     if (!state.currentUser) return;
     const blockedRoutes = [];
     if (!hasPermission("contacts.view")) blockedRoutes.push("contacts");
     if (!hasPermission("campaigns.view")) blockedRoutes.push("campaigns");
-    if (!hasPermission("channels.manage")) blockedRoutes.push("channels", "whatsapp-templates", "import-chat");
+    if (!hasPermission("channels.manage")) blockedRoutes.push("channels");
+    if (!hasPermission("channels.templates")) blockedRoutes.push("whatsapp-templates");
+    if (!hasPermission("channels.import")) blockedRoutes.push("import-chat");
     if (!hasPermission("developer.manage")) blockedRoutes.push("developer");
     if (!hasPermission("team.manage")) blockedRoutes.push("team");
     if (!hasPermission("roles.manage")) blockedRoutes.push("roles");
-    if (!hasPermission("workspace.edit")) blockedRoutes.push("automation");
+    if (!hasPermission("automation.manage")) blockedRoutes.push("automation");
     if (chatPermissionScope("view") === "none") blockedRoutes.push("inbox");
     if (blockedRoutes.includes(state.route)) setRoute(chatPermissionScope("view") === "none" ? "settings" : "inbox");
   }
@@ -8092,7 +8132,7 @@
       const section = element("section", "role-permission-group");
       const header = document.createElement("header");
       const title = element("div", "role-permission-group-title");
-      const icon = element("span", "role-section-icon", ({chats:"◌",contacts:"◎",campaigns:"↗",channels:"⊞",developer:"⌘",team:"♧",roles:"◇",workspace:"▣"}[group.key] || "◇")); icon.setAttribute("aria-hidden", "true");
+      const icon = element("span", "role-section-icon", ({chats:"◌",contacts:"◎",campaigns:"↗",channels:"⊞",developer:"⌘",team:"♧",roles:"◇",workspace:"▣",automation:"⟳"}[group.key] || "◇")); icon.setAttribute("aria-hidden", "true");
       title.append(icon, element("strong", "", group.label));
       header.append(title, element("span", "role-settings-count", group.fields.length + " setting" + (group.fields.length === 1 ? "" : "s")));
       const rows = element("div", "role-permission-rows");
@@ -10132,13 +10172,15 @@
     // resolves, hasPermission is false for everything and would collapse every
     // deep link to Settings via the inbox fallback.
     if (state.currentUser) {
-      if (!hasPermission("channels.manage") && ["channels", "whatsapp-templates", "import-chat"].includes(route)) route = "inbox";
+      if (!hasPermission("channels.manage") && route === "channels") route = "inbox";
+      if (!hasPermission("channels.templates") && route === "whatsapp-templates") route = "inbox";
+      if (!hasPermission("channels.import") && route === "import-chat") route = "inbox";
       if (!hasPermission("developer.manage") && route === "developer") route = "inbox";
       if (!hasPermission("team.manage") && route === "team") route = "inbox";
       if (!hasPermission("roles.manage") && route === "roles") route = "inbox";
       if (!hasPermission("contacts.view") && route === "contacts") route = "inbox";
       if (!hasPermission("campaigns.view") && route === "campaigns") route = "inbox";
-      if (!hasPermission("workspace.edit") && route === "automation") route = "inbox";
+      if (!hasPermission("automation.manage") && route === "automation") route = "inbox";
       if (chatPermissionScope("view") === "none" && route === "inbox") route = "settings";
     }
     if (!preserveLocation) {
@@ -13144,7 +13186,7 @@
   async function runImportChat(event) {
     event.preventDefault();
     if (state.importChat.importing) return;
-    if (!hasPermission("channels.manage")) {
+    if (!hasPermission("channels.import")) {
       showToast("Import unavailable", "You do not have permission to import chat history.", true);
       return;
     }
