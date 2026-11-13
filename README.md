@@ -29,6 +29,7 @@ index.html                 GitHub Pages entry point
 api-docs.html              Browser-friendly Helixcer Developer API reference
 assets/                    Dashboard JavaScript, styles, and Helixcer brand assets
 admin/                     Platform admin panel (admin.chat.helixcer.com)
+desktop/                   Optional Windows Electron shell (close-to-tray)
 docs/                      Markdown API reference
 worker/src/index.js        Cloudflare Worker API
 worker/src/platform.js     Multi-tenant platform administration API
@@ -37,6 +38,8 @@ worker/test/               Node tests
 gateway/                   Cloudflare Pages API gateway
 wrangler.toml              Cloudflare deployment configuration
 ```
+
+For a Windows desktop window that hides to the system tray on close (instead of the browser PWA), see [`desktop/README.md`](desktop/README.md).
 
 ## Local preview
 
