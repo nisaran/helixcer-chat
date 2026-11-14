@@ -1322,6 +1322,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
   if (!accessToken) throw apiError(409, 'channel_not_ready', 'The WhatsApp channel is missing its access token.');
 
   let template = input.template;
+  let mediaPreview = null;
   if (format === 'helixcer') {
     let definition = null;
     try {
@@ -1335,12 +1336,13 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
       language: input.template.language,
       ...(components.length ? { components } : {})
     });
+    mediaPreview = helixcerMediaPreviewFromVariables(input.variables);
   }
 
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
   const externalRequestId = crypto.randomUUID();
-  const presentation = await externalTemplateInboxPresentation(env, channel, template, input.previewText);
+  const presentation = await externalTemplateInboxPresentation(env, channel, template, input.previewText, mediaPreview);
   const sender = outboundSenderAttribution(principal);
   const senderName = sender.name;
   const preview = presentation.text;
@@ -1720,8 +1722,19 @@ function helixcerMediaParameter(kind, value, filename, path) {
     if (!id) throw httpError(400, `${path} must be a public HTTPS URL or Meta media id.`);
     media.id = id;
   }
+  // Meta accepts filename on document headers. Image/video use filename for inbox preview only.
   if (kind === 'document' && filename) media.filename = filename;
   return { type: kind, [kind]: media };
+}
+
+function helixcerMediaPreviewFromVariables(variables) {
+  for (const entry of Array.isArray(variables) ? variables : []) {
+    if (String(entry?.component || '').toLowerCase() !== 'header') continue;
+    const filename = String(entry?.filename || '').trim();
+    if (!filename) continue;
+    return { filename: filename.slice(0, 240), mimeType: '', size: 0 };
+  }
+  return null;
 }
 
 export function validateExternalTemplateContact(value) {

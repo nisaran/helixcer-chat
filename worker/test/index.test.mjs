@@ -649,6 +649,27 @@ test('infers Helixcer media and button parameter types from the approved templat
   }), [
     { type: 'header', parameters: [{ type: 'document', document: { id: 'META_MEDIA_ID', filename: 'INV-1001.pdf' } }] }
   ]);
+
+  assert.deepEqual(buildMetaComponentsFromHelixcerVariables([
+    {
+      component: 'header',
+      '1': 'https://cdn.example.com/invoices/INV-1001.pdf',
+      filename: 'INV-1001.pdf'
+    }
+  ], {
+    variables: [{ component: 'header', key: 'media', kind: 'document', parameterIndex: 0 }]
+  }), [
+    {
+      type: 'header',
+      parameters: [{
+        type: 'document',
+        document: {
+          link: 'https://cdn.example.com/invoices/INV-1001.pdf',
+          filename: 'INV-1001.pdf'
+        }
+      }]
+    }
+  ]);
 });
 
 test('sanitizes Meta template definitions while retaining positional, named, media, and button inputs', () => {
