@@ -46,8 +46,8 @@
     .two-col{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,.92fr);align-items:start;gap:34px}.three-col{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
     .card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:22px;box-shadow:0 5px 20px rgba(29,41,42,.035)}.card h3{margin-top:0}.card p:last-child{margin-bottom:0}.number{display:grid;place-items:center;width:29px;height:29px;border-radius:9px;background:var(--brand-soft);color:var(--brand-deep);margin-bottom:14px;font-size:12px;font-weight:900}.muted{color:var(--muted)}
     .callout{border-left:3px solid var(--green);background:var(--green-soft);padding:15px 17px;color:#365f50;font-size:13px}.callout strong{color:#164c38}
-    .endpoint{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;background:#fff;margin:18px 0;padding:12px 14px;overflow:auto}.method{flex:0 0 auto;border-radius:7px;background:var(--green-soft);color:var(--green);padding:4px 8px;font-size:10px;font-weight:900;letter-spacing:.06em}.method.get{background:var(--blue-soft);color:var(--blue)}.endpoint code{white-space:nowrap;color:#33413f;font-size:12px}
-    .code-card{overflow:hidden;border:1px solid #263637;border-radius:14px;background:var(--code);box-shadow:0 10px 30px rgba(23,35,36,.12)}.code-head{display:flex;align-items:center;justify-content:space-between;gap:15px;min-height:42px;border-bottom:1px solid rgba(255,255,255,.08);padding:7px 10px 7px 16px;color:#8fa3a0;font-size:10px;font-weight:750;letter-spacing:.07em;text-transform:uppercase}.copy{border:1px solid rgba(255,255,255,.13);border-radius:7px;background:rgba(255,255,255,.05);color:#c6d1ce;padding:5px 9px;cursor:pointer;font-size:10px;font-weight:750;text-transform:none;letter-spacing:0}.copy:hover{background:rgba(255,255,255,.1);color:#fff}
+    .endpoint{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;background:#fff;margin:18px 0;padding:12px 14px;overflow:auto}.method{flex:0 0 auto;border-radius:7px;background:var(--green-soft);color:var(--green);padding:4px 8px;font-size:10px;font-weight:900;letter-spacing:.06em}.method.get{background:var(--blue-soft);color:var(--blue)}.endpoint code{flex:1 1 auto;min-width:0;white-space:nowrap;color:#33413f;font-size:12px;overflow:auto}.endpoint .copy{flex:0 0 auto;margin-left:auto;border:1px solid var(--line-strong);border-radius:7px;background:#f7f8f5;color:#53615e;padding:5px 9px;cursor:pointer;font-size:10px;font-weight:750}.endpoint .copy:hover{background:#eef1ed;color:var(--ink)}
+    .code-card{overflow:hidden;border:1px solid #263637;border-radius:14px;background:var(--code);box-shadow:0 10px 30px rgba(23,35,36,.12)}.code-head{display:flex;align-items:center;justify-content:space-between;gap:15px;min-height:42px;border-bottom:1px solid rgba(255,255,255,.08);padding:7px 10px 7px 16px;color:#8fa3a0;font-size:10px;font-weight:750;letter-spacing:.07em;text-transform:uppercase}.copy{border:1px solid rgba(255,255,255,.13);border-radius:7px;background:rgba(255,255,255,.05);color:#c6d1ce;padding:5px 9px;cursor:pointer;font-size:10px;font-weight:750;text-transform:none;letter-spacing:0}.code-card .copy:hover{background:rgba(255,255,255,.1);color:#fff}
     pre{margin:0;overflow:auto;padding:19px;color:var(--code-ink);font-size:12px;line-height:1.65;tab-size:2}pre code{font:inherit}.plain{border:1px solid var(--line);border-radius:8px;background:#f6f7f4;color:#394643;padding:2px 6px;font-size:.88em}
     .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:#fff}table{width:100%;border-collapse:collapse;min-width:670px}th,td{border-bottom:1px solid var(--line);padding:13px 15px;text-align:left;vertical-align:top}th{background:#f7f8f5;color:#5c6966;font-size:10px;letter-spacing:.08em;text-transform:uppercase}td{color:#56625f;font-size:12px}tr:last-child td{border-bottom:0}td code{color:#253532;font-weight:700}.yes{color:var(--green);font-weight:800}.recommended{color:var(--amber);font-weight:800}
     .examples{display:grid;gap:14px;margin-top:25px}details{overflow:hidden;border:1px solid var(--line);border-radius:14px;background:#fff}summary{display:flex;align-items:center;gap:12px;min-height:60px;padding:13px 17px;cursor:pointer;list-style:none;font-weight:800}summary::-webkit-details-marker{display:none}summary:before{content:"+";display:grid;place-items:center;width:27px;height:27px;flex:0 0 27px;border-radius:8px;background:#f0f2ef;color:#60706c;font-size:17px;font-weight:500}details[open] summary:before{content:"−";background:var(--brand-soft);color:var(--brand)}details[open] summary{border-bottom:1px solid var(--line)}.detail{padding:19px}.detail>p{color:var(--muted);font-size:13px}.detail>p:first-child{margin-top:0}.tag{margin-left:auto;border-radius:99px;background:#f2f4f1;color:#71807c;padding:4px 8px;font-size:9px;font-weight:850;letter-spacing:.06em;text-transform:uppercase}
@@ -104,7 +104,7 @@
       <section id="quickstart">
         <p class="eyebrow">Quickstart</p><h2>Send a template from your server</h2>
         <p class="intro">Choose a saved WhatsApp channel, provide the recipient and approved Meta template, then retain the returned Helixcer message ID.</p>
-        <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/template-messages</code></div>
+        <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/template-messages</code><button class="copy" type="button" aria-label="Copy endpoint">Copy</button></div>
         <div class="code-card">
           <div class="code-head"><span>cURL · simple template</span><button class="copy" type="button">Copy</button></div>
           <pre><code>curl --request POST \
@@ -143,7 +143,7 @@ Content-Type: application/json</code></pre></div>
       <section id="send">
         <p class="eyebrow">WhatsApp Meta</p><h2>Send a template message</h2>
         <p class="intro">Helixcer validates the outer envelope, finds the channel's encrypted credentials, renders the approved template for the inbox, records its text and media, and submits a Meta-compatible template payload. Existing integrations keep this endpoint unchanged.</p>
-        <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/template-messages</code></div>
+        <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/template-messages</code><button class="copy" type="button" aria-label="Copy endpoint">Copy</button></div>
         <div class="code-card" style="margin:22px 0"><div class="code-head"><span>JSON request body</span><button class="copy" type="button">Copy</button></div><pre><code>{
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
   "to": "919999999999",
@@ -188,7 +188,7 @@ Content-Type: application/json</code></pre></div>
       <section id="templates">
         <p class="eyebrow">WhatsApp Meta</p><h2>List all templates</h2>
         <p class="intro">Return the message templates stored on the selected WhatsApp Business Account, including name, language, status, category, components, and variables.</p>
-        <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/templates?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4</code></div>
+        <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/templates?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4</code><button class="copy" type="button" aria-label="Copy endpoint">Copy</button></div>
         <div class="table-wrap" style="margin:22px 0"><table>
           <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
           <tbody>
@@ -227,7 +227,7 @@ Content-Type: application/json</code></pre></div>
       <section id="template">
         <p class="eyebrow">WhatsApp Meta</p><h2>Fetch template</h2>
         <p class="intro">Fetch one template by Meta template name for a WhatsApp channel. When the template exists in multiple languages, every matching variant is returned unless you filter with <code class="plain">language</code>.</p>
-        <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/templates/order_confirmation?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4</code></div>
+        <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/templates/order_confirmation?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4</code><button class="copy" type="button" aria-label="Copy endpoint">Copy</button></div>
         <div class="table-wrap" style="margin:22px 0"><table>
           <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
           <tbody>
@@ -459,7 +459,7 @@ Content-Type: application/json</code></pre></div>
       <section id="helixcer-send">
         <p class="eyebrow">WhatsApp Helixcer</p><h2>Send a template with Helixcer variables</h2>
         <p class="intro">Same inbox recording, delivery, and status tracking as WhatsApp Meta. The difference is the request shape: send a flat variable map per component, and Helixcer expands it into Meta <code class="plain">components</code> before calling WhatsApp.</p>
-        <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/helixcer/template-messages</code></div>
+        <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/helixcer/template-messages</code><button class="copy" type="button" aria-label="Copy endpoint">Copy</button></div>
         <div class="code-card" style="margin:22px 0"><div class="code-head"><span>JSON request body</span><button class="copy" type="button">Copy</button></div><pre><code>{
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
   "to": "919999999999",
@@ -604,7 +604,7 @@ Content-Type: application/json</code></pre></div>
 
       <section id="status">
         <p class="eyebrow">Status API</p><h2>Read the current message state</h2>
-        <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/messages/{messageId}</code></div>
+        <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/messages/{messageId}</code><button class="copy" type="button" aria-label="Copy endpoint">Copy</button></div>
         <p class="intro">Use the same Bearer key and <code class="plain">X-Workspace-Id</code> header. The key requires the message-read scope and can read only messages it created.</p>
         <div class="status-line" aria-label="Typical message status progression">
           <span class="pill">pending</span><span class="arrow">→</span><span class="pill">retrying</span><span class="arrow">→</span><span class="pill">submitted</span><span class="arrow">→</span><span class="pill">sent</span><span class="arrow">→</span><span class="pill good">delivered</span><span class="arrow">→</span><span class="pill good">read</span>
@@ -700,7 +700,7 @@ Content-Type: application/json</code></pre></div>
       menu.addEventListener('click',function(){var open=sidebar.classList.toggle('open');menu.setAttribute('aria-expanded',String(open))});
       links.forEach(function(link){link.addEventListener('click',function(){sidebar.classList.remove('open');menu.setAttribute('aria-expanded','false')})});
       document.addEventListener('click',function(e){if(window.innerWidth<=780&&sidebar.classList.contains('open')&&!sidebar.contains(e.target)&&!menu.contains(e.target)){sidebar.classList.remove('open');menu.setAttribute('aria-expanded','false')}});
-      document.querySelectorAll('.copy').forEach(function(button){button.addEventListener('click',function(){var code=button.closest('.code-card').querySelector('code').textContent;navigator.clipboard.writeText(code).then(function(){var original=button.textContent;button.textContent='Copied';setTimeout(function(){button.textContent=original},1300)}).catch(function(){button.textContent='Select & copy'})})});
+      document.querySelectorAll('.copy').forEach(function(button){button.addEventListener('click',function(){var host=button.closest('.code-card')||button.closest('.endpoint');var code=host&&host.querySelector('code');if(!code)return;navigator.clipboard.writeText(code.textContent).then(function(){var original=button.textContent;button.textContent='Copied';setTimeout(function(){button.textContent=original},1300)}).catch(function(){button.textContent='Select & copy'})})});
       if('IntersectionObserver' in window){var observer=new IntersectionObserver(function(entries){entries.forEach(function(entry){if(!entry.isIntersecting)return;links.forEach(function(link){link.classList.toggle('active',link.getAttribute('href')==='#'+entry.target.id)})})},{rootMargin:'-18% 0px -72% 0px'});document.querySelectorAll('main section[id]').forEach(function(section){observer.observe(section)})}
     }());
   </script>
