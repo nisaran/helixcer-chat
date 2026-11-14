@@ -33,6 +33,8 @@ import {
   searchMessages,
   timingSafeEqual,
   validateWhatsAppTemplateRequest,
+  validateHelixcerWhatsAppTemplateRequest,
+  buildMetaComponentsFromHelixcerVariables,
   whatsappReplyWindowState,
   verifyMetaSignature
 } from '../src/index.js';
@@ -582,6 +584,43 @@ test('validates Meta-native template variants without allowing provider envelope
     ...normalized,
     template: { ...normalized.template, components: [{ type: 'header', parameters: [{ type: 'image', image: { link: 'http://localhost/private' } }] }] }
   }), /public HTTPS URL/);
+});
+
+test('maps Helixcer variables into Meta components for numbered and named placeholders', () => {
+  assert.deepEqual(buildMetaComponentsFromHelixcerVariables([
+    { component: 'header', '1': 'Rahul' },
+    { component: 'body', '1': 'ORDR-1', '2': 'In Transit' },
+    { component: 'button', index: 0, '1': 'track-abc' }
+  ]), [
+    { type: 'header', parameters: [{ type: 'text', text: 'Rahul' }] },
+    { type: 'body', parameters: [{ type: 'text', text: 'ORDR-1' }, { type: 'text', text: 'In Transit' }] },
+    { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'track-abc' }] }
+  ]);
+
+  const named = validateHelixcerWhatsAppTemplateRequest({
+    channelId: 'wa-sales',
+    to: '919876543210',
+    template: { name: 'named_order_confirmation', language: { code: 'en_US' } },
+    variables: [{ component: 'body', customer_name: 'Asha', order_number: 'ORD-1001' }]
+  });
+  assert.deepEqual(named.template.components, [{
+    type: 'body',
+    parameters: [
+      { type: 'text', parameter_name: 'customer_name', text: 'Asha' },
+      { type: 'text', parameter_name: 'order_number', text: 'ORD-1001' }
+    ]
+  }]);
+  assert.throws(() => validateHelixcerWhatsAppTemplateRequest({
+    channelId: 'wa-sales',
+    to: '919876543210',
+    template: { name: 'order_update', language: { code: 'en_US' }, components: [] }
+  }), /Unsupported template field/);
+  assert.throws(() => buildMetaComponentsFromHelixcerVariables([
+    { component: 'body', '1': 'A', customer_name: 'Asha' }
+  ]), /cannot mix numbered and named/);
+  assert.throws(() => buildMetaComponentsFromHelixcerVariables([
+    { component: 'body', '2': 'missing-one' }
+  ]), /consecutive starting at 1/);
 });
 
 test('sanitizes Meta template definitions while retaining positional, named, media, and button inputs', () => {

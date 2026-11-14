@@ -115,7 +115,7 @@ async function insertKey(database, token, apiKeyId, prefix) {
     .run(apiKeyId, prefix, await sha256(token), now, now);
 }
 
-function postTemplate(token, idempotencyKey, body, headers = {}) {
+function postTemplate(token, idempotencyKey, body, headers = {}, pathname = '/api/v1/whatsapp/template-messages') {
   const requestHeaders = {
     Authorization: `Bearer ${token}`,
     'X-Workspace-Id': 'ws_default',
@@ -123,7 +123,7 @@ function postTemplate(token, idempotencyKey, body, headers = {}) {
     ...headers
   };
   if (idempotencyKey) requestHeaders['Idempotency-Key'] = idempotencyKey;
-  return new Request('https://api.chat.helixcer.com/api/v1/whatsapp/template-messages', {
+  return new Request(`https://api.chat.helixcer.com${pathname}`, {
     method: 'POST',
     headers: requestHeaders,
     body: JSON.stringify(body)
@@ -216,6 +216,55 @@ test('Developer API requires the API key workspace header and rejects mismatches
     assert.equal(database.prepare('SELECT count(*) AS count FROM messages').get().count, 0);
     assert.equal(database.prepare('SELECT last_used_at FROM api_keys WHERE api_key_id=?').get('key-workspace').last_used_at, null);
   } finally {
+    database.close();
+  }
+});
+
+test('Helixcer format endpoint expands variables and leaves the Meta endpoint unchanged', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_helixcer1.${'h'.repeat(43)}`;
+  await insertKey(database, token, 'key-helixcer', 'hxc_live_helixcer1');
+  const waits = [];
+  const originalFetch = globalThis.fetch;
+  let providerBody = null;
+  globalThis.fetch = async (_url, init = {}) => {
+    providerBody = JSON.parse(init.body);
+    return new Response(JSON.stringify({ messages: [{ id: 'wamid.helixcer-format' }] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    });
+  };
+  try {
+    const helixcer = await handleRequest(postTemplate(token, 'helixcer-format-1', {
+      channelId: 'wa-sales', to: '919876543210',
+      template: { name: 'order_update', language: { code: 'en_US' } },
+      variables: [
+        { component: 'header', '1': 'Rahul' },
+        { component: 'body', '1': 'ORDR-1', '2': 'In Transit' },
+        { component: 'button', index: 0, '1': 'track-abc' }
+      ]
+    }, {}, '/api/v1/whatsapp/helixcer/template-messages'), env, {
+      waitUntil(promise) { waits.push(promise); }
+    });
+    assert.equal(helixcer.status, 202);
+    await Promise.all(waits);
+    assert.equal(providerBody?.template?.name, 'order_update');
+    assert.deepEqual(providerBody?.template?.components, [
+      { type: 'header', parameters: [{ type: 'text', text: 'Rahul' }] },
+      { type: 'body', parameters: [{ type: 'text', text: 'ORDR-1' }, { type: 'text', text: 'In Transit' }] },
+      { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'track-abc' }] }
+    ]);
+
+    const metaRejectsVariables = await handleRequest(postTemplate(token, 'meta-rejects-variables', {
+      channelId: 'wa-sales', to: '919876543210',
+      template: { name: 'order_update', language: { code: 'en_US' } },
+      variables: [{ component: 'body', '1': 'ORD-1' }]
+    }), env, { waitUntil() {} });
+    assert.equal(metaRejectsVariables.status, 400);
+    const rejected = await metaRejectsVariables.json();
+    assert.equal(rejected.status, false);
+    assert.match(rejected.error.message, /Unsupported request field/);
+  } finally {
+    globalThis.fetch = originalFetch;
     database.close();
   }
 });
