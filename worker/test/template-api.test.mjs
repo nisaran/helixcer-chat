@@ -269,6 +269,66 @@ test('Helixcer format endpoint expands variables and leaves the Meta endpoint un
   }
 });
 
+test('Helixcer format infers image header type from the approved template catalogue', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_helixmedia.${'m'.repeat(43)}`;
+  await insertKey(database, token, 'key-helix-media', 'hxc_live_helixmedia');
+  const now = new Date().toISOString();
+  const config = JSON.parse(database.prepare('SELECT config_json FROM channels WHERE channel_id=?').get('wa-sales').config_json);
+  config.wabaId = '2053926168641345';
+  database.prepare('UPDATE channels SET config_json=?, updated_at=? WHERE channel_id=?')
+    .run(JSON.stringify(config), now, 'wa-sales');
+  const waits = [];
+  const originalFetch = globalThis.fetch;
+  let providerBody = null;
+  globalThis.fetch = async (url, init = {}) => {
+    const target = String(url);
+    if (target.includes('/message_templates')) {
+      return new Response(JSON.stringify({
+        data: [{
+          id: 'tmpl-media',
+          name: 'product_ready_image',
+          language: 'en_US',
+          status: 'APPROVED',
+          category: 'MARKETING',
+          components: [
+            { type: 'HEADER', format: 'IMAGE' },
+            { type: 'BODY', text: 'Hello {{1}}' },
+            { type: 'BUTTONS', buttons: [{ type: 'URL', text: 'View', url: 'https://shop.example/p/{{1}}' }] }
+          ]
+        }]
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    providerBody = JSON.parse(init.body);
+    return new Response(JSON.stringify({ messages: [{ id: 'wamid.helixcer-media' }] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    });
+  };
+  try {
+    const response = await handleRequest(postTemplate(token, 'helixcer-media-1', {
+      channelId: 'wa-sales', to: '919876543210',
+      template: { name: 'product_ready_image', language: { code: 'en_US' } },
+      variables: [
+        { component: 'header', '1': 'https://cdn.example.com/products/item.jpg' },
+        { component: 'body', '1': 'Asha' },
+        { component: 'button', index: 0, '1': 'item-1001' }
+      ]
+    }, {}, '/api/v1/whatsapp/helixcer/template-messages'), env, {
+      waitUntil(promise) { waits.push(promise); }
+    });
+    assert.equal(response.status, 202);
+    await Promise.all(waits);
+    assert.deepEqual(providerBody?.template?.components, [
+      { type: 'header', parameters: [{ type: 'image', image: { link: 'https://cdn.example.com/products/item.jpg' } }] },
+      { type: 'body', parameters: [{ type: 'text', text: 'Asha' }] },
+      { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'item-1001' }] }
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
 test('external template API accepts requests without an Idempotency-Key', async () => {
   const { database, env } = await fixture();
   const token = `hxc_live_noidem123.${'n'.repeat(43)}`;
