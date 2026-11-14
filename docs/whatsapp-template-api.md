@@ -280,7 +280,7 @@ Named templates use the approved parameter name as the key:
 | Named keys | No | Approved parameter names. Do not mix numbered and named keys in one entry. |
 | `index` | No | Button index (0–9). Defaults to `0`. Alias: `buttonIndex`. |
 | `subType` | No | Optional button subtype override. When omitted, Helixcer infers it from the approved template. Alias: `sub_type`. |
-| `filename` | No | Optional document filename when the approved header is a document. |
+| `filename` | No | Optional media filename on a header entry. Sent to Meta for document headers and used for inbox media preview for image, video, and document headers. |
 
 Do not send Meta parameter `type`. Helixcer loads the approved template and maps each value to the correct Meta type (`text`, `image`, `video`, `document`, URL button text, and similar string-backed slots). Use list/fetch template responses to learn each variable's `component`, `key`, and `kind`. Currency, date/time, and other structured Meta parameter objects still use the WhatsApp Meta endpoint.
 
@@ -289,6 +289,19 @@ Do not send Meta parameter `type`. Helixcer loads the approved template and maps
   { "component": "header", "1": "https://cdn.example.com/products/item.jpg" },
   { "component": "body", "1": "Asha" },
   { "component": "button", "index": 0, "1": "item-1001" }
+]
+```
+
+Document header with optional filename:
+
+```json
+"variables": [
+  {
+    "component": "header",
+    "1": "https://cdn.example.com/invoices/INV-1001.pdf",
+    "filename": "INV-1001.pdf"
+  },
+  { "component": "body", "1": "Asha" }
 ]
 ```
 
