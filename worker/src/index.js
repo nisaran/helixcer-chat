@@ -1180,7 +1180,13 @@ async function handleExternalApi(request, env, ctx, url) {
 
     if (url.pathname === '/api/v1/whatsapp/template-messages' && request.method === 'POST') {
       requireApiScope(apiPrincipal, 'whatsapp:template:send');
-      const response = await createExternalTemplateMessage(request, env, ctx, url, apiPrincipal, requestId);
+      const response = await createExternalTemplateMessage(request, env, ctx, url, apiPrincipal, requestId, 'meta');
+      response.headers.set('X-Request-Id', requestId);
+      return response;
+    }
+    if (url.pathname === '/api/v1/whatsapp/helixcer/template-messages' && request.method === 'POST') {
+      requireApiScope(apiPrincipal, 'whatsapp:template:send');
+      const response = await createExternalTemplateMessage(request, env, ctx, url, apiPrincipal, requestId, 'helixcer');
       response.headers.set('X-Request-Id', requestId);
       return response;
     }
@@ -1285,14 +1291,16 @@ async function enforceExternalApiRateLimit(env, principal, requestId) {
   throw apiError(503, 'rate_limiter_unavailable', 'The API rate limiter is temporarily unavailable.');
 }
 
-async function createExternalTemplateMessage(request, env, ctx, url, principal, requestId) {
+async function createExternalTemplateMessage(request, env, ctx, url, principal, requestId, format = 'meta') {
   const suppliedIdempotencyKey = request.headers.get('Idempotency-Key');
   if (suppliedIdempotencyKey !== null && !/^[A-Za-z0-9._:-]{8,128}$/.test(suppliedIdempotencyKey)) {
     throw apiError(400, 'invalid_idempotency_key', 'When provided, Idempotency-Key must contain 8 to 128 safe ASCII characters.');
   }
   const idempotencyKey = suppliedIdempotencyKey || `automatic-${crypto.randomUUID()}`;
   const raw = await readExternalJson(request);
-  const input = validateWhatsAppTemplateRequest(raw);
+  const input = format === 'helixcer'
+    ? validateHelixcerWhatsAppTemplateRequest(raw)
+    : validateWhatsAppTemplateRequest(raw);
   const requestHash = await hashText(stableStringify(input));
   const idempotencyHash = await hashText(idempotencyKey);
   const existing = await findExternalRequest(env, principal.apiKeyId, idempotencyHash);
@@ -1509,6 +1517,104 @@ export function validateWhatsAppTemplateRequest(payload) {
   const previewText = payload.previewText === undefined ? '' : cleanOptionalText(payload.previewText, 'Preview text', MAX_TEXT_LENGTH);
   const template = validateWhatsAppTemplate(payload.template);
   return { channelId, to, contact, template, clientReference, previewText };
+}
+
+export function validateHelixcerWhatsAppTemplateRequest(payload) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Request body must be a JSON object.');
+  rejectUnknownKeys(payload, new Set(['channelId', 'to', 'contact', 'template', 'variables', 'clientReference', 'previewText']), 'request');
+  const channelId = cleanId(payload.channelId, 'Channel ID');
+  const to = normalizeWhatsAppRecipient(payload.to);
+  const contact = validateExternalTemplateContact(payload.contact);
+  const clientReference = payload.clientReference === undefined ? '' : cleanOptionalText(payload.clientReference, 'Client reference', 200);
+  const previewText = payload.previewText === undefined ? '' : cleanOptionalText(payload.previewText, 'Preview text', MAX_TEXT_LENGTH);
+  if (!isPlainObject(payload.template)) throw httpError(400, 'Template must be an object.');
+  rejectUnknownKeys(payload.template, new Set(['name', 'language']), 'template');
+  const components = buildMetaComponentsFromHelixcerVariables(payload.variables);
+  const template = validateWhatsAppTemplate({
+    name: payload.template.name,
+    language: payload.template.language,
+    ...(components.length ? { components } : {})
+  });
+  return { channelId, to, contact, template, clientReference, previewText };
+}
+
+const HELIXCER_VARIABLE_RESERVED_KEYS = new Set(['component', 'index', 'buttonIndex', 'subType', 'sub_type']);
+
+export function buildMetaComponentsFromHelixcerVariables(variables) {
+  if (variables === undefined || variables === null) return [];
+  if (!Array.isArray(variables) || variables.length > 20) {
+    throw httpError(400, 'Variables must be an array with no more than 20 items.');
+  }
+  const components = [];
+  for (let entryIndex = 0; entryIndex < variables.length; entryIndex++) {
+    const entry = variables[entryIndex];
+    if (!isPlainObject(entry)) throw httpError(400, `variables[${entryIndex}] must be an object.`);
+    const component = String(entry.component || '').trim().toLowerCase();
+    if (!['header', 'body', 'button'].includes(component)) {
+      throw httpError(400, `variables[${entryIndex}].component must be header, body, or button.`);
+    }
+    const valueKeys = Object.keys(entry).filter(key => !HELIXCER_VARIABLE_RESERVED_KEYS.has(key));
+    if (!valueKeys.length) throw httpError(400, `variables[${entryIndex}] must include at least one variable value.`);
+    const positional = [];
+    const named = [];
+    for (const key of valueKeys) {
+      const rawValue = entry[key];
+      if (typeof rawValue !== 'string') {
+        throw httpError(400, `variables[${entryIndex}].${key} must be text. Use the Meta template endpoint for media or typed parameters.`);
+      }
+      if (rawValue.length > 1024) throw httpError(400, `variables[${entryIndex}].${key} is longer than 1024 characters.`);
+      if (/^\d+$/.test(key)) {
+        const position = Number(key);
+        if (position < 1 || position > 50) throw httpError(400, `variables[${entryIndex}] has an invalid variable number.`);
+        positional.push({ position, text: rawValue });
+      } else {
+        const parameterName = providerIdentifier(key, 100);
+        if (!parameterName || !/^[A-Za-z][A-Za-z0-9_]{0,99}$/.test(parameterName)) {
+          throw httpError(400, `variables[${entryIndex}] has an invalid variable name.`);
+        }
+        named.push({ parameterName, text: rawValue });
+      }
+    }
+    if (positional.length && named.length) {
+      throw httpError(400, `variables[${entryIndex}] cannot mix numbered and named variables.`);
+    }
+    let parameters;
+    if (positional.length) {
+      positional.sort((left, right) => left.position - right.position);
+      for (let index = 0; index < positional.length; index++) {
+        if (positional[index].position !== index + 1) {
+          throw httpError(400, `variables[${entryIndex}] numbered keys must be consecutive starting at 1.`);
+        }
+      }
+      parameters = positional.map(item => ({ type: 'text', text: item.text }));
+    } else {
+      parameters = named.map(item => ({ type: 'text', parameter_name: item.parameterName, text: item.text }));
+    }
+    if (component === 'button') {
+      const buttonIndex = entry.index === undefined && entry.buttonIndex === undefined
+        ? 0
+        : Number(entry.index ?? entry.buttonIndex);
+      if (!Number.isInteger(buttonIndex) || buttonIndex < 0 || buttonIndex > 9) {
+        throw httpError(400, `variables[${entryIndex}] button index must be an integer from 0 to 9.`);
+      }
+      const subType = String(entry.subType || entry.sub_type || 'url').trim().toLowerCase();
+      if (!['url', 'quick_reply', 'copy_code'].includes(subType)) {
+        throw httpError(400, `variables[${entryIndex}] button subType must be url, quick_reply, or copy_code.`);
+      }
+      if (subType !== 'url') {
+        throw httpError(400, `variables[${entryIndex}] supports text URL button values only. Use the Meta template endpoint for ${subType} buttons.`);
+      }
+      components.push({
+        type: 'button',
+        sub_type: 'url',
+        index: String(buttonIndex),
+        parameters
+      });
+      continue;
+    }
+    components.push({ type: component, parameters });
+  }
+  return components;
 }
 
 export function validateExternalTemplateContact(value) {

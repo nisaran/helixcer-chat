@@ -77,8 +77,10 @@
       <nav>
         <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li></ul>
         <p class="nav-label">Channels</p>
-        <p class="nav-channel">WhatsApp</p>
+        <p class="nav-channel">WhatsApp Meta</p>
         <ul class="nav-list nav-sublist"><li><a href="#send">Template messages</a></li><li><a href="#templates">List templates</a></li><li><a href="#template">Fetch template</a></li><li><a href="#examples">Template examples</a></li><li><a href="#advanced">Advanced templates</a></li><li><a href="#meta">Meta references</a></li></ul>
+        <p class="nav-channel">WhatsApp Helixcer</p>
+        <ul class="nav-list nav-sublist"><li><a href="#helixcer-send">Template messages</a></li><li><a href="#helixcer-format">Helixcer format</a></li><li><a href="#helixcer-examples">Format examples</a></li></ul>
         <p class="nav-label">Operations</p>
         <ul class="nav-list"><li><a href="#responses">Responses</a></li><li><a href="#status">Message status</a></li><li><a href="#webhooks">Chatbox &amp; webhooks</a></li><li><a href="#errors">Errors</a></li><li><a href="#security">Security checklist</a></li></ul>
       </nav>
@@ -94,10 +96,10 @@
           <div class="quick-card"><small>Base URL</small><code>api.chat.helixcer.com</code></div>
           <div class="quick-card"><small>Authentication</small><code>Bearer hxc_live_…</code></div>
           <div class="quick-card"><small>Format</small><code>application/json</code></div>
-          <div class="quick-card"><small>Available channel</small><code>WhatsApp</code></div>
+          <div class="quick-card"><small>Available channel</small><code>WhatsApp Meta · Helixcer</code></div>
         </div>
       </section>
-      <div class="notice" role="note"><span class="notice-mark" aria-hidden="true">!</span><p><strong>Available now: WhatsApp template messages.</strong> Telegram and Instagram external-send endpoints are not enabled yet. Live WhatsApp delivery requires a valid Meta access token and an approved template whose name, language, components, and parameters match the request.</p></div>
+      <div class="notice" role="note"><span class="notice-mark" aria-hidden="true">!</span><p><strong>Available now: WhatsApp template messages.</strong> Use <strong>WhatsApp Meta</strong> for Meta-native <code class="plain">components</code>, or <strong>WhatsApp Helixcer</strong> for the simpler component variable map. Existing Meta integrations keep the same endpoint and payload. Telegram and Instagram external-send endpoints are not enabled yet.</p></div>
 
       <section id="quickstart">
         <p class="eyebrow">Quickstart</p><h2>Send a template from your server</h2>
@@ -139,8 +141,8 @@ Content-Type: application/json</code></pre></div>
       </section>
 
       <section id="send">
-        <p class="eyebrow">Request contract</p><h2>Send a template message</h2>
-        <p class="intro">Helixcer validates the outer envelope, finds the channel's encrypted credentials, renders the approved template for the inbox, records its text and media, and submits a Meta-compatible template payload.</p>
+        <p class="eyebrow">WhatsApp Meta</p><h2>Send a template message</h2>
+        <p class="intro">Helixcer validates the outer envelope, finds the channel's encrypted credentials, renders the approved template for the inbox, records its text and media, and submits a Meta-compatible template payload. Existing integrations keep this endpoint unchanged.</p>
         <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/template-messages</code></div>
         <div class="code-card" style="margin:22px 0"><div class="code-head"><span>JSON request body</span><button class="copy" type="button">Copy</button></div><pre><code>{
   "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
@@ -184,7 +186,7 @@ Content-Type: application/json</code></pre></div>
       </section>
 
       <section id="templates">
-        <p class="eyebrow">WhatsApp</p><h2>List all templates</h2>
+        <p class="eyebrow">WhatsApp Meta</p><h2>List all templates</h2>
         <p class="intro">Return the message templates stored on the selected WhatsApp Business Account, including name, language, status, category, components, and variables.</p>
         <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/templates?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4</code></div>
         <div class="table-wrap" style="margin:22px 0"><table>
@@ -223,7 +225,7 @@ Content-Type: application/json</code></pre></div>
       </section>
 
       <section id="template">
-        <p class="eyebrow">WhatsApp</p><h2>Fetch template</h2>
+        <p class="eyebrow">WhatsApp Meta</p><h2>Fetch template</h2>
         <p class="intro">Fetch one template by Meta template name for a WhatsApp channel. When the template exists in multiple languages, every matching variant is returned unless you filter with <code class="plain">language</code>.</p>
         <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/templates/order_confirmation?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4</code></div>
         <div class="table-wrap" style="margin:22px 0"><table>
@@ -264,7 +266,7 @@ Content-Type: application/json</code></pre></div>
       </section>
 
       <section id="examples">
-        <p class="eyebrow">Template patterns</p><h2>Use the components Meta approved</h2>
+        <p class="eyebrow">WhatsApp Meta</p><h2>Use the components Meta approved</h2>
         <p class="intro">Each panel shows the template portion of a request. Add the same top-level <code class="plain">channelId</code>, <code class="plain">to</code>, contact/reference fields, and required headers shown above.</p>
         <div class="examples">
           <details open>
@@ -431,7 +433,7 @@ Content-Type: application/json</code></pre></div>
 
       <section id="advanced">
         <div class="two-col">
-          <div><p class="eyebrow">Future-compatible</p><h2>Advanced components pass through</h2><p class="intro">Helixcer keeps <code class="plain">template.components</code> Meta-native. Supported catalog/product, Flow, carousel/card, limited-time offer, and authentication components pass through without a second Helixcer-specific schema.</p><p>Helixcer validates the outer envelope and security boundary. Meta remains the authority on whether a component matches an approved template and whether the selected account can use it.</p></div>
+          <div><p class="eyebrow">WhatsApp Meta</p><h2>Advanced components pass through</h2><p class="intro">Helixcer keeps <code class="plain">template.components</code> Meta-native. Supported catalog/product, Flow, carousel/card, limited-time offer, and authentication components pass through without a second Helixcer-specific schema.</p><p>Helixcer validates the outer envelope and security boundary. Meta remains the authority on whether a component matches an approved template and whether the selected account can use it.</p></div>
           <div class="code-card"><div class="code-head"><span>Illustrative catalog button</span><button class="copy" type="button">Copy</button></div><pre><code>"template": {
   "name": "recommended_products",
   "language": { "code": "en_US" },
@@ -453,6 +455,110 @@ Content-Type: application/json</code></pre></div>
         </div>
         <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p>This is illustrative, not a universal schema. Copy the exact structure, types, indexes, and values required by your approved template and the current Meta Cloud API.</p></div>
       </section>
+
+      <section id="helixcer-send">
+        <p class="eyebrow">WhatsApp Helixcer</p><h2>Send a template with Helixcer variables</h2>
+        <p class="intro">Same inbox recording, delivery, and status tracking as WhatsApp Meta. The difference is the request shape: send a flat variable map per component, and Helixcer expands it into Meta <code class="plain">components</code> before calling WhatsApp.</p>
+        <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/whatsapp/helixcer/template-messages</code></div>
+        <div class="code-card" style="margin:22px 0"><div class="code-head"><span>JSON request body</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "to": "919999999999",
+  "contact": {
+    "name": "Asha",
+    "company": "Acme Retail",
+    "tags": ["VIP", "Orders"]
+  },
+  "clientReference": "order-1001",
+  "previewText": "Order ORD-1001 confirmed",
+  "template": {
+    "name": "order_confirmation",
+    "language": { "code": "en_US" }
+  },
+  "variables": [
+    { "component": "body", "1": "Asha", "2": "ORD-1001" }
+  ]
+}</code></pre></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>channelId</code></td><td class="yes">Yes</td><td>Helixcer ID of the saved WhatsApp channel that sends the message.</td></tr>
+            <tr><td><code>to</code></td><td class="yes">Yes</td><td>Recipient's WhatsApp number in international digits-only format.</td></tr>
+            <tr><td><code>contact</code></td><td>No</td><td>Same optional contact fields as the Meta endpoint.</td></tr>
+            <tr><td><code>clientReference</code></td><td>No</td><td>Your order, ticket, campaign, or transaction ID.</td></tr>
+            <tr><td><code>previewText</code></td><td>No</td><td>Optional inbox-text override.</td></tr>
+            <tr><td><code>template</code></td><td class="yes">Yes</td><td>Template identity only: <code>name</code> and <code>language.code</code>. Do not send Meta <code>components</code> here.</td></tr>
+            <tr><td><code>variables</code></td><td>No</td><td>Array of component maps. Omit when the approved template has no runtime values.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p><strong>Existing Meta integrations are unchanged.</strong> Keep using <code class="plain">POST /api/v1/whatsapp/template-messages</code> with Meta-native <code class="plain">components</code>. Use this Helixcer endpoint only when you want the simpler variable map. List and fetch templates remain the same GET routes for both formats.</p></div>
+      </section>
+
+      <section id="helixcer-format">
+        <p class="eyebrow">WhatsApp Helixcer</p><h2>Helixcer variable format</h2>
+        <p class="intro">Each item names a component (<code class="plain">header</code>, <code class="plain">body</code>, or <code class="plain">button</code>) and supplies Meta placeholder values as <code class="plain">"1":"value"</code> or named keys such as <code class="plain">"customer_name":"Asha"</code>.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>component</code></td><td class="yes">Yes</td><td><code>header</code>, <code>body</code>, or <code>button</code>.</td></tr>
+            <tr><td><code>"1"</code>, <code>"2"</code>, …</td><td>No</td><td>Positional placeholders issued by Meta (<code>{{1}}</code>, <code>{{2}}</code>). Keys must be consecutive starting at <code>1</code>.</td></tr>
+            <tr><td><code>name</code>, <code>order_id</code>, …</td><td>No</td><td>Named placeholders from the approved template. Do not mix numbered and named keys in the same component entry.</td></tr>
+            <tr><td><code>index</code></td><td>No</td><td>Button index (0–9). Defaults to <code>0</code>. Alias: <code>buttonIndex</code>.</td></tr>
+            <tr><td><code>subType</code></td><td>No</td><td>Button subtype. Helixcer format currently expands text URL buttons (<code>url</code>). Alias: <code>sub_type</code>.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p>Use <a href="#templates">List templates</a> or <a href="#template">Fetch template</a> to learn each variable's <code class="plain">component</code> and <code class="plain">key</code>. Media headers, currency, date/time, OTP, and quick-reply payloads stay on the <a href="#send">WhatsApp Meta</a> endpoint.</p></div>
+      </section>
+
+      <section id="helixcer-examples">
+        <p class="eyebrow">WhatsApp Helixcer</p><h2>Helixcer format examples</h2>
+        <p class="intro">Each panel shows the Helixcer <code class="plain">variables</code> portion. Add the same top-level <code class="plain">channelId</code>, <code class="plain">to</code>, <code class="plain">template.name</code>, language, and headers used above.</p>
+        <div class="examples">
+          <details open>
+            <summary>Simple template with no variables <span class="tag">No variables</span></summary>
+            <div class="detail"><p>Omit <code class="plain">variables</code> when the approved template contains no runtime values.</p>
+              <div class="code-card"><div class="code-head"><span>request</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "to": "919999999999",
+  "template": {
+    "name": "hello_world",
+    "language": { "code": "en_US" }
+  }
+}</code></pre></div>
+            </div>
+          </details>
+          <details>
+            <summary>Positional body variables <span class="tag">Body</span></summary>
+            <div class="detail"><p>Map Meta <code class="plain">{{1}}</code> and <code class="plain">{{2}}</code> with numbered keys.</p>
+              <div class="code-card"><div class="code-head"><span>variables</span><button class="copy" type="button">Copy</button></div><pre><code>"variables": [
+  { "component": "body", "1": "ORD-1001", "2": "28 October" }
+]</code></pre></div>
+            </div>
+          </details>
+          <details>
+            <summary>Named body variables <span class="tag">Named</span></summary>
+            <div class="detail"><p>Use the approved parameter names as object keys.</p>
+              <div class="code-card"><div class="code-head"><span>variables</span><button class="copy" type="button">Copy</button></div><pre><code>"variables": [
+  {
+    "component": "body",
+    "customer_name": "Asha",
+    "order_number": "ORD-1001"
+  }
+]</code></pre></div>
+            </div>
+          </details>
+          <details>
+            <summary>Header, body, and URL button <span class="tag">Mixed</span></summary>
+            <div class="detail"><p>Numbering restarts per component. Header <code class="plain">{{1}}</code> and body <code class="plain">{{1}}</code> are different slots.</p>
+              <div class="code-card"><div class="code-head"><span>variables</span><button class="copy" type="button">Copy</button></div><pre><code>"variables": [
+  { "component": "header", "1": "Rahul" },
+  { "component": "body", "1": "ORDR-1", "2": "In Transit" },
+  { "component": "button", "index": 0, "1": "track-abc" }
+]</code></pre></div>
+            </div>
+          </details>
+        </div>
+      </section>
+
       <section id="responses">
         <p class="eyebrow">Accepted response</p><h2>Every valid send is asynchronous</h2>
         <p class="intro">Helixcer first records the message and queues provider delivery. Accepted sends therefore return <code class="plain">202 Accepted</code>. The first <code class="plain">messageStatus</code> value is normally <code class="plain">pending</code>; Meta submission happens just after the response.</p>
@@ -554,7 +660,7 @@ Content-Type: application/json</code></pre></div>
         </ul></div>
       </section>
       <section id="meta">
-        <p class="eyebrow">Source of truth</p><h2>Official Meta references</h2>
+        <p class="eyebrow">WhatsApp Meta</p><h2>Official Meta references</h2>
         <p class="intro">Meta controls template approval, names, locales, component schemas, parameter types, limits, and feature availability by account and region. Use the current official payload for advanced components.</p>
         <div class="official">
           <a href="https://www.postman.com/meta/whatsapp-business-platform/documentation/wlk6lh4/whatsapp-cloud-api" target="_blank" rel="noopener"><strong>WhatsApp Cloud API collection</strong><span>Official Meta Postman documentation</span></a>

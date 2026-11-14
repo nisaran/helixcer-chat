@@ -1,8 +1,9 @@
 # Helixcer Developer API
 
-Connect external applications to the Helixcer inbox through the Helixcer Messaging API. The currently available channel module is WhatsApp.
+Connect external applications to the Helixcer inbox through the Helixcer Messaging API. The currently available channel module is WhatsApp, with two send formats:
 
-## WhatsApp
+- **WhatsApp Meta** — Meta-native `template.components` (existing integrations keep this path)
+- **WhatsApp Helixcer** — simpler per-component variable maps on a separate endpoint
 
 ### Template messages
 
@@ -17,7 +18,8 @@ Send approved WhatsApp templates from your server while keeping every outbound m
 | | |
 |---|---|
 | Base URL | `https://api.chat.helixcer.com` |
-| Send a template | `POST /api/v1/whatsapp/template-messages` |
+| Send a template (Meta format) | `POST /api/v1/whatsapp/template-messages` |
+| Send a template (Helixcer format) | `POST /api/v1/whatsapp/helixcer/template-messages` |
 | List templates | `GET /api/v1/whatsapp/templates?channelId=...` |
 | Fetch template | `GET /api/v1/whatsapp/templates/{templateName}?channelId=...` |
 | Read message status | `GET /api/v1/messages/{messageId}` |
@@ -25,7 +27,7 @@ Send approved WhatsApp templates from your server while keeping every outbound m
 | Workspace | `X-Workspace-Id: YOUR_WORKSPACE_ID` |
 | Request format | `application/json` |
 
-Your application supplies a Helixcer channel ID and a Meta-native template object. Helixcer selects the saved WhatsApp connection, writes the outbound message to the chatbox, sends it to Meta, and applies Meta status webhooks to the same message.
+Your application supplies a Helixcer channel ID and either a Meta-native template object or Helixcer `variables`. Helixcer selects the saved WhatsApp connection, writes the outbound message to the chatbox, sends it to Meta, and applies Meta status webhooks to the same message.
 
 Your application must **not** send a Meta access token, WhatsApp Business Account ID, phone-number ID, Graph API URL, `messaging_product`, or `recipient_type`. Those belong to the selected Helixcer channel.
 
@@ -42,7 +44,9 @@ An API key is shown once. Store it in a server-side secret manager or environmen
 
 Keys are bound to one workspace and apply to its WhatsApp connections. Copy the read-only workspace ID from **Workspace** in Helixcer and send it in `X-Workspace-Id` with every request. Helixcer verifies that the header matches the API key; it cannot grant access to another workspace. Sending requires the `whatsapp:template:send` scope; reading status requires `messages:read`. Every send still selects the required workspace connection with `channelId`. Revoke and replace a key immediately if it may have leaked; rotate production keys periodically.
 
-## Send a template message
+## WhatsApp Meta · Send a template message
+
+Existing Meta-native integrations keep this endpoint and payload shape.
 
 ```http
 POST https://api.chat.helixcer.com/api/v1/whatsapp/template-messages
@@ -204,9 +208,84 @@ X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
 }
 ```
 
-## Template examples
+## WhatsApp Helixcer · Send a template message
 
-The examples below show only the request body. Every send request also needs the authentication and content-type headers shown above.
+Use this endpoint when you want Helixcer to expand a simple variable map into Meta `components`. The Meta endpoint above is unchanged.
+
+```http
+POST https://api.chat.helixcer.com/api/v1/whatsapp/helixcer/template-messages
+Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
+X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
+```
+
+```json
+{
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "to": "919999999999",
+  "contact": {
+    "name": "Asha",
+    "company": "Acme Retail",
+    "tags": ["VIP", "Orders"]
+  },
+  "clientReference": "order-1001",
+  "previewText": "Order ORD-1001 confirmed",
+  "template": {
+    "name": "order_confirmation",
+    "language": { "code": "en_US" }
+  },
+  "variables": [
+    { "component": "body", "1": "Asha", "2": "ORD-1001" }
+  ]
+}
+```
+
+| Field | Required | Description |
+|---|---:|---|
+| `channelId` | Yes | Helixcer ID of the WhatsApp channel. |
+| `to` | Yes | Recipient WhatsApp number in international digits-only format. |
+| `contact` | No | Same optional contact fields as the Meta endpoint. |
+| `clientReference` | No | Your order, ticket, campaign, or transaction ID. |
+| `previewText` | No | Optional inbox-text override. |
+| `template` | Yes | Template identity only: `name` and `language.code`. Do not send Meta `components` here. |
+| `variables` | No | Array of component maps. Omit when the template has no runtime values. |
+
+### Helixcer variables
+
+Each array item names a component and supplies Meta placeholder values as `"1":"value"` or named keys such as `"customer_name":"Asha"`.
+
+```json
+"variables": [
+  { "component": "header", "1": "Rahul" },
+  { "component": "body", "1": "ORDR-1", "2": "In Transit" },
+  { "component": "button", "index": 0, "1": "track-abc" }
+]
+```
+
+Named templates use the approved parameter name as the key:
+
+```json
+"variables": [
+  {
+    "component": "body",
+    "customer_name": "Asha",
+    "order_number": "ORD-1001"
+  }
+]
+```
+
+| Field | Required | Description |
+|---|---:|---|
+| `component` | Yes | `header`, `body`, or `button`. |
+| `"1"`, `"2"`, … | No | Positional Meta placeholders. Keys must be consecutive starting at `1`. |
+| Named keys | No | Approved parameter names. Do not mix numbered and named keys in one entry. |
+| `index` | No | Button index (0–9). Defaults to `0`. Alias: `buttonIndex`. |
+| `subType` | No | Button subtype. Helixcer format expands text URL buttons (`url`). Alias: `sub_type`. |
+
+Use list/fetch template responses to learn each variable's `component` and `key`. Media headers, currency, date/time, OTP, and quick-reply payloads stay on the WhatsApp Meta endpoint.
+
+## WhatsApp Meta · Template examples
+
+The examples below show only the request body for the Meta endpoint. Every send request also needs the authentication and content-type headers shown above.
 
 ### Simple template with no variables
 
