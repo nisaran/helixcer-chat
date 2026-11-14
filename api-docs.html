@@ -490,23 +490,23 @@ Content-Type: application/json</code></pre></div>
             <tr><td><code>variables</code></td><td>No</td><td>Array of component maps. Omit when the approved template has no runtime values.</td></tr>
           </tbody>
         </table></div>
-        <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p><strong>Existing Meta integrations are unchanged.</strong> Keep using <code class="plain">POST /api/v1/whatsapp/template-messages</code> with Meta-native <code class="plain">components</code>. Use this Helixcer endpoint only when you want the simpler variable map. List and fetch templates remain the same GET routes for both formats.</p></div>
       </section>
 
       <section id="helixcer-format">
         <p class="eyebrow">WhatsApp Helixcer</p><h2>Helixcer variable format</h2>
-        <p class="intro">Each item names a component (<code class="plain">header</code>, <code class="plain">body</code>, or <code class="plain">button</code>) and supplies Meta placeholder values as <code class="plain">"1":"value"</code> or named keys such as <code class="plain">"customer_name":"Asha"</code>.</p>
+        <p class="intro">Each item names a component (<code class="plain">header</code>, <code class="plain">body</code>, or <code class="plain">button</code>) and supplies values as <code class="plain">"1":"value"</code> or named keys such as <code class="plain">"customer_name":"Asha"</code>. You do not send Meta parameter <code class="plain">type</code>. Helixcer loads the approved template and maps each value to the correct Meta type (<code class="plain">text</code>, <code class="plain">image</code>, <code class="plain">video</code>, <code class="plain">document</code>, URL button text, and similar string-backed slots).</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>component</code></td><td class="yes">Yes</td><td><code>header</code>, <code>body</code>, or <code>button</code>.</td></tr>
-            <tr><td><code>"1"</code>, <code>"2"</code>, …</td><td>No</td><td>Positional placeholders issued by Meta (<code>{{1}}</code>, <code>{{2}}</code>). Keys must be consecutive starting at <code>1</code>.</td></tr>
+            <tr><td><code>"1"</code>, <code>"2"</code>, …</td><td>No</td><td>Positional placeholders issued by Meta (<code>{{1}}</code>, <code>{{2}}</code>). Keys must be consecutive starting at <code>1</code>. For media headers, <code>"1"</code> or <code>media</code> is accepted.</td></tr>
             <tr><td><code>name</code>, <code>order_id</code>, …</td><td>No</td><td>Named placeholders from the approved template. Do not mix numbered and named keys in the same component entry.</td></tr>
             <tr><td><code>index</code></td><td>No</td><td>Button index (0–9). Defaults to <code>0</code>. Alias: <code>buttonIndex</code>.</td></tr>
-            <tr><td><code>subType</code></td><td>No</td><td>Button subtype. Helixcer format currently expands text URL buttons (<code>url</code>). Alias: <code>sub_type</code>.</td></tr>
+            <tr><td><code>subType</code></td><td>No</td><td>Optional button subtype override. When omitted, Helixcer infers it from the approved template. Alias: <code>sub_type</code>.</td></tr>
+            <tr><td><code>filename</code></td><td>No</td><td>Optional document filename when the approved header is a document.</td></tr>
           </tbody>
         </table></div>
-        <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p>Use <a href="#templates">List templates</a> or <a href="#template">Fetch template</a> to learn each variable's <code class="plain">component</code> and <code class="plain">key</code>. Media headers, currency, date/time, OTP, and quick-reply payloads stay on the <a href="#send">WhatsApp Meta</a> endpoint.</p></div>
+        <div class="notice info"><span class="notice-mark" aria-hidden="true">i</span><p>Use <a href="#templates">List templates</a> or <a href="#template">Fetch template</a> to learn each variable's <code class="plain">component</code>, <code class="plain">key</code>, and <code class="plain">kind</code>. Currency, date/time, and other structured Meta parameter objects still use the <a href="#send">WhatsApp Meta</a> endpoint.</p></div>
       </section>
 
       <section id="helixcer-examples">
@@ -553,6 +553,16 @@ Content-Type: application/json</code></pre></div>
   { "component": "header", "1": "Rahul" },
   { "component": "body", "1": "ORDR-1", "2": "In Transit" },
   { "component": "button", "index": 0, "1": "track-abc" }
+]</code></pre></div>
+            </div>
+          </details>
+          <details>
+            <summary>Image, video, or document header <span class="tag">Media</span></summary>
+            <div class="detail"><p>Send only the media value. Helixcer reads the approved header format and builds the correct Meta parameter type. Use a public HTTPS URL or a Meta media id. Optional <code class="plain">filename</code> applies to document headers.</p>
+              <div class="code-card"><div class="code-head"><span>variables</span><button class="copy" type="button">Copy</button></div><pre><code>"variables": [
+  { "component": "header", "1": "https://cdn.example.com/products/item.jpg" },
+  { "component": "body", "1": "Asha" },
+  { "component": "button", "index": 0, "1": "item-1001" }
 ]</code></pre></div>
             </div>
           </details>

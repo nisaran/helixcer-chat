@@ -1321,15 +1321,31 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
     WHERE workspace_id=?1 AND channel_id=?2 AND credential_key='accessToken'`).bind(principal.workspaceId, channel.channelId).first();
   if (!accessToken) throw apiError(409, 'channel_not_ready', 'The WhatsApp channel is missing its access token.');
 
+  let template = input.template;
+  if (format === 'helixcer') {
+    let definition = null;
+    try {
+      definition = await findWhatsAppChannelTemplate(env, channel, input.template.name, input.template.language?.code);
+    } catch {
+      // Catalogue lookup improves type inference; text-only templates can still send.
+    }
+    const components = buildMetaComponentsFromHelixcerVariables(input.variables, definition);
+    template = validateWhatsAppTemplate({
+      name: input.template.name,
+      language: input.template.language,
+      ...(components.length ? { components } : {})
+    });
+  }
+
   const now = new Date().toISOString();
   const messageId = crypto.randomUUID();
   const externalRequestId = crypto.randomUUID();
-  const presentation = await externalTemplateInboxPresentation(env, channel, input.template, input.previewText);
+  const presentation = await externalTemplateInboxPresentation(env, channel, template, input.previewText);
   const sender = outboundSenderAttribution(principal);
   const senderName = sender.name;
   const preview = presentation.text;
   const storedPayload = { ...presentation.storedPayload, senderName };
-  const encryptedPayload = await encryptOutboundPayload({ template: input.template }, env.CHANNEL_CREDENTIALS_KEY,
+  const encryptedPayload = await encryptOutboundPayload({ template }, env.CHANNEL_CREDENTIALS_KEY,
     principal.workspaceId, messageId);
   // Prepare everything that can fail without writing application state before
   // creating the recipient identity, binding, or conversation. In particular,
@@ -1529,92 +1545,183 @@ export function validateHelixcerWhatsAppTemplateRequest(payload) {
   const previewText = payload.previewText === undefined ? '' : cleanOptionalText(payload.previewText, 'Preview text', MAX_TEXT_LENGTH);
   if (!isPlainObject(payload.template)) throw httpError(400, 'Template must be an object.');
   rejectUnknownKeys(payload.template, new Set(['name', 'language']), 'template');
-  const components = buildMetaComponentsFromHelixcerVariables(payload.variables);
   const template = validateWhatsAppTemplate({
     name: payload.template.name,
-    language: payload.template.language,
-    ...(components.length ? { components } : {})
+    language: payload.template.language
   });
-  return { channelId, to, contact, template, clientReference, previewText };
+  const variables = normalizeHelixcerVariableEntries(payload.variables);
+  return { channelId, to, contact, template, variables, clientReference, previewText };
 }
 
-const HELIXCER_VARIABLE_RESERVED_KEYS = new Set(['component', 'index', 'buttonIndex', 'subType', 'sub_type']);
+const HELIXCER_VARIABLE_RESERVED_KEYS = new Set(['component', 'index', 'buttonIndex', 'subType', 'sub_type', 'filename']);
+const HELIXCER_MEDIA_KINDS = new Set(['image', 'video', 'document']);
 
-export function buildMetaComponentsFromHelixcerVariables(variables) {
+function normalizeHelixcerVariableEntries(variables) {
   if (variables === undefined || variables === null) return [];
   if (!Array.isArray(variables) || variables.length > 20) {
     throw httpError(400, 'Variables must be an array with no more than 20 items.');
   }
-  const components = [];
-  for (let entryIndex = 0; entryIndex < variables.length; entryIndex++) {
-    const entry = variables[entryIndex];
+  return variables.map((entry, entryIndex) => {
     if (!isPlainObject(entry)) throw httpError(400, `variables[${entryIndex}] must be an object.`);
     const component = String(entry.component || '').trim().toLowerCase();
     if (!['header', 'body', 'button'].includes(component)) {
       throw httpError(400, `variables[${entryIndex}].component must be header, body, or button.`);
     }
+    const filename = entry.filename === undefined
+      ? ''
+      : cleanOptionalText(entry.filename, `variables[${entryIndex}].filename`, 240);
+    const buttonIndex = component === 'button'
+      ? (entry.index === undefined && entry.buttonIndex === undefined
+        ? 0
+        : Number(entry.index ?? entry.buttonIndex))
+      : null;
+    if (component === 'button' && (!Number.isInteger(buttonIndex) || buttonIndex < 0 || buttonIndex > 9)) {
+      throw httpError(400, `variables[${entryIndex}] button index must be an integer from 0 to 9.`);
+    }
+    const subType = String(entry.subType || entry.sub_type || '').trim().toLowerCase();
+    if (subType && !['url', 'quick_reply', 'copy_code'].includes(subType)) {
+      throw httpError(400, `variables[${entryIndex}] button subType must be url, quick_reply, or copy_code.`);
+    }
     const valueKeys = Object.keys(entry).filter(key => !HELIXCER_VARIABLE_RESERVED_KEYS.has(key));
     if (!valueKeys.length) throw httpError(400, `variables[${entryIndex}] must include at least one variable value.`);
-    const positional = [];
-    const named = [];
+    const values = [];
+    let hasPositional = false;
+    let hasNamed = false;
     for (const key of valueKeys) {
       const rawValue = entry[key];
       if (typeof rawValue !== 'string') {
-        throw httpError(400, `variables[${entryIndex}].${key} must be text. Use the Meta template endpoint for media or typed parameters.`);
+        throw httpError(400, `variables[${entryIndex}].${key} must be text.`);
       }
-      if (rawValue.length > 1024) throw httpError(400, `variables[${entryIndex}].${key} is longer than 1024 characters.`);
+      if (rawValue.length > 2048) throw httpError(400, `variables[${entryIndex}].${key} is longer than 2048 characters.`);
       if (/^\d+$/.test(key)) {
         const position = Number(key);
         if (position < 1 || position > 50) throw httpError(400, `variables[${entryIndex}] has an invalid variable number.`);
-        positional.push({ position, text: rawValue });
+        hasPositional = true;
+        values.push({ key, position, value: rawValue });
       } else {
         const parameterName = providerIdentifier(key, 100);
         if (!parameterName || !/^[A-Za-z][A-Za-z0-9_]{0,99}$/.test(parameterName)) {
           throw httpError(400, `variables[${entryIndex}] has an invalid variable name.`);
         }
-        named.push({ parameterName, text: rawValue });
+        hasNamed = true;
+        values.push({ key: parameterName, position: null, value: rawValue });
       }
     }
-    if (positional.length && named.length) {
+    if (hasPositional && hasNamed) {
       throw httpError(400, `variables[${entryIndex}] cannot mix numbered and named variables.`);
     }
-    let parameters;
-    if (positional.length) {
-      positional.sort((left, right) => left.position - right.position);
-      for (let index = 0; index < positional.length; index++) {
-        if (positional[index].position !== index + 1) {
+    if (hasPositional) {
+      values.sort((left, right) => left.position - right.position);
+      for (let index = 0; index < values.length; index++) {
+        if (values[index].position !== index + 1) {
           throw httpError(400, `variables[${entryIndex}] numbered keys must be consecutive starting at 1.`);
         }
       }
-      parameters = positional.map(item => ({ type: 'text', text: item.text }));
-    } else {
-      parameters = named.map(item => ({ type: 'text', parameter_name: item.parameterName, text: item.text }));
     }
-    if (component === 'button') {
-      const buttonIndex = entry.index === undefined && entry.buttonIndex === undefined
-        ? 0
-        : Number(entry.index ?? entry.buttonIndex);
-      if (!Number.isInteger(buttonIndex) || buttonIndex < 0 || buttonIndex > 9) {
-        throw httpError(400, `variables[${entryIndex}] button index must be an integer from 0 to 9.`);
-      }
-      const subType = String(entry.subType || entry.sub_type || 'url').trim().toLowerCase();
-      if (!['url', 'quick_reply', 'copy_code'].includes(subType)) {
-        throw httpError(400, `variables[${entryIndex}] button subType must be url, quick_reply, or copy_code.`);
-      }
-      if (subType !== 'url') {
-        throw httpError(400, `variables[${entryIndex}] supports text URL button values only. Use the Meta template endpoint for ${subType} buttons.`);
-      }
+    return {
+      component,
+      buttonIndex,
+      subType,
+      filename,
+      values
+    };
+  });
+}
+
+export function buildMetaComponentsFromHelixcerVariables(variables, definition = null) {
+  const entries = Array.isArray(variables) && variables.length && isPlainObject(variables[0]) && Array.isArray(variables[0]?.values)
+    ? variables
+    : normalizeHelixcerVariableEntries(variables);
+  if (!entries.length) return [];
+  const slots = Array.isArray(definition?.variables) ? definition.variables : [];
+  const components = [];
+  for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
+    const entry = entries[entryIndex];
+    const parameters = entry.values.map((item, valueIndex) => helixcerParameterFromTemplateSlot(
+      entry, item, valueIndex, slots, entryIndex
+    ));
+    if (entry.component === 'button') {
+      const inferred = helixcerButtonSubType(entry, slots);
       components.push({
         type: 'button',
-        sub_type: 'url',
-        index: String(buttonIndex),
+        sub_type: inferred,
+        index: String(entry.buttonIndex ?? 0),
         parameters
       });
       continue;
     }
-    components.push({ type: component, parameters });
+    components.push({ type: entry.component, parameters });
   }
   return components;
+}
+
+function helixcerButtonSubType(entry, slots) {
+  if (entry.subType) return entry.subType;
+  const match = slots.find(slot => String(slot?.component || '').toLowerCase() === 'button'
+    && Number(slot?.buttonIndex ?? 0) === Number(entry.buttonIndex ?? 0));
+  const kind = String(match?.kind || 'url').toLowerCase();
+  if (kind === 'quick_reply' || kind === 'copy_code' || kind === 'url') return kind;
+  return 'url';
+}
+
+function helixcerFindTemplateSlot(slots, entry, key, valueIndex) {
+  const component = entry.component;
+  const buttonIndex = Number(entry.buttonIndex ?? 0);
+  const matches = slots.filter(slot => {
+    if (String(slot?.component || '').toLowerCase() !== component) return false;
+    if (component === 'button' && Number(slot?.buttonIndex ?? 0) !== buttonIndex) return false;
+    return true;
+  });
+  let slot = matches.find(item => String(item?.key || '') === key);
+  if (!slot && component === 'header' && (key === '1' || key === 'media')) {
+    slot = matches.find(item => item?.key === 'media' || HELIXCER_MEDIA_KINDS.has(String(item?.kind || '').toLowerCase()));
+  }
+  if (!slot && /^\d+$/.test(key)) {
+    slot = matches.find(item => Number(item?.parameterIndex) === Number(key) - 1)
+      || matches[valueIndex];
+  }
+  return slot || null;
+}
+
+function helixcerParameterFromTemplateSlot(entry, item, valueIndex, slots, entryIndex) {
+  const slot = helixcerFindTemplateSlot(slots, entry, item.key, valueIndex);
+  const kind = String(slot?.kind || 'text').toLowerCase();
+  const path = `variables[${entryIndex}].${item.key}`;
+  if (HELIXCER_MEDIA_KINDS.has(kind)) {
+    return helixcerMediaParameter(kind, item.value, entry.filename, path);
+  }
+  if (kind === 'url' || kind === 'text' || !slot) {
+    const parameter = { type: 'text', text: item.value.slice(0, 1024) };
+    if (slot?.key && !/^\d+$/.test(String(slot.key)) && String(slot.key) !== 'media') {
+      parameter.parameter_name = String(slot.key);
+    } else if (!/^\d+$/.test(item.key) && item.key !== 'media') {
+      parameter.parameter_name = item.key;
+    }
+    return parameter;
+  }
+  if (kind === 'quick_reply' || entry.subType === 'quick_reply') {
+    return { type: 'payload', payload: item.value.slice(0, 1024) };
+  }
+  if (kind === 'copy_code' || entry.subType === 'copy_code') {
+    return { type: 'coupon_code', coupon_code: item.value.slice(0, 256) };
+  }
+  throw httpError(400, `${path} maps to template kind "${kind}", which needs the Meta template endpoint.`);
+}
+
+function helixcerMediaParameter(kind, value, filename, path) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) throw httpError(400, `${path} must not be empty for a ${kind} header.`);
+  const media = {};
+  if (/^https:\/\//i.test(trimmed)) {
+    validatePublicHttpsMediaUrl(trimmed, path);
+    media.link = new URL(trimmed).toString();
+  } else {
+    const id = providerIdentifier(trimmed, 256);
+    if (!id) throw httpError(400, `${path} must be a public HTTPS URL or Meta media id.`);
+    media.id = id;
+  }
+  if (kind === 'document' && filename) media.filename = filename;
+  return { type: kind, [kind]: media };
 }
 
 export function validateExternalTemplateContact(value) {

@@ -603,7 +603,8 @@ test('maps Helixcer variables into Meta components for numbered and named placeh
     template: { name: 'named_order_confirmation', language: { code: 'en_US' } },
     variables: [{ component: 'body', customer_name: 'Asha', order_number: 'ORD-1001' }]
   });
-  assert.deepEqual(named.template.components, [{
+  assert.equal(named.template.components.length, 0);
+  assert.deepEqual(buildMetaComponentsFromHelixcerVariables(named.variables), [{
     type: 'body',
     parameters: [
       { type: 'text', parameter_name: 'customer_name', text: 'Asha' },
@@ -621,6 +622,33 @@ test('maps Helixcer variables into Meta components for numbered and named placeh
   assert.throws(() => buildMetaComponentsFromHelixcerVariables([
     { component: 'body', '2': 'missing-one' }
   ]), /consecutive starting at 1/);
+});
+
+test('infers Helixcer media and button parameter types from the approved template', () => {
+  const definition = {
+    variables: [
+      { component: 'header', key: 'media', kind: 'image', parameterIndex: 0 },
+      { component: 'body', key: '1', kind: 'text', parameterIndex: 0 },
+      { component: 'button', buttonIndex: 0, key: '1', kind: 'url', parameterIndex: 0 }
+    ]
+  };
+  assert.deepEqual(buildMetaComponentsFromHelixcerVariables([
+    { component: 'header', '1': 'https://cdn.example.com/item.jpg' },
+    { component: 'body', '1': 'Asha' },
+    { component: 'button', index: 0, '1': 'track-1001' }
+  ], definition), [
+    { type: 'header', parameters: [{ type: 'image', image: { link: 'https://cdn.example.com/item.jpg' } }] },
+    { type: 'body', parameters: [{ type: 'text', text: 'Asha' }] },
+    { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'track-1001' }] }
+  ]);
+
+  assert.deepEqual(buildMetaComponentsFromHelixcerVariables([
+    { component: 'header', media: 'META_MEDIA_ID', filename: 'INV-1001.pdf' }
+  ], {
+    variables: [{ component: 'header', key: 'media', kind: 'document', parameterIndex: 0 }]
+  }), [
+    { type: 'header', parameters: [{ type: 'document', document: { id: 'META_MEDIA_ID', filename: 'INV-1001.pdf' } }] }
+  ]);
 });
 
 test('sanitizes Meta template definitions while retaining positional, named, media, and button inputs', () => {
