@@ -6994,11 +6994,41 @@ async function resolveMetaAppIdForWhatsAppToken(credentials, apiVersion) {
   return appId;
 }
 
+export function metaResumableUploadSessionPath(sessionId) {
+  const id = String(sessionId || '').trim();
+  if (!id) throw httpError(502, 'Meta did not return an upload session id.');
+  // Graph documents POST /vX.Y/upload:<SESSION_ID>. Encoding the colon as %3A makes Meta
+  // report "Unsupported post request. Object with ID 'upload:…' does not exist".
+  if (/^upload:/i.test(id)) return id;
+  if (/^[A-Za-z0-9+/=_-]+$/.test(id)) return `upload:${id}`;
+  throw httpError(502, 'Meta returned an invalid upload session id.');
+}
+
+export function metaTemplateSampleFileName(filename, mimeType) {
+  const type = String(mimeType || '').toLowerCase().split(';', 1)[0].trim();
+  const extension = type === 'application/pdf' ? 'pdf'
+    : type === 'video/mp4' ? 'mp4'
+      : type === 'image/png' ? 'png'
+        : 'jpg';
+  const base = String(filename || 'sample')
+    .replace(/\.[A-Za-z0-9]{1,8}$/, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'sample';
+  return `${base}.${extension}`;
+}
+
 async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId, file, mimeType, filename) {
   const version = metaApiVersion(apiVersion);
-  const size = Number(file.size || 0);
+  const bytes = file instanceof ArrayBuffer
+    ? file
+    : await file.arrayBuffer();
+  const size = Number(bytes?.byteLength || file?.size || 0);
+  if (!Number.isFinite(size) || size <= 0) throw httpError(400, 'The sample media file is empty.');
+  const safeName = metaTemplateSampleFileName(filename, mimeType);
   const sessionEndpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(appId)}/uploads`);
-  sessionEndpoint.searchParams.set('file_name', filename);
+  sessionEndpoint.searchParams.set('file_name', safeName);
   sessionEndpoint.searchParams.set('file_length', String(size));
   sessionEndpoint.searchParams.set('file_type', mimeType);
   let sessionResponse;
@@ -7016,15 +7046,17 @@ async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId,
     const detail = redactProviderSecret(providerError(sessionData, sessionResponse.status), credentials.accessToken);
     throw httpError(422, `Meta could not start the template media upload: ${detail}`);
   }
+  const uploadPath = metaResumableUploadSessionPath(sessionId);
   let uploadResponse;
   try {
-    uploadResponse = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(sessionId)}`, {
+    uploadResponse = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${uploadPath}`, {
       method: 'POST',
       headers: {
         Authorization: `OAuth ${credentials.accessToken}`,
-        file_offset: '0'
+        file_offset: '0',
+        'Content-Type': mimeType
       },
-      body: file
+      body: bytes
     });
   } catch {
     throw httpError(502, 'Meta could not accept the template sample media upload.');
@@ -7057,10 +7089,11 @@ function validateWhatsAppTemplateSampleMediaFile(file, format) {
   if (size > limits.maxBytes) {
     throw httpError(413, `Sample ${format.toLowerCase()} media may not exceed ${Math.round(limits.maxBytes / (1024 * 1024))} MB.`);
   }
-  const rawName = String(file.name || `sample.${mimeType.split('/')[1] || 'bin'}`)
+  const normalizedMime = mimeType === 'image/jpg' ? 'image/jpeg' : mimeType;
+  const rawName = String(file.name || `sample.${normalizedMime.split('/')[1] || 'bin'}`)
     .replace(/[\u0000-\u001f\u007f\\/]+/g, ' ').trim();
-  const filename = (rawName || 'sample').slice(0, 240);
-  return { mimeType: mimeType === 'image/jpg' ? 'image/jpeg' : mimeType, size, filename };
+  const filename = metaTemplateSampleFileName(rawName || 'sample', normalizedMime);
+  return { mimeType: normalizedMime, size, filename };
 }
 
 async function uploadWorkspaceWhatsAppTemplateSampleMedia(env, workspaceId, request, principal) {
