@@ -896,7 +896,10 @@
       <section class="route content-route template-library-route" id="whatsappTemplatesRoute" data-route-panel="whatsapp-templates" aria-labelledby="whatsappTemplatesTitle" hidden>
         <div class="route-heading">
           <div><p class="eyebrow">Channel data · WhatsApp</p><h2 id="whatsappTemplatesTitle">WhatsApp Templates</h2><p>Search and preview templates from every connected WhatsApp account.</p></div>
-          <button class="secondary-button" id="refreshWhatsAppTemplates" type="button" data-action="refresh-whatsapp-templates"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15"/></svg>Refresh</button>
+          <div class="route-heading-actions">
+            <button class="secondary-button" id="refreshWhatsAppTemplates" type="button" data-action="refresh-whatsapp-templates"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15"/></svg>Refresh</button>
+            <button class="primary-button" type="button" data-action="open-create-whatsapp-template"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create template</button>
+          </div>
         </div>
 
         <section class="surface template-library-surface" aria-label="WhatsApp template library">
@@ -1548,6 +1551,94 @@
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-contact-dialog">Cancel</button>
         <button class="primary-button" type="submit">Create contact</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal create-template-modal" id="createWhatsAppTemplateDialog" aria-labelledby="createWhatsAppTemplateTitle">
+    <form class="modal-card create-template-card" id="createWhatsAppTemplateForm" autocomplete="off">
+      <div class="modal-head">
+        <div><p class="eyebrow">WhatsApp templates</p><h2 id="createWhatsAppTemplateTitle">Create a template</h2></div>
+        <button class="icon-button" type="button" data-action="close-create-whatsapp-template" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="modal-copy">Compose header, body, footer, and buttons with sample variables. Helixcer submits the draft to Meta for review on the selected WhatsApp account.</p>
+      <div class="create-template-layout">
+        <div class="create-template-fields">
+          <div class="form-grid">
+            <label class="field-label form-span">WhatsApp channel
+              <select class="text-field" name="channelId" id="createTemplateChannel" required></select>
+            </label>
+            <label class="field-label">Template name<input class="text-field" name="name" id="createTemplateName" required maxlength="512" pattern="[a-z0-9_]+" placeholder="order_confirmation"><span class="field-hint">Lowercase letters, numbers, and underscores only.</span></label>
+            <label class="field-label">Language
+              <select class="text-field" name="language" id="createTemplateLanguage" required></select>
+            </label>
+            <label class="field-label">Category
+              <select class="text-field" name="category" id="createTemplateCategory" required>
+                <option value="UTILITY">Utility</option>
+                <option value="MARKETING">Marketing</option>
+              </select>
+            </label>
+            <label class="field-label">Variable format
+              <select class="text-field" name="parameterFormat" id="createTemplateParameterFormat">
+                <option value="positional">Numbered · {{1}}, {{2}}</option>
+                <option value="named">Named · {{customer_name}}</option>
+              </select>
+            </label>
+          </div>
+
+          <fieldset class="create-template-section">
+            <legend>Header <span class="optional-label">optional</span></legend>
+            <div class="form-grid">
+              <label class="field-label">Type
+                <select class="text-field" name="headerFormat" id="createTemplateHeaderFormat">
+                  <option value="NONE">None</option>
+                  <option value="TEXT">Text</option>
+                </select>
+              </label>
+              <label class="field-label form-span" id="createTemplateHeaderTextWrap" hidden>Header text
+                <input class="text-field" name="headerText" id="createTemplateHeaderText" maxlength="60" placeholder="Order update for {{1}}">
+              </label>
+              <div class="form-span create-template-examples" id="createTemplateHeaderExamples" hidden></div>
+            </div>
+          </fieldset>
+
+          <fieldset class="create-template-section">
+            <legend>Body</legend>
+            <label class="field-label">Message text
+              <textarea class="text-field workspace-textarea" name="bodyText" id="createTemplateBodyText" required rows="5" maxlength="1024" placeholder="Hi {{1}}, your order {{2}} is confirmed."></textarea>
+              <span class="field-hint">Use {{1}} / {{2}} or named variables such as {{customer_name}}. Sample values are required for every variable.</span>
+            </label>
+            <div class="create-template-examples" id="createTemplateBodyExamples"></div>
+          </fieldset>
+
+          <fieldset class="create-template-section">
+            <legend>Footer <span class="optional-label">optional</span></legend>
+            <label class="field-label">Footer text
+              <input class="text-field" name="footerText" id="createTemplateFooterText" maxlength="60" placeholder="Thank you for shopping with us">
+            </label>
+          </fieldset>
+
+          <fieldset class="create-template-section">
+            <legend>Buttons <span class="optional-label">optional</span></legend>
+            <div class="create-template-section-head">
+              <span class="subtle">Add up to 10 actions</span>
+              <button class="secondary-button compact-button" type="button" data-action="add-create-template-button">Add button</button>
+            </div>
+            <div class="create-template-buttons" id="createTemplateButtons"></div>
+            <p class="field-hint">Quick reply, URL, and phone buttons are supported. A dynamic URL variable must sit at the end of the link.</p>
+          </fieldset>
+        </div>
+        <section class="create-template-preview-panel" aria-live="polite">
+          <span class="field-label">Live preview</span>
+          <div class="template-preview-phone">
+            <div class="whatsapp-template-preview" id="createTemplatePreview"></div>
+          </div>
+          <div class="create-template-variable-summary" id="createTemplateVariableSummary"></div>
+        </section>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-create-whatsapp-template">Cancel</button>
+        <button class="primary-button" id="createWhatsAppTemplateSubmit" type="submit">Submit to Meta</button>
       </div>
     </form>
   </dialog>

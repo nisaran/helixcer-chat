@@ -34,6 +34,8 @@ import {
   timingSafeEqual,
   validateWhatsAppTemplateRequest,
   validateHelixcerWhatsAppTemplateRequest,
+  validateWhatsAppTemplateCreateRequest,
+  buildMetaWhatsAppTemplateCreatePayload,
   buildMetaComponentsFromHelixcerVariables,
   whatsappReplyWindowState,
   verifyMetaSignature
@@ -670,6 +672,59 @@ test('infers Helixcer media and button parameter types from the approved templat
       }]
     }
   ]);
+});
+
+test('validates WhatsApp template create requests and builds Meta payloads', () => {
+  const input = validateWhatsAppTemplateCreateRequest({
+    channelId: 'wa-sales',
+    name: 'order_confirmation',
+    language: 'en_US',
+    category: 'UTILITY',
+    parameterFormat: 'positional',
+    header: { format: 'TEXT', text: 'Update for {{1}}', example: { '1': 'Asha' } },
+    body: { text: 'Hi {{1}}, order {{2}} is ready.', examples: { '1': 'Asha', '2': 'ORD-1001' } },
+    footer: { text: 'Helixcer Accounts' },
+    buttons: [
+      { type: 'URL', text: 'Track', url: 'https://example.com/orders/{{1}}', example: 'ORD-1001' },
+      { type: 'QUICK_REPLY', text: 'Need help' },
+      { type: 'PHONE_NUMBER', text: 'Call us', phoneNumber: '+919999999999' }
+    ]
+  });
+  assert.equal(input.name, 'order_confirmation');
+  assert.deepEqual(input.body.keys, ['1', '2']);
+  const payload = buildMetaWhatsAppTemplateCreatePayload(input);
+  assert.equal(payload.parameter_format, 'positional');
+  assert.equal(payload.components[0].type, 'HEADER');
+  assert.deepEqual(payload.components[0].example.header_text, ['Asha']);
+  assert.deepEqual(payload.components[1].example.body_text, [['Asha', 'ORD-1001']]);
+  assert.equal(payload.components[2].type, 'FOOTER');
+  assert.equal(payload.components[3].buttons[0].example[0], 'ORD-1001');
+
+  const named = validateWhatsAppTemplateCreateRequest({
+    channelId: 'wa-sales',
+    name: 'named_hello',
+    language: 'en',
+    category: 'MARKETING',
+    parameterFormat: 'named',
+    body: {
+      text: 'Hello {{customer_name}}, welcome to {{store_name}}.',
+      examples: { customer_name: 'Asha', store_name: 'Helixcer' }
+    }
+  });
+  assert.deepEqual(buildMetaWhatsAppTemplateCreatePayload(named).components[0].example.body_text_named_params, [
+    { param_name: 'customer_name', example: 'Asha' },
+    { param_name: 'store_name', example: 'Helixcer' }
+  ]);
+
+  assert.throws(() => validateWhatsAppTemplateCreateRequest({
+    channelId: 'wa-sales', name: 'Bad Name', language: 'en_US', category: 'UTILITY',
+    body: { text: 'Hello' }
+  }), /lowercase/);
+  assert.throws(() => validateWhatsAppTemplateCreateRequest({
+    channelId: 'wa-sales', name: 'gap_vars', language: 'en_US', category: 'UTILITY',
+    parameterFormat: 'positional',
+    body: { text: 'Hello {{1}} and {{3}}.', examples: { '1': 'A', '3': 'B' } }
+  }), /consecutive/);
 });
 
 test('sanitizes Meta template definitions while retaining positional, named, media, and button inputs', () => {

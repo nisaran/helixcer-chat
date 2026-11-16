@@ -1068,6 +1068,47 @@
       ]) };
     }
 
+    async createWhatsAppTemplate(payload) {
+      await smallDelay(160);
+      const name = String(payload?.name || "").trim().toLowerCase();
+      const language = String(payload?.language || "en_US").trim();
+      const channelId = String(payload?.channelId || "wa-sales");
+      const channel = (this.data.channels || []).find((item) => item.channelId === channelId)
+        || { channelId, name: "Sales WhatsApp", setup: { verifiedName: "Helixcer Sales" } };
+      if (!/^[a-z0-9_]+$/.test(name)) throw Object.assign(new Error("Template name may only use lowercase letters, numbers, and underscores."), { status: 400 });
+      if (!payload?.body?.text) throw Object.assign(new Error("Body text is required."), { status: 400 });
+      return {
+        ok: true,
+        channelId,
+        item: {
+          templateId: `demo-${name}-${language}`,
+          id: `demo-${name}-${language}`,
+          name,
+          language: { code: language },
+          status: "PENDING",
+          category: String(payload.category || "UTILITY").toUpperCase(),
+          components: [
+            payload.header?.format === "TEXT" ? { type: "HEADER", format: "TEXT", text: payload.header.text } : null,
+            { type: "BODY", text: payload.body.text },
+            payload.footer?.text ? { type: "FOOTER", text: payload.footer.text } : null,
+            Array.isArray(payload.buttons) && payload.buttons.length
+              ? { type: "BUTTONS", buttons: payload.buttons.map((button) => ({
+                type: button.type,
+                text: button.text,
+                url: button.url,
+                phoneNumber: button.phoneNumber || button.phone_number,
+              })) }
+              : null,
+          ].filter(Boolean),
+          variables: [],
+          channelId,
+          channelName: channel.name,
+          channelEnabled: true,
+          providerDisplayName: channel.setup?.verifiedName || channel.name,
+        },
+      };
+    }
+
     async getWhatsAppTemplates() {
       await smallDelay(180);
       const items = [
@@ -1765,10 +1806,20 @@
         })()}`);
     }
 
-    getWhatsAppTemplates() {
+    getWhatsAppTemplates({ refresh = false } = {}) {
+      const query = refresh ? "?refresh=1" : "";
       return this.isDemo
         ? this.demo.getWhatsAppTemplates()
-        : this.request("/api/channel-data/whatsapp-templates");
+        : this.request(`/api/channel-data/whatsapp-templates${query}`);
+    }
+
+    createWhatsAppTemplate(payload) {
+      return this.isDemo
+        ? this.demo.createWhatsAppTemplate(payload)
+        : this.request("/api/channel-data/whatsapp-templates", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
     }
 
     importChat(payload, { signal } = {}) {
@@ -7600,6 +7651,314 @@
     templates.forEach((template) => host.append(renderWhatsAppTemplateCard(template)));
   }
 
+  const CREATE_TEMPLATE_LANGUAGES = [
+    ["en_US", "English (US)"], ["en", "English"], ["en_GB", "English (UK)"],
+    ["hi", "Hindi"], ["ml", "Malayalam"], ["ta", "Tamil"], ["te", "Telugu"],
+    ["kn", "Kannada"], ["mr", "Marathi"], ["gu", "Gujarati"], ["bn", "Bengali"],
+    ["ar", "Arabic"], ["es", "Spanish"], ["pt_BR", "Portuguese (BR)"], ["fr", "French"],
+  ];
+
+  function createTemplatePlaceholders(value) {
+    const result = [];
+    const seen = new Set();
+    for (const match of String(value || "").matchAll(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g)) {
+      if (seen.has(match[1])) continue;
+      seen.add(match[1]);
+      result.push(match[1]);
+    }
+    return result;
+  }
+
+  function fillCreateTemplatePreviewText(text, examples = {}) {
+    return String(text || "").replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_, key) => {
+      const value = examples[key];
+      return value ? String(value) : `{{${key}}}`;
+    });
+  }
+
+  function openCreateWhatsAppTemplateDialog() {
+    if (!hasPermission("channels.templates")) {
+      showToast("Create unavailable", "You do not have permission to manage WhatsApp templates.", true);
+      return;
+    }
+    const form = $("createWhatsAppTemplateForm");
+    form.reset();
+    const channelSelect = $("createTemplateChannel");
+    const channels = Array.isArray(state.whatsappTemplateFilterOptions?.channels)
+      ? state.whatsappTemplateFilterOptions.channels
+      : (state.channels || []).filter((channel) => channel.connectorType === "whatsapp_cloud")
+        .map((channel) => ({ value: channel.channelId, label: channel.name, channelEnabled: channel.enabled !== false }));
+    channelSelect.replaceChildren();
+    if (!channels.length) {
+      channelSelect.append(new Option("No WhatsApp channels connected", ""));
+    } else {
+      channels.forEach((channel) => {
+        const option = new Option(
+          channel.channelEnabled === false ? `${channel.label} (disabled)` : channel.label,
+          channel.value,
+          false,
+          false
+        );
+        option.disabled = channel.channelEnabled === false;
+        channelSelect.append(option);
+      });
+    }
+    const languageSelect = $("createTemplateLanguage");
+    languageSelect.replaceChildren();
+    CREATE_TEMPLATE_LANGUAGES.forEach(([code, label]) => {
+      languageSelect.append(new Option(`${label} · ${code}`, code));
+    });
+    $("createTemplateButtons").replaceChildren();
+    $("createTemplateHeaderFormat").value = "NONE";
+    $("createTemplateParameterFormat").value = "positional";
+    $("createTemplateCategory").value = "UTILITY";
+    $("createTemplateBodyText").value = "Hi {{1}}, your order {{2}} is confirmed.";
+    syncCreateTemplateHeaderFields();
+    renderCreateTemplateBodyExamples();
+    renderCreateTemplatePreview();
+    $("createWhatsAppTemplateSubmit").disabled = !channels.some((channel) => channel.channelEnabled !== false);
+    $("createWhatsAppTemplateDialog").showModal();
+  }
+
+  function closeCreateWhatsAppTemplateDialog() {
+    $("createWhatsAppTemplateDialog").close();
+  }
+
+  function syncCreateTemplateHeaderFields() {
+    const enabled = $("createTemplateHeaderFormat").value === "TEXT";
+    $("createTemplateHeaderTextWrap").hidden = !enabled;
+    if (!enabled) $("createTemplateHeaderText").value = "";
+    renderCreateTemplateHeaderExamples();
+  }
+
+  function renderCreateTemplateExampleRows(host, keys, prefix) {
+    host.replaceChildren();
+    host.hidden = keys.length === 0;
+    keys.forEach((key) => {
+      const row = element("label", "create-template-example-row field-label");
+      row.append(Object.assign(document.createElement("code"), { textContent: `{{${key}}}` }));
+      const input = document.createElement("input");
+      input.className = "text-field";
+      input.name = `${prefix}Example_${key}`;
+      input.dataset.createTemplateExample = prefix;
+      input.dataset.exampleKey = key;
+      input.required = true;
+      input.maxLength = 1024;
+      input.placeholder = `Example for {{${key}}}`;
+      input.value = prefix === "header" ? "Asha" : key === "1" || /name/i.test(key) ? "Asha" : key === "2" || /order/i.test(key) ? "ORD-1001" : "Sample";
+      input.addEventListener("input", renderCreateTemplatePreview);
+      row.append(input);
+      host.append(row);
+    });
+  }
+
+  function renderCreateTemplateHeaderExamples() {
+    const keys = $("createTemplateHeaderFormat").value === "TEXT"
+      ? createTemplatePlaceholders($("createTemplateHeaderText").value)
+      : [];
+    renderCreateTemplateExampleRows($("createTemplateHeaderExamples"), keys, "header");
+    renderCreateTemplatePreview();
+  }
+
+  function renderCreateTemplateBodyExamples() {
+    const keys = createTemplatePlaceholders($("createTemplateBodyText").value);
+    renderCreateTemplateExampleRows($("createTemplateBodyExamples"), keys, "body");
+    renderCreateTemplatePreview();
+  }
+
+  function createTemplateExampleMap(prefix) {
+    const examples = {};
+    document.querySelectorAll(`[data-create-template-example="${prefix}"]`).forEach((input) => {
+      examples[input.dataset.exampleKey] = input.value.trim();
+    });
+    return examples;
+  }
+
+  function addCreateTemplateButtonRow(initial = {}) {
+    const host = $("createTemplateButtons");
+    if (host.children.length >= 10) {
+      showToast("Button limit reached", "A template can include up to 10 buttons.", true);
+      return;
+    }
+    const row = element("div", "create-template-button-row");
+    const head = element("div", "create-template-button-row-head");
+    const typeLabel = element("label", "field-label", "Type");
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "text-field";
+    typeSelect.dataset.createTemplateButtonField = "type";
+    [["QUICK_REPLY", "Quick reply"], ["URL", "Visit website"], ["PHONE_NUMBER", "Call phone number"]]
+      .forEach(([value, label]) => typeSelect.append(new Option(label, value)));
+    typeSelect.value = initial.type || "QUICK_REPLY";
+    typeLabel.append(typeSelect);
+    const remove = element("button", "secondary-button compact-button", "Remove");
+    remove.type = "button";
+    remove.dataset.action = "remove-create-template-button";
+    head.append(typeLabel, remove);
+
+    const textLabel = element("label", "field-label", "Button text");
+    const textInput = document.createElement("input");
+    textInput.className = "text-field";
+    textInput.dataset.createTemplateButtonField = "text";
+    textInput.maxLength = 25;
+    textInput.required = true;
+    textInput.placeholder = "Track order";
+    textInput.value = initial.text || "";
+    textLabel.append(textInput);
+
+    const urlLabel = element("label", "field-label", "Website URL");
+    const urlInput = document.createElement("input");
+    urlInput.className = "text-field";
+    urlInput.dataset.createTemplateButtonField = "url";
+    urlInput.placeholder = "https://example.com/orders/{{1}}";
+    urlInput.value = initial.url || "";
+    urlLabel.append(urlInput);
+
+    const phoneLabel = element("label", "field-label", "Phone number");
+    const phoneInput = document.createElement("input");
+    phoneInput.className = "text-field";
+    phoneInput.dataset.createTemplateButtonField = "phoneNumber";
+    phoneInput.placeholder = "+919999999999";
+    phoneInput.value = initial.phoneNumber || "";
+    phoneLabel.append(phoneInput);
+
+    const exampleLabel = element("label", "field-label", "URL variable example");
+    const exampleInput = document.createElement("input");
+    exampleInput.className = "text-field";
+    exampleInput.dataset.createTemplateButtonField = "example";
+    exampleInput.placeholder = "ORD-1001";
+    exampleInput.value = initial.example || "";
+    exampleLabel.append(exampleInput);
+
+    const syncVisibility = () => {
+      const type = typeSelect.value;
+      urlLabel.hidden = type !== "URL";
+      phoneLabel.hidden = type !== "PHONE_NUMBER";
+      const urlKeys = createTemplatePlaceholders(urlInput.value);
+      exampleLabel.hidden = type !== "URL" || !urlKeys.length;
+      renderCreateTemplatePreview();
+    };
+    [typeSelect, textInput, urlInput, phoneInput, exampleInput].forEach((input) => {
+      input.addEventListener("input", syncVisibility);
+      input.addEventListener("change", syncVisibility);
+    });
+    row.append(head, textLabel, urlLabel, phoneLabel, exampleLabel);
+    host.append(row);
+    syncVisibility();
+  }
+
+  function collectCreateTemplateButtons() {
+    return [...$("createTemplateButtons").children].map((row) => {
+      const read = (name) => row.querySelector(`[data-create-template-button-field="${name}"]`)?.value.trim() || "";
+      const type = read("type");
+      const button = { type, text: read("text") };
+      if (type === "URL") {
+        button.url = read("url");
+        const keys = createTemplatePlaceholders(button.url);
+        if (keys.length) button.example = read("example");
+      }
+      if (type === "PHONE_NUMBER") button.phoneNumber = read("phoneNumber");
+      return button;
+    });
+  }
+
+  function buildCreateTemplateDraft() {
+    const headerFormat = $("createTemplateHeaderFormat").value;
+    const headerExamples = createTemplateExampleMap("header");
+    const bodyExamples = createTemplateExampleMap("body");
+    const headerText = $("createTemplateHeaderText").value.trim();
+    const bodyText = $("createTemplateBodyText").value.trim();
+    const footerText = $("createTemplateFooterText").value.trim();
+    const buttons = collectCreateTemplateButtons();
+    return {
+      channelId: $("createTemplateChannel").value,
+      name: $("createTemplateName").value.trim().toLowerCase(),
+      language: $("createTemplateLanguage").value,
+      category: $("createTemplateCategory").value,
+      parameterFormat: $("createTemplateParameterFormat").value,
+      header: headerFormat === "TEXT" ? { format: "TEXT", text: headerText, example: headerExamples } : { format: "NONE" },
+      body: { text: bodyText, examples: bodyExamples },
+      footer: footerText ? { text: footerText } : null,
+      buttons,
+      preview: {
+        headerText: fillCreateTemplatePreviewText(headerText, headerExamples),
+        bodyText: fillCreateTemplatePreviewText(bodyText, bodyExamples),
+        footerText,
+        buttons: buttons.map((button) => {
+          if (button.type !== "URL" || !button.url) return button;
+          const keys = createTemplatePlaceholders(button.url);
+          const examples = keys.length ? { [keys[0]]: button.example || "" } : {};
+          return { ...button, url: fillCreateTemplatePreviewText(button.url, examples) };
+        }),
+      },
+    };
+  }
+
+  function renderCreateTemplatePreview() {
+    const draft = buildCreateTemplateDraft();
+    const preview = $("createTemplatePreview");
+    preview.replaceChildren();
+    if (draft.header.format === "TEXT" && draft.preview.headerText) {
+      preview.append(element("strong", "template-preview-header", draft.preview.headerText));
+    }
+    preview.append(element("p", "template-preview-body", draft.preview.bodyText || "Body text will appear here."));
+    if (draft.preview.footerText) preview.append(element("small", "template-preview-footer", draft.preview.footerText));
+    if (draft.preview.buttons.length) {
+      const host = element("div", "template-preview-buttons");
+      draft.preview.buttons.forEach((button) => {
+        host.append(element("span", "", button.text || button.type || "Action"));
+      });
+      preview.append(host);
+    }
+    const keys = [
+      ...createTemplatePlaceholders($("createTemplateHeaderText").value).map((key) => `header {{${key}}}`),
+      ...createTemplatePlaceholders($("createTemplateBodyText").value).map((key) => `body {{${key}}}`),
+      ...collectCreateTemplateButtons().flatMap((button) => createTemplatePlaceholders(button.url || "").map((key) => `button {{${key}}}`)),
+    ];
+    const summary = $("createTemplateVariableSummary");
+    summary.replaceChildren();
+    summary.append(element("strong", "", keys.length ? `${keys.length} variable${keys.length === 1 ? "" : "s"}` : "No variables"));
+    summary.append(document.createTextNode(keys.length
+      ? keys.join(" · ")
+      : "Add {{1}} or named placeholders in the body, header, or URL button when needed."));
+  }
+
+  async function submitCreateWhatsAppTemplate(event) {
+    event.preventDefault();
+    const submit = $("createWhatsAppTemplateSubmit");
+    const draft = buildCreateTemplateDraft();
+    if (!draft.channelId) {
+      showToast("Choose a channel", "Select a WhatsApp channel before submitting the template.", true);
+      return;
+    }
+    submit.disabled = true;
+    try {
+      const payload = {
+        channelId: draft.channelId,
+        name: draft.name,
+        language: draft.language,
+        category: draft.category,
+        parameterFormat: draft.parameterFormat,
+        header: draft.header.format === "TEXT" ? draft.header : undefined,
+        body: draft.body,
+        footer: draft.footer || undefined,
+        buttons: draft.buttons,
+      };
+      const result = await state.api.createWhatsAppTemplate(payload);
+      const item = normalizeWhatsAppTemplate(result.item || {});
+      state.whatsappTemplates = [item, ...state.whatsappTemplates.filter((template) =>
+        !(template.name === item.name && template.languageCode === item.languageCode && template.channelId === item.channelId))];
+      state.whatsappTemplatesLoaded = true;
+      closeCreateWhatsAppTemplateDialog();
+      renderWhatsAppTemplateLibrary();
+      showToast("Template submitted", `${item.name} was sent to Meta and is waiting for review.`);
+      loadWhatsAppTemplateLibrary({ refresh: true }).catch(() => {});
+    } catch (error) {
+      showToast("Template was not created", error.message || "Meta rejected the template request.", true);
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
   function renderWhatsAppTemplateLibrary() {
     ["channel", "category", "status", "language"].forEach((type) => {
       const search = document.querySelector(`[data-template-filter-search="${type}"]`);
@@ -7639,7 +7998,7 @@
     state.whatsappTemplateTruncatedChannels = [];
     renderWhatsAppTemplateLibrary();
     try {
-      const data = await state.api.getWhatsAppTemplates();
+      const data = await state.api.getWhatsAppTemplates({ refresh });
       state.whatsappTemplates = asItems(data).map(normalizeWhatsAppTemplate);
       state.whatsappTemplateErrors = asItems(data?.errors);
       state.whatsappTemplateTruncatedChannels = asItems(data?.truncatedChannels);
@@ -14987,6 +15346,17 @@
           "copy-invite-link": copyInviteLink,
           "open-api-key": openApiKeyDialog,
           "close-api-key": closeApiKeyDialog,
+          "open-create-whatsapp-template": () => {
+            openCreateWhatsAppTemplateDialog();
+            if (!state.whatsappTemplatesLoaded) loadWhatsAppTemplateLibrary().catch(() => {});
+          },
+          "close-create-whatsapp-template": closeCreateWhatsAppTemplateDialog,
+          "add-create-template-button": () => addCreateTemplateButtonRow(),
+          "remove-create-template-button": () => {
+            const row = actionButton.closest(".create-template-button-row");
+            row?.remove();
+            renderCreateTemplatePreview();
+          },
           "copy-api-base": () => copyDeveloperApiValue($("developerApiBase").textContent, "API base URL copied"),
           "copy-api-key": () => copyDeveloperApiValue($("apiKeyOutput").value, "API key copied"),
           "copy-workspace-id": () => copyDeveloperApiValue($("workspaceId").value, "Workspace ID copied"),
@@ -15658,6 +16028,22 @@
     renderTagInput(tagInputRoot("edit"), []);
     renderTagInput(tagInputRoot("create"), []);
     $("templateForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentTemplate(event.currentTarget); });
+    $("createWhatsAppTemplateForm")?.addEventListener("submit", submitCreateWhatsAppTemplate);
+    ["createTemplateHeaderFormat", "createTemplateHeaderText", "createTemplateBodyText", "createTemplateFooterText", "createTemplateParameterFormat"]
+      .forEach((id) => {
+        const node = $(id);
+        if (!node) return;
+        node.addEventListener("input", () => {
+          if (id === "createTemplateHeaderFormat") syncCreateTemplateHeaderFields();
+          else if (id === "createTemplateHeaderText") renderCreateTemplateHeaderExamples();
+          else if (id === "createTemplateBodyText") renderCreateTemplateBodyExamples();
+          else renderCreateTemplatePreview();
+        });
+        node.addEventListener("change", () => {
+          if (id === "createTemplateHeaderFormat") syncCreateTemplateHeaderFields();
+          else renderCreateTemplatePreview();
+        });
+      });
     $("templateDialog").addEventListener("close", () => {
       revokeTemplatePreviewUrl();
       state.templateConversationId = null;
