@@ -7738,13 +7738,11 @@
     copy.setAttribute("aria-label", `Copy template name ${template.name}`);
     copy.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg>';
     nameRow.append(copy);
-    title.append(nameRow, element("code", "", template.languageCode));
-    const meta = element("div", "whatsapp-template-meta");
-    meta.append(element("span", "", template.category), element("span", "", `${template.variables.length || templateVariableDescriptors(template).length} variable${(template.variables.length || templateVariableDescriptors(template).length) === 1 ? "" : "s"}`));
-    const actions = element("div", "whatsapp-template-card-actions");
+    const titleEnd = element("div", "whatsapp-template-title-end");
+    titleEnd.append(element("code", "", template.languageCode));
     const edit = document.createElement("button");
     edit.type = "button";
-    edit.className = "secondary-button compact-button";
+    edit.className = "icon-button template-edit-icon";
     edit.dataset.action = "edit-whatsapp-template";
     edit.dataset.channelId = template.channelId || "";
     edit.dataset.templateId = template.templateId || "";
@@ -7761,9 +7759,13 @@
       : String(template.status || "").toUpperCase() === "PENDING"
         ? "Pending templates cannot be edited until Meta finishes review"
         : "This template cannot be edited right now";
-    edit.textContent = "Edit";
-    actions.append(edit);
-    card.append(head, title, meta, actions, renderWhatsAppTemplatePreview(template));
+    edit.setAttribute("aria-label", canEdit ? `Edit template ${template.name}` : `Cannot edit template ${template.name}`);
+    edit.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+    titleEnd.append(edit);
+    title.append(nameRow, titleEnd);
+    const meta = element("div", "whatsapp-template-meta");
+    meta.append(element("span", "", template.category), element("span", "", `${template.variables.length || templateVariableDescriptors(template).length} variable${(template.variables.length || templateVariableDescriptors(template).length) === 1 ? "" : "s"}`));
+    card.append(head, title, meta, renderWhatsAppTemplatePreview(template));
     return card;
   }
 
@@ -7841,7 +7843,10 @@
     const deleteButton = $("deleteWhatsAppTemplateButton");
     if (eyebrow) eyebrow.textContent = editing ? "Edit WhatsApp template" : "WhatsApp template";
     if (title) title.textContent = editing ? "Edit template" : "Create a template";
-    if (deleteButton) deleteButton.hidden = !editing;
+    if (deleteButton) {
+      deleteButton.hidden = !editing;
+      setDeleteWhatsAppTemplateBusy(deleteButton, false, "Delete");
+    }
     ["createTemplateChannel", "createTemplateName", "createTemplateLanguage"].forEach((id) => {
       const field = $(id);
       if (!field) return;
@@ -8419,6 +8424,16 @@
     else submit.textContent = label;
   }
 
+  function setDeleteWhatsAppTemplateBusy(button, busy, label = "Delete") {
+    if (!button) return;
+    button.disabled = !!busy;
+    button.classList.toggle("is-busy", !!busy);
+    button.setAttribute("aria-busy", busy ? "true" : "false");
+    const text = button.querySelector("[data-delete-whatsapp-template-label]");
+    if (text) text.textContent = label;
+    else if (!button.querySelector(".create-template-submit-spinner")) button.textContent = label;
+  }
+
   async function submitCreateWhatsAppTemplate(event) {
     event.preventDefault();
     const submit = $("createWhatsAppTemplateSubmit");
@@ -8528,6 +8543,8 @@
   async function deleteWhatsAppTemplateFromEditor() {
     const editor = state.whatsappTemplateEditor;
     if (editor?.mode !== "edit") return;
+    const deleteButton = $("deleteWhatsAppTemplateButton");
+    if (deleteButton?.classList.contains("is-busy")) return;
     const confirmed = await requestConfirmation({
       eyebrow: "Delete WhatsApp template",
       title: `Delete ${editor.name}?`,
@@ -8536,8 +8553,9 @@
       confirmLabel: "Delete from Meta",
     });
     if (!confirmed) return;
-    const deleteButton = $("deleteWhatsAppTemplateButton");
-    if (deleteButton) deleteButton.disabled = true;
+    setDeleteWhatsAppTemplateBusy(deleteButton, true, "Deleting…");
+    const submit = $("createWhatsAppTemplateSubmit");
+    if (submit) submit.disabled = true;
     try {
       await state.api.deleteWhatsAppTemplate({
         channelId: editor.channelId,
@@ -8555,7 +8573,14 @@
     } catch (error) {
       showToast("Template was not deleted", error.message || "Meta rejected the delete request.", true);
     } finally {
-      if (deleteButton) deleteButton.disabled = false;
+      setDeleteWhatsAppTemplateBusy(deleteButton, false, "Delete");
+      if (submit) {
+        setCreateWhatsAppTemplateSubmitBusy(
+          submit,
+          false,
+          state.whatsappTemplateEditor?.mode === "edit" ? "Save to Meta" : "Submit to Meta"
+        );
+      }
     }
   }
 
