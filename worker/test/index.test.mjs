@@ -758,15 +758,14 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
 });
 
 test('Meta resumable upload keeps the upload: colon and sanitizes sample filenames', () => {
-  const sessionId = 'upload:MTphdHRhY2htZW50OjQ1ZmNiMDBjLTI3YjctNDAzMi05NjAwLTc5N2E3N2FiMDQ5Ng==';
-  assert.equal(metaResumableUploadSessionPath(sessionId), sessionId);
-  assert.equal(
-    metaResumableUploadSessionPath('MTphdHRhY2htZW50OjQ1ZmNiMDBjLTI3YjctNDAzMi05NjAwLTc5N2E3N2FiMDQ5Ng=='),
-    'upload:MTphdHRhY2htZW50OjQ1ZmNiMDBjLTI3YjctNDAzMi05NjAwLTc5N2E3N2FiMDQ5Ng=='
-  );
+  const token = 'MTphdHRhY2htZW50OjQ1ZmNiMDBjLTI3YjctNDAzMi05NjAwLTc5N2E3N2FiMDQ5Ng==';
+  const sessionId = `upload:${token}`;
+  assert.equal(metaResumableUploadSessionPath(sessionId), `upload:${encodeURIComponent(token)}`);
+  assert.equal(metaResumableUploadSessionPath(token), `upload:${encodeURIComponent(token)}`);
   assert.notEqual(metaResumableUploadSessionPath(sessionId), encodeURIComponent(sessionId));
   assert.match(metaResumableUploadSessionPath(sessionId), /^upload:/);
   assert.doesNotMatch(metaResumableUploadSessionPath(sessionId), /upload%3A/i);
+  assert.match(metaResumableUploadSessionPath(sessionId), /%3D%3D$/);
   assert.equal(
     metaTemplateSampleFileName('DROPX5026_Invoice Slip for October - 2026.pdf', 'application/pdf'),
     'DROPX5026_Invoice_Slip_for_October_-_2026.pdf'
