@@ -6997,11 +6997,14 @@ async function resolveMetaAppIdForWhatsAppToken(credentials, apiVersion) {
 export function metaResumableUploadSessionPath(sessionId) {
   const id = String(sessionId || '').trim();
   if (!id) throw httpError(502, 'Meta did not return an upload session id.');
-  // Graph documents POST /vX.Y/upload:<SESSION_ID>. Encoding the colon as %3A makes Meta
-  // report "Unsupported post request. Object with ID 'upload:…' does not exist".
-  if (/^upload:/i.test(id)) return id;
-  if (/^[A-Za-z0-9+/=_-]+$/.test(id)) return `upload:${id}`;
-  throw httpError(502, 'Meta returned an invalid upload session id.');
+  // Graph documents POST /vX.Y/upload:<SESSION_ID>. The "upload:" prefix must stay literal —
+  // encoding the colon as %3A makes Meta report the object does not exist. Encode only the
+  // opaque token so +, /, and = survive fetch URL parsing.
+  const raw = /^upload:/i.test(id) ? id.slice(id.indexOf(':') + 1) : id;
+  if (!raw || !/^[A-Za-z0-9+/=_-]+$/.test(raw)) {
+    throw httpError(502, 'Meta returned an invalid upload session id.');
+  }
+  return `upload:${encodeURIComponent(raw)}`;
 }
 
 export function metaTemplateSampleFileName(filename, mimeType) {
@@ -7031,13 +7034,21 @@ async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId,
   sessionEndpoint.searchParams.set('file_name', safeName);
   sessionEndpoint.searchParams.set('file_length', String(size));
   sessionEndpoint.searchParams.set('file_type', mimeType);
+  sessionEndpoint.searchParams.set('access_token', credentials.accessToken);
+  const sessionSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(45000)
+    : undefined;
   let sessionResponse;
   try {
     sessionResponse = await fetch(sessionEndpoint, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${credentials.accessToken}` }
+      headers: { Authorization: `OAuth ${credentials.accessToken}` },
+      signal: sessionSignal
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw httpError(504, 'Meta timed out while starting the template media upload. Try again in a moment.');
+    }
     throw httpError(502, 'Meta could not start the template media upload session.');
   }
   const sessionData = safeJsonParse(await sessionResponse.text(), {});
@@ -7047,6 +7058,9 @@ async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId,
     throw httpError(422, `Meta could not start the template media upload: ${detail}`);
   }
   const uploadPath = metaResumableUploadSessionPath(sessionId);
+  const uploadSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(90000)
+    : undefined;
   let uploadResponse;
   try {
     uploadResponse = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${uploadPath}`, {
@@ -7056,9 +7070,13 @@ async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId,
         file_offset: '0',
         'Content-Type': mimeType
       },
-      body: bytes
+      body: new Blob([bytes], { type: mimeType }),
+      signal: uploadSignal
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw httpError(504, 'Meta timed out while storing the template sample media. Try a smaller sample file, then submit again.');
+    }
     throw httpError(502, 'Meta could not accept the template sample media upload.');
   }
   const uploadData = safeJsonParse(await uploadResponse.text(), {});
@@ -7147,6 +7165,9 @@ async function createWorkspaceWhatsAppTemplate(env, workspaceId, payload, princi
   const metaPayload = buildMetaWhatsAppTemplateCreatePayload(input);
   const version = metaApiVersion(channel.config?.apiVersion);
   const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/message_templates`);
+  const createSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(60000)
+    : undefined;
   let response;
   try {
     response = await fetch(endpoint, {
@@ -7155,9 +7176,13 @@ async function createWorkspaceWhatsAppTemplate(env, workspaceId, payload, princi
         Authorization: `Bearer ${credentials.accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(metaPayload)
+      body: JSON.stringify(metaPayload),
+      signal: createSignal
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw httpError(504, 'Meta timed out while creating the WhatsApp template. Check Templates in a minute before submitting again.');
+    }
     throw httpError(502, 'Meta could not create the WhatsApp template.');
   }
   const data = safeJsonParse(await response.text(), {});

@@ -1609,12 +1609,27 @@
     }
 
     async request(path, options = {}) {
-      const headers = new Headers(options.headers || {});
+      const { timeoutMs, ...fetchOptions } = options;
+      const headers = new Headers(fetchOptions.headers || {});
       if (!headers.has("Accept")) headers.set("Accept", "application/json");
-      const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
-      if (options.body && !isFormData && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+      const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
+      if (fetchOptions.body && !isFormData && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
       if (this.recoveryToken) headers.set("Authorization", `Bearer ${this.recoveryToken}`);
-      const response = await fetch(`${this.base}${path}`, { ...options, headers, credentials: "include" });
+      const signal = fetchOptions.signal
+        || (Number.isFinite(timeoutMs) && timeoutMs > 0 && typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+          ? AbortSignal.timeout(timeoutMs)
+          : undefined);
+      let response;
+      try {
+        response = await fetch(`${this.base}${path}`, { ...fetchOptions, headers, credentials: "include", signal });
+      } catch (error) {
+        if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+          const timeout = new Error("The request timed out. Check your connection and try again.");
+          timeout.status = 504;
+          throw timeout;
+        }
+        throw error;
+      }
       const contentType = response.headers.get("content-type") || "";
       const payload = contentType.includes("application/json") ? await response.json() : await response.text();
       if (!response.ok) {
@@ -1841,6 +1856,7 @@
         : this.request("/api/channel-data/whatsapp-templates", {
           method: "POST",
           body: JSON.stringify(payload),
+          timeoutMs: 90000,
         });
     }
 
@@ -1850,6 +1866,7 @@
         : this.request("/api/channel-data/whatsapp-templates/sample-media", {
           method: "POST",
           body: formData,
+          timeoutMs: 120000,
         });
     }
 
@@ -8120,9 +8137,20 @@
       : "Add {{1}} or named placeholders in the body, header, or dynamic website URL when needed."));
   }
 
+  function setCreateWhatsAppTemplateSubmitBusy(submit, busy, label = "Submit to Meta") {
+    if (!submit) return;
+    submit.disabled = !!busy;
+    submit.classList.toggle("is-busy", !!busy);
+    submit.setAttribute("aria-busy", busy ? "true" : "false");
+    const text = submit.querySelector("[data-create-template-submit-label]");
+    if (text) text.textContent = label;
+    else submit.textContent = label;
+  }
+
   async function submitCreateWhatsAppTemplate(event) {
     event.preventDefault();
     const submit = $("createWhatsAppTemplateSubmit");
+    if (submit?.classList.contains("is-busy")) return;
     const draft = buildCreateTemplateDraft();
     if (!draft.channelId) {
       showToast("Choose a channel", "Select a WhatsApp channel before submitting the template.", true);
@@ -8149,21 +8177,28 @@
         return;
       }
     }
-    submit.disabled = true;
+    const needsSampleUpload = ["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.header.format);
+    setCreateWhatsAppTemplateSubmitBusy(submit, true, needsSampleUpload ? "Uploading sample…" : "Submitting…");
     try {
       let header;
       if (draft.header.format === "TEXT") {
         header = draft.header;
-      } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.header.format)) {
+      } else if (needsSampleUpload) {
+        showToast("Uploading sample", "Sending the header sample to Meta first…");
         const formData = new FormData();
         formData.set("channelId", draft.channelId);
         formData.set("format", draft.header.format);
         formData.set("file", draft.header.mediaFile, draft.header.mediaFile.name || "sample");
         const uploaded = await state.api.uploadWhatsAppTemplateSampleMedia(formData);
+        if (!uploaded?.headerHandle) {
+          throw Object.assign(new Error("Meta did not return a sample media handle."), { status: 502 });
+        }
         header = {
           format: draft.header.format,
           headerHandle: uploaded.headerHandle,
         };
+        setCreateWhatsAppTemplateSubmitBusy(submit, true, "Submitting…");
+        showToast("Submitting template", "Sample uploaded. Creating the template on Meta…");
       }
       const payload = {
         channelId: draft.channelId,
@@ -8188,7 +8223,7 @@
     } catch (error) {
       showToast("Template was not created", error.message || "Meta rejected the template request.", true);
     } finally {
-      submit.disabled = false;
+      setCreateWhatsAppTemplateSubmitBusy(submit, false, "Submit to Meta");
     }
   }
 
