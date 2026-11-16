@@ -35,7 +35,10 @@ import {
   validateWhatsAppTemplateRequest,
   validateHelixcerWhatsAppTemplateRequest,
   validateWhatsAppTemplateCreateRequest,
+  validateWhatsAppTemplateUpdateRequest,
+  validateWhatsAppTemplateDeleteRequest,
   buildMetaWhatsAppTemplateCreatePayload,
+  buildMetaWhatsAppTemplateUpdatePayload,
   buildMetaComponentsFromHelixcerVariables,
   metaResumableUploadSessionPath,
   metaTemplateSampleFileName,
@@ -755,6 +758,42 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
     header: { format: 'VIDEO' },
     body: { text: 'Hello' }
   }), /sample media/i);
+
+  const updateInput = validateWhatsAppTemplateUpdateRequest({
+    channelId: 'wa-sales',
+    templateId: '123456789012345',
+    name: 'promo_image',
+    language: 'en_US',
+    category: 'MARKETING',
+    parameterFormat: 'positional',
+    header: { format: 'IMAGE' },
+    body: { text: 'Hi {{1}}, check this offer.', examples: { '1': 'Asha' } }
+  });
+  assert.equal(updateInput.templateId, '123456789012345');
+  assert.equal(updateInput.header.format, 'IMAGE');
+  assert.equal(updateInput.header.headerHandle, undefined);
+  const updatePayload = buildMetaWhatsAppTemplateUpdatePayload(updateInput);
+  assert.equal(updatePayload.name, undefined);
+  assert.equal(updatePayload.language, undefined);
+  assert.equal(updatePayload.category, 'MARKETING');
+  assert.equal(updatePayload.components[0].format, 'IMAGE');
+  assert.equal(updatePayload.components[0].example, undefined);
+
+  const deleteInput = validateWhatsAppTemplateDeleteRequest({
+    channelId: 'wa-sales',
+    templateId: '123456789012345',
+    name: 'promo_image',
+    language: 'en_US'
+  });
+  assert.deepEqual(deleteInput, {
+    channelId: 'wa-sales',
+    templateId: '123456789012345',
+    name: 'promo_image',
+    language: 'en_US'
+  });
+  assert.throws(() => validateWhatsAppTemplateDeleteRequest({
+    channelId: 'wa-sales', name: 'promo_image'
+  }), /Template ID/i);
 });
 
 test('Meta resumable upload keeps the upload: colon and sanitizes sample filenames', () => {

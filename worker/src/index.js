@@ -687,6 +687,22 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       });
       return withCors(json(result, 201), cors);
     }
+    if (url.pathname === '/api/channel-data/whatsapp-templates' && request.method === 'PATCH') {
+      requirePermission(principal, 'channels.templates');
+      const result = await updateWorkspaceWhatsAppTemplate(env, workspaceId, await readJson(request), principal);
+      await audit(env, principal, 'update', 'whatsapp_template', result.item?.templateId || result.item?.name || '', {
+        channelId: result.channelId, name: result.item?.name, language: result.item?.language?.code
+      });
+      return withCors(json(result), cors);
+    }
+    if (url.pathname === '/api/channel-data/whatsapp-templates' && request.method === 'DELETE') {
+      requirePermission(principal, 'channels.templates');
+      const result = await deleteWorkspaceWhatsAppTemplate(env, workspaceId, await readJson(request), principal);
+      await audit(env, principal, 'delete', 'whatsapp_template', result.templateId || result.name || '', {
+        channelId: result.channelId, name: result.name, language: result.language
+      });
+      return withCors(json(result), cors);
+    }
     if (url.pathname === '/api/channel-data/import-chat' && request.method === 'POST') {
       requirePermission(principal, 'channels.import');
       const result = await importChatHistory(env, workspaceId, principal, await readImportJson(request));
@@ -6722,13 +6738,17 @@ const WHATSAPP_TEMPLATE_SAMPLE_MEDIA_LIMITS = Object.freeze({
   DOCUMENT: { maxBytes: MAX_ATTACHMENT_BYTES, mimeTypes: new Set(['application/pdf']) }
 });
 
-export function validateWhatsAppTemplateCreateRequest(payload) {
+function parseWhatsAppTemplateWriteRequest(payload, { requireTemplateId = false, allowMissingMediaSample = false } = {}) {
   if (!isPlainObject(payload)) throw httpError(400, 'Request body must be a JSON object.');
   rejectUnknownKeys(payload, new Set([
-    'channelId', 'name', 'language', 'category', 'parameterFormat',
+    'channelId', 'templateId', 'name', 'language', 'category', 'parameterFormat',
     'header', 'body', 'footer', 'buttons'
   ]), 'request');
   const channelId = cleanId(payload.channelId, 'Channel ID');
+  const templateId = requireTemplateId
+    ? providerIdentifier(payload.templateId ?? payload.id, 128)
+    : providerIdentifier(payload.templateId ?? payload.id, 128) || '';
+  if (requireTemplateId && !templateId) throw httpError(400, 'Template ID is required.');
   const name = cleanRequired(payload.name, 'Template name', 512).toLowerCase();
   if (!/^[a-z0-9_]+$/.test(name)) {
     throw httpError(400, 'Template name may only use lowercase letters, numbers, and underscores.');
@@ -6774,12 +6794,20 @@ export function validateWhatsAppTemplateCreateRequest(payload) {
         headerKeys, 'Header');
       header = { format: 'TEXT', text, examples };
     } else if (WHATSAPP_TEMPLATE_CREATE_MEDIA_HEADER_FORMATS.has(format)) {
-      const headerHandle = cleanWhatsAppTemplateHeaderHandle(
-        payload.header.headerHandle ?? payload.header.header_handle
-          ?? (isPlainObject(payload.header.example) ? payload.header.example.header_handle : null)
-          ?? (isPlainObject(payload.header.examples) ? payload.header.examples.header_handle : null),
-        'Header sample media handle');
-      header = { format, headerHandle };
+      const rawHandle = payload.header.headerHandle ?? payload.header.header_handle
+        ?? (isPlainObject(payload.header.example) ? payload.header.example.header_handle : null)
+        ?? (isPlainObject(payload.header.examples) ? payload.header.examples.header_handle : null);
+      if (rawHandle === undefined || rawHandle === null || String(rawHandle).trim() === '') {
+        if (!allowMissingMediaSample) {
+          cleanWhatsAppTemplateHeaderHandle(rawHandle, 'Header sample media handle');
+        }
+        header = { format };
+      } else {
+        header = {
+          format,
+          headerHandle: cleanWhatsAppTemplateHeaderHandle(rawHandle, 'Header sample media handle')
+        };
+      }
     }
   }
 
@@ -6851,6 +6879,7 @@ export function validateWhatsAppTemplateCreateRequest(payload) {
 
   return {
     channelId,
+    templateId,
     name,
     language,
     category,
@@ -6860,6 +6889,39 @@ export function validateWhatsAppTemplateCreateRequest(payload) {
     footerText,
     buttons
   };
+}
+
+export function validateWhatsAppTemplateCreateRequest(payload) {
+  return parseWhatsAppTemplateWriteRequest(payload, {
+    requireTemplateId: false,
+    allowMissingMediaSample: false
+  });
+}
+
+export function validateWhatsAppTemplateUpdateRequest(payload) {
+  return parseWhatsAppTemplateWriteRequest(payload, {
+    requireTemplateId: true,
+    allowMissingMediaSample: true
+  });
+}
+
+export function validateWhatsAppTemplateDeleteRequest(payload) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Request body must be a JSON object.');
+  rejectUnknownKeys(payload, new Set(['channelId', 'templateId', 'name', 'language']), 'request');
+  const channelId = cleanId(payload.channelId, 'Channel ID');
+  const name = cleanRequired(payload.name, 'Template name', 512).toLowerCase();
+  if (!/^[a-z0-9_]+$/.test(name)) {
+    throw httpError(400, 'Template name may only use lowercase letters, numbers, and underscores.');
+  }
+  const templateId = providerIdentifier(payload.templateId, 128);
+  if (!templateId) throw httpError(400, 'Template ID is required.');
+  const language = payload.language === undefined || payload.language === null || payload.language === ''
+    ? ''
+    : cleanRequired(payload.language, 'Language', 35);
+  if (language && !/^[A-Za-z]{2,3}(?:_[A-Za-z0-9]{2,8})?$/.test(language)) {
+    throw httpError(400, 'Enter a valid WhatsApp language code such as en_US.');
+  }
+  return { channelId, templateId, name, language };
 }
 
 function assertTemplatePlaceholderFormat(keys, parameterFormat, label) {
@@ -6905,18 +6967,16 @@ function cleanWhatsAppTemplateHeaderHandle(value, label) {
   return cleaned;
 }
 
-export function buildMetaWhatsAppTemplateCreatePayload(input) {
+export function buildMetaWhatsAppTemplateComponents(input) {
   const components = [];
   if (input.header?.format === 'TEXT') {
     const component = { type: 'HEADER', format: 'TEXT', text: input.header.text };
     if (input.header.examples?.length) component.example = { header_text: input.header.examples };
     components.push(component);
   } else if (WHATSAPP_TEMPLATE_CREATE_MEDIA_HEADER_FORMATS.has(input.header?.format)) {
-    components.push({
-      type: 'HEADER',
-      format: input.header.format,
-      example: { header_handle: [input.header.headerHandle] }
-    });
+    const component = { type: 'HEADER', format: input.header.format };
+    if (input.header.headerHandle) component.example = { header_handle: [input.header.headerHandle] };
+    components.push(component);
   }
   const body = { type: 'BODY', text: input.body.text };
   if (input.body.keys.length) {
@@ -6943,12 +7003,23 @@ export function buildMetaWhatsAppTemplateCreatePayload(input) {
       })
     });
   }
+  return components;
+}
+
+export function buildMetaWhatsAppTemplateCreatePayload(input) {
   return {
     name: input.name,
     language: input.language,
     category: input.category,
     parameter_format: input.parameterFormat,
-    components
+    components: buildMetaWhatsAppTemplateComponents(input)
+  };
+}
+
+export function buildMetaWhatsAppTemplateUpdatePayload(input) {
+  return {
+    category: input.category,
+    components: buildMetaWhatsAppTemplateComponents(input)
   };
 }
 
@@ -7220,6 +7291,119 @@ async function createWorkspaceWhatsAppTemplate(env, workspaceId, payload, princi
       channelEnabled: true,
       providerDisplayName: providerText(channel.config?.verifiedName || channel.config?.verifiedPhoneNumber, 160)
     }
+  };
+}
+
+async function updateWorkspaceWhatsAppTemplate(env, workspaceId, payload, principal) {
+  const input = validateWhatsAppTemplateUpdateRequest(payload);
+  assertPrincipalChannelAccess(principal, input.channelId);
+  const channel = await getChannel(env, input.channelId, 'whatsapp_cloud', workspaceId);
+  if (!channel) throw httpError(404, 'WhatsApp channel not found or is disabled.');
+  await assertChannelReadyForConversation(env, workspaceId, channel);
+  const credentials = await readChannelCredentials(env, channel);
+  if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
+  const metaPayload = buildMetaWhatsAppTemplateUpdatePayload(input);
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(input.templateId)}`);
+  const updateSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(60000)
+    : undefined;
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${credentials.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(metaPayload),
+      signal: updateSignal
+    });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw httpError(504, 'Meta timed out while updating the WhatsApp template. Refresh Templates before editing again.');
+    }
+    throw httpError(502, 'Meta could not update the WhatsApp template.');
+  }
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) {
+    const detail = redactProviderSecret(providerError(data, response.status), credentials.accessToken);
+    throw httpError(422, `Meta could not update the WhatsApp template: ${detail}`);
+  }
+  await bustWhatsAppTemplateCache(channel);
+  const status = providerEnum(data.status, 40) || 'PENDING';
+  const item = sanitizeWhatsAppTemplateDefinition({
+    id: input.templateId,
+    name: input.name,
+    language: input.language,
+    status,
+    category: input.category,
+    components: metaPayload.components
+  }) || {
+    templateId: input.templateId,
+    id: input.templateId,
+    name: input.name,
+    language: { code: input.language },
+    status,
+    category: input.category,
+    components: metaPayload.components,
+    variables: []
+  };
+  return {
+    ok: true,
+    channelId: channel.channelId,
+    item: {
+      ...item,
+      channelId: channel.channelId,
+      channelName: channel.name || '',
+      channelEnabled: true,
+      providerDisplayName: providerText(channel.config?.verifiedName || channel.config?.verifiedPhoneNumber, 160)
+    }
+  };
+}
+
+async function deleteWorkspaceWhatsAppTemplate(env, workspaceId, payload, principal) {
+  const input = validateWhatsAppTemplateDeleteRequest(payload);
+  assertPrincipalChannelAccess(principal, input.channelId);
+  const channel = await getChannel(env, input.channelId, 'whatsapp_cloud', workspaceId);
+  if (!channel) throw httpError(404, 'WhatsApp channel not found or is disabled.');
+  await assertChannelReadyForConversation(env, workspaceId, channel);
+  const wabaId = String(channel.config?.wabaId || '').trim();
+  if (!/^\d{5,40}$/.test(wabaId)) throw httpError(409, 'The WhatsApp Business Account ID is not configured.');
+  const credentials = await readChannelCredentials(env, channel);
+  if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/message_templates`);
+  endpoint.searchParams.set('name', input.name);
+  endpoint.searchParams.set('hsm_id', input.templateId);
+  const deleteSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(60000)
+    : undefined;
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      signal: deleteSignal
+    });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw httpError(504, 'Meta timed out while deleting the WhatsApp template. Refresh Templates before trying again.');
+    }
+    throw httpError(502, 'Meta could not delete the WhatsApp template.');
+  }
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) {
+    const detail = redactProviderSecret(providerError(data, response.status), credentials.accessToken);
+    throw httpError(422, `Meta could not delete the WhatsApp template: ${detail}`);
+  }
+  await bustWhatsAppTemplateCache(channel);
+  return {
+    ok: true,
+    channelId: channel.channelId,
+    templateId: input.templateId,
+    name: input.name,
+    language: input.language || ''
   };
 }
 
