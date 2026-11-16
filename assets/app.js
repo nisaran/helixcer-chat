@@ -1068,6 +1068,22 @@
       ]) };
     }
 
+    async uploadWhatsAppTemplateSampleMedia(formData) {
+      await smallDelay(120);
+      const file = formData.get("file");
+      const format = String(formData.get("format") || "IMAGE").toUpperCase();
+      if (!file) throw Object.assign(new Error("A sample media file is required."), { status: 400 });
+      return {
+        ok: true,
+        channelId: String(formData.get("channelId") || "wa-sales"),
+        format,
+        headerHandle: `demo-handle-${format.toLowerCase()}-${Date.now()}`,
+        filename: file.name || "sample",
+        mimeType: file.type || "application/octet-stream",
+        size: Number(file.size || 0),
+      };
+    }
+
     async createWhatsAppTemplate(payload) {
       await smallDelay(160);
       const name = String(payload?.name || "").trim().toLowerCase();
@@ -1077,6 +1093,11 @@
         || { channelId, name: "Sales WhatsApp", setup: { verifiedName: "Helixcer Sales" } };
       if (!/^[a-z0-9_]+$/.test(name)) throw Object.assign(new Error("Template name may only use lowercase letters, numbers, and underscores."), { status: 400 });
       if (!payload?.body?.text) throw Object.assign(new Error("Body text is required."), { status: 400 });
+      const mediaFormats = new Set(["IMAGE", "VIDEO", "DOCUMENT"]);
+      const headerFormat = String(payload.header?.format || "NONE").toUpperCase();
+      if (mediaFormats.has(headerFormat) && !payload.header?.headerHandle) {
+        throw Object.assign(new Error("Upload a sample media file for the media header."), { status: 400 });
+      }
       return {
         ok: true,
         channelId,
@@ -1088,7 +1109,8 @@
           status: "PENDING",
           category: String(payload.category || "UTILITY").toUpperCase(),
           components: [
-            payload.header?.format === "TEXT" ? { type: "HEADER", format: "TEXT", text: payload.header.text } : null,
+            headerFormat === "TEXT" ? { type: "HEADER", format: "TEXT", text: payload.header.text }
+              : mediaFormats.has(headerFormat) ? { type: "HEADER", format: headerFormat } : null,
             { type: "BODY", text: payload.body.text },
             payload.footer?.text ? { type: "FOOTER", text: payload.footer.text } : null,
             Array.isArray(payload.buttons) && payload.buttons.length
@@ -1819,6 +1841,15 @@
         : this.request("/api/channel-data/whatsapp-templates", {
           method: "POST",
           body: JSON.stringify(payload),
+        });
+    }
+
+    uploadWhatsAppTemplateSampleMedia(formData) {
+      return this.isDemo
+        ? this.demo.uploadWhatsAppTemplateSampleMedia(formData)
+        : this.request("/api/channel-data/whatsapp-templates/sample-media", {
+          method: "POST",
+          body: formData,
         });
     }
 
@@ -7717,6 +7748,7 @@
     if ($("createTemplateParameterFormat")) $("createTemplateParameterFormat").value = "positional";
     if ($("createTemplateCategory")) $("createTemplateCategory").value = "UTILITY";
     if ($("createTemplateBodyText")) $("createTemplateBodyText").value = "Hi {{1}}, your order {{2}} is confirmed.";
+    if ($("createTemplateHeaderMedia")) $("createTemplateHeaderMedia").value = "";
     syncCreateTemplateHeaderFields();
     renderCreateTemplateBodyExamples();
     renderCreateTemplatePreview();
@@ -7731,10 +7763,37 @@
     $("createWhatsAppTemplateDialog").close();
   }
 
+  function createTemplateMediaHeaderAccept(format) {
+    if (format === "IMAGE") return "image/jpeg,image/png,.jpg,.jpeg,.png";
+    if (format === "VIDEO") return "video/mp4,.mp4";
+    if (format === "DOCUMENT") return "application/pdf,.pdf";
+    return "";
+  }
+
+  function createTemplateMediaHeaderHint(format) {
+    if (format === "IMAGE") return "Upload a JPEG or PNG sample for Meta review. Actual images are chosen when you send.";
+    if (format === "VIDEO") return "Upload an MP4 sample for Meta review. Actual videos are chosen when you send.";
+    if (format === "DOCUMENT") return "Upload a PDF sample for Meta review. Actual documents are chosen when you send.";
+    return "Meta reviews this sample with the template. Actual media is chosen when you send.";
+  }
+
   function syncCreateTemplateHeaderFields() {
-    const enabled = $("createTemplateHeaderFormat").value === "TEXT";
-    $("createTemplateHeaderTextWrap").hidden = !enabled;
-    if (!enabled) $("createTemplateHeaderText").value = "";
+    const format = $("createTemplateHeaderFormat")?.value || "NONE";
+    const textEnabled = format === "TEXT";
+    const mediaEnabled = ["IMAGE", "VIDEO", "DOCUMENT"].includes(format);
+    const textWrap = $("createTemplateHeaderTextWrap");
+    const mediaWrap = $("createTemplateHeaderMediaWrap");
+    const mediaInput = $("createTemplateHeaderMedia");
+    const mediaHint = $("createTemplateHeaderMediaHint");
+    if (textWrap) textWrap.hidden = !textEnabled;
+    if (mediaWrap) mediaWrap.hidden = !mediaEnabled;
+    if (!textEnabled && $("createTemplateHeaderText")) $("createTemplateHeaderText").value = "";
+    if (mediaInput) {
+      mediaInput.accept = createTemplateMediaHeaderAccept(format);
+      mediaInput.required = mediaEnabled;
+      if (!mediaEnabled) mediaInput.value = "";
+    }
+    if (mediaHint) mediaHint.textContent = createTemplateMediaHeaderHint(format);
     renderCreateTemplateHeaderExamples();
   }
 
@@ -7781,6 +7840,23 @@
     return examples;
   }
 
+  function createTemplateDynamicUrlSuffix() {
+    return $("createTemplateParameterFormat")?.value === "named" ? "{{order_id}}" : "{{1}}";
+  }
+
+  function ensureCreateTemplateDynamicUrl(url) {
+    const trimmed = String(url || "").trim();
+    const keys = createTemplatePlaceholders(trimmed);
+    if (keys.length) return trimmed;
+    const suffix = createTemplateDynamicUrlSuffix();
+    if (!trimmed) return `https://example.com/orders/${suffix}`;
+    return `${trimmed.replace(/\/+$/, "")}/${suffix}`;
+  }
+
+  function stripCreateTemplateUrlVariables(url) {
+    return String(url || "").replace(/\{\{\s*[^{}]+\s*\}\}/g, "").replace(/\/+$/, "").trim();
+  }
+
   function addCreateTemplateButtonRow(initial = {}) {
     const host = $("createTemplateButtons");
     if (host.children.length >= 10) {
@@ -7812,13 +7888,26 @@
     textInput.value = initial.text || "";
     textLabel.append(textInput);
 
+    const urlModeLabel = element("label", "field-label", "Website URL type");
+    const urlModeSelect = document.createElement("select");
+    urlModeSelect.className = "text-field";
+    urlModeSelect.dataset.createTemplateButtonField = "urlMode";
+    [["static", "Static URL"], ["dynamic", "Dynamic URL"]].forEach(([value, label]) => {
+      urlModeSelect.append(new Option(label, value));
+    });
+    const initialUrl = initial.url || "";
+    const initialUrlMode = initial.urlMode || (createTemplatePlaceholders(initialUrl).length ? "dynamic" : "static");
+    urlModeSelect.value = initialUrlMode;
+    urlModeLabel.append(urlModeSelect);
+
     const urlLabel = element("label", "field-label", "Website URL");
     const urlInput = document.createElement("input");
     urlInput.className = "text-field";
     urlInput.dataset.createTemplateButtonField = "url";
-    urlInput.placeholder = "https://example.com/orders/{{1}}";
-    urlInput.value = initial.url || "";
-    urlLabel.append(urlInput);
+    urlInput.placeholder = "https://example.com/store";
+    urlInput.value = initialUrl;
+    const urlHint = element("span", "field-hint", "Use a fixed link, or choose Dynamic URL to append one variable at the end.");
+    urlLabel.append(urlInput, urlHint);
 
     const phoneLabel = element("label", "field-label", "Phone number");
     const phoneInput = document.createElement("input");
@@ -7836,19 +7925,41 @@
     exampleInput.value = initial.example || "";
     exampleLabel.append(exampleInput);
 
+    let lastUrlMode = urlModeSelect.value;
     const syncVisibility = () => {
       const type = typeSelect.value;
-      urlLabel.hidden = type !== "URL";
+      const isUrl = type === "URL";
+      urlModeLabel.hidden = !isUrl;
+      urlLabel.hidden = !isUrl;
       phoneLabel.hidden = type !== "PHONE_NUMBER";
-      const urlKeys = createTemplatePlaceholders(urlInput.value);
-      exampleLabel.hidden = type !== "URL" || !urlKeys.length;
+      if (isUrl) {
+        const mode = urlModeSelect.value === "dynamic" ? "dynamic" : "static";
+        if (mode !== lastUrlMode) {
+          if (mode === "dynamic") urlInput.value = ensureCreateTemplateDynamicUrl(urlInput.value);
+          else urlInput.value = stripCreateTemplateUrlVariables(urlInput.value) || "https://example.com/store";
+          lastUrlMode = mode;
+        }
+        urlInput.placeholder = mode === "dynamic"
+          ? `https://example.com/orders/${createTemplateDynamicUrlSuffix()}`
+          : "https://example.com/store";
+        urlHint.textContent = mode === "dynamic"
+          ? "Put one variable at the end of the link, such as /{{1}} or /{{order_id}}."
+          : "Use a fixed https link with no variables.";
+        if (mode === "static" && createTemplatePlaceholders(urlInput.value).length) {
+          urlInput.value = stripCreateTemplateUrlVariables(urlInput.value) || "https://example.com/store";
+        }
+      }
+      const urlKeys = isUrl && urlModeSelect.value === "dynamic" ? createTemplatePlaceholders(urlInput.value) : [];
+      exampleLabel.hidden = !(isUrl && urlModeSelect.value === "dynamic");
+      exampleInput.required = !exampleLabel.hidden;
+      if (exampleLabel.hidden) exampleInput.value = exampleInput.value;
       renderCreateTemplatePreview();
     };
-    [typeSelect, textInput, urlInput, phoneInput, exampleInput].forEach((input) => {
+    [typeSelect, urlModeSelect, textInput, urlInput, phoneInput, exampleInput].forEach((input) => {
       input.addEventListener("input", syncVisibility);
       input.addEventListener("change", syncVisibility);
     });
-    row.append(head, textLabel, urlLabel, phoneLabel, exampleLabel);
+    row.append(head, textLabel, urlModeLabel, urlLabel, phoneLabel, exampleLabel);
     host.append(row);
     syncVisibility();
   }
@@ -7859,9 +7970,14 @@
       const type = read("type");
       const button = { type, text: read("text") };
       if (type === "URL") {
-        button.url = read("url");
+        const urlMode = read("urlMode") === "dynamic" ? "dynamic" : "static";
+        button.urlMode = urlMode;
+        button.url = urlMode === "dynamic" ? ensureCreateTemplateDynamicUrl(read("url")) : stripCreateTemplateUrlVariables(read("url"));
         const keys = createTemplatePlaceholders(button.url);
-        if (keys.length) button.example = read("example");
+        if (urlMode === "dynamic") {
+          if (!keys.length) button.url = ensureCreateTemplateDynamicUrl(button.url);
+          button.example = read("example");
+        }
       }
       if (type === "PHONE_NUMBER") button.phoneNumber = read("phoneNumber");
       return button;
@@ -7876,18 +7992,25 @@
     const bodyText = $("createTemplateBodyText").value.trim();
     const footerText = $("createTemplateFooterText").value.trim();
     const buttons = collectCreateTemplateButtons();
+    const mediaFile = $("createTemplateHeaderMedia")?.files?.[0] || null;
+    const header = headerFormat === "TEXT"
+      ? { format: "TEXT", text: headerText, example: headerExamples }
+      : ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat)
+        ? { format: headerFormat, mediaFile }
+        : { format: "NONE" };
     return {
       channelId: $("createTemplateChannel").value,
       name: $("createTemplateName").value.trim().toLowerCase(),
       language: $("createTemplateLanguage").value,
       category: $("createTemplateCategory").value,
       parameterFormat: $("createTemplateParameterFormat").value,
-      header: headerFormat === "TEXT" ? { format: "TEXT", text: headerText, example: headerExamples } : { format: "NONE" },
+      header,
       body: { text: bodyText, examples: bodyExamples },
       footer: footerText ? { text: footerText } : null,
       buttons,
       preview: {
         headerText: fillCreateTemplatePreviewText(headerText, headerExamples),
+        headerMediaName: mediaFile?.name || "",
         bodyText: fillCreateTemplatePreviewText(bodyText, bodyExamples),
         footerText,
         buttons: buttons.map((button) => {
@@ -7906,6 +8029,16 @@
     preview.replaceChildren();
     if (draft.header.format === "TEXT" && draft.preview.headerText) {
       preview.append(element("strong", "template-preview-header", draft.preview.headerText));
+    } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.header.format)) {
+      const media = element("div", "template-preview-media");
+      const format = draft.header.format;
+      media.append(
+        element("span", "", format === "VIDEO" ? "▶" : format === "DOCUMENT" ? "▤" : "▧"),
+        element("small", "", draft.preview.headerMediaName
+          ? draft.preview.headerMediaName
+          : `${capitalize(format.toLocaleLowerCase())} header`)
+      );
+      preview.append(media);
     }
     preview.append(element("p", "template-preview-body", draft.preview.bodyText || "Body text will appear here."));
     if (draft.preview.footerText) preview.append(element("small", "template-preview-footer", draft.preview.footerText));
@@ -7917,8 +8050,8 @@
       preview.append(host);
     }
     const keys = [
-      ...createTemplatePlaceholders($("createTemplateHeaderText").value).map((key) => `header {{${key}}}`),
-      ...createTemplatePlaceholders($("createTemplateBodyText").value).map((key) => `body {{${key}}}`),
+      ...createTemplatePlaceholders($("createTemplateHeaderText")?.value || "").map((key) => `header {{${key}}}`),
+      ...createTemplatePlaceholders($("createTemplateBodyText")?.value || "").map((key) => `body {{${key}}}`),
       ...collectCreateTemplateButtons().flatMap((button) => createTemplatePlaceholders(button.url || "").map((key) => `button {{${key}}}`)),
     ];
     const summary = $("createTemplateVariableSummary");
@@ -7926,7 +8059,7 @@
     summary.append(element("strong", "", keys.length ? `${keys.length} variable${keys.length === 1 ? "" : "s"}` : "No variables"));
     summary.append(document.createTextNode(keys.length
       ? keys.join(" · ")
-      : "Add {{1}} or named placeholders in the body, header, or URL button when needed."));
+      : "Add {{1}} or named placeholders in the body, header, or dynamic website URL when needed."));
   }
 
   async function submitCreateWhatsAppTemplate(event) {
@@ -7937,18 +8070,53 @@
       showToast("Choose a channel", "Select a WhatsApp channel before submitting the template.", true);
       return;
     }
+    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.header.format) && !draft.header.mediaFile) {
+      showToast("Sample media required", `Choose a ${draft.header.format.toLowerCase()} sample for the header.`, true);
+      return;
+    }
+    for (const button of draft.buttons) {
+      if (button.type !== "URL") continue;
+      if (button.urlMode === "dynamic") {
+        const keys = createTemplatePlaceholders(button.url || "");
+        if (!keys.length) {
+          showToast("Dynamic URL needed", "Dynamic Visit website buttons need one variable at the end of the URL.", true);
+          return;
+        }
+        if (!button.example) {
+          showToast("URL example needed", "Enter a sample value for the dynamic website URL variable.", true);
+          return;
+        }
+      } else if (createTemplatePlaceholders(button.url || "").length) {
+        showToast("Static URL invalid", "Static Visit website buttons cannot include variables. Switch to Dynamic URL instead.", true);
+        return;
+      }
+    }
     submit.disabled = true;
     try {
+      let header;
+      if (draft.header.format === "TEXT") {
+        header = draft.header;
+      } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.header.format)) {
+        const formData = new FormData();
+        formData.set("channelId", draft.channelId);
+        formData.set("format", draft.header.format);
+        formData.set("file", draft.header.mediaFile, draft.header.mediaFile.name || "sample");
+        const uploaded = await state.api.uploadWhatsAppTemplateSampleMedia(formData);
+        header = {
+          format: draft.header.format,
+          headerHandle: uploaded.headerHandle,
+        };
+      }
       const payload = {
         channelId: draft.channelId,
         name: draft.name,
         language: draft.language,
         category: draft.category,
         parameterFormat: draft.parameterFormat,
-        header: draft.header.format === "TEXT" ? draft.header : undefined,
+        header,
         body: draft.body,
         footer: draft.footer || undefined,
-        buttons: draft.buttons,
+        buttons: draft.buttons.map(({ urlMode, ...button }) => button),
       };
       const result = await state.api.createWhatsAppTemplate(payload);
       const item = normalizeWhatsAppTemplate(result.item || {});
@@ -16064,7 +16232,7 @@
     renderTagInput(tagInputRoot("create"), []);
     $("templateForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentTemplate(event.currentTarget); });
     $("createWhatsAppTemplateForm")?.addEventListener("submit", submitCreateWhatsAppTemplate);
-    ["createTemplateHeaderFormat", "createTemplateHeaderText", "createTemplateBodyText", "createTemplateFooterText", "createTemplateParameterFormat"]
+    ["createTemplateHeaderFormat", "createTemplateHeaderText", "createTemplateHeaderMedia", "createTemplateBodyText", "createTemplateFooterText", "createTemplateParameterFormat"]
       .forEach((id) => {
         const node = $(id);
         if (!node) return;

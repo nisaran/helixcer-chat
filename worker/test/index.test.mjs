@@ -725,6 +725,34 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
     parameterFormat: 'positional',
     body: { text: 'Hello {{1}} and {{3}}.', examples: { '1': 'A', '3': 'B' } }
   }), /consecutive/);
+
+  const mediaInput = validateWhatsAppTemplateCreateRequest({
+    channelId: 'wa-sales',
+    name: 'promo_image',
+    language: 'en_US',
+    category: 'MARKETING',
+    parameterFormat: 'positional',
+    header: { format: 'IMAGE', headerHandle: '4::aW1hZ2UvcG5n:ARZ9oTHzo9igJVD5QgwemUWSkOv3vl4dzdBovSFUy2yz5fFAg' },
+    body: { text: 'Hi {{1}}, check this offer.', examples: { '1': 'Asha' } },
+    buttons: [
+      { type: 'URL', text: 'Shop', url: 'https://example.com/shop' },
+      { type: 'URL', text: 'Track', url: 'https://example.com/orders/{{1}}', example: 'ORD-1001' }
+    ]
+  });
+  assert.equal(mediaInput.header.format, 'IMAGE');
+  assert.match(mediaInput.header.headerHandle, /^4::/);
+  const mediaPayload = buildMetaWhatsAppTemplateCreatePayload(mediaInput);
+  assert.equal(mediaPayload.components[0].format, 'IMAGE');
+  assert.deepEqual(mediaPayload.components[0].example.header_handle, [mediaInput.header.headerHandle]);
+  assert.equal(mediaPayload.components[2].buttons[0].url, 'https://example.com/shop');
+  assert.equal(mediaPayload.components[2].buttons[0].example, undefined);
+  assert.equal(mediaPayload.components[2].buttons[1].example[0], 'ORD-1001');
+
+  assert.throws(() => validateWhatsAppTemplateCreateRequest({
+    channelId: 'wa-sales', name: 'missing_handle', language: 'en_US', category: 'UTILITY',
+    header: { format: 'VIDEO' },
+    body: { text: 'Hello' }
+  }), /sample media/i);
 });
 
 test('sanitizes Meta template definitions while retaining positional, named, media, and button inputs', () => {
