@@ -75,7 +75,7 @@
     <aside class="sidebar" aria-label="Documentation navigation">
       <p class="nav-label">Start</p>
       <nav>
-        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li></ul>
+        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li><li><a href="#contacts">Add a contact</a></li></ul>
         <p class="nav-label">Channels</p>
         <p class="nav-channel">WhatsApp Meta</p>
         <ul class="nav-list nav-sublist"><li><a href="#send">Template messages</a></li><li><a href="#templates">List templates</a></li><li><a href="#template">Fetch template</a></li><li><a href="#examples">Template examples</a></li><li><a href="#advanced">Advanced templates</a></li><li><a href="#meta">Meta references</a></li></ul>
@@ -132,12 +132,62 @@
 
       <section id="authentication">
         <div class="two-col">
-          <div><p class="eyebrow">Authentication</p><h2>Your key stays on your server</h2><p class="intro">Create a workspace key in Helixcer and include it as a Bearer token. Every request must also include the workspace ID shown under <strong>Workspace</strong> in <code class="plain">X-Workspace-Id</code>. Helixcer verifies that it matches the API key; the header cannot grant access to another workspace. Sending requires <code class="plain">whatsapp:template:send</code>; reading status requires <code class="plain">messages:read</code>. Each send selects one of that workspace's connections with <code class="plain">channelId</code>.</p><div class="callout"><strong>A Helixcer key is not a Meta token.</strong> External applications never receive the Meta token, WABA ID, or phone-number ID saved on the channel.</div></div>
+          <div><p class="eyebrow">Authentication</p><h2>Your key stays on your server</h2><p class="intro">Create a workspace key in Helixcer and include it as a Bearer token. Every request must also include the workspace ID shown under <strong>Workspace</strong> in <code class="plain">X-Workspace-Id</code>. Helixcer verifies that it matches the API key; the header cannot grant access to another workspace. Creating contacts requires <code class="plain">contacts:write</code>; sending templates requires <code class="plain">whatsapp:template:send</code>; reading status requires <code class="plain">messages:read</code>. New keys include all three scopes. Template sends still select a workspace connection with <code class="plain">channelId</code>.</p><div class="callout"><strong>A Helixcer key is not a Meta token.</strong> External applications never receive the Meta token, WABA ID, or phone-number ID saved on the channel.</div></div>
           <div class="code-card"><div class="code-head"><span>Required headers</span><button class="copy" type="button">Copy</button></div><pre><code>Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
 X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
 Content-Type: application/json</code></pre></div>
         </div>
         <p style="margin-top:20px">An API key is shown once. Store it in a server-side secret manager or environment variable. Never place it in browser JavaScript, a mobile app, logs, screenshots, support messages, or a source repository. Revoke and replace it immediately if it may have leaked.</p>
+      </section>
+
+      <section id="contacts">
+        <p class="eyebrow">Contacts</p><h2>Add a contact</h2>
+        <p class="intro">Create a Helixcer contact with a display name and at least one platform ID. Company and tags are optional. This route does not use <code class="plain">Idempotency-Key</code>.</p>
+        <div class="endpoint"><span class="method">POST</span><code>https://api.chat.helixcer.com/api/v1/contacts</code><button class="copy" type="button" aria-label="Copy endpoint">Copy</button></div>
+        <div class="code-card">
+          <div class="code-head"><span>cURL · add contact</span><button class="copy" type="button">Copy</button></div>
+          <pre><code>curl --request POST \
+  --url https://api.chat.helixcer.com/api/v1/contacts \
+  --header 'Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY' \
+  --header 'X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "Asha Sharma",
+    "company": "Acme Retail",
+    "tags": ["lead", "invoice"],
+    "platformIds": {
+      "whatsapp": "919999999999",
+      "email": "asha@example.com"
+    }
+  }'</code></pre>
+        </div>
+        <div class="table-wrap" style="margin-top:18px"><table>
+          <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>name</code></td><td>Yes</td><td>Display name. Alias <code>displayName</code>. Max 120 characters.</td></tr>
+            <tr><td><code>company</code></td><td>No</td><td>Max 160 characters.</td></tr>
+            <tr><td><code>tags</code></td><td>No</td><td>Up to 20 tags, each up to 40 characters.</td></tr>
+            <tr><td><code>platformIds</code></td><td>Yes</td><td>At least one of <code>whatsapp</code>, <code>telegram</code>, <code>instagram</code>, <code>facebook</code>, <code>email</code>. WhatsApp is normalized to digits; email is lowercased.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="code-card" style="margin-top:18px"><div class="code-head"><span>201 · contact created</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "status": true,
+  "requestId": "96fe6806-a769-451e-918a-034b33d06dc1",
+  "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
+  "item": {
+    "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
+    "displayName": "Asha Sharma",
+    "company": "Acme Retail",
+    "tags": ["lead", "invoice"],
+    "platformIds": {
+      "whatsapp": "919999999999",
+      "telegram": "",
+      "instagram": "",
+      "facebook": "",
+      "email": "asha@example.com"
+    }
+  }
+}</code></pre></div>
       </section>
 
       <section id="send">
