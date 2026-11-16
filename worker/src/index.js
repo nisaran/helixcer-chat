@@ -110,7 +110,7 @@ import {
   shouldSendOutOfOffice
 } from './automation.js';
 
-const API_VERSION = '2026-11-16-template-upload-session';
+const API_VERSION = '2026-11-16-template-upload-sig';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -7089,26 +7089,46 @@ async function resolveMetaAppIdForWhatsAppToken(credentials, apiVersion) {
   return appId;
 }
 
-export function metaResumableUploadSessionPath(sessionId) {
+export function metaResumableUploadSessionParts(sessionId) {
   let id = String(sessionId || '').trim();
   if (!id) throw httpError(502, 'Meta did not return an upload session id.');
   // Some Graph responses already escape the upload: prefix as upload%3A.
   if (/^upload%3a/i.test(id)) {
     try { id = decodeURIComponent(id); } catch { /* keep original */ }
   }
-  // Graph documents POST /vX.Y/upload:<SESSION_ID>. The "upload:" prefix must stay literal —
-  // encoding that colon as %3A makes Meta report the object does not exist. Encode only the
-  // opaque token so +, /, =, :, and . survive fetch URL parsing.
+  // Graph returns ids like upload:<token>?sig=<signature>. The upload: prefix must stay
+  // literal in the path; ?sig= is a query parameter, not part of the path segment.
   const raw = /^upload:/i.test(id) ? id.slice(id.indexOf(':') + 1) : id;
-  // Meta has returned base64, base64url, dotted, and multi-colon opaque tokens. Reject only
-  // empty/control/whitespace values and URL delimiters that would break the path.
-  if (!raw || /[\s\u0000-\u001f\u007f#?]/.test(raw)) {
-    const preview = raw.replace(/[\s\u0000-\u001f\u007f]+/g, '').slice(0, 16);
+  const queryIndex = raw.indexOf('?');
+  const token = (queryIndex >= 0 ? raw.slice(0, queryIndex) : raw).trim();
+  const query = queryIndex >= 0 ? raw.slice(queryIndex + 1) : '';
+  if (!token || /[\s\u0000-\u001f\u007f#]/.test(token)) {
+    const preview = token.replace(/[\s\u0000-\u001f\u007f]+/g, '').slice(0, 16);
     throw httpError(502, preview
       ? `Meta returned an invalid upload session id (${preview}…).`
       : 'Meta returned an invalid upload session id.');
   }
-  return `upload:${encodeURIComponent(raw)}`;
+  return { token, query };
+}
+
+export function metaResumableUploadSessionPath(sessionId) {
+  const { token, query } = metaResumableUploadSessionParts(sessionId);
+  return query
+    ? `upload:${encodeURIComponent(token)}?${query}`
+    : `upload:${encodeURIComponent(token)}`;
+}
+
+export function metaResumableUploadSessionUrl(apiVersion, sessionId) {
+  const version = metaApiVersion(apiVersion);
+  const { token, query } = metaResumableUploadSessionParts(sessionId);
+  const url = new URL(`https://graph.facebook.com/${version}/upload:${encodeURIComponent(token)}`);
+  if (query) {
+    const params = new URLSearchParams(query);
+    for (const [key, value] of params.entries()) {
+      if (key) url.searchParams.set(key, value);
+    }
+  }
+  return url.toString();
 }
 
 export function metaResumableUploadSessionIdFromResponse(payload) {
@@ -7180,15 +7200,13 @@ async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId,
     const detail = redactProviderSecret(providerError(sessionData, sessionResponse.status), credentials.accessToken);
     throw httpError(422, `Meta could not start the template media upload: ${detail}`);
   }
-  let uploadPath;
+  let uploadUrl;
   try {
-    uploadPath = metaResumableUploadSessionPath(sessionId);
+    uploadUrl = metaResumableUploadSessionUrl(version, sessionId);
   } catch (error) {
     if (Number(error?.status) === 502) {
-      const detail = redactProviderSecret(providerError(sessionData, sessionResponse.status), credentials.accessToken);
-      throw httpError(502, detail
-        ? `Meta returned an invalid upload session id: ${detail}`
-        : error.message);
+      // Avoid providerError() on HTTP 200 success bodies — it falls back to "HTTP 200".
+      throw httpError(502, error.message || 'Meta returned an invalid upload session id.');
     }
     throw error;
   }
@@ -7197,7 +7215,7 @@ async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId,
     : undefined;
   let uploadResponse;
   try {
-    uploadResponse = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${uploadPath}`, {
+    uploadResponse = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
         Authorization: `OAuth ${credentials.accessToken}`,
