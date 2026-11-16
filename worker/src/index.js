@@ -110,7 +110,7 @@ import {
   shouldSendOutOfOffice
 } from './automation.js';
 
-const API_VERSION = '2026-11-06-campaign-chat-state';
+const API_VERSION = '2026-11-16-template-edit-save';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -690,17 +690,25 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (url.pathname === '/api/channel-data/whatsapp-templates' && request.method === 'PATCH') {
       requirePermission(principal, 'channels.templates');
       const result = await updateWorkspaceWhatsAppTemplate(env, workspaceId, await readJson(request), principal);
-      await audit(env, principal, 'update', 'whatsapp_template', result.item?.templateId || result.item?.name || '', {
-        channelId: result.channelId, name: result.item?.name, language: result.item?.language?.code
-      });
+      try {
+        await audit(env, principal, 'update', 'whatsapp_template', result.item?.templateId || result.item?.name || '', {
+          channelId: result.channelId, name: result.item?.name, language: result.item?.language?.code
+        });
+      } catch (error) {
+        console.error('whatsapp_template_update_audit_failed', { error: cleanError(error) });
+      }
       return withCors(json(result), cors);
     }
     if (url.pathname === '/api/channel-data/whatsapp-templates' && request.method === 'DELETE') {
       requirePermission(principal, 'channels.templates');
       const result = await deleteWorkspaceWhatsAppTemplate(env, workspaceId, await readJson(request), principal);
-      await audit(env, principal, 'delete', 'whatsapp_template', result.templateId || result.name || '', {
-        channelId: result.channelId, name: result.name, language: result.language
-      });
+      try {
+        await audit(env, principal, 'delete', 'whatsapp_template', result.templateId || result.name || '', {
+          channelId: result.channelId, name: result.name, language: result.language
+        });
+      } catch (error) {
+        console.error('whatsapp_template_delete_audit_failed', { error: cleanError(error) });
+      }
       return withCors(json(result), cors);
     }
     if (url.pathname === '/api/channel-data/import-chat' && request.method === 'POST') {
@@ -1078,7 +1086,11 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
   } catch (error) {
     const status = Number(error.status) || 500;
     if (status >= 500) console.error('request_failed', { path: url.pathname, status, message: error.message });
-    return withCors(json({ ok: false, error: status >= 500 ? 'The service could not complete the request.' : error.message }, status), cors);
+    // Keep intentional 502/504 provider messages visible; only hide unexpected 500s.
+    const message = status === 500
+      ? 'The service could not complete the request.'
+      : (error.message || 'The service could not complete the request.');
+    return withCors(json({ ok: false, error: message }, status), cors);
   }
 }
 
@@ -6875,6 +6887,17 @@ function parseWhatsAppTemplateWriteRequest(payload, { requireTemplateId = false,
       }
       buttons.push(button);
     }
+    // Meta requires call-to-action buttons (URL / phone) before quick replies.
+    let seenQuickReply = false;
+    for (const button of buttons) {
+      if (button.type === 'QUICK_REPLY') {
+        seenQuickReply = true;
+        continue;
+      }
+      if (seenQuickReply && (button.type === 'URL' || button.type === 'PHONE_NUMBER')) {
+        throw httpError(400, 'Put Visit website and Call phone buttons before Quick reply buttons. Meta rejects the reverse order.');
+      }
+    }
   }
 
   return {
@@ -7016,11 +7039,12 @@ export function buildMetaWhatsAppTemplateCreatePayload(input) {
   };
 }
 
-export function buildMetaWhatsAppTemplateUpdatePayload(input) {
-  return {
-    category: input.category,
+export function buildMetaWhatsAppTemplateUpdatePayload(input, { includeCategory = true } = {}) {
+  const payload = {
     components: buildMetaWhatsAppTemplateComponents(input)
   };
+  if (includeCategory && input.category) payload.category = input.category;
+  return payload;
 }
 
 async function bustWhatsAppTemplateCache(channel) {
@@ -7095,9 +7119,12 @@ export function metaTemplateSampleFileName(filename, mimeType) {
 
 async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId, file, mimeType, filename) {
   const version = metaApiVersion(apiVersion);
-  const bytes = file instanceof ArrayBuffer
-    ? file
-    : await file.arrayBuffer();
+  let bytes;
+  try {
+    bytes = file instanceof ArrayBuffer ? file : await file.arrayBuffer();
+  } catch (error) {
+    throw httpError(400, `Could not read the sample media file: ${cleanError(error) || 'invalid upload data.'}`);
+  }
   const size = Number(bytes?.byteLength || file?.size || 0);
   if (!Number.isFinite(size) || size <= 0) throw httpError(400, 'The sample media file is empty.');
   const safeName = metaTemplateSampleFileName(filename, mimeType);
@@ -7294,17 +7321,8 @@ async function createWorkspaceWhatsAppTemplate(env, workspaceId, payload, princi
   };
 }
 
-async function updateWorkspaceWhatsAppTemplate(env, workspaceId, payload, principal) {
-  const input = validateWhatsAppTemplateUpdateRequest(payload);
-  assertPrincipalChannelAccess(principal, input.channelId);
-  const channel = await getChannel(env, input.channelId, 'whatsapp_cloud', workspaceId);
-  if (!channel) throw httpError(404, 'WhatsApp channel not found or is disabled.');
-  await assertChannelReadyForConversation(env, workspaceId, channel);
-  const credentials = await readChannelCredentials(env, channel);
-  if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
-  const metaPayload = buildMetaWhatsAppTemplateUpdatePayload(input);
-  const version = metaApiVersion(channel.config?.apiVersion);
-  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(input.templateId)}`);
+async function postMetaWhatsAppTemplateUpdate(credentials, version, templateId, metaPayload) {
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(templateId)}`);
   const updateSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
     ? AbortSignal.timeout(60000)
     : undefined;
@@ -7326,18 +7344,52 @@ async function updateWorkspaceWhatsAppTemplate(env, workspaceId, payload, princi
     throw httpError(502, 'Meta could not update the WhatsApp template.');
   }
   const data = safeJsonParse(await response.text(), {});
+  return { response, data };
+}
+
+function metaTemplateUpdateCategoryConflict(detail) {
+  return /categor(y|ies)|utility guidelines|cannot update the category|can't update the category|not allowed to change/i.test(String(detail || ''));
+}
+
+async function updateWorkspaceWhatsAppTemplate(env, workspaceId, payload, principal) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Request body must be a JSON object.');
+  const includeCategory = payload.includeCategory !== false;
+  const { includeCategory: _ignoredIncludeCategory, ...templatePayload } = payload;
+  const input = validateWhatsAppTemplateUpdateRequest(templatePayload);
+  assertPrincipalChannelAccess(principal, input.channelId);
+  const channel = await getChannel(env, input.channelId, 'whatsapp_cloud', workspaceId);
+  if (!channel) throw httpError(404, 'WhatsApp channel not found or is disabled.');
+  await assertChannelReadyForConversation(env, workspaceId, channel);
+  const credentials = await readChannelCredentials(env, channel);
+  if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
+  let metaPayload = buildMetaWhatsAppTemplateUpdatePayload(input, { includeCategory });
+  const version = metaApiVersion(channel.config?.apiVersion);
+  let { response, data } = await postMetaWhatsAppTemplateUpdate(credentials, version, input.templateId, metaPayload);
+  if (!response.ok && includeCategory) {
+    const detail = redactProviderSecret(providerError(data, response.status), credentials.accessToken);
+    if (metaTemplateUpdateCategoryConflict(detail)) {
+      // Approved templates often reject category changes; retry with components only.
+      metaPayload = buildMetaWhatsAppTemplateUpdatePayload(input, { includeCategory: false });
+      ({ response, data } = await postMetaWhatsAppTemplateUpdate(credentials, version, input.templateId, metaPayload));
+    }
+  }
   if (!response.ok) {
     const detail = redactProviderSecret(providerError(data, response.status), credentials.accessToken);
     throw httpError(422, `Meta could not update the WhatsApp template: ${detail}`);
   }
-  await bustWhatsAppTemplateCache(channel);
+  try {
+    await bustWhatsAppTemplateCache(channel);
+  } catch (error) {
+    console.error('whatsapp_template_cache_bust_failed', { channelId: channel.channelId, error: cleanError(error) });
+  }
   const status = providerEnum(data.status, 40) || 'PENDING';
+  const category = providerEnum(data.category, 40) || input.category;
   const item = sanitizeWhatsAppTemplateDefinition({
     id: input.templateId,
-    name: input.name,
+    name: input.name || providerText(data.name, 512),
     language: input.language,
     status,
-    category: input.category,
+    category,
     components: metaPayload.components
   }) || {
     templateId: input.templateId,
@@ -7345,7 +7397,7 @@ async function updateWorkspaceWhatsAppTemplate(env, workspaceId, payload, princi
     name: input.name,
     language: { code: input.language },
     status,
-    category: input.category,
+    category,
     components: metaPayload.components,
     variables: []
   };

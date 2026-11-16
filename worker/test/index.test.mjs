@@ -691,8 +691,8 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
     footer: { text: 'Helixcer Accounts' },
     buttons: [
       { type: 'URL', text: 'Track', url: 'https://example.com/orders/{{1}}', example: 'ORD-1001' },
-      { type: 'QUICK_REPLY', text: 'Need help' },
-      { type: 'PHONE_NUMBER', text: 'Call us', phoneNumber: '+919999999999' }
+      { type: 'PHONE_NUMBER', text: 'Call us', phoneNumber: '+919999999999' },
+      { type: 'QUICK_REPLY', text: 'Need help' }
     ]
   });
   assert.equal(input.name, 'order_confirmation');
@@ -704,6 +704,7 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
   assert.deepEqual(payload.components[1].example.body_text, [['Asha', 'ORD-1001']]);
   assert.equal(payload.components[2].type, 'FOOTER');
   assert.equal(payload.components[3].buttons[0].example[0], 'ORD-1001');
+  assert.equal(payload.components[3].buttons[2].type, 'QUICK_REPLY');
 
   const named = validateWhatsAppTemplateCreateRequest({
     channelId: 'wa-sales',
@@ -778,6 +779,22 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
   assert.equal(updatePayload.category, 'MARKETING');
   assert.equal(updatePayload.components[0].format, 'IMAGE');
   assert.equal(updatePayload.components[0].example, undefined);
+  const updateWithoutCategory = buildMetaWhatsAppTemplateUpdatePayload(updateInput, { includeCategory: false });
+  assert.equal(updateWithoutCategory.category, undefined);
+  assert.equal(updateWithoutCategory.components[0].format, 'IMAGE');
+
+  assert.throws(() => validateWhatsAppTemplateUpdateRequest({
+    channelId: 'wa-sales',
+    templateId: '123456789012345',
+    name: 'bad_button_order',
+    language: 'en_US',
+    category: 'UTILITY',
+    body: { text: 'Hello {{1}}', examples: { '1': 'Asha' } },
+    buttons: [
+      { type: 'QUICK_REPLY', text: 'Hi' },
+      { type: 'URL', text: 'Shop', url: 'https://example.com/shop' }
+    ]
+  }), /before Quick reply/i);
 
   const deleteInput = validateWhatsAppTemplateDeleteRequest({
     channelId: 'wa-sales',
