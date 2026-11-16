@@ -18,6 +18,7 @@ Send approved WhatsApp templates from your server while keeping every outbound m
 | | |
 |---|---|
 | Base URL | `https://api.chat.helixcer.com` |
+| Add a contact | `POST /api/v1/contacts` |
 | Send a template (Meta format) | `POST /api/v1/whatsapp/template-messages` |
 | Send a template (Helixcer format) | `POST /api/v1/whatsapp/helixcer/template-messages` |
 | List templates | `GET /api/v1/whatsapp/templates?channelId=...` |
@@ -42,7 +43,60 @@ X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
 
 An API key is shown once. Store it in a server-side secret manager or environment variable. Never place it in browser JavaScript, a mobile app, logs, screenshots, support messages, or a Git repository. A Helixcer API key is not a Meta access token.
 
-Keys are bound to one workspace and apply to its WhatsApp connections. Copy the read-only workspace ID from **Workspace** in Helixcer and send it in `X-Workspace-Id` with every request. Helixcer verifies that the header matches the API key; it cannot grant access to another workspace. Sending requires the `whatsapp:template:send` scope; reading status requires `messages:read`. Every send still selects the required workspace connection with `channelId`. Revoke and replace a key immediately if it may have leaked; rotate production keys periodically.
+Keys are bound to one workspace and apply to its WhatsApp connections. Copy the read-only workspace ID from **Workspace** in Helixcer and send it in `X-Workspace-Id` with every request. Helixcer verifies that the header matches the API key; it cannot grant access to another workspace. Creating contacts requires `contacts:write`; sending templates requires `whatsapp:template:send`; reading status requires `messages:read`. New keys include all three scopes. Template sends still select the required workspace connection with `channelId`. Revoke and replace a key immediately if it may have leaked; rotate production keys periodically.
+
+## Contacts · Add a contact
+
+Create a Helixcer contact with optional company/tags and at least one platform ID. This endpoint does not use `Idempotency-Key`.
+
+```http
+POST https://api.chat.helixcer.com/api/v1/contacts
+Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
+X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "Asha Sharma",
+  "company": "Acme Retail",
+  "tags": ["lead", "invoice"],
+  "platformIds": {
+    "whatsapp": "919999999999",
+    "email": "asha@example.com"
+  }
+}
+```
+
+| Field | Required | Description |
+|---|---:|---|
+| `name` | Yes | Display name. Alias: `displayName`. Max 120 characters. |
+| `company` | No | Max 160 characters. |
+| `tags` | No | Array of up to 20 tags, each up to 40 characters. |
+| `platformIds` | Yes | Object with at least one of `whatsapp`, `telegram`, `instagram`, `facebook`, `email`. WhatsApp values are normalized to digits (`^[1-9]\d{7,14}$`). Email is lowercased. |
+
+### Accepted response · `201 Created`
+
+```json
+{
+  "status": true,
+  "requestId": "96fe6806-a769-451e-918a-034b33d06dc1",
+  "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
+  "item": {
+    "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
+    "displayName": "Asha Sharma",
+    "company": "Acme Retail",
+    "tags": ["lead", "invoice"],
+    "platformIds": {
+      "whatsapp": "919999999999",
+      "telegram": "",
+      "instagram": "",
+      "facebook": "",
+      "email": "asha@example.com"
+    }
+  }
+}
+```
 
 ## WhatsApp Meta · Send a template message
 

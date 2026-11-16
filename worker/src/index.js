@@ -131,6 +131,11 @@ const WHATSAPP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 const EXTERNAL_API_OPERATION = 'whatsapp.template.send';
 const EXTERNAL_API_IDEMPOTENCY_DAYS = 7;
+const EXTERNAL_API_DEFAULT_SCOPES = Object.freeze([
+  'whatsapp:template:send',
+  'messages:read',
+  'contacts:write'
+]);
 const LEGACY_WORKSPACE_ID = 'ws_default';
 const WHATSAPP_TEMPLATE_CACHE_SECONDS = 5 * 60;
 const WHATSAPP_TEMPLATE_CACHE_ORIGIN = 'https://template-cache.helixcer.internal';
@@ -1074,7 +1079,7 @@ async function createApiKey(env, workspaceId, principal, payload) {
        expires_at,created_by_user_id,created_at,updated_at)
     VALUES (?1,?2,?3,?4,?5,?6,?7,'active',?8,?9,?10,?10)`)
     .bind(apiKeyId, workspaceId, name, keyPrefix, await hashText(apiKey),
-      JSON.stringify(['whatsapp:template:send', 'messages:read']), '[]',
+      JSON.stringify([...EXTERNAL_API_DEFAULT_SCOPES]), '[]',
       expiresAt, principal.user.userId || '', now).run();
   await audit(env, principal, 'create', 'api_key', apiKeyId, { keyPrefix });
   return {
@@ -1082,7 +1087,7 @@ async function createApiKey(env, workspaceId, principal, payload) {
     apiKey,
     item: publicApiKeyView({
       api_key_id: apiKeyId, name, key_prefix: keyPrefix,
-      scopes_json: JSON.stringify(['whatsapp:template:send', 'messages:read']),
+      scopes_json: JSON.stringify([...EXTERNAL_API_DEFAULT_SCOPES]),
       status: 'active', expires_at: expiresAt,
       last_used_at: null, created_at: now, updated_at: now, revoked_at: null
     })
@@ -1212,6 +1217,12 @@ async function handleExternalApi(request, env, ctx, url) {
       response.headers.set('X-Request-Id', requestId);
       return response;
     }
+    if (url.pathname === '/api/v1/contacts' && request.method === 'POST') {
+      requireApiScope(apiPrincipal, 'contacts:write');
+      const response = await createExternalContact(request, env, apiPrincipal, requestId);
+      response.headers.set('X-Request-Id', requestId);
+      return response;
+    }
     throw apiError(404, 'route_not_found', 'API route not found.');
   } catch (error) {
     const status = Number(error?.status) || 500;
@@ -1264,6 +1275,49 @@ async function authenticateApiKey(request, env) {
 
 function requireApiScope(principal, scope) {
   if (!principal.scopes.has(scope)) throw apiError(403, 'insufficient_scope', `The API key requires the ${scope} scope.`);
+}
+
+function externalContactView(item) {
+  return {
+    contactId: item.contactId,
+    displayName: item.displayName || item.name || '',
+    company: item.company || '',
+    tags: Array.isArray(item.tags) ? item.tags : [],
+    platformIds: {
+      whatsapp: item.platformIds?.whatsapp || '',
+      telegram: item.platformIds?.telegram || '',
+      instagram: item.platformIds?.instagram || '',
+      facebook: item.platformIds?.facebook || '',
+      email: item.platformIds?.email || ''
+    }
+  };
+}
+
+async function createExternalContact(request, env, principal, requestId) {
+  const payload = await readExternalJson(request);
+  if (!isPlainObject(payload)) throw apiError(400, 'invalid_request', 'Request body must be a JSON object.');
+  try {
+    rejectUnknownKeys(payload, new Set(['name', 'displayName', 'company', 'tags', 'platformIds']), 'request');
+  } catch (error) {
+    throw apiError(400, 'invalid_request', cleanError(error));
+  }
+  if (payload.platformIds === undefined) {
+    throw apiError(400, 'invalid_request', 'platformIds is required and must include at least one ID.');
+  }
+  let result;
+  try {
+    result = await createContact(env, principal.workspaceId, payload, principal);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) throw error;
+    throw apiError(status, error?.code || (status === 409 ? 'conflict' : 'invalid_request'), cleanError(error));
+  }
+  return json({
+    status: true,
+    requestId,
+    contactId: result.contactId,
+    item: externalContactView(result.item)
+  }, 201);
 }
 
 async function enforceExternalApiRateLimit(env, principal, requestId) {
@@ -10490,6 +10544,9 @@ export function timingSafeEqual(left, right) {
 }
 
 async function audit(env, principal, action, targetType, targetId, details) {
+  if (principal?.apiKeyId) {
+    return auditApiKey(env, principal, action, targetType, targetId, details);
+  }
   await env.DB.prepare(`INSERT INTO audit_log
       (audit_id,actor,action,target_type,target_id,details_json,timestamp,workspace_id,actor_user_id,actor_email)
     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?2)`)

@@ -494,7 +494,7 @@
         ],
       },
       apiKeys: [
-        { apiKeyId: "demo-api-key", name: "Order notifications", keyPrefix: "hxc_live_demo…", scopes: ["whatsapp:template:send", "messages:read"], status: "active", createdAt: ago(1440), lastUsedAt: ago(8), expiresAt: "" },
+        { apiKeyId: "demo-api-key", name: "Order notifications", keyPrefix: "hxc_live_demo…", scopes: ["whatsapp:template:send", "messages:read", "contacts:write"], status: "active", createdAt: ago(1440), lastUsedAt: ago(8), expiresAt: "" },
       ],
       channels: [
         { channelId: "wa-sales", name: "Sales WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", config: { wabaId: "123456789012345", phoneNumberId: "123456789012346" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(120), webhookVerifiedAt: ago(118), lastWebhookAt: ago(3), verifiedName: "Helixcer Sales", verifiedPhoneNumber: "+91 98765 43210" } },
@@ -865,7 +865,7 @@
         apiKeyId: `key-${suffix}`,
         name: payload.name,
         keyPrefix: `hxc_live_${suffix.slice(-8)}…`,
-        scopes: ["whatsapp:template:send", "messages:read"],
+        scopes: ["whatsapp:template:send", "messages:read", "contacts:write"],
         status: "active",
         createdAt: new Date().toISOString(),
         lastUsedAt: "",

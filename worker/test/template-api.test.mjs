@@ -107,12 +107,25 @@ async function metaSignature(raw, secret) {
   return `sha256=${Buffer.from(signature).toString('hex')}`;
 }
 
-async function insertKey(database, token, apiKeyId, prefix) {
+async function insertKey(database, token, apiKeyId, prefix, scopes = ['whatsapp:template:send', 'messages:read', 'contacts:write']) {
   const now = new Date().toISOString();
   database.prepare(`INSERT INTO api_keys
       (api_key_id,workspace_id,name,key_prefix,secret_hash,scopes_json,allowed_channel_ids_json,status,created_at,updated_at)
-    VALUES (?, 'ws_default', 'Integration key', ?, ?, '["whatsapp:template:send","messages:read"]', '[]', 'active', ?, ?)`)
-    .run(apiKeyId, prefix, await sha256(token), now, now);
+    VALUES (?, 'ws_default', 'Integration key', ?, ?, ?, '[]', 'active', ?, ?)`)
+    .run(apiKeyId, prefix, await sha256(token), JSON.stringify(scopes), now, now);
+}
+
+function postContact(token, body, headers = {}) {
+  return new Request('https://api.chat.helixcer.com/api/v1/contacts', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Workspace-Id': 'ws_default',
+      'Content-Type': 'application/json',
+      ...headers
+    },
+    body: JSON.stringify(body)
+  });
 }
 
 function postTemplate(token, idempotencyKey, body, headers = {}, pathname = '/api/v1/whatsapp/template-messages') {
@@ -781,6 +794,7 @@ test('API key management reveals a secret once, stores only its hash, lists meta
     const created = await createdResponse.json();
     assert.match(created.apiKey, /^hxc_live_[A-Za-z0-9_-]{8,32}\.[A-Za-z0-9_-]{32,128}$/);
     assert.equal(created.item.name, 'Order system');
+    assert.deepEqual(created.item.scopes, ['whatsapp:template:send', 'messages:read', 'contacts:write']);
     assert.equal(Object.hasOwn(created.item, 'allowedChannelIds'), false);
     const stored = database.prepare('SELECT key_prefix,secret_hash,allowed_channel_ids_json FROM api_keys WHERE api_key_id=?').get(created.item.apiKeyId);
     assert.equal(stored.key_prefix, created.item.keyPrefix);
@@ -919,6 +933,75 @@ test('external WhatsApp API lists and fetches templates by channel', async () =>
     assert.equal(providerPaths.some(path => path.includes('name=order_confirmation')), true);
   } finally {
     globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('external contacts API creates a contact and requires contacts:write', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_contacts1.${'c'.repeat(43)}`;
+  await insertKey(database, token, 'key-contacts', 'hxc_live_contacts1');
+  const limitedToken = `hxc_live_contacts0.${'d'.repeat(43)}`;
+  await insertKey(database, limitedToken, 'key-contacts-limited', 'hxc_live_contacts0',
+    ['whatsapp:template:send', 'messages:read']);
+
+  try {
+    const createdResponse = await handleRequest(postContact(token, {
+      name: 'Asha Sharma',
+      company: 'Acme Retail',
+      tags: ['lead', 'invoice'],
+      platformIds: {
+        whatsapp: '+91 99999 99999',
+        email: 'Asha@Example.com'
+      }
+    }), env);
+    assert.equal(createdResponse.status, 201);
+    assert.equal(createdResponse.headers.get('X-Request-Id')?.length > 0, true);
+    const created = await createdResponse.json();
+    assert.equal(created.status, true);
+    assert.equal(typeof created.requestId, 'string');
+    assert.equal(typeof created.contactId, 'string');
+    assert.equal(created.item.displayName, 'Asha Sharma');
+    assert.equal(created.item.company, 'Acme Retail');
+    assert.deepEqual(created.item.tags, ['lead', 'invoice']);
+    assert.equal(created.item.platformIds.whatsapp, '919999999999');
+    assert.equal(created.item.platformIds.email, 'asha@example.com');
+    assert.equal(created.item.platformIds.telegram, '');
+    assert.equal(Object.hasOwn(created.item, 'identities'), false);
+
+    const row = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?')
+      .get(created.contactId);
+    assert.equal(row.display_name, 'Asha Sharma');
+    assert.equal(row.company, 'Acme Retail');
+    assert.deepEqual(JSON.parse(row.tags_json), ['lead', 'invoice']);
+    const platforms = database.prepare(
+      'SELECT platform,profile_id FROM contact_platform_ids WHERE contact_id=? ORDER BY platform'
+    ).all(created.contactId).map(row => ({ platform: row.platform, profile_id: row.profile_id }));
+    assert.deepEqual(platforms, [
+      { platform: 'email', profile_id: 'asha@example.com' },
+      { platform: 'whatsapp', profile_id: '919999999999' }
+    ]);
+
+    const missingIds = await handleRequest(postContact(token, {
+      name: 'No Platforms'
+    }), env);
+    assert.equal(missingIds.status, 400);
+    assert.equal((await missingIds.json()).error.code, 'invalid_request');
+
+    const emptyIds = await handleRequest(postContact(token, {
+      name: 'Empty Platforms',
+      platformIds: { whatsapp: '', email: '' }
+    }), env);
+    assert.equal(emptyIds.status, 400);
+    assert.equal((await emptyIds.json()).error.code, 'invalid_request');
+
+    const denied = await handleRequest(postContact(limitedToken, {
+      name: 'Blocked',
+      platformIds: { whatsapp: '918888888888' }
+    }), env);
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json()).error.code, 'insufficient_scope');
+  } finally {
     database.close();
   }
 });
