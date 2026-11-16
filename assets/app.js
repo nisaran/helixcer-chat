@@ -7750,6 +7750,7 @@
     if ($("createTemplateBodyText")) $("createTemplateBodyText").value = "Hi {{1}}, your order {{2}} is confirmed.";
     if ($("createTemplateHeaderMedia")) $("createTemplateHeaderMedia").value = "";
     syncCreateTemplateHeaderFields();
+    syncCreateTemplateBodyHint();
     renderCreateTemplateBodyExamples();
     renderCreateTemplatePreview();
     if ($("createWhatsAppTemplateSubmit")) {
@@ -7830,6 +7831,63 @@
     const keys = createTemplatePlaceholders($("createTemplateBodyText").value);
     renderCreateTemplateExampleRows($("createTemplateBodyExamples"), keys, "body");
     renderCreateTemplatePreview();
+  }
+
+  function syncCreateTemplateBodyHint() {
+    const hint = $("createTemplateBodyHint");
+    if (!hint) return;
+    const named = $("createTemplateParameterFormat")?.value === "named";
+    hint.textContent = named
+      ? "Use named variables such as {{customer_name}}. Sample values are required for every variable."
+      : "Use numbered variables such as {{1}} and {{2}}. Sample values are required for every variable.";
+    const textarea = $("createTemplateBodyText");
+    if (textarea) {
+      textarea.placeholder = named
+        ? "Hi {{customer_name}}, your order {{order_id}} is confirmed."
+        : "Hi {{1}}, your order {{2}} is confirmed.";
+    }
+  }
+
+  function nextCreateTemplateBodyVariableKey() {
+    const named = $("createTemplateParameterFormat")?.value === "named";
+    const existing = createTemplatePlaceholders($("createTemplateBodyText")?.value || "");
+    if (!named) {
+      const numbers = existing.map((key) => Number(key)).filter((value) => Number.isInteger(value) && value > 0);
+      return String(numbers.length ? Math.max(...numbers) + 1 : 1);
+    }
+    const suggested = window.prompt("Variable name", "customer_name");
+    if (suggested === null) return "";
+    const key = String(suggested || "").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!key || /^\d+$/.test(key)) {
+      showToast("Invalid variable", "Named variables must use letters, numbers, or underscores, and cannot be only digits.", true);
+      return "";
+    }
+    if (existing.includes(key)) {
+      showToast("Variable exists", `{{${key}}} is already in the body text.`, true);
+      return "";
+    }
+    return key;
+  }
+
+  function insertCreateTemplateBodyVariable() {
+    const textarea = $("createTemplateBodyText");
+    if (!textarea) return;
+    const key = nextCreateTemplateBodyVariableKey();
+    if (!key) return;
+    const token = `{{${key}}}`;
+    const start = Number.isInteger(textarea.selectionStart) ? textarea.selectionStart : textarea.value.length;
+    const end = Number.isInteger(textarea.selectionEnd) ? textarea.selectionEnd : start;
+    const before = textarea.value.slice(0, start);
+    const after = textarea.value.slice(end);
+    const needsLeadingSpace = before && !/\s$/.test(before) && !before.endsWith("{");
+    const needsTrailingSpace = after && !/^\s/.test(after) && !after.startsWith("}");
+    const insert = `${needsLeadingSpace ? " " : ""}${token}${needsTrailingSpace ? " " : ""}`;
+    textarea.value = `${before}${insert}${after}`;
+    const cursor = before.length + insert.length;
+    textarea.focus();
+    textarea.setSelectionRange(cursor, cursor);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    renderCreateTemplateBodyExamples();
   }
 
   function createTemplateExampleMap(prefix) {
@@ -15374,6 +15432,10 @@
           addCreateTemplateButtonRow();
           return;
         }
+        if (actionButton.dataset.action === "add-create-template-body-variable") {
+          insertCreateTemplateBodyVariable();
+          return;
+        }
         if (actionButton.dataset.action === "remove-create-template-button") {
           actionButton.closest(".create-template-button-row")?.remove();
           renderCreateTemplatePreview();
@@ -15555,6 +15617,7 @@
           },
           "close-create-whatsapp-template": closeCreateWhatsAppTemplateDialog,
           "add-create-template-button": () => addCreateTemplateButtonRow(),
+          "add-create-template-body-variable": () => insertCreateTemplateBodyVariable(),
           "remove-create-template-button": () => {
             const row = actionButton.closest(".create-template-button-row");
             row?.remove();
@@ -16240,11 +16303,17 @@
           if (id === "createTemplateHeaderFormat") syncCreateTemplateHeaderFields();
           else if (id === "createTemplateHeaderText") renderCreateTemplateHeaderExamples();
           else if (id === "createTemplateBodyText") renderCreateTemplateBodyExamples();
-          else renderCreateTemplatePreview();
+          else if (id === "createTemplateParameterFormat") {
+            syncCreateTemplateBodyHint();
+            renderCreateTemplatePreview();
+          } else renderCreateTemplatePreview();
         });
         node.addEventListener("change", () => {
           if (id === "createTemplateHeaderFormat") syncCreateTemplateHeaderFields();
-          else renderCreateTemplatePreview();
+          else if (id === "createTemplateParameterFormat") {
+            syncCreateTemplateBodyHint();
+            renderCreateTemplatePreview();
+          } else renderCreateTemplatePreview();
         });
       });
     $("templateDialog").addEventListener("close", () => {
