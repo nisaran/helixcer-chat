@@ -37,6 +37,8 @@ import {
   validateWhatsAppTemplateCreateRequest,
   buildMetaWhatsAppTemplateCreatePayload,
   buildMetaComponentsFromHelixcerVariables,
+  metaResumableUploadSessionPath,
+  metaTemplateSampleFileName,
   whatsappReplyWindowState,
   verifyMetaSignature
 } from '../src/index.js';
@@ -753,6 +755,23 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
     header: { format: 'VIDEO' },
     body: { text: 'Hello' }
   }), /sample media/i);
+});
+
+test('Meta resumable upload keeps the upload: colon and sanitizes sample filenames', () => {
+  const sessionId = 'upload:MTphdHRhY2htZW50OjQ1ZmNiMDBjLTI3YjctNDAzMi05NjAwLTc5N2E3N2FiMDQ5Ng==';
+  assert.equal(metaResumableUploadSessionPath(sessionId), sessionId);
+  assert.equal(
+    metaResumableUploadSessionPath('MTphdHRhY2htZW50OjQ1ZmNiMDBjLTI3YjctNDAzMi05NjAwLTc5N2E3N2FiMDQ5Ng=='),
+    'upload:MTphdHRhY2htZW50OjQ1ZmNiMDBjLTI3YjctNDAzMi05NjAwLTc5N2E3N2FiMDQ5Ng=='
+  );
+  assert.notEqual(metaResumableUploadSessionPath(sessionId), encodeURIComponent(sessionId));
+  assert.match(metaResumableUploadSessionPath(sessionId), /^upload:/);
+  assert.doesNotMatch(metaResumableUploadSessionPath(sessionId), /upload%3A/i);
+  assert.equal(
+    metaTemplateSampleFileName('DROPX5026_Invoice Slip for October - 2026.pdf', 'application/pdf'),
+    'DROPX5026_Invoice_Slip_for_October_-_2026.pdf'
+  );
+  assert.equal(metaTemplateSampleFileName('promo shot!!.PNG', 'image/png'), 'promo_shot.png');
 });
 
 test('sanitizes Meta template definitions while retaining positional, named, media, and button inputs', () => {
