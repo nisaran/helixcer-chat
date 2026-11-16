@@ -1923,7 +1923,7 @@
         : this.request("/api/channel-data/whatsapp-templates", {
           method: "PATCH",
           body: JSON.stringify(payload),
-          timeoutMs: 90000,
+          timeoutMs: 120000,
         });
     }
 
@@ -7937,6 +7937,7 @@
       name: template.name,
       language: template.languageCode,
       status: template.status,
+      category: String(template.category || "").toUpperCase(),
     };
     syncWhatsAppTemplateDialogMode();
     prefillCreateWhatsAppTemplateForm(template);
@@ -8007,17 +8008,24 @@
       if (input) input.value = value;
     });
     $("createTemplateButtons")?.replaceChildren();
-    buttons.forEach((button) => {
+    // Meta requires URL/phone CTAs before quick replies. Prefill in that order.
+    const normalizedButtons = buttons.map((button) => {
       const type = String(button?.type || "QUICK_REPLY").toUpperCase();
-      const url = String(button?.url || "");
-      const urlKeys = createTemplatePlaceholders(url);
-      addCreateTemplateButtonRow({
+      return {
         type: ["QUICK_REPLY", "URL", "PHONE_NUMBER"].includes(type) ? type : "QUICK_REPLY",
         text: String(button?.text || ""),
-        url,
-        urlMode: urlKeys.length ? "dynamic" : "static",
+        url: String(button?.url || ""),
         example: Array.isArray(button?.example) ? button.example[0] : button?.example,
         phoneNumber: button?.phone_number || button?.phoneNumber || "",
+      };
+    });
+    const callToAction = normalizedButtons.filter((button) => button.type === "URL" || button.type === "PHONE_NUMBER");
+    const quickReplies = normalizedButtons.filter((button) => button.type === "QUICK_REPLY");
+    [...callToAction, ...quickReplies].forEach((button) => {
+      const urlKeys = createTemplatePlaceholders(button.url || "");
+      addCreateTemplateButtonRow({
+        ...button,
+        urlMode: urlKeys.length ? "dynamic" : "static",
       });
     });
     renderCreateTemplatePreview();
@@ -8454,7 +8462,18 @@
       showToast("Sample media required", `Choose a ${draft.header.format.toLowerCase()} sample for the header.`, true);
       return;
     }
+    let seenQuickReply = false;
     for (const button of draft.buttons) {
+      if (button.type === "QUICK_REPLY") {
+        seenQuickReply = true;
+      } else if (seenQuickReply && (button.type === "URL" || button.type === "PHONE_NUMBER")) {
+        showToast(
+          "Button order invalid",
+          "Move Visit website and Call phone buttons above Quick reply buttons. Meta rejects the reverse order.",
+          true
+        );
+        return;
+      }
       if (button.type !== "URL") continue;
       if (button.urlMode === "dynamic") {
         const keys = createTemplatePlaceholders(button.url || "");
@@ -8513,6 +8532,9 @@
         ? await state.api.updateWhatsAppTemplate({
           ...payload,
           templateId: state.whatsappTemplateEditor.templateId,
+          // Avoid Meta category conflicts on approved templates unless the user changed it.
+          includeCategory: String(draft.category || "").toUpperCase()
+            !== String(state.whatsappTemplateEditor.category || "").toUpperCase(),
         })
         : await state.api.createWhatsAppTemplate(payload);
       const item = normalizeWhatsAppTemplate(result.item || {});
