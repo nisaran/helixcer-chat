@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261116-create-template-submit-progress">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261116-template-edit-copy">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261116-create-template-submit-progress" defer></script>
+  <script src="./assets/app.js?v=20261116-template-edit-copy" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1555,7 +1555,10 @@
   <dialog class="modal create-template-modal" id="createWhatsAppTemplateDialog" aria-labelledby="createWhatsAppTemplateTitle">
     <form class="modal-card create-template-card" id="createWhatsAppTemplateForm" autocomplete="off">
       <div class="modal-head">
-        <div><h2 id="createWhatsAppTemplateTitle">Create a template</h2></div>
+        <div>
+          <p class="eyebrow" id="createWhatsAppTemplateEyebrow">WhatsApp template</p>
+          <h2 id="createWhatsAppTemplateTitle">Create a template</h2>
+        </div>
         <button class="icon-button" type="button" data-action="close-create-whatsapp-template" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
       <div class="create-template-layout">
@@ -1642,12 +1645,15 @@
           <div class="create-template-variable-summary" id="createTemplateVariableSummary"></div>
         </section>
       </div>
-      <div class="modal-actions">
-        <button class="secondary-button" type="button" data-action="close-create-whatsapp-template">Cancel</button>
-        <button class="primary-button" id="createWhatsAppTemplateSubmit" type="submit">
-          <span class="create-template-submit-spinner" aria-hidden="true"></span>
-          <span data-create-template-submit-label>Submit to Meta</span>
-        </button>
+      <div class="modal-actions create-template-actions">
+        <button class="danger-button" id="deleteWhatsAppTemplateButton" type="button" data-action="delete-whatsapp-template" hidden>Delete</button>
+        <div class="create-template-actions-end">
+          <button class="secondary-button" type="button" data-action="close-create-whatsapp-template">Cancel</button>
+          <button class="primary-button" id="createWhatsAppTemplateSubmit" type="submit">
+            <span class="create-template-submit-spinner" aria-hidden="true"></span>
+            <span data-create-template-submit-label>Submit to Meta</span>
+          </button>
+        </div>
       </div>
     </form>
   </dialog>
