@@ -7681,9 +7681,14 @@
       showToast("Create unavailable", "You do not have permission to manage WhatsApp templates.", true);
       return;
     }
+    const dialog = $("createWhatsAppTemplateDialog");
     const form = $("createWhatsAppTemplateForm");
-    form.reset();
     const channelSelect = $("createTemplateChannel");
+    const languageSelect = $("createTemplateLanguage");
+    if (!dialog || !form || !channelSelect || !languageSelect) {
+      throw new Error("The create-template dialog is missing from the page. Hard-refresh and try again.");
+    }
+    form.reset();
     const channels = Array.isArray(state.whatsappTemplateFilterOptions?.channels)
       ? state.whatsappTemplateFilterOptions.channels
       : (state.channels || []).filter((channel) => channel.connectorType === "whatsapp_cloud")
@@ -7703,21 +7708,23 @@
         channelSelect.append(option);
       });
     }
-    const languageSelect = $("createTemplateLanguage");
     languageSelect.replaceChildren();
     CREATE_TEMPLATE_LANGUAGES.forEach(([code, label]) => {
       languageSelect.append(new Option(`${label} · ${code}`, code));
     });
-    $("createTemplateButtons").replaceChildren();
-    $("createTemplateHeaderFormat").value = "NONE";
-    $("createTemplateParameterFormat").value = "positional";
-    $("createTemplateCategory").value = "UTILITY";
-    $("createTemplateBodyText").value = "Hi {{1}}, your order {{2}} is confirmed.";
+    $("createTemplateButtons")?.replaceChildren();
+    if ($("createTemplateHeaderFormat")) $("createTemplateHeaderFormat").value = "NONE";
+    if ($("createTemplateParameterFormat")) $("createTemplateParameterFormat").value = "positional";
+    if ($("createTemplateCategory")) $("createTemplateCategory").value = "UTILITY";
+    if ($("createTemplateBodyText")) $("createTemplateBodyText").value = "Hi {{1}}, your order {{2}} is confirmed.";
     syncCreateTemplateHeaderFields();
     renderCreateTemplateBodyExamples();
     renderCreateTemplatePreview();
-    $("createWhatsAppTemplateSubmit").disabled = !channels.some((channel) => channel.channelEnabled !== false);
-    $("createWhatsAppTemplateDialog").showModal();
+    if ($("createWhatsAppTemplateSubmit")) {
+      $("createWhatsAppTemplateSubmit").disabled = !channels.some((channel) => channel.channelEnabled !== false);
+    }
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
   }
 
   function closeCreateWhatsAppTemplateDialog() {
@@ -15181,6 +15188,29 @@
           loadWhatsAppTemplateLibrary({ refresh: true });
           return;
         }
+        if (actionButton.dataset.action === "open-create-whatsapp-template") {
+          try {
+            openCreateWhatsAppTemplateDialog();
+            if (!state.whatsappTemplatesLoaded) loadWhatsAppTemplateLibrary().catch(() => {});
+          } catch (error) {
+            console.error("open-create-whatsapp-template failed", error);
+            showToast("Could not open create template", error?.message || "Reload the page and try again.", true);
+          }
+          return;
+        }
+        if (actionButton.dataset.action === "close-create-whatsapp-template") {
+          closeCreateWhatsAppTemplateDialog();
+          return;
+        }
+        if (actionButton.dataset.action === "add-create-template-button") {
+          addCreateTemplateButtonRow();
+          return;
+        }
+        if (actionButton.dataset.action === "remove-create-template-button") {
+          actionButton.closest(".create-template-button-row")?.remove();
+          renderCreateTemplatePreview();
+          return;
+        }
         if (actionButton.dataset.deleteApiKey) {
           deleteDeveloperApiKey(actionButton.dataset.deleteApiKey, actionButton);
           return;
@@ -15347,8 +15377,13 @@
           "open-api-key": openApiKeyDialog,
           "close-api-key": closeApiKeyDialog,
           "open-create-whatsapp-template": () => {
-            openCreateWhatsAppTemplateDialog();
-            if (!state.whatsappTemplatesLoaded) loadWhatsAppTemplateLibrary().catch(() => {});
+            try {
+              openCreateWhatsAppTemplateDialog();
+              if (!state.whatsappTemplatesLoaded) loadWhatsAppTemplateLibrary().catch(() => {});
+            } catch (error) {
+              console.error("open-create-whatsapp-template failed", error);
+              showToast("Could not open create template", error?.message || "Reload the page and try again.", true);
+            }
           },
           "close-create-whatsapp-template": closeCreateWhatsAppTemplateDialog,
           "add-create-template-button": () => addCreateTemplateButtonRow(),
