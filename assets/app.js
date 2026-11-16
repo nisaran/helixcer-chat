@@ -7853,6 +7853,7 @@
       field.disabled = editing;
       field.readOnly = editing && field.tagName === "INPUT";
     });
+    syncCreateTemplateHeaderFields();
     setCreateWhatsAppTemplateSubmitBusy(
       $("createWhatsAppTemplateSubmit"),
       false,
@@ -8093,7 +8094,8 @@
     if (!textEnabled && $("createTemplateHeaderText")) $("createTemplateHeaderText").value = "";
     if (mediaInput) {
       mediaInput.accept = createTemplateMediaHeaderAccept(format);
-      mediaInput.required = mediaEnabled;
+      // Edits can keep existing Meta sample media; only create requires a new file.
+      mediaInput.required = mediaEnabled && state.whatsappTemplateEditor?.mode !== "edit";
       if (!mediaEnabled) mediaInput.value = "";
     }
     if (mediaHint) mediaHint.textContent = createTemplateMediaHeaderHint(format);
