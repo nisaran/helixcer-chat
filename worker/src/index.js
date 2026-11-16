@@ -674,6 +674,14 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         forceRefresh: url.searchParams.get('refresh') === '1'
       })), cors);
     }
+    if (url.pathname === '/api/channel-data/whatsapp-templates' && request.method === 'POST') {
+      requirePermission(principal, 'channels.templates');
+      const result = await createWorkspaceWhatsAppTemplate(env, workspaceId, await readJson(request), principal);
+      await audit(env, principal, 'create', 'whatsapp_template', result.item?.templateId || result.item?.name || '', {
+        channelId: result.channelId, name: result.item?.name, language: result.item?.language?.code
+      });
+      return withCors(json(result, 201), cors);
+    }
     if (url.pathname === '/api/channel-data/import-chat' && request.method === 'POST') {
       requirePermission(principal, 'channels.import');
       const result = await importChatHistory(env, workspaceId, principal, await readImportJson(request));
@@ -6698,6 +6706,302 @@ async function listWhatsAppTemplatesByName(env, channel, name) {
 async function findWhatsAppChannelTemplate(env, channel, name, languageCode) {
   const items = await listWhatsAppTemplatesByName(env, channel, name);
   return items.find(template => template.status === 'APPROVED' && template.language.code === languageCode) || null;
+}
+
+const WHATSAPP_TEMPLATE_CREATE_CATEGORIES = new Set(['MARKETING', 'UTILITY']);
+const WHATSAPP_TEMPLATE_CREATE_BUTTON_TYPES = new Set(['QUICK_REPLY', 'URL', 'PHONE_NUMBER']);
+
+export function validateWhatsAppTemplateCreateRequest(payload) {
+  if (!isPlainObject(payload)) throw httpError(400, 'Request body must be a JSON object.');
+  rejectUnknownKeys(payload, new Set([
+    'channelId', 'name', 'language', 'category', 'parameterFormat',
+    'header', 'body', 'footer', 'buttons'
+  ]), 'request');
+  const channelId = cleanId(payload.channelId, 'Channel ID');
+  const name = cleanRequired(payload.name, 'Template name', 512).toLowerCase();
+  if (!/^[a-z0-9_]+$/.test(name)) {
+    throw httpError(400, 'Template name may only use lowercase letters, numbers, and underscores.');
+  }
+  const language = cleanRequired(payload.language, 'Language', 35);
+  if (!/^[A-Za-z]{2,3}(?:_[A-Za-z0-9]{2,8})?$/.test(language)) {
+    throw httpError(400, 'Enter a valid WhatsApp language code such as en_US.');
+  }
+  const category = String(payload.category || '').trim().toUpperCase();
+  if (!WHATSAPP_TEMPLATE_CREATE_CATEGORIES.has(category)) {
+    throw httpError(400, 'Category must be MARKETING or UTILITY.');
+  }
+  const parameterFormat = String(payload.parameterFormat || 'positional').trim().toLowerCase();
+  if (!['positional', 'named'].includes(parameterFormat)) {
+    throw httpError(400, 'Parameter format must be positional or named.');
+  }
+  if (!isPlainObject(payload.body)) throw httpError(400, 'Body must be an object.');
+  rejectUnknownKeys(payload.body, new Set(['text', 'examples']), 'body');
+  const bodyText = cleanWorkspaceMultiline(payload.body.text, 'Body text', 1024);
+  if (!bodyText) throw httpError(400, 'Body text is required.');
+  const bodyKeys = templatePlaceholders(bodyText);
+  assertTemplatePlaceholderFormat(bodyKeys, parameterFormat, 'Body');
+  const bodyExamples = normalizeTemplateCreateExamples(payload.body.examples, bodyKeys, 'Body');
+
+  let header = null;
+  if (payload.header !== undefined && payload.header !== null) {
+    if (!isPlainObject(payload.header)) throw httpError(400, 'Header must be an object.');
+    rejectUnknownKeys(payload.header, new Set(['format', 'text', 'example', 'examples']), 'header');
+    const format = String(payload.header.format || 'NONE').trim().toUpperCase();
+    if (!['NONE', 'TEXT'].includes(format)) {
+      throw httpError(400, 'Header format must be NONE or TEXT. Media headers require Meta sample uploads and are not supported here yet.');
+    }
+    if (format === 'TEXT') {
+      const text = cleanRequired(payload.header.text, 'Header text', 60);
+      if (/[\u0000-\u001f\u007f]/.test(text)) throw httpError(400, 'Header text contains invalid characters.');
+      const headerKeys = templatePlaceholders(text);
+      if (headerKeys.length > 1) throw httpError(400, 'A text header may include at most one variable.');
+      assertTemplatePlaceholderFormat(headerKeys, parameterFormat, 'Header');
+      const examples = normalizeTemplateCreateExamples(
+        payload.header.example === undefined ? payload.header.examples : payload.header.example,
+        headerKeys, 'Header');
+      header = { format: 'TEXT', text, examples };
+    }
+  }
+
+  let footerText = '';
+  if (payload.footer !== undefined && payload.footer !== null) {
+    if (!isPlainObject(payload.footer)) throw httpError(400, 'Footer must be an object.');
+    rejectUnknownKeys(payload.footer, new Set(['text']), 'footer');
+    footerText = payload.footer.text === undefined || payload.footer.text === ''
+      ? ''
+      : cleanOptionalText(payload.footer.text, 'Footer text', 60);
+    if (footerText && templatePlaceholders(footerText).length) {
+      throw httpError(400, 'Footer text cannot include variables.');
+    }
+  }
+
+  const buttons = [];
+  if (payload.buttons !== undefined && payload.buttons !== null) {
+    if (!Array.isArray(payload.buttons) || payload.buttons.length > 10) {
+      throw httpError(400, 'Buttons must be an array with no more than 10 items.');
+    }
+    let quickReplyCount = 0;
+    let urlCount = 0;
+    let phoneCount = 0;
+    for (let index = 0; index < payload.buttons.length; index++) {
+      const entry = payload.buttons[index];
+      if (!isPlainObject(entry)) throw httpError(400, `buttons[${index}] must be an object.`);
+      rejectUnknownKeys(entry, new Set(['type', 'text', 'url', 'phoneNumber', 'phone_number', 'example']), `buttons[${index}]`);
+      const type = String(entry.type || '').trim().toUpperCase();
+      if (!WHATSAPP_TEMPLATE_CREATE_BUTTON_TYPES.has(type)) {
+        throw httpError(400, `buttons[${index}].type must be QUICK_REPLY, URL, or PHONE_NUMBER.`);
+      }
+      const text = cleanRequired(entry.text, `buttons[${index}].text`, 25);
+      const button = { type, text };
+      if (type === 'QUICK_REPLY') {
+        quickReplyCount += 1;
+        if (quickReplyCount > 10) throw httpError(400, 'A template may include no more than 10 quick-reply buttons.');
+      }
+      if (type === 'URL') {
+        urlCount += 1;
+        if (urlCount > 2) throw httpError(400, 'A template may include no more than 2 URL buttons.');
+        const url = cleanRequired(entry.url, `buttons[${index}].url`, 2000);
+        if (!/^https:\/\//i.test(url)) throw httpError(400, `buttons[${index}].url must start with https://.`);
+        const urlKeys = templatePlaceholders(url);
+        if (urlKeys.length > 1) throw httpError(400, `buttons[${index}].url may include at most one variable.`);
+        if (urlKeys.length && !new RegExp(`\\{\\{\\s*${urlKeys[0]}\\s*\\}\\}\\s*$`).test(url)) {
+          throw httpError(400, `buttons[${index}].url dynamic variable must be at the end of the URL.`);
+        }
+        assertTemplatePlaceholderFormat(urlKeys, parameterFormat, `buttons[${index}].url`);
+        button.url = url;
+        if (urlKeys.length) {
+          const example = cleanRequired(
+            Array.isArray(entry.example) ? entry.example[0] : entry.example,
+            `buttons[${index}].example`, 2000);
+          button.example = [example];
+        }
+      }
+      if (type === 'PHONE_NUMBER') {
+        phoneCount += 1;
+        if (phoneCount > 1) throw httpError(400, 'A template may include only one phone-number button.');
+        const phoneNumber = cleanRequired(entry.phoneNumber ?? entry.phone_number, `buttons[${index}].phoneNumber`, 20);
+        if (!/^\+?[1-9]\d{6,14}$/.test(phoneNumber.replace(/[\s()-]/g, ''))) {
+          throw httpError(400, `buttons[${index}].phoneNumber must be a valid phone number with country code.`);
+        }
+        button.phone_number = phoneNumber.replace(/[\s()-]/g, '');
+      }
+      buttons.push(button);
+    }
+  }
+
+  return {
+    channelId,
+    name,
+    language,
+    category,
+    parameterFormat,
+    header,
+    body: { text: bodyText, examples: bodyExamples, keys: bodyKeys },
+    footerText,
+    buttons
+  };
+}
+
+function assertTemplatePlaceholderFormat(keys, parameterFormat, label) {
+  if (!keys.length) return;
+  const named = keys.filter(key => !/^\d+$/.test(key));
+  const positional = keys.filter(key => /^\d+$/.test(key));
+  if (named.length && positional.length) {
+    throw httpError(400, `${label} cannot mix numbered and named variables.`);
+  }
+  if (parameterFormat === 'positional') {
+    if (named.length) throw httpError(400, `${label} must use numbered variables such as {{1}} when parameter format is positional.`);
+    for (let index = 0; index < positional.length; index++) {
+      if (Number(positional[index]) !== index + 1) {
+        throw httpError(400, `${label} numbered variables must be consecutive starting at {{1}}.`);
+      }
+    }
+  } else if (positional.length) {
+    throw httpError(400, `${label} must use named variables when parameter format is named.`);
+  }
+}
+
+function normalizeTemplateCreateExamples(value, keys, label) {
+  if (!keys.length) return [];
+  if (Array.isArray(value)) {
+    if (value.length < keys.length) throw httpError(400, `${label} needs an example for every variable.`);
+    return keys.map((key, index) => cleanRequired(value[index], `${label} example for {{${key}}}`, 1024));
+  }
+  if (isPlainObject(value)) {
+    return keys.map(key => cleanRequired(value[key], `${label} example for {{${key}}}`, 1024));
+  }
+  if (keys.length === 1 && (typeof value === 'string' || typeof value === 'number')) {
+    return [cleanRequired(value, `${label} example for {{${keys[0]}}}`, 1024)];
+  }
+  throw httpError(400, `${label} needs example values for every variable.`);
+}
+
+export function buildMetaWhatsAppTemplateCreatePayload(input) {
+  const components = [];
+  if (input.header?.format === 'TEXT') {
+    const component = { type: 'HEADER', format: 'TEXT', text: input.header.text };
+    if (input.header.examples?.length) component.example = { header_text: input.header.examples };
+    components.push(component);
+  }
+  const body = { type: 'BODY', text: input.body.text };
+  if (input.body.keys.length) {
+    body.example = input.parameterFormat === 'named'
+      ? {
+        body_text_named_params: input.body.keys.map((key, index) => ({
+          param_name: key,
+          example: input.body.examples[index]
+        }))
+      }
+      : { body_text: [input.body.examples] };
+  }
+  components.push(body);
+  if (input.footerText) components.push({ type: 'FOOTER', text: input.footerText });
+  if (input.buttons.length) {
+    components.push({
+      type: 'BUTTONS',
+      buttons: input.buttons.map(button => {
+        const item = { type: button.type, text: button.text };
+        if (button.url) item.url = button.url;
+        if (button.phone_number) item.phone_number = button.phone_number;
+        if (button.example) item.example = button.example;
+        return item;
+      })
+    });
+  }
+  return {
+    name: input.name,
+    language: input.language,
+    category: input.category,
+    parameter_format: input.parameterFormat,
+    components
+  };
+}
+
+async function bustWhatsAppTemplateCache(channel) {
+  const wabaId = String(channel.config?.wabaId || '').trim();
+  if (!wabaId) return;
+  const version = metaApiVersion(channel.config?.apiVersion);
+  for (const approvedOnly of [true, false]) {
+    for (const includeMetadata of [true, false]) {
+      const request = whatsAppTemplateCacheRequest(channel, wabaId, version, approvedOnly, includeMetadata);
+      const cache = defaultTemplateCache();
+      if (!cache) continue;
+      try {
+        await cache.put(request, new Response(JSON.stringify({ value: null }), {
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'max-age=0'
+          }
+        }));
+      } catch {
+        // Cache busting is best-effort.
+      }
+    }
+  }
+}
+
+async function createWorkspaceWhatsAppTemplate(env, workspaceId, payload, principal) {
+  const input = validateWhatsAppTemplateCreateRequest(payload);
+  assertPrincipalChannelAccess(principal, input.channelId);
+  const channel = await getChannel(env, input.channelId, 'whatsapp_cloud', workspaceId);
+  if (!channel) throw httpError(404, 'WhatsApp channel not found or is disabled.');
+  await assertChannelReadyForConversation(env, workspaceId, channel);
+  const wabaId = String(channel.config?.wabaId || '').trim();
+  if (!/^\d{5,40}$/.test(wabaId)) throw httpError(409, 'The WhatsApp Business Account ID is not configured.');
+  const credentials = await readChannelCredentials(env, channel);
+  if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
+  const metaPayload = buildMetaWhatsAppTemplateCreatePayload(input);
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/message_templates`);
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${credentials.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(metaPayload)
+    });
+  } catch {
+    throw httpError(502, 'Meta could not create the WhatsApp template.');
+  }
+  const data = safeJsonParse(await response.text(), {});
+  if (!response.ok) {
+    const detail = redactProviderSecret(providerError(data, response.status), credentials.accessToken);
+    throw httpError(422, `Meta could not create the WhatsApp template: ${detail}`);
+  }
+  await bustWhatsAppTemplateCache(channel);
+  const status = providerEnum(data.status, 40) || 'PENDING';
+  const templateId = providerIdentifier(data.id, 128) || `${input.name}:${input.language}`;
+  const item = sanitizeWhatsAppTemplateDefinition({
+    id: templateId,
+    name: input.name,
+    language: input.language,
+    status,
+    category: input.category,
+    components: metaPayload.components
+  }) || {
+    templateId,
+    id: templateId,
+    name: input.name,
+    language: { code: input.language },
+    status,
+    category: input.category,
+    components: metaPayload.components,
+    variables: []
+  };
+  return {
+    ok: true,
+    channelId: channel.channelId,
+    item: {
+      ...item,
+      channelId: channel.channelId,
+      channelName: channel.name || '',
+      channelEnabled: true,
+      providerDisplayName: providerText(channel.config?.verifiedName || channel.config?.verifiedPhoneNumber, 160)
+    }
+  };
 }
 
 export function sanitizeWhatsAppTemplateDefinition(value) {
