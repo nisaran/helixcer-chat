@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261116-create-template-compact">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261116-create-template-add-var">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261116-create-template-compact" defer></script>
+  <script src="./assets/app.js?v=20261116-create-template-add-var" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1609,7 +1609,10 @@
             <legend>Body</legend>
             <label class="field-label">Message text
               <textarea class="text-field workspace-textarea" name="bodyText" id="createTemplateBodyText" required rows="3" maxlength="1024" placeholder="Hi {{1}}, your order {{2}} is confirmed."></textarea>
-              <span class="field-hint">Use {{1}} / {{2}} or named variables such as {{customer_name}}. Sample values are required for every variable.</span>
+              <span class="create-template-body-hint-row">
+                <span class="field-hint" id="createTemplateBodyHint">Use numbered variables such as {{1}} and {{2}}. Sample values are required for every variable.</span>
+                <button class="secondary-button compact-button create-template-add-variable" type="button" data-action="add-create-template-body-variable" title="Insert variable at cursor">+ Variable</button>
+              </span>
             </label>
             <div class="create-template-examples" id="createTemplateBodyExamples"></div>
           </fieldset>
