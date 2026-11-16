@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261116-create-template-center">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261116-create-template-media">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261116-create-template-center" defer></script>
+  <script src="./assets/app.js?v=20261116-create-template-media" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1589,10 +1589,17 @@
                 <select class="text-field" name="headerFormat" id="createTemplateHeaderFormat">
                   <option value="NONE">None</option>
                   <option value="TEXT">Text</option>
+                  <option value="IMAGE">Image</option>
+                  <option value="VIDEO">Video</option>
+                  <option value="DOCUMENT">Document</option>
                 </select>
               </label>
               <label class="field-label form-span" id="createTemplateHeaderTextWrap" hidden>Header text
                 <input class="text-field" name="headerText" id="createTemplateHeaderText" maxlength="60" placeholder="Order update for {{1}}">
+              </label>
+              <label class="field-label form-span" id="createTemplateHeaderMediaWrap" hidden>Sample media
+                <input class="text-field" type="file" name="headerMedia" id="createTemplateHeaderMedia" accept="">
+                <span class="field-hint" id="createTemplateHeaderMediaHint">Meta reviews this sample with the template. Actual media is chosen when you send.</span>
               </label>
               <div class="form-span create-template-examples" id="createTemplateHeaderExamples" hidden></div>
             </div>
@@ -1621,7 +1628,7 @@
               <button class="secondary-button compact-button" type="button" data-action="add-create-template-button">Add button</button>
             </div>
             <div class="create-template-buttons" id="createTemplateButtons"></div>
-            <p class="field-hint">Quick reply, URL, and phone buttons are supported. A dynamic URL variable must sit at the end of the link.</p>
+            <p class="field-hint">Quick reply, Visit website (static or dynamic URL), and phone buttons are supported. Dynamic website URLs may include one variable at the end of the link.</p>
           </fieldset>
         </div>
         <section class="create-template-preview-panel" aria-live="polite">

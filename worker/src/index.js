@@ -674,6 +674,11 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         forceRefresh: url.searchParams.get('refresh') === '1'
       })), cors);
     }
+    if (url.pathname === '/api/channel-data/whatsapp-templates/sample-media' && request.method === 'POST') {
+      requirePermission(principal, 'channels.templates');
+      const result = await uploadWorkspaceWhatsAppTemplateSampleMedia(env, workspaceId, request, principal);
+      return withCors(json(result, 201), cors);
+    }
     if (url.pathname === '/api/channel-data/whatsapp-templates' && request.method === 'POST') {
       requirePermission(principal, 'channels.templates');
       const result = await createWorkspaceWhatsAppTemplate(env, workspaceId, await readJson(request), principal);
@@ -6710,6 +6715,12 @@ async function findWhatsAppChannelTemplate(env, channel, name, languageCode) {
 
 const WHATSAPP_TEMPLATE_CREATE_CATEGORIES = new Set(['MARKETING', 'UTILITY']);
 const WHATSAPP_TEMPLATE_CREATE_BUTTON_TYPES = new Set(['QUICK_REPLY', 'URL', 'PHONE_NUMBER']);
+const WHATSAPP_TEMPLATE_CREATE_MEDIA_HEADER_FORMATS = new Set(['IMAGE', 'VIDEO', 'DOCUMENT']);
+const WHATSAPP_TEMPLATE_SAMPLE_MEDIA_LIMITS = Object.freeze({
+  IMAGE: { maxBytes: WHATSAPP_IMAGE_MAX_BYTES, mimeTypes: new Set(['image/jpeg', 'image/jpg', 'image/png']) },
+  VIDEO: { maxBytes: MAX_ATTACHMENT_BYTES, mimeTypes: new Set(['video/mp4']) },
+  DOCUMENT: { maxBytes: MAX_ATTACHMENT_BYTES, mimeTypes: new Set(['application/pdf']) }
+});
 
 export function validateWhatsAppTemplateCreateRequest(payload) {
   if (!isPlainObject(payload)) throw httpError(400, 'Request body must be a JSON object.');
@@ -6745,10 +6756,12 @@ export function validateWhatsAppTemplateCreateRequest(payload) {
   let header = null;
   if (payload.header !== undefined && payload.header !== null) {
     if (!isPlainObject(payload.header)) throw httpError(400, 'Header must be an object.');
-    rejectUnknownKeys(payload.header, new Set(['format', 'text', 'example', 'examples']), 'header');
+    rejectUnknownKeys(payload.header, new Set([
+      'format', 'text', 'example', 'examples', 'headerHandle', 'header_handle'
+    ]), 'header');
     const format = String(payload.header.format || 'NONE').trim().toUpperCase();
-    if (!['NONE', 'TEXT'].includes(format)) {
-      throw httpError(400, 'Header format must be NONE or TEXT. Media headers require Meta sample uploads and are not supported here yet.');
+    if (!['NONE', 'TEXT', ...WHATSAPP_TEMPLATE_CREATE_MEDIA_HEADER_FORMATS].includes(format)) {
+      throw httpError(400, 'Header format must be NONE, TEXT, IMAGE, VIDEO, or DOCUMENT.');
     }
     if (format === 'TEXT') {
       const text = cleanRequired(payload.header.text, 'Header text', 60);
@@ -6760,6 +6773,13 @@ export function validateWhatsAppTemplateCreateRequest(payload) {
         payload.header.example === undefined ? payload.header.examples : payload.header.example,
         headerKeys, 'Header');
       header = { format: 'TEXT', text, examples };
+    } else if (WHATSAPP_TEMPLATE_CREATE_MEDIA_HEADER_FORMATS.has(format)) {
+      const headerHandle = cleanWhatsAppTemplateHeaderHandle(
+        payload.header.headerHandle ?? payload.header.header_handle
+          ?? (isPlainObject(payload.header.example) ? payload.header.example.header_handle : null)
+          ?? (isPlainObject(payload.header.examples) ? payload.header.examples.header_handle : null),
+        'Header sample media handle');
+      header = { format, headerHandle };
     }
   }
 
@@ -6876,12 +6896,27 @@ function normalizeTemplateCreateExamples(value, keys, label) {
   throw httpError(400, `${label} needs example values for every variable.`);
 }
 
+function cleanWhatsAppTemplateHeaderHandle(value, label) {
+  const handle = Array.isArray(value) ? value[0] : value;
+  const cleaned = cleanRequired(handle, label, 4096);
+  if (!/^[A-Za-z0-9:_.=+/-]{8,4096}$/.test(cleaned)) {
+    throw httpError(400, `${label} is invalid. Upload a sample media file first.`);
+  }
+  return cleaned;
+}
+
 export function buildMetaWhatsAppTemplateCreatePayload(input) {
   const components = [];
   if (input.header?.format === 'TEXT') {
     const component = { type: 'HEADER', format: 'TEXT', text: input.header.text };
     if (input.header.examples?.length) component.example = { header_text: input.header.examples };
     components.push(component);
+  } else if (WHATSAPP_TEMPLATE_CREATE_MEDIA_HEADER_FORMATS.has(input.header?.format)) {
+    components.push({
+      type: 'HEADER',
+      format: input.header.format,
+      example: { header_handle: [input.header.headerHandle] }
+    });
   }
   const body = { type: 'BODY', text: input.body.text };
   if (input.body.keys.length) {
@@ -6938,6 +6973,132 @@ async function bustWhatsAppTemplateCache(channel) {
       }
     }
   }
+}
+
+async function resolveMetaAppIdForWhatsAppToken(credentials, apiVersion) {
+  const version = metaApiVersion(apiVersion);
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/debug_token`);
+  endpoint.searchParams.set('input_token', credentials.accessToken);
+  endpoint.searchParams.set('access_token', credentials.accessToken);
+  let response;
+  try {
+    response = await fetch(endpoint);
+  } catch {
+    throw httpError(502, 'Meta could not validate the WhatsApp access token for media uploads.');
+  }
+  const data = safeJsonParse(await response.text(), {});
+  const appId = String(data?.data?.app_id || '').trim();
+  if (!/^\d{5,40}$/.test(appId)) {
+    throw httpError(409, 'Could not resolve the Meta App ID for media header uploads. Confirm the WhatsApp access token belongs to your Meta app.');
+  }
+  return appId;
+}
+
+async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId, file, mimeType, filename) {
+  const version = metaApiVersion(apiVersion);
+  const size = Number(file.size || 0);
+  const sessionEndpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(appId)}/uploads`);
+  sessionEndpoint.searchParams.set('file_name', filename);
+  sessionEndpoint.searchParams.set('file_length', String(size));
+  sessionEndpoint.searchParams.set('file_type', mimeType);
+  let sessionResponse;
+  try {
+    sessionResponse = await fetch(sessionEndpoint, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${credentials.accessToken}` }
+    });
+  } catch {
+    throw httpError(502, 'Meta could not start the template media upload session.');
+  }
+  const sessionData = safeJsonParse(await sessionResponse.text(), {});
+  const sessionId = String(sessionData?.id || '').trim();
+  if (!sessionResponse.ok || !sessionId) {
+    const detail = redactProviderSecret(providerError(sessionData, sessionResponse.status), credentials.accessToken);
+    throw httpError(422, `Meta could not start the template media upload: ${detail}`);
+  }
+  let uploadResponse;
+  try {
+    uploadResponse = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(sessionId)}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `OAuth ${credentials.accessToken}`,
+        file_offset: '0'
+      },
+      body: file
+    });
+  } catch {
+    throw httpError(502, 'Meta could not accept the template sample media upload.');
+  }
+  const uploadData = safeJsonParse(await uploadResponse.text(), {});
+  const headerHandle = String(uploadData?.h || '').trim();
+  if (!uploadResponse.ok || !headerHandle) {
+    const detail = redactProviderSecret(providerError(uploadData, uploadResponse.status), credentials.accessToken);
+    throw httpError(422, `Meta could not store the template sample media: ${detail}`);
+  }
+  return headerHandle;
+}
+
+function validateWhatsAppTemplateSampleMediaFile(file, format) {
+  const limits = WHATSAPP_TEMPLATE_SAMPLE_MEDIA_LIMITS[format];
+  if (!limits) throw httpError(400, 'Sample media format must be IMAGE, VIDEO, or DOCUMENT.');
+  if (!file || typeof file !== 'object' || typeof file.arrayBuffer !== 'function') {
+    throw httpError(400, 'A sample media file is required.');
+  }
+  const mimeType = String(file.type || '').toLowerCase().split(';', 1)[0].trim();
+  if (!limits.mimeTypes.has(mimeType)) {
+    throw httpError(415, format === 'IMAGE'
+      ? 'Image headers require a JPEG or PNG sample.'
+      : format === 'VIDEO'
+        ? 'Video headers require an MP4 sample.'
+        : 'Document headers require a PDF sample.');
+  }
+  const size = Number(file.size || 0);
+  if (!Number.isFinite(size) || size <= 0) throw httpError(400, 'The sample media file is empty.');
+  if (size > limits.maxBytes) {
+    throw httpError(413, `Sample ${format.toLowerCase()} media may not exceed ${Math.round(limits.maxBytes / (1024 * 1024))} MB.`);
+  }
+  const rawName = String(file.name || `sample.${mimeType.split('/')[1] || 'bin'}`)
+    .replace(/[\u0000-\u001f\u007f\\/]+/g, ' ').trim();
+  const filename = (rawName || 'sample').slice(0, 240);
+  return { mimeType: mimeType === 'image/jpg' ? 'image/jpeg' : mimeType, size, filename };
+}
+
+async function uploadWorkspaceWhatsAppTemplateSampleMedia(env, workspaceId, request, principal) {
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.toLowerCase().startsWith('multipart/form-data;')) {
+    throw httpError(415, 'Content-Type must be multipart/form-data.');
+  }
+  const declaredLength = Number(request.headers.get('Content-Length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_ATTACHMENT_BYTES + 1024 * 1024) {
+    throw httpError(413, 'Template sample media request is too large.');
+  }
+  let form;
+  try { form = await request.formData(); } catch { throw httpError(400, 'Multipart template sample media is invalid.'); }
+  const channelId = cleanId(form.get('channelId'), 'Channel ID');
+  assertPrincipalChannelAccess(principal, channelId);
+  const format = String(form.get('format') || '').trim().toUpperCase();
+  if (!WHATSAPP_TEMPLATE_CREATE_MEDIA_HEADER_FORMATS.has(format)) {
+    throw httpError(400, 'Sample media format must be IMAGE, VIDEO, or DOCUMENT.');
+  }
+  const channel = await getChannel(env, channelId, 'whatsapp_cloud', workspaceId);
+  if (!channel) throw httpError(404, 'WhatsApp channel not found or is disabled.');
+  await assertChannelReadyForConversation(env, workspaceId, channel);
+  const credentials = await readChannelCredentials(env, channel);
+  if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
+  const file = form.get('file');
+  const attachment = validateWhatsAppTemplateSampleMediaFile(file, format);
+  const appId = await resolveMetaAppIdForWhatsAppToken(credentials, channel.config?.apiVersion);
+  const headerHandle = await uploadMetaResumableTemplateSample(
+    credentials, channel.config?.apiVersion, appId, file, attachment.mimeType, attachment.filename);
+  return {
+    ok: true,
+    channelId,
+    format,
+    headerHandle,
+    filename: attachment.filename,
+    mimeType: attachment.mimeType,
+    size: attachment.size
+  };
 }
 
 async function createWorkspaceWhatsAppTemplate(env, workspaceId, payload, principal) {
