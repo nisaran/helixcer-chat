@@ -894,14 +894,7 @@
       </section>
 
       <section class="route content-route template-library-route" id="whatsappTemplatesRoute" data-route-panel="whatsapp-templates" aria-labelledby="whatsappTemplatesTitle" hidden>
-        <div class="route-heading">
-          <div><p class="eyebrow">Channel data · WhatsApp</p><h2 id="whatsappTemplatesTitle">WhatsApp Templates</h2><p>Search and preview templates from every connected WhatsApp account.</p></div>
-          <div class="route-heading-actions">
-            <button class="secondary-button" id="refreshWhatsAppTemplates" type="button" data-action="refresh-whatsapp-templates"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15"/></svg>Refresh</button>
-            <button class="primary-button" type="button" data-action="open-create-whatsapp-template"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create template</button>
-          </div>
-        </div>
-
+        <h2 class="sr-only" id="whatsappTemplatesTitle">WhatsApp Templates</h2>
         <section class="surface template-library-surface" aria-label="WhatsApp template library">
           <div class="template-library-toolbar">
             <label class="template-library-search" for="whatsappTemplateSearch">
@@ -942,6 +935,10 @@
                   <button class="template-filter-clear" type="button" data-action="clear-template-filter" data-filter-type="language">Clear language filter</button>
                 </div>
               </div>
+            </div>
+            <div class="template-library-toolbar-actions">
+              <button class="secondary-button" id="refreshWhatsAppTemplates" type="button" data-action="refresh-whatsapp-templates"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15"/></svg>Refresh</button>
+              <button class="primary-button" type="button" data-action="open-create-whatsapp-template"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create template</button>
             </div>
           </div>
           <div class="template-library-active-row">

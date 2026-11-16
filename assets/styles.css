@@ -1253,9 +1253,10 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .channel-card-actions .primary-button, .channel-card-actions .secondary-button { min-height: 36px; }
 .channel-card-actions button:disabled { cursor: not-allowed; opacity: .48; }
 
-.template-library-route { overflow-y: auto; }
+.template-library-route { overflow-y: auto; padding-top: 16px; }
 .template-library-surface { overflow: visible; }
-.template-library-toolbar { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); padding: 14px 16px; }
+.template-library-toolbar { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); padding: 14px 16px; flex-wrap: wrap; }
+.template-library-toolbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: 0 0 auto; }
 .template-library-search { display: flex; align-items: center; min-width: 210px; flex: 1 1 320px; min-height: 40px; border: 1px solid var(--line-strong); border-radius: 10px; background: #f8fafc; color: #8490a3; padding: 0 11px; }
 .template-library-search:focus-within { border-color: #b8a5f3; background: white; box-shadow: 0 0 0 3px rgba(109,59,234,.09); }
 .template-library-search svg { width: 17px; height: 17px; flex: 0 0 17px; }
