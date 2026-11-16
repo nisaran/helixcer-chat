@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261116-template-edit-copy">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261116-template-edit-icon">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261116-template-edit-copy" defer></script>
+  <script src="./assets/app.js?v=20261116-template-edit-icon" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1646,7 +1646,10 @@
         </section>
       </div>
       <div class="modal-actions create-template-actions">
-        <button class="danger-button" id="deleteWhatsAppTemplateButton" type="button" data-action="delete-whatsapp-template" hidden>Delete</button>
+        <button class="danger-button" id="deleteWhatsAppTemplateButton" type="button" data-action="delete-whatsapp-template" hidden>
+          <span class="create-template-submit-spinner" aria-hidden="true"></span>
+          <span data-delete-whatsapp-template-label>Delete</span>
+        </button>
         <div class="create-template-actions-end">
           <button class="secondary-button" type="button" data-action="close-create-whatsapp-template">Cancel</button>
           <button class="primary-button" id="createWhatsAppTemplateSubmit" type="submit">

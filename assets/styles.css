@@ -1301,17 +1301,21 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .template-status-badge.is-approved { background: var(--green-soft); color: var(--green); }
 .template-status-badge.is-pending, .template-status-badge.is-in-appeal { background: var(--amber-soft); color: var(--amber); }
 .template-status-badge.is-rejected, .template-status-badge.is-disabled, .template-status-badge.is-paused { background: #fff0ed; color: #a63b2a; }
-.whatsapp-template-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 13px; }
+.whatsapp-template-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 13px; }
 .whatsapp-template-name-row { display: flex; min-width: 0; align-items: center; gap: 4px; }
 .whatsapp-template-title h3 { overflow: hidden; margin: 0; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; font-size: 14px; letter-spacing: -.2px; }
-.template-name-copy { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 8px; color: #667085; }
-.template-name-copy:hover { background: #eef2f6; color: var(--ink); }
-.template-name-copy svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.8; fill: none; }
+.template-name-copy,
+.template-edit-icon { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 8px; color: #667085; }
+.template-name-copy:hover,
+.template-edit-icon:hover { background: #eef2f6; color: var(--ink); }
+.template-name-copy svg,
+.template-edit-icon svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.8; fill: none; }
+.template-edit-icon:disabled { opacity: .4; cursor: not-allowed; }
+.template-edit-icon:disabled:hover { background: transparent; color: #667085; }
+.whatsapp-template-title-end { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .whatsapp-template-title code { color: #667085; font-size: 9px; }
-.whatsapp-template-meta { display: flex; gap: 6px; margin: 5px 0 8px; }
+.whatsapp-template-meta { display: flex; gap: 6px; margin: 5px 0 10px; }
 .whatsapp-template-meta span { border-radius: 999px; background: #f0f2f5; color: #667085; padding: 3px 7px; font-size: 8px; font-weight: 750; }
-.whatsapp-template-card-actions { display: flex; justify-content: flex-end; gap: 6px; margin: 0 0 10px; }
-.whatsapp-template-card-actions .compact-button { min-height: 28px; padding: 4px 10px; font-size: 10px; }
 .create-template-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
 .create-template-actions-end { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .whatsapp-template-preview { overflow: hidden; border: 1px solid #dce9e1; border-radius: 12px 12px 12px 4px; background: #edf8f2; box-shadow: 0 2px 5px rgba(17,78,55,.05); }
@@ -1361,7 +1365,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   padding: 6px 12px;
   font-size: 11px;
 }
-.create-template-modal .modal-actions .primary-button.is-busy {
+.create-template-modal .modal-actions .primary-button.is-busy,
+.create-template-modal .modal-actions .danger-button.is-busy {
   opacity: 1;
   gap: 8px;
 }
@@ -1375,7 +1380,12 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   animation: spin .7s linear infinite;
   flex: 0 0 auto;
 }
-.create-template-modal .modal-actions .primary-button.is-busy .create-template-submit-spinner {
+.create-template-modal .modal-actions .danger-button .create-template-submit-spinner {
+  border-color: rgba(164, 63, 43, .28);
+  border-top-color: #a43f2b;
+}
+.create-template-modal .modal-actions .primary-button.is-busy .create-template-submit-spinner,
+.create-template-modal .modal-actions .danger-button.is-busy .create-template-submit-spinner {
   display: inline-block;
 }
 .create-template-layout {
