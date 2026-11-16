@@ -110,7 +110,7 @@ import {
   shouldSendOutOfOffice
 } from './automation.js';
 
-const API_VERSION = '2026-11-16-template-edit-save';
+const API_VERSION = '2026-11-16-template-upload-session';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -7090,16 +7090,41 @@ async function resolveMetaAppIdForWhatsAppToken(credentials, apiVersion) {
 }
 
 export function metaResumableUploadSessionPath(sessionId) {
-  const id = String(sessionId || '').trim();
+  let id = String(sessionId || '').trim();
   if (!id) throw httpError(502, 'Meta did not return an upload session id.');
+  // Some Graph responses already escape the upload: prefix as upload%3A.
+  if (/^upload%3a/i.test(id)) {
+    try { id = decodeURIComponent(id); } catch { /* keep original */ }
+  }
   // Graph documents POST /vX.Y/upload:<SESSION_ID>. The "upload:" prefix must stay literal —
-  // encoding the colon as %3A makes Meta report the object does not exist. Encode only the
-  // opaque token so +, /, and = survive fetch URL parsing.
+  // encoding that colon as %3A makes Meta report the object does not exist. Encode only the
+  // opaque token so +, /, =, :, and . survive fetch URL parsing.
   const raw = /^upload:/i.test(id) ? id.slice(id.indexOf(':') + 1) : id;
-  if (!raw || !/^[A-Za-z0-9+/=_-]+$/.test(raw)) {
-    throw httpError(502, 'Meta returned an invalid upload session id.');
+  // Meta has returned base64, base64url, dotted, and multi-colon opaque tokens. Reject only
+  // empty/control/whitespace values and URL delimiters that would break the path.
+  if (!raw || /[\s\u0000-\u001f\u007f#?]/.test(raw)) {
+    const preview = raw.replace(/[\s\u0000-\u001f\u007f]+/g, '').slice(0, 16);
+    throw httpError(502, preview
+      ? `Meta returned an invalid upload session id (${preview}…).`
+      : 'Meta returned an invalid upload session id.');
   }
   return `upload:${encodeURIComponent(raw)}`;
+}
+
+export function metaResumableUploadSessionIdFromResponse(payload) {
+  if (!isPlainObject(payload)) return '';
+  const candidates = [
+    payload.id,
+    payload.upload_session_id,
+    payload.session_id,
+    isPlainObject(payload.data) ? payload.data.id : '',
+    isPlainObject(payload.data) ? payload.data.upload_session_id : ''
+  ];
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) return value;
+  }
+  return '';
 }
 
 export function metaTemplateSampleFileName(filename, mimeType) {
@@ -7150,12 +7175,23 @@ async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId,
     throw httpError(502, 'Meta could not start the template media upload session.');
   }
   const sessionData = safeJsonParse(await sessionResponse.text(), {});
-  const sessionId = String(sessionData?.id || '').trim();
+  const sessionId = metaResumableUploadSessionIdFromResponse(sessionData);
   if (!sessionResponse.ok || !sessionId) {
     const detail = redactProviderSecret(providerError(sessionData, sessionResponse.status), credentials.accessToken);
     throw httpError(422, `Meta could not start the template media upload: ${detail}`);
   }
-  const uploadPath = metaResumableUploadSessionPath(sessionId);
+  let uploadPath;
+  try {
+    uploadPath = metaResumableUploadSessionPath(sessionId);
+  } catch (error) {
+    if (Number(error?.status) === 502) {
+      const detail = redactProviderSecret(providerError(sessionData, sessionResponse.status), credentials.accessToken);
+      throw httpError(502, detail
+        ? `Meta returned an invalid upload session id: ${detail}`
+        : error.message);
+    }
+    throw error;
+  }
   const uploadSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
     ? AbortSignal.timeout(90000)
     : undefined;

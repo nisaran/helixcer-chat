@@ -41,6 +41,7 @@ import {
   buildMetaWhatsAppTemplateUpdatePayload,
   buildMetaComponentsFromHelixcerVariables,
   metaResumableUploadSessionPath,
+  metaResumableUploadSessionIdFromResponse,
   metaTemplateSampleFileName,
   whatsappReplyWindowState,
   verifyMetaSignature
@@ -822,6 +823,23 @@ test('Meta resumable upload keeps the upload: colon and sanitizes sample filenam
   assert.match(metaResumableUploadSessionPath(sessionId), /^upload:/);
   assert.doesNotMatch(metaResumableUploadSessionPath(sessionId), /upload%3A/i);
   assert.match(metaResumableUploadSessionPath(sessionId), /%3D%3D$/);
+  // Dotted / multi-colon opaque tokens from newer Graph responses must not be rejected.
+  assert.equal(
+    metaResumableUploadSessionPath('upload:abc.def:ghi+jkl/mno='),
+    `upload:${encodeURIComponent('abc.def:ghi+jkl/mno=')}`
+  );
+  assert.equal(
+    metaResumableUploadSessionPath('upload%3A' + encodeURIComponent(token)),
+    `upload:${encodeURIComponent(token)}`
+  );
+  assert.equal(
+    metaResumableUploadSessionIdFromResponse({ id: sessionId }),
+    sessionId
+  );
+  assert.equal(
+    metaResumableUploadSessionIdFromResponse({ data: { upload_session_id: token } }),
+    token
+  );
   assert.equal(
     metaTemplateSampleFileName('DROPX5026_Invoice Slip for October - 2026.pdf', 'application/pdf'),
     'DROPX5026_Invoice_Slip_for_October_-_2026.pdf'
