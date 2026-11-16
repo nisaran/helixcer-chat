@@ -41,6 +41,7 @@ import {
   buildMetaWhatsAppTemplateUpdatePayload,
   buildMetaComponentsFromHelixcerVariables,
   metaResumableUploadSessionPath,
+  metaResumableUploadSessionUrl,
   metaResumableUploadSessionIdFromResponse,
   metaTemplateSampleFileName,
   whatsappReplyWindowState,
@@ -832,6 +833,16 @@ test('Meta resumable upload keeps the upload: colon and sanitizes sample filenam
     metaResumableUploadSessionPath('upload%3A' + encodeURIComponent(token)),
     `upload:${encodeURIComponent(token)}`
   );
+  // Meta includes ?sig= on session ids — keep it as a query param, not a rejected character.
+  const signed = `upload:${token}?sig=ARZqkGCA_uQMxC8nHKI`;
+  assert.equal(
+    metaResumableUploadSessionPath(signed),
+    `upload:${encodeURIComponent(token)}?sig=ARZqkGCA_uQMxC8nHKI`
+  );
+  const signedUrl = metaResumableUploadSessionUrl('v26.0', signed);
+  assert.match(signedUrl, /^https:\/\/graph\.facebook\.com\/v26\.0\/upload:/);
+  assert.match(signedUrl, /\?sig=ARZqkGCA_uQMxC8nHKI$/);
+  assert.doesNotMatch(signedUrl, /upload%3A/i);
   assert.equal(
     metaResumableUploadSessionIdFromResponse({ id: sessionId }),
     sessionId

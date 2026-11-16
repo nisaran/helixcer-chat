@@ -8070,10 +8070,10 @@
   function createTemplateMediaHeaderHint(format) {
     const editing = state.whatsappTemplateEditor?.mode === "edit";
     if (editing) {
-      if (format === "IMAGE") return "Optional: upload a new JPEG or PNG sample only if you want to replace the existing header media.";
-      if (format === "VIDEO") return "Optional: upload a new MP4 sample only if you want to replace the existing header media.";
-      if (format === "DOCUMENT") return "Optional: upload a new PDF sample only if you want to replace the existing header media.";
-      return "Leave empty to keep the current Meta sample media.";
+      if (format === "IMAGE") return "Meta requires a new JPEG or PNG sample whenever you save changes to a media-header template.";
+      if (format === "VIDEO") return "Meta requires a new MP4 sample whenever you save changes to a media-header template.";
+      if (format === "DOCUMENT") return "Meta requires a new PDF sample whenever you save changes to a media-header template.";
+      return "Meta requires a new sample file when saving media-header template changes.";
     }
     if (format === "IMAGE") return "Upload a JPEG or PNG sample for Meta review. Actual images are chosen when you send.";
     if (format === "VIDEO") return "Upload an MP4 sample for Meta review. Actual videos are chosen when you send.";
@@ -8094,8 +8094,8 @@
     if (!textEnabled && $("createTemplateHeaderText")) $("createTemplateHeaderText").value = "";
     if (mediaInput) {
       mediaInput.accept = createTemplateMediaHeaderAccept(format);
-      // Edits can keep existing Meta sample media; only create requires a new file.
-      mediaInput.required = mediaEnabled && state.whatsappTemplateEditor?.mode !== "edit";
+      // Meta rejects media-header updates without a fresh header_handle sample.
+      mediaInput.required = mediaEnabled;
       if (!mediaEnabled) mediaInput.value = "";
     }
     if (mediaHint) mediaHint.textContent = createTemplateMediaHeaderHint(format);
@@ -8460,8 +8460,14 @@
       return;
     }
     const needsSampleUpload = ["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.header.format) && Boolean(draft.header.mediaFile);
-    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.header.format) && !draft.header.mediaFile && !editing) {
-      showToast("Sample media required", `Choose a ${draft.header.format.toLowerCase()} sample for the header.`, true);
+    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.header.format) && !draft.header.mediaFile) {
+      showToast(
+        "Sample media required",
+        editing
+          ? `Meta needs a new ${draft.header.format.toLowerCase()} sample when saving this template.`
+          : `Choose a ${draft.header.format.toLowerCase()} sample for the header.`,
+        true
+      );
       return;
     }
     let seenQuickReply = false;
