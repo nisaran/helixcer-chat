@@ -8845,30 +8845,39 @@
     }) || null;
   }
 
+  function mapTemplateOptionLabel(template) {
+    return `${template.name} · ${templateLanguageCode(template) || "—"}${template.channelName ? ` · ${template.channelName}` : ""}`;
+  }
+
   function filterMapTemplateOptions(query = "") {
     const menu = $("mapTemplateOptions");
     const search = $("mapTemplateSearch");
     if (!menu || !search) return;
-    const needle = String(query || "").trim().toLocaleLowerCase();
+    const searchText = String(query ?? search.value ?? "").trim();
+    const selectedLabel = String(search.dataset.selectedLabel || "").trim();
+    // Selected display label is not a search query. Reopening lists all templates.
+    const needle = searchText && searchText !== selectedLabel ? searchText.toLocaleLowerCase() : "";
     const selected = state.mapTemplatesKey;
     menu.replaceChildren();
     const templates = mapTemplatesSelectableTemplates().filter((template) => {
+      if (!needle) return true;
       const haystack = [
         template.name,
         templateLanguageCode(template),
         template.channelName,
         template.category,
         template.status,
+        mapTemplateOptionLabel(template),
       ].join(" ").toLocaleLowerCase();
-      return !needle || haystack.includes(needle);
+      return haystack.includes(needle);
     });
     if (!templates.length) {
-      menu.append(element("span", "searchable-combobox-empty", "No matching templates"));
+      // Keep the menu open but empty — do not fall back to the full list.
       return;
     }
     templates.forEach((template) => {
       const key = whatsappTemplateMappingLookupKey(template.channelId, template.name, templateLanguageCode(template));
-      const label = `${template.name} · ${templateLanguageCode(template) || "—"}${template.channelName ? ` · ${template.channelName}` : ""}`;
+      const label = mapTemplateOptionLabel(template);
       const option = element("button", "searchable-combobox-option", label);
       option.type = "button";
       option.setAttribute("role", "option");
@@ -8881,12 +8890,25 @@
         $("mapTemplateSelect").value = key;
         search.value = label;
         search.dataset.selectedLabel = label;
-        menu.hidden = true;
-        search.setAttribute("aria-expanded", "false");
+        setSearchableComboboxOpen(search, menu, false);
         renderMapTemplateVariables();
       });
       menu.append(option);
     });
+  }
+
+  function openMapTemplateMenu({ toggle = false } = {}) {
+    const menu = $("mapTemplateOptions");
+    const search = $("mapTemplateSearch");
+    if (!menu || !search) return;
+    const alreadyOpen = !menu.hidden;
+    if (toggle && alreadyOpen) {
+      setSearchableComboboxOpen(search, menu, false);
+      return;
+    }
+    filterMapTemplateOptions(search.value);
+    setSearchableComboboxOpen(search, menu, true);
+    search.focus();
   }
 
   function mapTemplateSourceLabel(source, constantValue = "") {
@@ -9151,7 +9173,10 @@
     setMapTemplatesSubmitBusy(false);
     if (typeof dialog.showModal === "function") dialog.showModal();
     else dialog.setAttribute("open", "");
-    $("mapTemplateSearch")?.focus();
+    // Focus without opening the menu here: the same click that opened the dialog
+    // would immediately close it via the document click listener.
+    $("mapTemplateSearch")?.focus({ preventScroll: true });
+    setSearchableComboboxOpen($("mapTemplateSearch"), $("mapTemplateOptions"), false);
   }
 
   function closeMapWhatsAppTemplatesDialog() {
@@ -17350,15 +17375,35 @@
     $("templateForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentTemplate(event.currentTarget); });
     $("createWhatsAppTemplateForm")?.addEventListener("submit", submitCreateWhatsAppTemplate);
     $("mapWhatsAppTemplatesForm")?.addEventListener("submit", submitMapWhatsAppTemplates);
-    $("mapTemplateSearch")?.addEventListener("input", (event) => {
-      filterMapTemplateOptions(event.target.value);
-      setSearchableComboboxOpen(event.target, $("mapTemplateOptions"), true);
+    $("mapTemplateCombobox")?.addEventListener("mousedown", (event) => {
+      if (event.target.closest(".searchable-combobox-menu")) return;
+      const menu = $("mapTemplateOptions");
+      const alreadyOpen = menu && !menu.hidden;
+      const onToggle = Boolean(event.target.closest(".searchable-combobox-toggle"));
+      if (onToggle) {
+        event.preventDefault();
+        openMapTemplateMenu({ toggle: true });
+        return;
+      }
+      if (!alreadyOpen) openMapTemplateMenu();
     });
-    $("mapTemplateSearch")?.addEventListener("focus", (event) => {
+    $("mapTemplateSearch")?.addEventListener("click", () => {
+      openMapTemplateMenu();
+    });
+    $("mapTemplateSearch")?.addEventListener("input", (event) => {
+      // Typing clears the "selected label" shortcut so filtering is strict.
+      if (event.target.dataset.selectedLabel && event.target.value !== event.target.dataset.selectedLabel) {
+        delete event.target.dataset.selectedLabel;
+      }
       filterMapTemplateOptions(event.target.value);
       setSearchableComboboxOpen(event.target, $("mapTemplateOptions"), true);
     });
     $("mapTemplateSearch")?.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" && $("mapTemplateOptions")?.hidden) {
+        event.preventDefault();
+        openMapTemplateMenu();
+        return;
+      }
       searchableComboboxInputKeydown(event, event.currentTarget, $("mapTemplateOptions"));
     });
     $("mapTemplateOptions")?.addEventListener("keydown", (event) => {

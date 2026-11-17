@@ -1286,11 +1286,17 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   align-items: start;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
+  /* Keep overflow visible so the template combobox menu is not clipped. */
+  overflow: visible;
   padding-right: 2px;
 }
-.map-templates-fields { min-width: 0; }
+.map-templates-fields { min-width: 0; overflow: visible; }
+.map-templates-fields .form-grid { overflow: visible; }
+.map-templates-modal #mapTemplateCombobox { z-index: 5; }
+.map-templates-modal #mapTemplateOptions {
+  z-index: 40;
+  max-height: min(280px, 42vh);
+}
 .map-templates-summary {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1302,9 +1308,10 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .map-templates-variable-fields {
   display: grid;
   gap: 10px;
-  max-height: none;
-  overflow: visible;
-  padding-right: 0;
+  max-height: min(48vh, 420px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
 }
 .map-template-variable-row {
   display: grid;
