@@ -79,7 +79,14 @@ export function campaignFinalStatus(counts) {
   return 'completed';
 }
 
-export function resolveCampaignVariableValue(mapping, { contact = {}, row = {}, profileId = '' } = {}) {
+export function resolveCampaignVariableValue(mapping, {
+  contact = {},
+  row = {},
+  profileId = '',
+  channel = {},
+  workspace = {},
+  agent = {}
+} = {}) {
   const source = String(mapping?.source || '').trim();
   if (!source || source === 'constant' || source === 'manual') {
     return String(mapping?.value ?? '').trim();
@@ -102,7 +109,21 @@ export function resolveCampaignVariableValue(mapping, { contact = {}, row = {}, 
     if (key === 'profileId' || key === 'channelProfileId') {
       return String(profileId || contact.profileId || contact.channelProfileId || '').trim();
     }
+    if (key === 'email') return String(contact.email || '').trim();
+    if (key === 'phone') {
+      const phone = String(contact.phone || contact.phoneNumber || '').trim();
+      return phone === '—' ? '' : phone;
+    }
     return String(contact[key] ?? '').trim();
+  }
+  if (source === 'channel.name') {
+    return String(channel.name || channel.displayName || channel.channelName || '').trim();
+  }
+  if (source === 'workspace.name') {
+    return String(workspace.displayName || workspace.name || '').trim();
+  }
+  if (source === 'agent.displayName') {
+    return String(agent.displayName || agent.name || agent.email || '').trim();
   }
   return String(mapping?.value ?? '').trim();
 }
