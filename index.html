@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261116-template-upload-sig">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261117-map-templates">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261116-template-upload-sig" defer></script>
+  <script src="./assets/app.js?v=20261117-map-templates" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -938,6 +938,7 @@
             </div>
             <div class="template-library-toolbar-actions">
               <button class="secondary-button" id="refreshWhatsAppTemplates" type="button" data-action="refresh-whatsapp-templates"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15"/></svg>Refresh</button>
+              <button class="secondary-button" id="mapWhatsAppTemplates" type="button" data-action="open-map-whatsapp-templates"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h7M4 12h16M4 17h10M15 7h5M14 17h6"/></svg>Map Templates</button>
               <button class="primary-button" type="button" data-action="open-create-whatsapp-template"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Create template</button>
             </div>
           </div>
@@ -1657,6 +1658,37 @@
             <span data-create-template-submit-label>Submit to Meta</span>
           </button>
         </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal map-templates-modal" id="mapWhatsAppTemplatesDialog" aria-labelledby="mapWhatsAppTemplatesTitle">
+    <form class="modal-card map-templates-card" id="mapWhatsAppTemplatesForm" autocomplete="off">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">WhatsApp templates</p>
+          <h2 id="mapWhatsAppTemplatesTitle">Map template variables</h2>
+        </div>
+        <button class="icon-button" type="button" data-action="close-map-whatsapp-templates" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="modal-copy">Set default sources for each variable. Inbox and campaigns will auto-fill from these mappings — you can still change values when sending. External API sends are not affected.</p>
+      <div class="form-grid">
+        <label class="field-label form-span">Template
+          <span class="searchable-combobox" id="mapTemplateCombobox">
+            <input class="text-field searchable-combobox-input" id="mapTemplateSearch" type="search" placeholder="Search or choose a template…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="mapTemplateOptions">
+            <input type="hidden" id="mapTemplateSelect">
+            <span class="searchable-combobox-menu" id="mapTemplateOptions" role="listbox" aria-label="Templates" hidden></span>
+          </span>
+        </label>
+        <div class="map-templates-summary form-span" id="mapTemplateSummary" hidden></div>
+        <div class="map-templates-variable-fields form-span" id="mapTemplateVariableFields"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-map-whatsapp-templates">Cancel</button>
+        <button class="primary-button" id="mapWhatsAppTemplatesSubmit" type="submit">
+          <span class="create-template-submit-spinner" aria-hidden="true"></span>
+          <span data-map-templates-submit-label>Save mapping</span>
+        </button>
       </div>
     </form>
   </dialog>

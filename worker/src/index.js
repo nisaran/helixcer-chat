@@ -109,8 +109,14 @@ import {
   shouldSendGreeting,
   shouldSendOutOfOffice
 } from './automation.js';
+import {
+  TEMPLATE_MAPPING_SOURCES,
+  serializeWhatsAppTemplateMappingRow,
+  templateMappingKey,
+  validateWhatsAppTemplateMappingsUpsert
+} from './template-mappings.js';
 
-const API_VERSION = '2026-11-16-template-upload-sig';
+const API_VERSION = '2026-11-17-map-templates';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -708,6 +714,23 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         });
       } catch (error) {
         console.error('whatsapp_template_delete_audit_failed', { error: cleanError(error) });
+      }
+      return withCors(json(result), cors);
+    }
+    if (url.pathname === '/api/channel-data/whatsapp-template-mappings' && request.method === 'GET') {
+      requireAnyPermission(principal, ['channels.templates', 'campaigns.manage', 'campaigns.view', 'chats.reply']);
+      return withCors(json(await listWorkspaceWhatsAppTemplateMappings(env, workspaceId)), cors);
+    }
+    if (url.pathname === '/api/channel-data/whatsapp-template-mappings' && request.method === 'PUT') {
+      requirePermission(principal, 'channels.templates');
+      const result = await upsertWorkspaceWhatsAppTemplateMappings(env, workspaceId, await readJson(request), principal);
+      try {
+        await audit(env, principal, 'update', 'whatsapp_template_mapping', `${result.item.templateName}:${result.item.templateLanguage}`, {
+          channelId: result.item.channelId,
+          mappingCount: result.item.mappings?.length || 0
+        });
+      } catch (error) {
+        console.error('whatsapp_template_mapping_audit_failed', { error: cleanError(error) });
       }
       return withCors(json(result), cors);
     }
@@ -7513,6 +7536,68 @@ async function deleteWorkspaceWhatsAppTemplate(env, workspaceId, payload, princi
   };
 }
 
+async function listWorkspaceWhatsAppTemplateMappings(env, workspaceId) {
+  try {
+    const result = await env.DB.prepare(`SELECT workspace_id,channel_id,template_name,template_language,
+        mappings_json,updated_at,updated_by
+      FROM workspace_whatsapp_template_mappings
+      WHERE workspace_id=?1
+      ORDER BY template_name ASC, template_language ASC`)
+      .bind(workspaceId).all();
+    const items = (result?.results || []).map((row) => serializeWhatsAppTemplateMappingRow(row));
+    return { items, sources: TEMPLATE_MAPPING_SOURCES };
+  } catch (error) {
+    if (/no such table/i.test(String(error?.message || error))) {
+      return { items: [], sources: TEMPLATE_MAPPING_SOURCES };
+    }
+    throw error;
+  }
+}
+
+async function upsertWorkspaceWhatsAppTemplateMappings(env, workspaceId, payload, principal) {
+  const input = validateWhatsAppTemplateMappingsUpsert(payload);
+  assertPrincipalChannelAccess(principal, input.channelId);
+  const channel = await getChannel(env, input.channelId, 'whatsapp_cloud', workspaceId);
+  if (!channel) throw httpError(404, 'WhatsApp channel not found or is disabled.');
+  const now = new Date().toISOString();
+  const updatedBy = String(principal?.user?.email || principal?.user?.displayName || '').slice(0, 254);
+  try {
+    await env.DB.prepare(`INSERT INTO workspace_whatsapp_template_mappings
+        (workspace_id,channel_id,template_name,template_language,mappings_json,updated_at,updated_by)
+      VALUES (?1,?2,?3,?4,?5,?6,?7)
+      ON CONFLICT(workspace_id,channel_id,template_name,template_language) DO UPDATE SET
+        mappings_json=excluded.mappings_json,
+        updated_at=excluded.updated_at,
+        updated_by=excluded.updated_by`)
+      .bind(
+        workspaceId,
+        input.channelId,
+        input.templateName,
+        input.templateLanguage,
+        JSON.stringify(input.mappings),
+        now,
+        updatedBy
+      ).run();
+  } catch (error) {
+    if (/no such table/i.test(String(error?.message || error))) {
+      throw httpError(503, 'Template mapping storage is not ready yet. Apply migration 0030 and retry.');
+    }
+    throw error;
+  }
+  return {
+    item: {
+      channelId: input.channelId,
+      templateName: input.templateName,
+      templateLanguage: input.templateLanguage,
+      mappings: input.mappings,
+      updatedAt: now,
+      updatedBy,
+      key: templateMappingKey(input.channelId, input.templateName, input.templateLanguage)
+    },
+    sources: TEMPLATE_MAPPING_SOURCES
+  };
+}
+
 export function sanitizeWhatsAppTemplateDefinition(value) {
   if (!isPlainObject(value)) return null;
   const name = providerText(value.name, 512);
@@ -9901,6 +9986,20 @@ async function processCampaign(env, workspaceId, campaignId, principal, batchSiz
   const textVariables = Array.isArray(mappingPayload.textVariables) ? mappingPayload.textVariables : [];
   const previewTextBase = String(mappingPayload.previewText || '');
   const mediaPreview = mappingPayload.mediaPreview || null;
+  let workspaceName = '';
+  try {
+    const workspaceRow = await env.DB.prepare('SELECT name FROM workspaces WHERE workspace_id=?1 LIMIT 1')
+      .bind(workspaceId).first();
+    workspaceName = String(workspaceRow?.name || '').trim();
+  } catch { /* ignore missing workspace name */ }
+  const sharedVariableContext = {
+    channel: { name: channel.name || channel.displayName || '', channelName: channel.name || '' },
+    workspace: { name: workspaceName, displayName: workspaceName },
+    agent: {
+      displayName: principal?.user?.displayName || principal?.user?.name || '',
+      email: principal?.user?.email || ''
+    }
+  };
 
   const pending = detail.recipients.filter(item => !item.messageId && item.status === 'pending').slice(0, batchSize);
   await runCampaignConcurrent(pending, 3, async (recipient) => {
@@ -9917,7 +10016,8 @@ async function processCampaign(env, workspaceId, campaignId, principal, batchSiz
       const context = {
         contact: prepared.contact,
         row: recipient.row || {},
-        profileId: prepared.profileId
+        profileId: prepared.profileId,
+        ...sharedVariableContext
       };
       let sendResult;
       if (campaign.messageType === 'template') {

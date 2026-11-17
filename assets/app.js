@@ -67,6 +67,11 @@
     whatsappTemplatesLoading: false,
     whatsappTemplatesError: "",
     whatsappTemplateEditor: null,
+    whatsappTemplateMappings: new Map(),
+    whatsappTemplateMappingSources: [],
+    whatsappTemplateMappingsLoaded: false,
+    whatsappTemplateMappingsLoading: false,
+    mapTemplatesKey: "",
     whatsappTemplateSearch: "",
     whatsappTemplateFilters: {
       channel: new Set(), category: new Set(), status: new Set(), language: new Set(),
@@ -1188,6 +1193,51 @@
       return { ok: true, channelId, templateId, name, language: String(payload?.language || "") };
     }
 
+    async getWhatsAppTemplateMappings() {
+      await smallDelay(80);
+      return {
+        items: clone(this.data.whatsappTemplateMappings || []),
+        sources: [
+          { value: "contact.displayName", label: "Contact name" },
+          { value: "contact.company", label: "Company" },
+          { value: "contact.tags", label: "Tags" },
+          { value: "contact.profileId", label: "Messaging ID" },
+          { value: "contact.email", label: "Email" },
+          { value: "contact.phone", label: "Phone" },
+          { value: "channel.name", label: "Channel name" },
+          { value: "workspace.name", label: "Workspace name" },
+          { value: "agent.displayName", label: "Agent name" },
+          { value: "constant", label: "Constant value" },
+        ],
+      };
+    }
+
+    async saveWhatsAppTemplateMappings(payload) {
+      await smallDelay(100);
+      const channelId = String(payload?.channelId || "").trim();
+      const templateName = String(payload?.templateName || "").trim().toLowerCase();
+      const templateLanguage = String(payload?.templateLanguage || "").trim();
+      const mappings = Array.isArray(payload?.mappings) ? payload.mappings : [];
+      if (!channelId || !templateName || !templateLanguage) {
+        throw Object.assign(new Error("Channel, template name, and language are required."), { status: 400 });
+      }
+      if (!this.data.whatsappTemplateMappings) this.data.whatsappTemplateMappings = [];
+      const keyMatch = (item) => item.channelId === channelId
+        && item.templateName === templateName
+        && item.templateLanguage === templateLanguage;
+      this.data.whatsappTemplateMappings = this.data.whatsappTemplateMappings.filter((item) => !keyMatch(item));
+      const item = {
+        channelId,
+        templateName,
+        templateLanguage,
+        mappings: clone(mappings),
+        updatedAt: new Date().toISOString(),
+        updatedBy: this.data.me?.email || "demo",
+      };
+      this.data.whatsappTemplateMappings.push(item);
+      return { item, sources: (await this.getWhatsAppTemplateMappings()).sources };
+    }
+
     async getWhatsAppTemplates() {
       await smallDelay(180);
       const items = [
@@ -1944,6 +1994,21 @@
           method: "POST",
           body: formData,
           timeoutMs: 120000,
+        });
+    }
+
+    getWhatsAppTemplateMappings() {
+      return this.isDemo
+        ? this.demo.getWhatsAppTemplateMappings()
+        : this.request("/api/channel-data/whatsapp-template-mappings");
+    }
+
+    saveWhatsAppTemplateMappings(payload) {
+      return this.isDemo
+        ? this.demo.saveWhatsAppTemplateMappings(payload)
+        : this.request("/api/channel-data/whatsapp-template-mappings", {
+          method: "PUT",
+          body: JSON.stringify(payload),
         });
     }
 
@@ -8659,11 +8724,320 @@
       state.whatsappTemplateTruncatedChannels = asItems(data?.truncatedChannels);
       state.whatsappTemplateFilterOptions = data?.filterOptions && typeof data.filterOptions === "object" ? data.filterOptions : {};
       state.whatsappTemplatesLoaded = true;
+      loadWhatsAppTemplateMappings({ force: refresh }).catch(() => {});
     } catch (error) {
       state.whatsappTemplatesError = error.message || "Unable to reach the template service.";
     } finally {
       state.whatsappTemplatesLoading = false;
       renderWhatsAppTemplateLibrary();
+    }
+  }
+
+  function whatsappTemplateMappingLookupKey(channelId, templateName, templateLanguage) {
+    return [
+      String(channelId || "").trim(),
+      String(templateName || "").trim().toLowerCase(),
+      String(templateLanguage || "").trim(),
+    ].join("::");
+  }
+
+  function templateLanguageCode(template) {
+    return String(template?.language?.code || template?.language || "").trim();
+  }
+
+  function savedWhatsAppTemplateMappings(template, fallbackChannelId = "") {
+    if (!template) return [];
+    const channelId = template.channelId || fallbackChannelId || "";
+    const language = templateLanguageCode(template);
+    const exact = state.whatsappTemplateMappings.get(
+      whatsappTemplateMappingLookupKey(channelId, template.name, language)
+    );
+    if (exact) return exact;
+    if (!channelId) {
+      for (const [key, mappings] of state.whatsappTemplateMappings.entries()) {
+        const [, name, lang] = key.split("::");
+        if (name === String(template.name || "").trim().toLowerCase() && lang === language) return mappings;
+      }
+    }
+    return [];
+  }
+
+  function findSavedTemplateMapping(mappings, descriptor) {
+    if (!descriptor || !Array.isArray(mappings) || !mappings.length) return null;
+    const byId = mappings.find((item) => item.id === descriptor.id);
+    if (byId) return byId;
+    const placeholder = String(descriptor.placeholder || descriptor.parameterName || "").trim();
+    if (!placeholder) return null;
+    return mappings.find((item) => {
+      const itemPlaceholder = String(item.placeholder || item.parameterName || "").trim();
+      const sameComponent = !item.componentType || item.componentType === descriptor.componentType;
+      return sameComponent && itemPlaceholder === placeholder;
+    }) || null;
+  }
+
+  const TEMPLATE_MAPPING_SOURCE_OPTIONS = [
+    { value: "", label: "Not mapped" },
+    { value: "contact.displayName", label: "Contact name" },
+    { value: "contact.company", label: "Company" },
+    { value: "contact.tags", label: "Tags" },
+    { value: "contact.profileId", label: "Messaging ID" },
+    { value: "contact.email", label: "Email" },
+    { value: "contact.phone", label: "Phone" },
+    { value: "channel.name", label: "Channel name" },
+    { value: "workspace.name", label: "Workspace name" },
+    { value: "agent.displayName", label: "Agent name" },
+    { value: "constant", label: "Constant value" },
+  ];
+
+  function inboxSourceFromMappingSource(source) {
+    const map = {
+      "contact.displayName": "displayName",
+      "contact.company": "company",
+      "contact.tags": "tags",
+      "contact.profileId": "channelProfileId",
+      "contact.email": "email",
+      "contact.phone": "phone",
+      "channel.name": "channelName",
+      "workspace.name": "workspaceName",
+      "agent.displayName": "agentName",
+      constant: "manual",
+    };
+    return map[String(source || "").trim()] || "";
+  }
+
+  async function loadWhatsAppTemplateMappings({ force = false } = {}) {
+    if (state.whatsappTemplateMappingsLoading || (state.whatsappTemplateMappingsLoaded && !force)) {
+      return state.whatsappTemplateMappings;
+    }
+    state.whatsappTemplateMappingsLoading = true;
+    try {
+      const data = await state.api.getWhatsAppTemplateMappings();
+      const next = new Map();
+      for (const item of asItems(data)) {
+        const key = whatsappTemplateMappingLookupKey(item.channelId, item.templateName, item.templateLanguage);
+        next.set(key, Array.isArray(item.mappings) ? item.mappings : []);
+      }
+      state.whatsappTemplateMappings = next;
+      state.whatsappTemplateMappingSources = asItems(data?.sources);
+      state.whatsappTemplateMappingsLoaded = true;
+    } catch (error) {
+      console.warn("whatsapp template mappings load failed", error);
+      if (!state.whatsappTemplateMappingsLoaded) state.whatsappTemplateMappings = new Map();
+    } finally {
+      state.whatsappTemplateMappingsLoading = false;
+    }
+    return state.whatsappTemplateMappings;
+  }
+
+  function mapTemplatesSelectableTemplates() {
+    return state.whatsappTemplates
+      .filter((template) => String(template.status || "").toUpperCase() !== "DELETED")
+      .slice()
+      .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""))
+        || templateLanguageCode(left).localeCompare(templateLanguageCode(right)));
+  }
+
+  function selectedMapTemplate() {
+    const key = state.mapTemplatesKey || $("mapTemplateSelect")?.value || "";
+    return mapTemplatesSelectableTemplates().find((template) => {
+      const templateKey = whatsappTemplateMappingLookupKey(template.channelId, template.name, templateLanguageCode(template));
+      return templateKey === key;
+    }) || null;
+  }
+
+  function filterMapTemplateOptions(query = "") {
+    const menu = $("mapTemplateOptions");
+    const search = $("mapTemplateSearch");
+    if (!menu || !search) return;
+    const needle = String(query || "").trim().toLocaleLowerCase();
+    const selected = state.mapTemplatesKey;
+    menu.replaceChildren();
+    const templates = mapTemplatesSelectableTemplates().filter((template) => {
+      const haystack = [
+        template.name,
+        templateLanguageCode(template),
+        template.channelName,
+        template.category,
+        template.status,
+      ].join(" ").toLocaleLowerCase();
+      return !needle || haystack.includes(needle);
+    });
+    if (!templates.length) {
+      menu.append(element("span", "searchable-combobox-empty", "No matching templates"));
+      return;
+    }
+    templates.forEach((template) => {
+      const key = whatsappTemplateMappingLookupKey(template.channelId, template.name, templateLanguageCode(template));
+      const label = `${template.name} · ${templateLanguageCode(template) || "—"}${template.channelName ? ` · ${template.channelName}` : ""}`;
+      const option = element("button", "searchable-combobox-option", label);
+      option.type = "button";
+      option.setAttribute("role", "option");
+      option.dataset.value = key;
+      option.dataset.label = label;
+      option.setAttribute("aria-selected", String(key === selected));
+      option.classList.toggle("is-active", key === selected);
+      option.addEventListener("click", () => {
+        state.mapTemplatesKey = key;
+        $("mapTemplateSelect").value = key;
+        search.value = label;
+        search.dataset.selectedLabel = label;
+        menu.hidden = true;
+        search.setAttribute("aria-expanded", "false");
+        renderMapTemplateVariables();
+      });
+      menu.append(option);
+    });
+  }
+
+  function renderMapTemplateVariables() {
+    const host = $("mapTemplateVariableFields");
+    const summary = $("mapTemplateSummary");
+    if (!host) return;
+    host.replaceChildren();
+    const template = selectedMapTemplate();
+    if (!template) {
+      if (summary) summary.hidden = true;
+      host.append(element("p", "template-no-variables", "Choose a template to map its variables."));
+      return;
+    }
+    const languageCode = templateLanguageCode(template);
+    if (summary) {
+      summary.hidden = false;
+      summary.textContent = [template.channelName, template.category, languageCode, template.status]
+        .filter(Boolean)
+        .join(" · ");
+    }
+    const descriptors = templateVariableDescriptors(template).filter((item) => item.kind === "text");
+    const saved = savedWhatsAppTemplateMappings(template);
+    if (!descriptors.length) {
+      host.append(element("p", "template-no-variables", "This template has no text variables to map. Media headers are chosen when sending."));
+      return;
+    }
+    descriptors.forEach((descriptor) => {
+      const savedItem = findSavedTemplateMapping(saved, descriptor) || {};
+      const source = String(savedItem.source || "").trim();
+      const row = element("div", "map-template-variable-row");
+      row.dataset.variableId = descriptor.id;
+      row.dataset.placeholder = descriptor.placeholder || "";
+      row.dataset.parameterName = descriptor.parameterName || "";
+      row.dataset.componentType = descriptor.componentType || "";
+      const sourceOptions = (state.whatsappTemplateMappingSources.length
+        ? [{ value: "", label: "Not mapped" }, ...state.whatsappTemplateMappingSources]
+        : TEMPLATE_MAPPING_SOURCE_OPTIONS);
+      row.innerHTML = `
+        <label class="field-label">${escapeHtml(descriptor.label)}
+          <select class="text-field map-template-source">${sourceOptions.map((option) => {
+            const value = option.value ?? option[0];
+            const label = option.label ?? option[1];
+            return `<option value="${escapeHtml(value)}" ${value === source ? "selected" : ""}>${escapeHtml(label)}</option>`;
+          }).join("")}</select>
+        </label>
+        <label class="field-label">Constant value
+          <input class="text-field map-template-value" type="text" maxlength="1000" value="${escapeHtml(source === "constant" ? (savedItem.value || "") : "")}" placeholder="Used when source is Constant value" ${source === "constant" ? "" : "readonly"}>
+        </label>`;
+      host.append(row);
+      const sourceSelect = row.querySelector(".map-template-source");
+      const valueInput = row.querySelector(".map-template-value");
+      const syncValueState = () => {
+        const isConstant = sourceSelect.value === "constant";
+        valueInput.readOnly = !isConstant;
+        valueInput.classList.toggle("is-readonly", !isConstant);
+        if (!isConstant) valueInput.value = "";
+        valueInput.placeholder = isConstant ? "Enter a fixed value" : "Used when source is Constant value";
+      };
+      syncValueState();
+      sourceSelect.addEventListener("change", syncValueState);
+      valueInput.addEventListener("input", () => {
+        if (valueInput.readOnly) return;
+        if (valueInput.value.trim() && sourceSelect.value !== "constant") sourceSelect.value = "constant";
+        syncValueState();
+      });
+    });
+  }
+
+  function collectMapTemplateMappingsFromDom() {
+    return [...($("mapTemplateVariableFields")?.querySelectorAll("[data-variable-id]") || [])].map((row) => {
+      const source = row.querySelector(".map-template-source")?.value || "";
+      const value = source === "constant" ? (row.querySelector(".map-template-value")?.value?.trim() || "") : "";
+      return {
+        id: row.dataset.variableId,
+        placeholder: row.dataset.placeholder || "",
+        parameterName: row.dataset.parameterName || "",
+        componentType: row.dataset.componentType || "",
+        source,
+        value,
+      };
+    }).filter((item) => item.source);
+  }
+
+  function setMapTemplatesSubmitBusy(busy, label = "Save mapping") {
+    const submit = $("mapWhatsAppTemplatesSubmit");
+    if (!submit) return;
+    submit.classList.toggle("is-busy", busy);
+    submit.disabled = busy;
+    const labelNode = submit.querySelector("[data-map-templates-submit-label]");
+    if (labelNode) labelNode.textContent = label;
+  }
+
+  async function openMapWhatsAppTemplatesDialog() {
+    const dialog = $("mapWhatsAppTemplatesDialog");
+    if (!dialog) return;
+    if (!state.whatsappTemplatesLoaded) await loadWhatsAppTemplateLibrary();
+    await loadWhatsAppTemplateMappings();
+    state.mapTemplatesKey = "";
+    if ($("mapTemplateSelect")) $("mapTemplateSelect").value = "";
+    if ($("mapTemplateSearch")) {
+      $("mapTemplateSearch").value = "";
+      delete $("mapTemplateSearch").dataset.selectedLabel;
+    }
+    filterMapTemplateOptions("");
+    renderMapTemplateVariables();
+    setMapTemplatesSubmitBusy(false);
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    $("mapTemplateSearch")?.focus();
+  }
+
+  function closeMapWhatsAppTemplatesDialog() {
+    const dialog = $("mapWhatsAppTemplatesDialog");
+    if (!dialog) return;
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+    setMapTemplatesSubmitBusy(false);
+  }
+
+  async function submitMapWhatsAppTemplates(event) {
+    event?.preventDefault?.();
+    const template = selectedMapTemplate();
+    if (!template) {
+      showToast("Choose a template", "Select a template before saving a mapping.", true);
+      return;
+    }
+    const mappings = collectMapTemplateMappingsFromDom();
+    setMapTemplatesSubmitBusy(true, "Saving…");
+    try {
+      const result = await state.api.saveWhatsAppTemplateMappings({
+        channelId: template.channelId,
+        templateName: template.name,
+        templateLanguage: templateLanguageCode(template),
+        mappings,
+      });
+      const item = result?.item || {};
+      const key = whatsappTemplateMappingLookupKey(
+        item.channelId || template.channelId,
+        item.templateName || template.name,
+        item.templateLanguage || templateLanguageCode(template)
+      );
+      state.whatsappTemplateMappings.set(key, Array.isArray(item.mappings) ? item.mappings : mappings);
+      if (Array.isArray(result?.sources) && result.sources.length) {
+        state.whatsappTemplateMappingSources = result.sources;
+      }
+      state.whatsappTemplateMappingsLoaded = true;
+      showToast("Mapping saved", `${template.name} defaults will auto-fill in inbox and campaigns.`);
+      closeMapWhatsAppTemplatesDialog();
+    } catch (error) {
+      showToast("Mapping was not saved", error.message || "Try again.", true);
+      setMapTemplatesSubmitBusy(false);
     }
   }
 
@@ -9697,19 +10071,34 @@
     const contact = conversation ? contactFor(conversation) : null;
     const identity = conversation ? contactIdentityForConversation(conversation, contact) : null;
     const channel = conversation ? channelFor(conversation.channelId) : null;
+    const phone = contact?.phone && contact.phone !== "—" ? contact.phone : "";
     const values = {
       displayName: contact?.displayName || conversation?.subject || "",
       channelProfileId: conversation?.channelProfileId || identity?.profileId || (contact?.channelProfileId === "—" ? "" : contact?.channelProfileId) || "",
       company: contact?.company || "",
       tags: contact?.tags?.join(", ") || "",
       channelName: channel?.name || "",
+      email: contact?.email || "",
+      phone,
+      workspaceName: String(state.workspace?.displayName || state.workspace?.name || "").trim(),
+      agentName: String(state.currentUser?.displayName || state.currentUser?.email || "").trim(),
     };
     return values[source] || "";
   }
 
-  function suggestedTemplateSource(descriptor) {
+  function suggestedTemplateSource(descriptor, template = null) {
     if (["media", "location"].includes(descriptor.kind)) return "manual";
-    const name = String(descriptor.parameterName || "").toLocaleLowerCase();
+    const conversation = selectedConversation();
+    const route = conversation ? selectedComposerRoute(conversation) : null;
+    const saved = findSavedTemplateMapping(
+      savedWhatsAppTemplateMappings(template, route?.channelId || conversation?.channelId || ""),
+      descriptor
+    );
+    if (saved?.source) {
+      const mapped = inboxSourceFromMappingSource(saved.source);
+      if (mapped) return mapped;
+    }
+    const name = String(descriptor.parameterName || descriptor.placeholder || "").toLocaleLowerCase();
     if (!name) return "";
     const sources = new Map([
       ["name", "displayName"],
@@ -9722,11 +10111,16 @@
       ["tags", "tags"],
       ["channel", "channelName"],
       ["channel_name", "channelName"],
-      ["phone", "channelProfileId"],
+      ["email", "email"],
+      ["phone", "phone"],
       ["phone_number", "channelProfileId"],
       ["provider_id", "channelProfileId"],
       ["contact_id", "channelProfileId"],
-      ["wa_id", "channelProfileId"]
+      ["wa_id", "channelProfileId"],
+      ["workspace", "workspaceName"],
+      ["workspace_name", "workspaceName"],
+      ["agent", "agentName"],
+      ["agent_name", "agentName"],
     ]);
     return sources.get(name) || "";
   }
@@ -9779,8 +10173,17 @@
   }
 
   const templateSourceOptions = [
-    ["", "Choose source"], ["displayName", "Contact name"], ["channelProfileId", "Channel Profile ID"],
-    ["company", "Company"], ["tags", "Tags"], ["channelName", "Channel name"], ["manual", "Manual entry"],
+    ["", "Choose source"],
+    ["displayName", "Contact name"],
+    ["channelProfileId", "Channel Profile ID"],
+    ["company", "Company"],
+    ["tags", "Tags"],
+    ["email", "Email"],
+    ["phone", "Phone"],
+    ["channelName", "Channel name"],
+    ["workspaceName", "Workspace name"],
+    ["agentName", "Agent name"],
+    ["manual", "Manual entry"],
   ];
 
   function setSearchableComboboxOpen(input, menu, open) {
@@ -9893,6 +10296,12 @@
       renderTemplateComposerPreview();
       return;
     }
+    const conversation = selectedConversation();
+    const route = conversation ? selectedComposerRoute(conversation) : null;
+    const savedMappings = savedWhatsAppTemplateMappings(
+      template,
+      route?.channelId || conversation?.channelId || ""
+    );
     descriptors.forEach((descriptor) => {
       const row = element("div", "template-variable-row");
       row.dataset.variableId = descriptor.id;
@@ -9903,7 +10312,8 @@
       const source = document.createElement("input");
       source.type = "hidden";
       source.className = "template-source-select";
-      source.value = descriptor.kind === "media" ? "upload" : suggestedTemplateSource(descriptor);
+      source.value = descriptor.kind === "media" ? "upload" : suggestedTemplateSource(descriptor, template);
+      const saved = findSavedTemplateMapping(savedMappings, descriptor);
       const combo = element("span", "searchable-combobox template-source-combobox");
       const comboInput = document.createElement("input");
       const menuId = `template-source-options-${descriptor.id}`;
@@ -9934,6 +10344,9 @@
         ? "https://example.com/media.jpg"
         : descriptor.kind === "location" ? "12.9716, 77.5946 | Location name | Address" : `Enter ${descriptor.label.toLowerCase()}`;
       manual.setAttribute("aria-label", `${descriptor.label} manual value`);
+      if (descriptor.kind !== "media" && source.value === "manual" && saved?.source === "constant" && saved.value) {
+        manual.value = saved.value;
+      }
       const file = document.createElement("input");
       file.className = "text-field template-media-file";
       file.type = "file";
@@ -10229,6 +10642,7 @@
     $("templateSelect").value = "";
     state.templateConversationId = conversation.conversationId;
     $("templateDialog").showModal();
+    loadWhatsAppTemplateMappings().catch(() => {});
     loadConversationTemplates(conversation.conversationId);
   }
 
@@ -12934,7 +13348,21 @@
       if (key === "profileId" || key === "channelProfileId") {
         return String(context.profileId || context.contact?.channelProfileId || "").trim();
       }
+      if (key === "email") return String(context.contact?.email || "").trim();
+      if (key === "phone") {
+        const phone = String(context.contact?.phone || "").trim();
+        return phone === "—" ? "" : phone;
+      }
       return String(context.contact?.[key] ?? "").trim();
+    }
+    if (source === "channel.name") {
+      return String(context.channel?.name || selectedCampaignChannel()?.name || "").trim();
+    }
+    if (source === "workspace.name") {
+      return String(state.workspace?.displayName || state.workspace?.name || "").trim();
+    }
+    if (source === "agent.displayName") {
+      return String(state.currentUser?.displayName || state.currentUser?.email || "").trim();
     }
     return value;
   }
@@ -13040,6 +13468,7 @@
     if (status) status.textContent = "Loading approved templates…";
     try {
       if (!state.whatsappTemplatesLoaded) await loadWhatsAppTemplateLibrary();
+      await loadWhatsAppTemplateMappings();
       if (selectedCampaignChannel()?.channelId !== channel.channelId) return;
       state.campaigns.templates = (state.whatsappTemplates || [])
         .filter((template) => !template.channelId || template.channelId === channel.channelId)
@@ -13111,6 +13540,11 @@
       { value: "contact.company", label: "Company" },
       { value: "contact.tags", label: "Tags" },
       { value: "contact.profileId", label: "Messaging ID" },
+      { value: "contact.email", label: "Email" },
+      { value: "contact.phone", label: "Phone" },
+      { value: "channel.name", label: "Channel name" },
+      { value: "workspace.name", label: "Workspace name" },
+      { value: "agent.displayName", label: "Agent name" },
       { value: "constant", label: "Constant value" },
     );
     if (includeFields && state.campaigns.audienceSource === "upload") {
@@ -13123,7 +13557,11 @@
 
   function campaignSourceUsesContactField(source) {
     const value = String(source || "").trim();
-    return value.startsWith("contact.") || value.startsWith("field.");
+    return value.startsWith("contact.")
+      || value.startsWith("field.")
+      || value === "channel.name"
+      || value === "workspace.name"
+      || value === "agent.displayName";
   }
 
   function applyCampaignVariableValueState(row, sourceSelector, valueSelector) {
@@ -13176,8 +13614,13 @@
     }
     const descriptors = templateVariableDescriptors(template);
     const existing = new Map((state.campaigns.variableMappings || []).map((item) => [item.id, item]));
+    const savedMappings = savedWhatsAppTemplateMappings({
+      ...template,
+      channelId: template.channelId || selectedCampaignChannel()?.channelId || state.campaigns.channelId || "",
+    });
     const nextMappings = [];
     for (const descriptor of descriptors) {
+      const saved = findSavedTemplateMapping(savedMappings, descriptor) || {};
       const current = existing.get(descriptor.id) || {};
       const row = document.createElement("div");
       row.className = "campaign-variable-row";
@@ -13188,14 +13631,14 @@
           { value: "url", label: "Use URL" },
         ]
         : campaignVariableSourceOptions({ includeEmpty: true });
-      let source = String(current.source || "").trim();
+      let source = String(current.source || saved.source || "").trim();
       if (descriptor.kind === "media") {
         source = source === "url" ? "url" : "upload";
-      } else if (String(current.value || "").trim() && (!source || source === "constant")) {
+      } else if (String(current.value || saved.value || "").trim() && (!source || source === "constant")) {
         source = "constant";
       }
       const locked = descriptor.kind !== "media" && campaignSourceUsesContactField(source);
-      const valueText = locked ? "" : (current.value || "");
+      const valueText = locked ? "" : (current.value || (source === "constant" ? (saved.value || "") : "") || "");
       row.innerHTML = `
         <label class="field-label">${escapeHtml(descriptor.label)}
           <select class="text-field campaign-variable-source">${sourceOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === source ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>
@@ -15846,6 +16289,17 @@
           }
           return;
         }
+        if (actionButton.dataset.action === "open-map-whatsapp-templates") {
+          openMapWhatsAppTemplatesDialog().catch((error) => {
+            console.error("open-map-whatsapp-templates failed", error);
+            showToast("Could not open Map Templates", error?.message || "Reload the page and try again.", true);
+          });
+          return;
+        }
+        if (actionButton.dataset.action === "close-map-whatsapp-templates") {
+          closeMapWhatsAppTemplatesDialog();
+          return;
+        }
         if (actionButton.dataset.action === "copy-whatsapp-template-name") {
           copyWhatsAppTemplateName(actionButton.dataset.templateName);
           return;
@@ -16739,6 +17193,32 @@
     renderTagInput(tagInputRoot("create"), []);
     $("templateForm").addEventListener("submit", (event) => { event.preventDefault(); sendCurrentTemplate(event.currentTarget); });
     $("createWhatsAppTemplateForm")?.addEventListener("submit", submitCreateWhatsAppTemplate);
+    $("mapWhatsAppTemplatesForm")?.addEventListener("submit", submitMapWhatsAppTemplates);
+    $("mapTemplateSearch")?.addEventListener("input", (event) => {
+      filterMapTemplateOptions(event.target.value);
+      setSearchableComboboxOpen(event.target, $("mapTemplateOptions"), true);
+    });
+    $("mapTemplateSearch")?.addEventListener("focus", (event) => {
+      filterMapTemplateOptions(event.target.value);
+      setSearchableComboboxOpen(event.target, $("mapTemplateOptions"), true);
+    });
+    $("mapTemplateSearch")?.addEventListener("keydown", (event) => {
+      searchableComboboxInputKeydown(event, event.currentTarget, $("mapTemplateOptions"));
+    });
+    $("mapTemplateOptions")?.addEventListener("keydown", (event) => {
+      if (!event.target.classList.contains("searchable-combobox-option")) return;
+      searchableComboboxOptionKeydown(event, $("mapTemplateSearch"), $("mapTemplateOptions"));
+    });
+    $("mapWhatsAppTemplatesDialog")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) closeMapWhatsAppTemplatesDialog();
+    });
+    document.addEventListener("click", (event) => {
+      const search = $("mapTemplateSearch");
+      const menu = $("mapTemplateOptions");
+      if (!search || !menu || menu.hidden) return;
+      if (event.target.closest("#mapTemplateCombobox")) return;
+      setSearchableComboboxOpen(search, menu, false);
+    });
     ["createTemplateHeaderFormat", "createTemplateHeaderText", "createTemplateHeaderMedia", "createTemplateBodyText", "createTemplateFooterText", "createTemplateParameterFormat"]
       .forEach((id) => {
         const node = $(id);

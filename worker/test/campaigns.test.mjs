@@ -20,6 +20,9 @@ test('campaign variable resolution prefers contact fields, CSV headers, and cons
     row: { Phone: '919999999999' }
   }), '919999999999');
   assert.equal(resolveCampaignVariableValue({ source: 'constant', value: 'Hello' }, {}), 'Hello');
+  assert.equal(resolveCampaignVariableValue({ source: 'workspace.name' }, {
+    workspace: { name: 'Helixcer' }
+  }), 'Helixcer');
 });
 
 test('campaign text templates substitute mapped variables', () => {
