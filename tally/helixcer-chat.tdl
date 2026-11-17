@@ -5,7 +5,9 @@
 ;; Or: Gateway of Tally → F4 (Manage Local TDLs) → add helixcer-chat.tdl
 
 ;; ---------------------------------------------------------------------------
-;; Persistent API settings (kept in TallySav.Cfg across sessions)
+;; Persistent API settings (system scope → kept in TallySav.Cfg)
+;; Do NOT re-declare these on the Report with "Variable :" — that makes them
+;; local and they are lost when the screen closes.
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcWorkspaceId]
@@ -34,26 +36,26 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    Key Item : API Settings : S : Alter : Helixcer API Settings
+    ;; Modify Variable opens the report against system variables (not local copies)
+    Key Item : API Settings : S : Modify Variable : Helixcer API Settings
     Key Item : About        : A : Display : Helixcer Chat About
     Key Item : Back         : B : Menu : Gateway of Tally
 
 ;; ---------------------------------------------------------------------------
 ;; API Settings — Workspace ID, Channel ID, API Key
-;; Keep this form compact to avoid "Insufficient height to allocate!"
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer API Settings]
-    Form     : Helixcer API Settings
-    Title    : "API Settings"
-    Variable : HxcWorkspaceId, HxcChannelId, HxcApiKey
+    Form  : Helixcer API Settings
+    Title : "API Settings"
+    Auto  : Yes
 
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
     Button : Form Accept, Form Cancel
 
 [Part: Helixcer API Settings]
-    Lines : Hxc Api Settings Title, Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line
+    Lines  : Hxc Api Settings Title, Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line
     Scroll : Vertical
 
 [Line: Hxc Api Settings Title]
@@ -75,7 +77,7 @@
 [Field: Hxc Workspace Id]
     Use      : Name Field
     Set as   : ##HxcWorkspaceId
-    Modifies : HxcWorkspaceId
+    Modifies : HxcWorkspaceId : Yes
     Width    : 40
     Max      : 64
 
@@ -87,7 +89,7 @@
 [Field: Hxc Channel Id]
     Use      : Name Field
     Set as   : ##HxcChannelId
-    Modifies : HxcChannelId
+    Modifies : HxcChannelId : Yes
     Width    : 40
     Max      : 64
 
@@ -99,12 +101,12 @@
 [Field: Hxc Api Key]
     Use      : Name Field
     Set as   : ##HxcApiKey
-    Modifies : HxcApiKey
+    Modifies : HxcApiKey : Yes
     Width    : 40
     Max      : 128
 
 ;; ---------------------------------------------------------------------------
-;; About
+;; About (shows whether settings are stored)
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Chat About]
@@ -114,7 +116,7 @@
     Part : Helixcer Chat About
 
 [Part: Helixcer Chat About]
-    Lines : Helixcer Chat About Title, Helixcer Chat About Body
+    Lines : Helixcer Chat About Title, Helixcer Chat About Body, Helixcer Chat About Status
 
 [Line: Helixcer Chat About Title]
     Field : Helixcer Chat About Title
@@ -132,5 +134,14 @@
 [Field: Helixcer Chat About Body]
     Use       : Name Field
     Set as    : "Open API Settings to save Workspace ID, Channel ID, and API Key."
+    Align     : Centre
+    FullWidth : Yes
+
+[Line: Helixcer Chat About Status]
+    Field : Helixcer Chat About Status
+
+[Field: Helixcer Chat About Status]
+    Use       : Name Field
+    Set as    : If $$IsEmpty:##HxcApiKey Then "API Key: not set" Else "API Key: saved (" + $$StringLength:##HxcApiKey + " chars)"
     Align     : Centre
     FullWidth : Yes

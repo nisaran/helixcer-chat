@@ -20,7 +20,9 @@ TDL add-on that connects TallyPrime to Helixcer Chat (WhatsApp templates and mor
 4. Set **Load TDLs on startup** / enable the file → **Yes**.
 5. Restart TallyPrime if prompted.
 6. On **Gateway of Tally**, open **Helixcer Chat** → **API Settings**.
-7. Enter your Helixcer values and accept/save.
+7. Enter your Helixcer values, move through each field, then **Accept** (Ctrl+A).
+8. Open **About** — it should show `API Key: saved (…)`.
+9. Close Tally and reopen to confirm values still appear in **API Settings**.
 
 ## Where to find the values in Helixcer
 
