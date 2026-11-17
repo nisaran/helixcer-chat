@@ -8889,6 +8889,157 @@
     });
   }
 
+  function mapTemplateSourceLabel(source, constantValue = "") {
+    const value = String(source || "").trim();
+    if (!value) return "";
+    if (value === "constant") {
+      const constant = String(constantValue || "").trim();
+      return constant || "Constant value";
+    }
+    const options = state.whatsappTemplateMappingSources.length
+      ? state.whatsappTemplateMappingSources
+      : TEMPLATE_MAPPING_SOURCE_OPTIONS;
+    const match = options.find((option) => (option.value ?? option[0]) === value);
+    return String(match?.label ?? match?.[1] ?? value).trim();
+  }
+
+  function mapTemplatePreviewToken(source, constantValue = "") {
+    const label = mapTemplateSourceLabel(source, constantValue);
+    if (!label) return "";
+    if (source === "constant" && String(constantValue || "").trim()) {
+      return { text: String(constantValue).trim(), mapped: true, braced: false };
+    }
+    return { text: `{{${label}}}`, mapped: true, braced: true };
+  }
+
+  function fillMapTemplatePreviewText(text, descriptors, tokenById) {
+    const candidates = descriptors.filter((item) => item.kind === "text");
+    let positionalIndex = 0;
+    return String(text || "").replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, rawKey) => {
+      const key = String(rawKey || "").trim();
+      const named = candidates.find((item) => item.parameterName === key || item.placeholder === key);
+      const descriptor = named || candidates[positionalIndex++];
+      if (!descriptor) return match;
+      const token = tokenById.get(descriptor.id);
+      return token?.text || `{{${descriptor.placeholder || key}}}`;
+    });
+  }
+
+  function appendMapPreviewTextNode(host, className, text, tokenByPlaceholder) {
+    const node = element(className.includes("header") ? "strong" : className.includes("footer") ? "small" : "p", className);
+    const source = String(text || "");
+    if (!source) {
+      host.append(node);
+      return;
+    }
+    const parts = [];
+    let lastIndex = 0;
+    for (const match of source.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
+      const full = match[0];
+      const start = match.index || 0;
+      if (start > lastIndex) parts.push({ text: source.slice(lastIndex, start), token: false });
+      const inner = String(match[1] || "").trim();
+      const mapped = Boolean(tokenByPlaceholder.get(inner));
+      parts.push({ text: full, token: true, mapped });
+      lastIndex = start + full.length;
+    }
+    if (lastIndex < source.length) parts.push({ text: source.slice(lastIndex), token: false });
+    if (!parts.length) {
+      node.textContent = source;
+      host.append(node);
+      return;
+    }
+    parts.forEach((part) => {
+      if (!part.token) {
+        node.append(document.createTextNode(part.text));
+        return;
+      }
+      const mark = element("span", `map-preview-token${part.mapped ? "" : " is-unmapped"}`, part.text);
+      node.append(mark);
+    });
+    host.append(node);
+  }
+
+  function collectMapTemplatePreviewTokens(template) {
+    const descriptors = templateVariableDescriptors(template).filter((item) => item.kind === "text");
+    const tokenById = new Map();
+    const tokenByPlaceholder = new Map();
+    [...($("mapTemplateVariableFields")?.querySelectorAll("[data-variable-id]") || [])].forEach((row) => {
+      const id = row.dataset.variableId;
+      const source = row.querySelector(".map-template-source")?.value || "";
+      const value = row.querySelector(".map-template-value")?.value || "";
+      const token = mapTemplatePreviewToken(source, value);
+      if (!token) return;
+      tokenById.set(id, token);
+      const placeholder = String(row.dataset.placeholder || row.dataset.parameterName || "").trim();
+      if (placeholder) tokenByPlaceholder.set(placeholder, token);
+      if (token.braced) {
+        const inner = token.text.replace(/^\{\{\s*|\s*\}\}$/g, "");
+        if (inner) tokenByPlaceholder.set(inner, token);
+      }
+    });
+    return { descriptors, tokenById, tokenByPlaceholder };
+  }
+
+  function renderMapTemplatePreview() {
+    const preview = $("mapTemplatePreview");
+    const hint = $("mapTemplatePreviewHint");
+    if (!preview) return;
+    preview.replaceChildren();
+    const template = selectedMapTemplate();
+    if (!template) {
+      preview.append(element("p", "template-preview-body", "Choose a template to preview mapped variables."));
+      if (hint) hint.textContent = "Mapped variables appear as {{Contact name}}, {{Workspace name}}, and so on.";
+      return;
+    }
+    const { descriptors, tokenById, tokenByPlaceholder } = collectMapTemplatePreviewTokens(template);
+    const header = templateLibraryComponent(template, "HEADER");
+    if (header) {
+      const format = String(header.format || "TEXT").toUpperCase();
+      if (format === "TEXT" && header.text) {
+        const filled = fillMapTemplatePreviewText(header.text, descriptors.filter((item) => item.componentType === "header"), tokenById);
+        appendMapPreviewTextNode(preview, "template-preview-header", filled, tokenByPlaceholder);
+      } else {
+        const media = element("div", "template-preview-media");
+        media.append(
+          element("span", "", format === "VIDEO" ? "▶" : format === "DOCUMENT" ? "▤" : "▧"),
+          element("small", "", `${capitalize(format.toLocaleLowerCase())} header`)
+        );
+        preview.append(media);
+      }
+    }
+    const bodyText = String(templateLibraryComponent(template, "BODY")?.text || "No body text provided.");
+    const filledBody = fillMapTemplatePreviewText(bodyText, descriptors.filter((item) => item.componentType === "body"), tokenById);
+    appendMapPreviewTextNode(preview, "template-preview-body", filledBody, tokenByPlaceholder);
+    const footerText = String(templateLibraryComponent(template, "FOOTER")?.text || "").trim();
+    if (footerText) preview.append(element("small", "template-preview-footer", footerText));
+    const buttons = templateLibraryButtons(template);
+    if (buttons.length) {
+      const buttonHost = element("div", "template-preview-buttons");
+      buttons.forEach((button, buttonIndex) => {
+        const label = String(button?.text || button?.type || "Action");
+        const url = String(button?.url || "");
+        if (url && templatePlaceholders(url).length) {
+          const filledUrl = fillMapTemplatePreviewText(
+            url,
+            descriptors.filter((item) => item.componentType === "button" && item.buttonIndex === buttonIndex),
+            tokenById
+          );
+          buttonHost.append(element("span", "", `${label} · ${filledUrl}`));
+        } else {
+          buttonHost.append(element("span", "", label));
+        }
+      });
+      preview.append(buttonHost);
+    }
+    const mappedCount = [...tokenById.values()].length;
+    if (hint) {
+      hint.textContent = mappedCount
+        ? `${mappedCount} mapped variable${mappedCount === 1 ? "" : "s"} shown as {{source}} in the preview.`
+        : "Mapped variables appear as {{Contact name}}, {{Workspace name}}, and so on.";
+    }
+  }
+
   function renderMapTemplateVariables() {
     const host = $("mapTemplateVariableFields");
     const summary = $("mapTemplateSummary");
@@ -8898,6 +9049,7 @@
     if (!template) {
       if (summary) summary.hidden = true;
       host.append(element("p", "template-no-variables", "Choose a template to map its variables."));
+      renderMapTemplatePreview();
       return;
     }
     const languageCode = templateLanguageCode(template);
@@ -8911,6 +9063,7 @@
     const saved = savedWhatsAppTemplateMappings(template);
     if (!descriptors.length) {
       host.append(element("p", "template-no-variables", "This template has no text variables to map. Media headers are chosen when sending."));
+      renderMapTemplatePreview();
       return;
     }
     descriptors.forEach((descriptor) => {
@@ -8944,6 +9097,7 @@
         valueInput.classList.toggle("is-readonly", !isConstant);
         if (!isConstant) valueInput.value = "";
         valueInput.placeholder = isConstant ? "Enter a fixed value" : "Used when source is Constant value";
+        renderMapTemplatePreview();
       };
       syncValueState();
       sourceSelect.addEventListener("change", syncValueState);
@@ -8953,6 +9107,7 @@
         syncValueState();
       });
     });
+    renderMapTemplatePreview();
   }
 
   function collectMapTemplateMappingsFromDom() {
@@ -8992,6 +9147,7 @@
     }
     filterMapTemplateOptions("");
     renderMapTemplateVariables();
+    renderMapTemplatePreview();
     setMapTemplatesSubmitBusy(false);
     if (typeof dialog.showModal === "function") dialog.showModal();
     else dialog.setAttribute("open", "");
