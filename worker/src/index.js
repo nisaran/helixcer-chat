@@ -1,5 +1,5 @@
 import { applyCampaignActions, campaignDispatchState } from './campaign-controls.js';
-﻿import {
+import {
   acceptInvitationWithPassword,
   authenticateRequest,
   changePassword,
