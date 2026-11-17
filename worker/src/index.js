@@ -1312,8 +1312,12 @@ async function handleExternalApi(request, env, ctx, url) {
 }
 
 async function authenticateApiKey(request, env) {
-  const authorization = request.headers.get('Authorization') || '';
-  const match = authorization.match(/^Bearer (hxc_live_([A-Za-z0-9_-]{8,32})\.([A-Za-z0-9_-]{32,128}))$/);
+  // Tally and other clients sometimes add spaces/newlines around long pasted keys.
+  const authorization = String(request.headers.get('Authorization') || '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = authorization.match(/^Bearer\s+(hxc_live_([A-Za-z0-9_-]{8,32})\.([A-Za-z0-9_-]{32,128}))$/i);
   if (!match) throw apiError(401, 'invalid_api_key', 'A valid Bearer API key is required.');
   const token = match[1];
   const keyPrefix = `hxc_live_${match[2]}`;

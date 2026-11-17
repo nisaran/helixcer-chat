@@ -1057,6 +1057,19 @@ test('Developer API connection endpoint returns workspace and channel names', as
     ), env);
     assert.equal(unknown.status, 404);
     assert.equal((await unknown.json()).error.code, 'channel_not_found');
+
+    const messyAuth = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/v1/connection?channelId=wa-sales',
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer  ${token} \n`,
+          'X-Workspace-Id': 'ws_default'
+        }
+      }
+    ), env);
+    assert.equal(messyAuth.status, 200);
+    assert.equal((await messyAuth.json()).workspaceName, 'Helixcer Demo Workspace');
   } finally {
     database.close();
   }
