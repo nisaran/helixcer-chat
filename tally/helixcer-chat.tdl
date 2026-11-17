@@ -5,9 +5,8 @@
 ;; Or: Gateway of Tally → F4 (Manage Local TDLs) → add helixcer-chat.tdl
 
 ;; ---------------------------------------------------------------------------
-;; Persistent API settings (system scope → kept in TallySav.Cfg)
-;; Do NOT re-declare these on the Report with "Variable :" — that makes them
-;; local and they are lost when the screen closes.
+;; Persistent settings (system scope → TallySav.Cfg)
+;; Do NOT re-declare these on the Report with "Variable :"
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcWorkspaceId]
@@ -22,10 +21,67 @@
     Type       : String
     Persistent : Yes
 
+[Variable: HxcWorkspaceName]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcChannelName]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcConnectionStatus]
+    Type       : String
+    Persistent : Yes
+
 [System: Variable]
-    HxcWorkspaceId : ""
-    HxcChannelId   : ""
-    HxcApiKey      : ""
+    HxcWorkspaceId      : ""
+    HxcChannelId        : ""
+    HxcApiKey           : ""
+    HxcWorkspaceName    : ""
+    HxcChannelName      : ""
+    HxcConnectionStatus : ""
+
+[System: Formula]
+    Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcChannelId
+    Hxc Auth Header    : "Authorization: Bearer " + ##HxcApiKey
+    Hxc Ws Header      : "X-Workspace-Id: " + ##HxcWorkspaceId
+
+;; ---------------------------------------------------------------------------
+;; HTTP JSON — resolves workspace/channel names after the API Key is entered
+;; ---------------------------------------------------------------------------
+
+[Collection: Hxc Connection Info]
+    Data Source      : HTTP JSON : @@HxcConnectionUrl : UTF8
+    Export Header    : @@HxcAuthHeader
+    Export Header    : @@HxcWsHeader
+    Export Header    : "Accept: application/json"
+    JSON Object Path : "."
+    Fetch            : workspaceName, channelName, workspaceId, channelId, status
+
+;; ---------------------------------------------------------------------------
+;; Fetch + permanently store names (Persistent variables)
+;; ---------------------------------------------------------------------------
+
+[Function: Hxc Fetch Connection]
+    01 : IF : $$IsEmpty:##HxcWorkspaceId OR $$IsEmpty:##HxcChannelId OR $$IsEmpty:##HxcApiKey
+    02 :    SET : HxcWorkspaceName : ""
+    03 :    SET : HxcChannelName : ""
+    04 :    SET : HxcConnectionStatus : "Enter Workspace ID, Channel ID, and API Key"
+    05 :    RETURN : No
+    06 : END IF
+    07 : SET : HxcWorkspaceName : ""
+    08 : SET : HxcChannelName : ""
+    09 : SET : HxcConnectionStatus : "Fetching from Helixcer..."
+    10 : WALK COLLECTION : Hxc Connection Info
+    11 :    IF : NOT $$IsEmpty:$workspaceName
+    12 :       SET : HxcWorkspaceName : $workspaceName
+    13 :       SET : HxcChannelName : $channelName
+    14 :       SET : HxcConnectionStatus : "Connected"
+    15 :    END IF
+    16 : END WALK
+    17 : IF : $$IsEmpty:##HxcWorkspaceName
+    18 :    SET : HxcConnectionStatus : "Could not fetch names. Check IDs and API Key."
+    19 : END IF
 
 ;; ---------------------------------------------------------------------------
 ;; Gateway of Tally → Helixcer Chat
@@ -36,13 +92,12 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    ;; Modify Variable opens the report against system variables (not local copies)
     Key Item : API Settings : S : Modify Variable : Helixcer API Settings
     Key Item : About        : A : Display : Helixcer Chat About
     Key Item : Back         : B : Menu : Gateway of Tally
 
 ;; ---------------------------------------------------------------------------
-;; API Settings — Workspace ID, Channel ID, API Key
+;; API Settings
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer API Settings]
@@ -52,10 +107,17 @@
 
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
-    Button : Form Accept, Form Cancel
+    Button : Form Accept, Form Cancel, Hxc Fetch Names Button
+
+[Button: Hxc Fetch Names Button]
+    Key    : Alt+V
+    Title  : "Verify"
+    Action : Call : Hxc Fetch Connection
 
 [Part: Helixcer API Settings]
-    Lines  : Hxc Api Settings Title, Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line
+    Lines  : Hxc Api Settings Title, +
+             Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line, +
+             Hxc Workspace Name Line, Hxc Channel Name Line, Hxc Connection Status Line
     Scroll : Vertical
 
 [Line: Hxc Api Settings Title]
@@ -103,10 +165,52 @@
     Set as   : ##HxcApiKey
     Modifies : HxcApiKey : Yes
     Width    : 40
-    Max      : 128
+    Max      : 200
+    ;; Leave this field (Tab / Enter) → fetch names and keep them permanently
+    On       : Accept : SET : HxcApiKey : $Value
+    On       : Accept : Call : Hxc Fetch Connection
+
+[Line: Hxc Workspace Name Line]
+    Fields : Medium Prompt, Hxc Workspace Name
+    Local  : Field : Medium Prompt : Set as : "Workspace Name"
+    Local  : Field : Medium Prompt : Width  : 20
+
+[Field: Hxc Workspace Name]
+    Use       : Name Field
+    Set as    : ##HxcWorkspaceName
+    Set Always: Yes
+    Width     : 40
+    Skip      : Yes
+    Inactive  : Yes
+
+[Line: Hxc Channel Name Line]
+    Fields : Medium Prompt, Hxc Channel Name
+    Local  : Field : Medium Prompt : Set as : "Channel Name"
+    Local  : Field : Medium Prompt : Width  : 20
+
+[Field: Hxc Channel Name]
+    Use       : Name Field
+    Set as    : ##HxcChannelName
+    Set Always: Yes
+    Width     : 40
+    Skip      : Yes
+    Inactive  : Yes
+
+[Line: Hxc Connection Status Line]
+    Fields : Medium Prompt, Hxc Connection Status
+    Local  : Field : Medium Prompt : Set as : "Status"
+    Local  : Field : Medium Prompt : Width  : 20
+
+[Field: Hxc Connection Status]
+    Use       : Name Field
+    Set as    : ##HxcConnectionStatus
+    Set Always: Yes
+    Width     : 40
+    Skip      : Yes
+    Inactive  : Yes
 
 ;; ---------------------------------------------------------------------------
-;; About (shows whether settings are stored)
+;; About
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Chat About]
@@ -133,7 +237,9 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "Open API Settings to save Workspace ID, Channel ID, and API Key."
+    Set as    : If $$IsEmpty:##HxcWorkspaceName THEN +
+                "Open API Settings, enter IDs and API Key, then leave the API Key field to fetch names." +
+                ELSE ##HxcWorkspaceName + " / " + ##HxcChannelName
     Align     : Centre
     FullWidth : Yes
 
@@ -142,6 +248,8 @@
 
 [Field: Helixcer Chat About Status]
     Use       : Name Field
-    Set as    : If $$IsEmpty:##HxcApiKey Then "API Key: not set" Else "API Key: saved (" + $$StringLength:##HxcApiKey + " chars)"
+    Set as    : If $$IsEmpty:##HxcConnectionStatus THEN +
+                If $$IsEmpty:##HxcApiKey THEN "API Key: not set" ELSE "API Key: saved" +
+                ELSE ##HxcConnectionStatus
     Align     : Centre
     FullWidth : Yes

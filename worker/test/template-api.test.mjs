@@ -1005,3 +1005,59 @@ test('external contacts API creates a contact and requires contacts:write', asyn
     database.close();
   }
 });
+
+test('Developer API connection endpoint returns workspace and channel names', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_connect01.${'k'.repeat(43)}`;
+  await insertKey(database, token, 'key-connection', 'hxc_live_connect01');
+  database.prepare(`UPDATE workspaces SET name=? WHERE workspace_id=?`)
+    .run('Helixcer Demo Workspace', 'ws_default');
+  try {
+    const ok = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/v1/connection?channelId=wa-sales',
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Workspace-Id': 'ws_default'
+        }
+      }
+    ), env);
+    assert.equal(ok.status, 200);
+    const body = await ok.json();
+    assert.equal(body.status, true);
+    assert.equal(body.workspaceId, 'ws_default');
+    assert.equal(body.workspaceName, 'Helixcer Demo Workspace');
+    assert.equal(body.channelId, 'wa-sales');
+    assert.equal(body.channelName, 'WhatsApp Sales');
+    assert.equal(body.connectorType, 'whatsapp_cloud');
+    assert.equal(body.enabled, true);
+
+    const missing = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/v1/connection',
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Workspace-Id': 'ws_default'
+        }
+      }
+    ), env);
+    assert.equal(missing.status, 400);
+
+    const unknown = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/v1/connection?channelId=missing-channel',
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Workspace-Id': 'ws_default'
+        }
+      }
+    ), env);
+    assert.equal(unknown.status, 404);
+    assert.equal((await unknown.json()).error.code, 'channel_not_found');
+  } finally {
+    database.close();
+  }
+});

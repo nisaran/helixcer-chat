@@ -1287,6 +1287,12 @@ async function handleExternalApi(request, env, ctx, url) {
       response.headers.set('X-Request-Id', requestId);
       return response;
     }
+    if (url.pathname === '/api/v1/connection' && request.method === 'GET') {
+      // Any valid workspace API key can resolve its own workspace/channel labels.
+      const response = await getExternalConnection(env, url, apiPrincipal, requestId);
+      response.headers.set('X-Request-Id', requestId);
+      return response;
+    }
     throw apiError(404, 'route_not_found', 'API route not found.');
   } catch (error) {
     const status = Number(error?.status) || 500;
@@ -1339,6 +1345,37 @@ async function authenticateApiKey(request, env) {
 
 function requireApiScope(principal, scope) {
   if (!principal.scopes.has(scope)) throw apiError(403, 'insufficient_scope', `The API key requires the ${scope} scope.`);
+}
+
+async function getExternalConnection(env, url, principal, requestId) {
+  const channelId = cleanId(url.searchParams.get('channelId') || '', 'Channel ID');
+  const keyRow = await env.DB.prepare(`SELECT allowed_channel_ids_json FROM api_keys
+    WHERE api_key_id=?1 AND workspace_id=?2 LIMIT 1`)
+    .bind(principal.apiKeyId, principal.workspaceId).first();
+  const allowedChannelIds = safeJsonParse(keyRow?.allowed_channel_ids_json, []);
+  if (Array.isArray(allowedChannelIds) && allowedChannelIds.length && !allowedChannelIds.includes(channelId)) {
+    throw apiError(403, 'channel_not_allowed', 'This API key cannot access the selected channel.');
+  }
+  const workspace = await env.DB.prepare(`SELECT workspace_id,name,status FROM workspaces
+    WHERE workspace_id=?1 LIMIT 1`).bind(principal.workspaceId).first();
+  if (!workspace) throw apiError(404, 'workspace_not_found', 'Workspace not found.');
+  if (workspace.status && workspace.status !== 'active') {
+    throw apiError(403, 'workspace_inactive', 'This workspace is not active.');
+  }
+  const channel = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled
+    FROM channels WHERE workspace_id=?1 AND channel_id=?2 LIMIT 1`)
+    .bind(principal.workspaceId, channelId).first();
+  if (!channel) throw apiError(404, 'channel_not_found', 'Channel not found in this workspace.');
+  return json({
+    status: true,
+    workspaceId: workspace.workspace_id,
+    workspaceName: String(workspace.name || ''),
+    channelId: channel.channel_id,
+    channelName: String(channel.name || ''),
+    connectorType: logicalConnectorType(channel),
+    enabled: Boolean(channel.enabled),
+    requestId
+  });
 }
 
 function externalContactView(item) {
