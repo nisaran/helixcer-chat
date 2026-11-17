@@ -22,13 +22,13 @@ TDL add-on that connects TallyPrime to Helixcer Chat (WhatsApp templates and mor
 4. Set **Load TDLs on startup** / enable the file → **Yes**.
 5. Restart TallyPrime if prompted.
 6. On **Gateway of Tally**, open **Helixcer Chat** → **API Settings**.
-7. Enter **Workspace ID**, **Channel ID**, then **API Key**.
-8. Leave the **API Key** field (Tab / Enter) — Tally calls Helixcer and fills **Workspace Name** and **Channel Name** below. Those names are kept permanently with your other settings.
-9. Optional: press **Alt+V** (Verify) to fetch again.
+7. Enter **Workspace ID**, **Channel ID**, then **API Key** (paste the full `hxc_live_…` value shown once when the key was created).
+8. Leave the **API Key** field with **Tab** or **Enter** — or press **Alt+V** (**Verify**) — so Tally calls Helixcer and fills **Workspace Name**, **Channel Name**, and **Status**.
+9. **Status** should show `Connected`, or an error such as `Could not fetch names…` if the key/IDs are wrong. Blank Status means Verify did not run (reload this TDL, then Alt+V again).
 10. **Accept** (Ctrl+A) to close the form.
 11. Close Tally and reopen to confirm IDs, key, and names still appear.
 
-Tally must be able to reach `https://api.chat.helixcer.com` (outbound HTTPS).
+Tally must be able to reach `https://api.chat.helixcer.com` (outbound HTTPS). If Status says it could not fetch names, create a new Developer API key in Helixcer and paste it again (keys are shown only once).
 
 ## Where to find the values in Helixcer
 

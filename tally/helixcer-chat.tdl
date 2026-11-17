@@ -82,6 +82,7 @@
     17 : IF : $$IsEmpty:##HxcWorkspaceName
     18 :    SET : HxcConnectionStatus : "Could not fetch names. Check IDs and API Key."
     19 : END IF
+    20 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; Gateway of Tally → Helixcer Chat
@@ -108,6 +109,10 @@
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
     Button : Form Accept, Form Cancel, Hxc Fetch Names Button
+    ;; Rebuild the form when Status changes so names/status become visible
+    Option : Hxc Settings Refresh : ##HxcConnectionStatus
+
+[!Form: Hxc Settings Refresh]
 
 [Button: Hxc Fetch Names Button]
     Key    : Alt+V
@@ -115,7 +120,7 @@
     Action : Call : Hxc Fetch Connection
 
 [Part: Helixcer API Settings]
-    Lines  : Hxc Api Settings Title, +
+    Lines  : Hxc Api Settings Title, Hxc Api Settings Hint, +
              Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line, +
              Hxc Workspace Name Line, Hxc Channel Name Line, Hxc Connection Status Line
     Scroll : Vertical
@@ -127,6 +132,16 @@
     Use       : Name Field
     Set as    : "Helixcer Chat — API Settings"
     Style     : Bold
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Line: Hxc Api Settings Hint]
+    Field : Hxc Api Settings Hint
+
+[Field: Hxc Api Settings Hint]
+    Use       : Name Field
+    Set as    : "Tab off API Key, or press Alt+V (Verify), to load names"
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -166,9 +181,10 @@
     Modifies : HxcApiKey : Yes
     Width    : 40
     Max      : 200
-    ;; Leave this field (Tab / Enter) → fetch names and keep them permanently
-    On       : Accept : SET : HxcApiKey : $Value
-    On       : Accept : Call : Hxc Fetch Connection
+    ;; On: Accept must include condition + Field Accept or the field never finishes
+    On       : Accept : Yes : SET : HxcApiKey : $Value
+    On       : Accept : Yes : Call : Hxc Fetch Connection
+    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Workspace Name Line]
     Fields : Medium Prompt, Hxc Workspace Name
@@ -181,7 +197,6 @@
     Set Always: Yes
     Width     : 40
     Skip      : Yes
-    Inactive  : Yes
 
 [Line: Hxc Channel Name Line]
     Fields : Medium Prompt, Hxc Channel Name
@@ -194,7 +209,6 @@
     Set Always: Yes
     Width     : 40
     Skip      : Yes
-    Inactive  : Yes
 
 [Line: Hxc Connection Status Line]
     Fields : Medium Prompt, Hxc Connection Status
@@ -207,7 +221,6 @@
     Set Always: Yes
     Width     : 40
     Skip      : Yes
-    Inactive  : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; About
@@ -238,7 +251,7 @@
 [Field: Helixcer Chat About Body]
     Use       : Name Field
     Set as    : If $$IsEmpty:##HxcWorkspaceName THEN +
-                "Open API Settings, enter IDs and API Key, then leave the API Key field to fetch names." +
+                "Open API Settings, enter IDs and API Key, then Tab off API Key or press Alt+V." +
                 ELSE ##HxcWorkspaceName + " / " + ##HxcChannelName
     Align     : Centre
     FullWidth : Yes
