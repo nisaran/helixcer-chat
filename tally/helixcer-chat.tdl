@@ -1,50 +1,169 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; Step 1: Gateway of Tally menu entry
 ;;
 ;; Load in TallyPrime:
 ;;   F1 (Help) → TDL & Add-On → select this file → Enable → Yes
 ;; Or: Gateway of Tally → F4 (Manage Local TDLs) → add helixcer-chat.tdl
+
+;; ---------------------------------------------------------------------------
+;; Persistent API settings (kept in TallySav.Cfg across sessions)
+;; ---------------------------------------------------------------------------
+
+[Variable: HxcWorkspaceId]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcChannelId]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcApiKey]
+    Type       : String
+    Persistent : Yes
+
+[System: Variable]
+    HxcWorkspaceId : ""
+    HxcChannelId   : ""
+    HxcApiKey      : ""
+
+;; ---------------------------------------------------------------------------
+;; Gateway of Tally → Helixcer Chat
+;; ---------------------------------------------------------------------------
 
 [#Menu: Gateway of Tally]
     Add : Key Item : Before : @@LOCQuit : Helixcer Chat : H : Menu : Helixcer Chat Menu
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    Key Item : About : A : Display : Helixcer Chat About
-    Key Item : Quit  : Q : Menu    : Gateway of Tally
+    Key Item : API Settings : S : Alter   : Helixcer API Settings
+    Key Item : About        : A : Display : Helixcer Chat About
+    Key Item : Quit         : Q : Menu    : Gateway of Tally
+
+;; ---------------------------------------------------------------------------
+;; API Settings — Workspace ID, Channel ID, API Key
+;; ---------------------------------------------------------------------------
+
+[Report: Helixcer API Settings]
+    Form  : Helixcer API Settings
+    Title : "API Settings"
+    Variable : HxcWorkspaceId, HxcChannelId, HxcApiKey
+
+[Form: Helixcer API Settings]
+    Parts  : Helixcer API Settings Head, Helixcer API Settings Body
+    Width  : 70%
+    Height : 50%
+    Button : Form Accept, Form Cancel
+
+[Part: Helixcer API Settings Head]
+    Lines : Helixcer API Settings Title, Helixcer API Settings Help
+    Top Space    : 0.5
+    Bottom Space : 0.5
+    Left Space   : 1
+    Right Space  : 1
+
+[Line: Helixcer API Settings Title]
+    Field : Helixcer API Settings Title
+
+[Field: Helixcer API Settings Title]
+    Use       : Name Field
+    Set as    : "Helixcer Chat — API Settings"
+    Style     : Large Bold
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Line: Helixcer API Settings Help]
+    Field : Helixcer API Settings Help
+
+[Field: Helixcer API Settings Help]
+    Use       : Name Field
+    Set as    : "Enter values from Helixcer Workspace / Developer settings. Accept to save."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Part: Helixcer API Settings Body]
+    Lines : Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line
+    Top Space    : 1
+    Bottom Space : 1
+    Left Space   : 2
+    Right Space  : 2
+    Scroll       : Vertical
+
+[Line: Hxc Workspace Id Line]
+    Fields : Medium Prompt, Hxc Workspace Id
+    Local  : Field : Medium Prompt : Set as : "Workspace ID"
+    Local  : Field : Medium Prompt : Width  : 22
+    Space Bottom : 0.5
+
+[Field: Hxc Workspace Id]
+    Use      : Name Field
+    Set as   : ##HxcWorkspaceId
+    Modifies : HxcWorkspaceId
+    Width    : 50
+    Max      : 64
+
+[Line: Hxc Channel Id Line]
+    Fields : Medium Prompt, Hxc Channel Id
+    Local  : Field : Medium Prompt : Set as : "Channel ID"
+    Local  : Field : Medium Prompt : Width  : 22
+    Space Bottom : 0.5
+
+[Field: Hxc Channel Id]
+    Use      : Name Field
+    Set as   : ##HxcChannelId
+    Modifies : HxcChannelId
+    Width    : 50
+    Max      : 64
+
+[Line: Hxc Api Key Line]
+    Fields : Medium Prompt, Hxc Api Key
+    Local  : Field : Medium Prompt : Set as : "API Key"
+    Local  : Field : Medium Prompt : Width  : 22
+    Space Bottom : 0.5
+
+[Field: Hxc Api Key]
+    Use      : Name Field
+    Set as   : ##HxcApiKey
+    Modifies : HxcApiKey
+    Width    : 50
+    Max      : 128
+
+;; ---------------------------------------------------------------------------
+;; About
+;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Chat About]
     Form : Helixcer Chat About
 
 [Form: Helixcer Chat About]
-    Part  : Helixcer Chat About
-    Width : 60%
-    Height: 40%
+    Part   : Helixcer Chat About
+    Width  : 60%
+    Height : 40%
 
 [Part: Helixcer Chat About]
     Lines : Helixcer Chat About Title, Helixcer Chat About Body
-    Top Space : 1
+    Top Space    : 1
     Bottom Space : 1
-    Left Space : 2
-    Right Space : 2
+    Left Space   : 2
+    Right Space  : 2
 
 [Line: Helixcer Chat About Title]
     Field : Helixcer Chat About Title
-    Space Top : 0.5
+    Space Top    : 0.5
     Space Bottom : 0.5
 
 [Field: Helixcer Chat About Title]
-    Use      : Name Field
-    Set as   : "Helixcer Chat"
-    Style    : Large Bold
-    Align    : Centre
-    FullWidth: Yes
+    Use       : Name Field
+    Set as    : "Helixcer Chat"
+    Style     : Large Bold
+    Align     : Centre
+    FullWidth : Yes
 
 [Line: Helixcer Chat About Body]
     Field : Helixcer Chat About Body
 
 [Field: Helixcer Chat About Body]
-    Use      : Name Field
-    Set as   : "WhatsApp messaging from TallyPrime. More options coming next."
-    Align    : Centre
-    FullWidth: Yes
+    Use       : Name Field
+    Set as    : "Set API Settings first, then WhatsApp send options will be added here."
+    Align     : Centre
+    FullWidth : Yes

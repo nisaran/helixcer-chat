@@ -5,7 +5,11 @@ TDL add-on that connects TallyPrime to Helixcer Chat (WhatsApp templates and mor
 ## What is included so far
 
 - **Helixcer Chat** menu item on **Gateway of Tally** (hotkey `H`)
-- Opens a Helixcer Chat submenu with an About screen
+- Submenu with **API Settings** and **About**
+- **API Settings** fields (saved across Tally restarts):
+  - Workspace ID
+  - Channel ID
+  - API Key
 
 ## Load the TDL in TallyPrime
 
@@ -15,9 +19,15 @@ TDL add-on that connects TallyPrime to Helixcer Chat (WhatsApp templates and mor
 3. Add file: `tally/helixcer-chat.tdl` from this repository.
 4. Set **Load TDLs on startup** / enable the file → **Yes**.
 5. Restart TallyPrime if prompted.
-6. On **Gateway of Tally**, you should see **Helixcer Chat**.
+6. On **Gateway of Tally**, open **Helixcer Chat** → **API Settings**.
+7. Enter your Helixcer values and accept/save.
+
+## Where to find the values in Helixcer
+
+- **Workspace ID** — Workspace page in Helixcer
+- **Channel ID** — the WhatsApp channel you want to send from
+- **API Key** — Developer / API keys (`hxc_live_…`, shown once when created)
 
 ## Next steps (planned)
 
-- Settings screen (API key, workspace ID, channel ID)
 - Send WhatsApp template from a voucher / ledger mobile number
