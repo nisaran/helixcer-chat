@@ -34,98 +34,73 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    Key Item : API Settings : S : Alter   : Helixcer API Settings
+    Key Item : API Settings : S : Alter : Helixcer API Settings
     Key Item : About        : A : Display : Helixcer Chat About
-    Key Item : Quit         : Q : Menu    : Gateway of Tally
+    Key Item : Back         : B : Menu : Gateway of Tally
 
 ;; ---------------------------------------------------------------------------
 ;; API Settings — Workspace ID, Channel ID, API Key
+;; Keep this form compact to avoid "Insufficient height to allocate!"
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer API Settings]
-    Form  : Helixcer API Settings
-    Title : "API Settings"
+    Form     : Helixcer API Settings
+    Title    : "API Settings"
     Variable : HxcWorkspaceId, HxcChannelId, HxcApiKey
 
 [Form: Helixcer API Settings]
-    Parts  : Helixcer API Settings Head, Helixcer API Settings Body
-    Width  : 70%
-    Height : 50%
+    Part   : Helixcer API Settings
     Button : Form Accept, Form Cancel
 
-[Part: Helixcer API Settings Head]
-    Lines : Helixcer API Settings Title, Helixcer API Settings Help
-    Top Space    : 0.5
-    Bottom Space : 0.5
-    Left Space   : 1
-    Right Space  : 1
+[Part: Helixcer API Settings]
+    Lines : Hxc Api Settings Title, Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line
+    Scroll : Vertical
 
-[Line: Helixcer API Settings Title]
-    Field : Helixcer API Settings Title
+[Line: Hxc Api Settings Title]
+    Field : Hxc Api Settings Title
 
-[Field: Helixcer API Settings Title]
+[Field: Hxc Api Settings Title]
     Use       : Name Field
     Set as    : "Helixcer Chat — API Settings"
-    Style     : Large Bold
+    Style     : Bold
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
-
-[Line: Helixcer API Settings Help]
-    Field : Helixcer API Settings Help
-
-[Field: Helixcer API Settings Help]
-    Use       : Name Field
-    Set as    : "Enter values from Helixcer Workspace / Developer settings. Accept to save."
-    Align     : Centre
-    FullWidth : Yes
-    Skip      : Yes
-
-[Part: Helixcer API Settings Body]
-    Lines : Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line
-    Top Space    : 1
-    Bottom Space : 1
-    Left Space   : 2
-    Right Space  : 2
-    Scroll       : Vertical
 
 [Line: Hxc Workspace Id Line]
     Fields : Medium Prompt, Hxc Workspace Id
     Local  : Field : Medium Prompt : Set as : "Workspace ID"
-    Local  : Field : Medium Prompt : Width  : 22
-    Space Bottom : 0.5
+    Local  : Field : Medium Prompt : Width  : 20
 
 [Field: Hxc Workspace Id]
     Use      : Name Field
     Set as   : ##HxcWorkspaceId
     Modifies : HxcWorkspaceId
-    Width    : 50
+    Width    : 40
     Max      : 64
 
 [Line: Hxc Channel Id Line]
     Fields : Medium Prompt, Hxc Channel Id
     Local  : Field : Medium Prompt : Set as : "Channel ID"
-    Local  : Field : Medium Prompt : Width  : 22
-    Space Bottom : 0.5
+    Local  : Field : Medium Prompt : Width  : 20
 
 [Field: Hxc Channel Id]
     Use      : Name Field
     Set as   : ##HxcChannelId
     Modifies : HxcChannelId
-    Width    : 50
+    Width    : 40
     Max      : 64
 
 [Line: Hxc Api Key Line]
     Fields : Medium Prompt, Hxc Api Key
     Local  : Field : Medium Prompt : Set as : "API Key"
-    Local  : Field : Medium Prompt : Width  : 22
-    Space Bottom : 0.5
+    Local  : Field : Medium Prompt : Width  : 20
 
 [Field: Hxc Api Key]
     Use      : Name Field
     Set as   : ##HxcApiKey
     Modifies : HxcApiKey
-    Width    : 50
+    Width    : 40
     Max      : 128
 
 ;; ---------------------------------------------------------------------------
@@ -136,26 +111,18 @@
     Form : Helixcer Chat About
 
 [Form: Helixcer Chat About]
-    Part   : Helixcer Chat About
-    Width  : 60%
-    Height : 40%
+    Part : Helixcer Chat About
 
 [Part: Helixcer Chat About]
     Lines : Helixcer Chat About Title, Helixcer Chat About Body
-    Top Space    : 1
-    Bottom Space : 1
-    Left Space   : 2
-    Right Space  : 2
 
 [Line: Helixcer Chat About Title]
     Field : Helixcer Chat About Title
-    Space Top    : 0.5
-    Space Bottom : 0.5
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
     Set as    : "Helixcer Chat"
-    Style     : Large Bold
+    Style     : Bold
     Align     : Centre
     FullWidth : Yes
 
@@ -164,6 +131,6 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "Set API Settings first, then WhatsApp send options will be added here."
+    Set as    : "Open API Settings to save Workspace ID, Channel ID, and API Key."
     Align     : Centre
     FullWidth : Yes
