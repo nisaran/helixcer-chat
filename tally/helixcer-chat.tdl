@@ -1,0 +1,50 @@
+;; Helixcer Chat — TallyPrime TDL
+;; Step 1: Gateway of Tally menu entry
+;;
+;; Load in TallyPrime:
+;;   F1 (Help) → TDL & Add-On → select this file → Enable → Yes
+;; Or: Gateway of Tally → F4 (Manage Local TDLs) → add helixcer-chat.tdl
+
+[#Menu: Gateway of Tally]
+    Add : Key Item : Before : @@LOCQuit : Helixcer Chat : H : Menu : Helixcer Chat Menu
+
+[Menu: Helixcer Chat Menu]
+    Title    : "Helixcer Chat"
+    Key Item : About : A : Display : Helixcer Chat About
+    Key Item : Quit  : Q : Menu    : Gateway of Tally
+
+[Report: Helixcer Chat About]
+    Form : Helixcer Chat About
+
+[Form: Helixcer Chat About]
+    Part  : Helixcer Chat About
+    Width : 60%
+    Height: 40%
+
+[Part: Helixcer Chat About]
+    Lines : Helixcer Chat About Title, Helixcer Chat About Body
+    Top Space : 1
+    Bottom Space : 1
+    Left Space : 2
+    Right Space : 2
+
+[Line: Helixcer Chat About Title]
+    Field : Helixcer Chat About Title
+    Space Top : 0.5
+    Space Bottom : 0.5
+
+[Field: Helixcer Chat About Title]
+    Use      : Name Field
+    Set as   : "Helixcer Chat"
+    Style    : Large Bold
+    Align    : Centre
+    FullWidth: Yes
+
+[Line: Helixcer Chat About Body]
+    Field : Helixcer Chat About Body
+
+[Field: Helixcer Chat About Body]
+    Use      : Name Field
+    Set as   : "WhatsApp messaging from TallyPrime. More options coming next."
+    Align    : Centre
+    FullWidth: Yes
