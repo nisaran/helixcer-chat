@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261117-map-templates">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261117-map-templates-preview">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261117-map-templates" defer></script>
+  <script src="./assets/app.js?v=20261117-map-templates-preview" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1672,16 +1672,27 @@
         <button class="icon-button" type="button" data-action="close-map-whatsapp-templates" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
       <p class="modal-copy">Set default sources for each variable. Inbox and campaigns will auto-fill from these mappings — you can still change values when sending. External API sends are not affected.</p>
-      <div class="form-grid">
-        <label class="field-label form-span">Template
-          <span class="searchable-combobox" id="mapTemplateCombobox">
-            <input class="text-field searchable-combobox-input" id="mapTemplateSearch" type="search" placeholder="Search or choose a template…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="mapTemplateOptions">
-            <input type="hidden" id="mapTemplateSelect">
-            <span class="searchable-combobox-menu" id="mapTemplateOptions" role="listbox" aria-label="Templates" hidden></span>
-          </span>
-        </label>
-        <div class="map-templates-summary form-span" id="mapTemplateSummary" hidden></div>
-        <div class="map-templates-variable-fields form-span" id="mapTemplateVariableFields"></div>
+      <div class="map-templates-layout">
+        <div class="map-templates-fields">
+          <div class="form-grid">
+            <label class="field-label form-span">Template
+              <span class="searchable-combobox" id="mapTemplateCombobox">
+                <input class="text-field searchable-combobox-input" id="mapTemplateSearch" type="search" placeholder="Search or choose a template…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="mapTemplateOptions">
+                <input type="hidden" id="mapTemplateSelect">
+                <span class="searchable-combobox-menu" id="mapTemplateOptions" role="listbox" aria-label="Templates" hidden></span>
+              </span>
+            </label>
+            <div class="map-templates-summary form-span" id="mapTemplateSummary" hidden></div>
+            <div class="map-templates-variable-fields form-span" id="mapTemplateVariableFields"></div>
+          </div>
+        </div>
+        <section class="map-templates-preview-panel" aria-live="polite">
+          <span class="field-label">Live preview</span>
+          <div class="template-preview-phone">
+            <div class="whatsapp-template-preview" id="mapTemplatePreview"></div>
+          </div>
+          <p class="field-hint" id="mapTemplatePreviewHint">Mapped variables appear as {{Contact name}}, {{Workspace name}}, and so on.</p>
+        </section>
       </div>
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="close-map-whatsapp-templates">Cancel</button>
