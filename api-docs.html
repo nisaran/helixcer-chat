@@ -75,7 +75,7 @@
     <aside class="sidebar" aria-label="Documentation navigation">
       <p class="nav-label">Start</p>
       <nav>
-        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li><li><a href="#contacts">Add a contact</a></li></ul>
+        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li><li><a href="#connection">Resolve connection</a></li><li><a href="#contacts">Add a contact</a></li></ul>
         <p class="nav-label">Channels</p>
         <p class="nav-channel">WhatsApp Meta</p>
         <ul class="nav-list nav-sublist"><li><a href="#send">Template messages</a></li><li><a href="#templates">List templates</a></li><li><a href="#template">Fetch template</a></li><li><a href="#examples">Template examples</a></li><li><a href="#advanced">Advanced templates</a></li><li><a href="#meta">Meta references</a></li></ul>
@@ -138,6 +138,35 @@ X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
 Content-Type: application/json</code></pre></div>
         </div>
         <p style="margin-top:20px">An API key is shown once. Store it in a server-side secret manager or environment variable. Never place it in browser JavaScript, a mobile app, logs, screenshots, support messages, or a source repository. Revoke and replace it immediately if it may have leaked.</p>
+      </section>
+
+      <section id="connection">
+        <p class="eyebrow">Connection</p><h2>Resolve workspace and channel names</h2>
+        <p class="intro">Confirm an API key can access a workspace channel and read the human-readable names. Used by integrations such as TallyPrime after the API key is entered. Any valid workspace API key can call this route; no extra scope is required. If the key is limited to specific channels, only those <code class="plain">channelId</code> values are allowed.</p>
+        <div class="endpoint"><span class="method get">GET</span><code>https://api.chat.helixcer.com/api/v1/connection?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4</code><button class="copy" type="button" aria-label="Copy endpoint">Copy</button></div>
+        <div class="code-card">
+          <div class="code-head"><span>cURL · resolve connection</span><button class="copy" type="button">Copy</button></div>
+          <pre><code>curl --request GET \
+  --url 'https://api.chat.helixcer.com/api/v1/connection?channelId=66d66f0c-0ca2-4c79-96b9-d182d5a481b4' \
+  --header 'Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY' \
+  --header 'X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0'</code></pre>
+        </div>
+        <div class="table-wrap" style="margin-top:18px"><table>
+          <thead><tr><th>Query</th><th>Required</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>channelId</code></td><td>Yes</td><td>Helixcer channel ID in the same workspace as the API key.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="code-card" style="margin-top:18px"><div class="code-head"><span>200 · connection resolved</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "status": true,
+  "workspaceId": "b0963871-a454-4fb8-94eb-80464e2358b0",
+  "workspaceName": "Acme Retail",
+  "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+  "channelName": "WhatsApp Sales",
+  "connectorType": "whatsapp_cloud",
+  "enabled": true,
+  "requestId": "5d61b28e-f7fe-48f1-8b59-96bf43784340"
+}</code></pre></div>
       </section>
 
       <section id="contacts">
