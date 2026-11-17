@@ -9,9 +9,8 @@ TDL add-on that connects TallyPrime to Helixcer Chat (WhatsApp templates and mor
 - **API Settings** fields (saved across Tally restarts):
   - Workspace ID
   - Channel ID
-  - API Key
-  - Workspace Name / Channel Name (fetched automatically)
-  - Connection status
+  - API Key (shown as `******` after save)
+  - Status / Workspace / Channel Name (blue, only after verify; channel includes platform)
 
 ## Load the TDL in TallyPrime
 
@@ -22,14 +21,14 @@ TDL add-on that connects TallyPrime to Helixcer Chat (WhatsApp templates and mor
 4. Set **Load TDLs on startup** / enable the file → **Yes**.
 5. Restart TallyPrime if prompted.
 6. On **Gateway of Tally**, open **Helixcer Chat** → **API Settings**.
-7. Enter **Workspace ID**, **Channel ID**, then **API Key** (paste the full `hxc_live_…` value in one go — do not press Enter inside the key).
-8. Leave the **API Key** field with **Tab** or **Enter** — or press **Alt+V** (**Verify**) — so Tally calls Helixcer and fills **Workspace Name**, **Channel Name**, and **Status**.
-9. **Status** should show `Connected` (with names filled). Other messages:
-   - `Could not fetch names…` — wrong key/IDs, or Tally could not parse the response
-   - `Could not reach Helixcer…` — outbound HTTPS to `api.chat.helixcer.com` blocked
-   - Blank Status — reload this TDL, then Alt+V again
-10. **Accept** (Ctrl+A) to close the form.
-11. Close Tally and reopen to confirm IDs, key, and names still appear.
+7. Enter **Workspace ID**, **Channel ID**, then **API Key** (paste once; typing is masked).
+8. Tab off **API Key** or press **Alt+V** — Status shows **Loading...**, then blue details appear:
+   - **Status**
+   - **Workspace**
+   - **Channel Name** (with platform in brackets, e.g. `Helixcer (WhatsApp)`)
+9. Press **Enter** / **Ctrl+A** to save.
+10. Reopen API Settings — IDs, blue details, and Status stay filled; API Key shows `******`.
+11. To change the key, replace `******` with a new key and Tab / Alt+V again.
 
 Tally must be able to reach `https://api.chat.helixcer.com` (outbound HTTPS).
 
@@ -46,7 +45,7 @@ Tally must be able to reach `https://api.chat.helixcer.com` (outbound HTTPS).
 - `Authorization: Bearer <api key>`
 - `X-Workspace-Id: <workspace id>`
 
-Returns `workspaceName` and `channelName` for the settings screen.
+Returns `workspaceName`, `channelName`, and `connectorType` for the settings screen.
 
 ## Next steps (planned)
 
