@@ -1,7 +1,9 @@
 name = "helixcer-chat-api"
 main = "worker/src/index.js"
 compatibility_date = "2026-10-01"
-workers_dev = true
+# Keep the production Worker off *.workers.dev so the API is only reached
+# through the custom hostname (api.chat.helixcer.com / Pages gateway).
+workers_dev = false
 preview_urls = false
 
 [vars]
