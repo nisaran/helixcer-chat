@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261117-map-templates-layout">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261117-map-templates-dropdown">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261117-map-templates-layout" defer></script>
+  <script src="./assets/app.js?v=20261117-map-templates-dropdown" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1676,8 +1676,9 @@
         <div class="map-templates-fields">
           <div class="form-grid">
             <label class="field-label form-span">Template
-              <span class="searchable-combobox" id="mapTemplateCombobox">
-                <input class="text-field searchable-combobox-input" id="mapTemplateSearch" type="search" placeholder="Search or choose a template…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="mapTemplateOptions">
+              <span class="searchable-combobox is-clickable" id="mapTemplateCombobox" data-map-template-combobox>
+                <input class="text-field searchable-combobox-input" id="mapTemplateSearch" type="text" placeholder="Search or choose a template…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="mapTemplateOptions" spellcheck="false">
+                <button class="searchable-combobox-toggle" type="button" id="mapTemplateToggle" aria-label="Show templates" tabindex="-1"></button>
                 <input type="hidden" id="mapTemplateSelect">
                 <span class="searchable-combobox-menu" id="mapTemplateOptions" role="listbox" aria-label="Templates" hidden></span>
               </span>
