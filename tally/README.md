@@ -1,8 +1,8 @@
-# Helixcer Chat for TallyPrime — build 343
+# Helixcer Chat for TallyPrime — build 344
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer_chat.tdl
 
-Company must be open. Title must show **(build 343)**.
+Company must be open. Titles must show **(build 344)**.
 
 ## API Settings
 
@@ -12,24 +12,18 @@ Enter Workspace ID / Channel ID / API Key → **Ctrl+A**.
 
 Connection check via Helixcer `GET /api/v1/connection`.
 
-## Voucher Config (phase 1 shell)
+## Voucher Config
 
-Menu → **Voucher Config** (`V`).
+Helixcer Chat → **Voucher Config**:
 
-| Column | Meaning |
-|--------|---------|
-| Config Name | Your label |
-| Template | WhatsApp template name (fetch in phase 2) |
-| Lang | e.g. `en_US` |
-| Voucher Types | Pick from list or type names |
-| Media | None / Voucher PDF / HTML / XML / Excel |
-| Auto | Auto-select after voucher save? |
-| Confirm | Confirm before send? (used when Auto = Yes) |
+| Menu | What |
+|------|------|
+| **Create Config** (`C`) | Popup form: Config Name, Template, Language, Voucher Type, Media Header, Auto Select, Confirm → **Ctrl+A** |
+| **Alter Config** (`A`) | Select config → same form → **Ctrl+A** |
+| **List Configs** (`L`) | Read-only table |
 
-Add rows in the grid → **Ctrl+A**.
-
-**Not in phase 1:** template API fetch, variable mapping, preview, send.
+**Not in this build:** template API fetch, variable mapping, preview, send.
 
 ## Honesty
 
-This agent cannot run TallyPrime. Verify Accept/list locally. If Aggregate rows do not persist, report the exact Tally message.
+Create/Alter save uses Tally procedural `INSERT COLLECTION OBJECT` / `WALK` + `ALTER TARGET` on Company Aggregate UDF. This agent cannot run TallyPrime — if save fails, report the exact message.
