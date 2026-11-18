@@ -1,17 +1,23 @@
 # Helixcer Chat for TallyPrime
 
-## Load (build 334)
+## Load (build 335)
 
-https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-live-field-vars-b545/tally/helixcer-chat-build334.tdl
+Use this exact file (same name as many local copies):
 
-1. Quit Tally; disable older Helixcer TDLs.
-2. Add `helixcer-chat-build334.tdl`, enable, restart with company open.
-3. Title must show **(build 334)**.
+https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-live-field-vars-b545/tally/helixcer_chat.tdl
 
-## API Settings
+1. Quit Tally.
+2. Replace your local `helixcer_chat.tdl` with this file (or point TDL list at it).
+3. Disable other Helixcer TDL files.
+4. API Settings title must show **(build 335)**.
 
-Tab through Workspace ID → Channel ID → API Key (each Accept writes Storage + `##` mirrors) → Enter → Yes.
+## Save check
+
+1. Tab Workspace ID → Channel ID → API Key.
+2. Enter → Yes.
+3. You must see **Helixcer saved** with `WS=[...] CH=[...] KeyChars=N`.
+4. If KeyChars=0 or WS/CH brackets empty, values did not write — Tab each field again.
 
 ## Status
 
-Loads company UDFs, then `GET /api/v1/connection`, then Msg Boxes for Status / Workspace / Channel.
+Uses the saved `##` values (and `HelixcerChat.pvf` if needed). If still empty, the Msg Box shows `Not saved. WS=[...]` so you can see which part is missing.
