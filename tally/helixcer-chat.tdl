@@ -1,10 +1,12 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 339-api-key-storage
-;; Title must show "(build 339)".
+;; BUILD: 340-status-company-read
+;; Title must show "(build 340)".
 ;;
-;; IDs already persist via Storage. API Key was mask/SET VALUE only — blank
-;; on reopen. Official pattern: field name contains "Password" + Storage
-;; (displays * , stores real value in UDF).
+;; Bugs fixed:
+;; 1) Form Create Sync ran before Company bind → wrote EMPTY into HxcSys*
+;;    and Status always said "save first" even when Storage IDs were visible.
+;; 2) API Key UDF held literal "*" (KeyChars=1). Save now rejects short keys.
+;; 3) Status now loads UDFs via $UDF:Company:##SVCurrentCompany (non-empty only).
 
 ;; ---------------------------------------------------------------------------
 ;; Company UDFs (Storage)
@@ -16,7 +18,7 @@
     HxcApiKeyUDF      : String : 25103
 
 ;; ---------------------------------------------------------------------------
-;; System mirrors for Status / HTTP (filled on save)
+;; System mirrors for HTTP headers
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcSysWorkspaceId]
@@ -56,7 +58,7 @@
     Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
 
 ;; ---------------------------------------------------------------------------
-;; HTTP GET — headers from system mirrors
+;; HTTP GET
 ;; ---------------------------------------------------------------------------
 
 [Report: Hxc Connection Request]
@@ -100,29 +102,58 @@
     17 : END WALK
     18 : RETURN : Yes
 
+;; Never copy empty / "*" over a good mirror
 [Function: Hxc Sync Sys From Company]
-    01 : SET : HxcSysWorkspaceId : $HxcWorkspaceIdUDF
-    02 : SET : HxcSysChannelId : $HxcChannelIdUDF
-    03 : SET : HxcSysApiKey : $HxcApiKeyUDF
-    04 : RETURN : Yes
+    01 : IF : NOT $$IsEmpty:$HxcWorkspaceIdUDF:Company:##SVCurrentCompany
+    02 :    SET : HxcSysWorkspaceId : $HxcWorkspaceIdUDF:Company:##SVCurrentCompany
+    03 : END IF
+    04 : IF : NOT $$IsEmpty:$HxcChannelIdUDF:Company:##SVCurrentCompany
+    05 :    SET : HxcSysChannelId : $HxcChannelIdUDF:Company:##SVCurrentCompany
+    06 : END IF
+    07 : IF : NOT $$IsEmpty:$HxcApiKeyUDF:Company:##SVCurrentCompany
+    08 :    IF : $HxcApiKeyUDF:Company:##SVCurrentCompany != "*"
+    09 :       IF : $$StringLength:$HxcApiKeyUDF:Company:##SVCurrentCompany > 10
+    10 :          SET : HxcSysApiKey : $HxcApiKeyUDF:Company:##SVCurrentCompany
+    11 :       END IF
+    12 :    END IF
+    13 : END IF
+    14 : RETURN : Yes
+
+;; Same, but unqualified $UDF — only valid inside Alter Company form
+[Function: Hxc Sync Sys From Alter]
+    01 : IF : NOT $$IsEmpty:$HxcWorkspaceIdUDF
+    02 :    SET : HxcSysWorkspaceId : $HxcWorkspaceIdUDF
+    03 : END IF
+    04 : IF : NOT $$IsEmpty:$HxcChannelIdUDF
+    05 :    SET : HxcSysChannelId : $HxcChannelIdUDF
+    06 : END IF
+    07 : IF : NOT $$IsEmpty:$HxcApiKeyUDF
+    08 :    IF : $HxcApiKeyUDF != "*"
+    09 :       IF : $$StringLength:$HxcApiKeyUDF > 10
+    10 :          SET : HxcSysApiKey : $HxcApiKeyUDF
+    11 :       END IF
+    12 :    END IF
+    13 : END IF
+    14 : RETURN : Yes
 
 [Function: Hxc Fetch Connection]
-    01 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
-    02 :    SET : HxcConnectionStatus : "Not saved. " + @@HxcSysSummary
-    03 :    RETURN : No
-    04 : END IF
-    05 : SET : HxcWorkspaceName : ""
-    06 : SET : HxcChannelName : ""
-    07 : SET : HxcConnectionStatus : "Checking..."
-    08 : Start Progress : 1 : "Helixcer Chat" : "Connection status" : "Fetching workspace and channel"
-    09 : HTTP Request : @@HxcConnectionUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Connection Response
-    10 : End Progress
-    11 : IF : $$IsEmpty:##HxcWorkspaceName
-    12 :    IF : ##HxcConnectionStatus = "Checking..."
-    13 :       SET : HxcConnectionStatus : "Could not fetch. Check IDs and API Key."
-    14 :    END IF
-    15 : END IF
-    16 : RETURN : Yes
+    01 : CALL : Hxc Sync Sys From Company
+    02 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
+    03 :    SET : HxcConnectionStatus : "Not ready. " + @@HxcSysSummary + "  Re-type full API Key in Settings (must not be a single *), Tab all fields, Yes."
+    04 :    RETURN : No
+    05 : END IF
+    06 : SET : HxcWorkspaceName : ""
+    07 : SET : HxcChannelName : ""
+    08 : SET : HxcConnectionStatus : "Checking..."
+    09 : Start Progress : 1 : "Helixcer Chat" : "Connection status" : "Fetching workspace and channel"
+    10 : HTTP Request : @@HxcConnectionUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Connection Response
+    11 : End Progress
+    12 : IF : $$IsEmpty:##HxcWorkspaceName
+    13 :    IF : ##HxcConnectionStatus = "Checking..."
+    14 :       SET : HxcConnectionStatus : "Could not fetch. Check IDs and API Key."
+    15 :    END IF
+    16 : END IF
+    17 : RETURN : Yes
 
 [Function: Hxc Show Status]
     01 : CALL : Hxc Fetch Connection
@@ -142,14 +173,13 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    ;; Alter — Display crashes; Modify Variable does not persist
     Key Item : API Settings : S : Alter : Helixcer API Settings
     Key Item : Status       : T : Call : Hxc Show Status
     Key Item : About        : A : Display : Helixcer Chat About
     Key Item : Back         : B : Menu : Gateway of Tally
 
 ;; ---------------------------------------------------------------------------
-;; API Settings — Company Alter + Storage
+;; API Settings — Alter + Storage (no Form Create wipe)
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer API Settings]
@@ -160,7 +190,6 @@
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
     Button : Form Accept, Form Cancel
-    On     : Form Create : Yes : Call : Hxc Sync Sys From Company
     On     : Form Accept : Yes : Call : Hxc Confirm Save
 
 [Part: Helixcer API Settings]
@@ -173,7 +202,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 339)"
+    Set as    : "Helixcer Chat — API Settings (build 340)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -212,27 +241,35 @@
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
-;; Name contains "Password" → UI shows *; Storage keeps the real key (Tally FAQ)
+;; "Password" in field name → shows *; Storage keeps real key
 [Field: Hxc Api Key Password]
     Use      : Name Field
     Storage  : HxcApiKeyUDF
     Set as   : $HxcApiKeyUDF
     Width    : 60
     Max      : 200
-    On       : Accept : Yes : SET : HxcSysApiKey : $HxcApiKeyUDF
     On       : Accept : Yes : Field Accept
 
 [Function: Hxc Confirm Save]
-    01 : Query Box : "Do you want to save?" : Yes
-    02 : IF : NOT $$LastResult
-    03 :    RETURN : No
-    04 : END IF
-    05 : CALL : Hxc Sync Sys From Company
-    06 : Msg Box : "Helixcer saved" : @@HxcSysSummary
-    07 : RETURN : Yes
+    01 : CALL : Hxc Sync Sys From Alter
+    02 : IF : $$IsEmpty:##HxcSysApiKey OR $$StringLength:##HxcSysApiKey < 20
+    03 :    Msg Box : "API Key missing" : "Clear the API Key field and type the FULL key (hxc_live_...). A single * is not valid. Then Tab and save again."
+    04 :    RETURN : No
+    05 : END IF
+    06 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId
+    07 :    Msg Box : "IDs missing" : "Workspace ID and Channel ID are required. " + @@HxcSysSummary
+    08 :    RETURN : No
+    09 : END IF
+    10 : Query Box : "Do you want to save?" : Yes
+    11 : IF : NOT $$LastResult
+    12 :    RETURN : No
+    13 : END IF
+    14 : CALL : Hxc Sync Sys From Alter
+    15 : Msg Box : "Helixcer saved" : @@HxcSysSummary
+    16 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
-;; About — plain Display only (no Company / $UDF)
+;; About
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Chat About]
@@ -249,7 +286,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 339)"
+    Set as    : "Helixcer Chat (build 340)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -259,7 +296,7 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "API Settings uses company Storage. After Yes you must see Helixcer saved."
+    Set as    : "Re-type the FULL API Key (not a single *). Tab all fields. Yes must show KeyChars>=20."
     Align     : Centre
     FullWidth : Yes
 
