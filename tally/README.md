@@ -1,21 +1,24 @@
-# Helixcer Chat — build 341
+# Helixcer Chat for TallyPrime — build 342
 
-https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-live-field-vars-b545/tally/helixcer_chat.tdl
+## Honesty
 
-## Why replacement failed
+This agent **cannot run TallyPrime**. Earlier builds guessed around `On Form Accept` / `Query Box` / nested `Form Accept` and that broke saving. Build **342** is only the pattern Tally documents for company UDFs.
 
-You entered new UUIDs + key and got **Do you want to save?**, but reopen showed the old `Sddcsdfsdfc` / single `*`.
+## Load
 
-Cause: Confirm Save returned Yes **without** running `Form Accept`, so company **Storage was never committed**.
+https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer_chat.tdl
 
-## Fix
+Title must show **(build 342)**. Company must be open. Disable every older Helixcer TDL.
 
-After Yes → **`Form Accept`** (commits Alter) → **Helixcer saved** Msg Box.
+## Save (Tally default — no custom Yes/No)
 
-## Steps
+1. Helixcer Chat → API Settings.
+2. Enter Workspace ID, Channel ID, API Key (key is **visible** on purpose so you can verify).
+3. **Ctrl+A** (Accept) — use Tally’s normal accept, not a custom dialog.
+4. Reopen API Settings — all three values must still be there.
 
-1. Title **(build 341)**.
-2. Enter new Workspace / Channel / full API Key (many `*`).
-3. Enter → Yes.
-4. Must see **Helixcer saved** with the **new** WS/CH and KeyChars ≥ 20.
-5. Reopen — new values must still be there (not the old dummy IDs).
+If reopen is blank, Storage is not attaching to the company on your Tally build; that needs a Tally TDL developer with a local Tally to debug.
+
+## Status
+
+After a successful Accept, Status copies company UDFs and calls `GET /api/v1/connection`.

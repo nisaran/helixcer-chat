@@ -1,13 +1,15 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 341-form-accept
-;; Title must show "(build 341)".
+;; BUILD: 342-minimal
+;; Title must show "(build 342)".
 ;;
-;; Bug: On Form Accept returned Yes after Query Box but never ran Form Accept,
-;; so Alter Company did NOT commit Storage — reopen showed old WS/CH and "*".
-;; Fix: after Yes, run Form Accept to commit, then sync mirrors + Msg Box.
+;; HONEST SCOPE: This file follows Tally's documented Company UDF Storage
+;; example only. No custom On Form Accept / Query Box / nested Form Accept.
+;; Save with Tally's normal Accept (Ctrl+A or Enter through fields).
+;;
+;; I cannot run TallyPrime in this environment. Verify locally.
 
 ;; ---------------------------------------------------------------------------
-;; Company UDFs (Storage)
+;; Company UDFs — same pattern as Tally "CompanyVehicles" sample
 ;; ---------------------------------------------------------------------------
 
 [System: UDF]
@@ -16,7 +18,7 @@
     HxcApiKeyUDF      : String : 25103
 
 ;; ---------------------------------------------------------------------------
-;; System mirrors for Status / HTTP
+;; Status / HTTP use these after you Accept settings (filled on field Accept)
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcSysWorkspaceId]
@@ -56,7 +58,7 @@
     Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
 
 ;; ---------------------------------------------------------------------------
-;; HTTP GET
+;; HTTP
 ;; ---------------------------------------------------------------------------
 
 [Report: Hxc Connection Request]
@@ -100,7 +102,7 @@
     17 : END WALK
     18 : RETURN : Yes
 
-[Function: Hxc Sync Sys From Company]
+[Function: Hxc Sync From Company]
     01 : IF : NOT $$IsEmpty:$HxcWorkspaceIdUDF:Company:##SVCurrentCompany
     02 :    SET : HxcSysWorkspaceId : $HxcWorkspaceIdUDF:Company:##SVCurrentCompany
     03 : END IF
@@ -108,34 +110,14 @@
     05 :    SET : HxcSysChannelId : $HxcChannelIdUDF:Company:##SVCurrentCompany
     06 : END IF
     07 : IF : NOT $$IsEmpty:$HxcApiKeyUDF:Company:##SVCurrentCompany
-    08 :    IF : $HxcApiKeyUDF:Company:##SVCurrentCompany != "*"
-    09 :       IF : $$StringLength:$HxcApiKeyUDF:Company:##SVCurrentCompany > 10
-    10 :          SET : HxcSysApiKey : $HxcApiKeyUDF:Company:##SVCurrentCompany
-    11 :       END IF
-    12 :    END IF
-    13 : END IF
-    14 : RETURN : Yes
-
-[Function: Hxc Sync Sys From Alter]
-    01 : IF : NOT $$IsEmpty:$HxcWorkspaceIdUDF
-    02 :    SET : HxcSysWorkspaceId : $HxcWorkspaceIdUDF
-    03 : END IF
-    04 : IF : NOT $$IsEmpty:$HxcChannelIdUDF
-    05 :    SET : HxcSysChannelId : $HxcChannelIdUDF
-    06 : END IF
-    07 : IF : NOT $$IsEmpty:$HxcApiKeyUDF
-    08 :    IF : $HxcApiKeyUDF != "*"
-    09 :       IF : $$StringLength:$HxcApiKeyUDF > 10
-    10 :          SET : HxcSysApiKey : $HxcApiKeyUDF
-    11 :       END IF
-    12 :    END IF
-    13 : END IF
-    14 : RETURN : Yes
+    08 :    SET : HxcSysApiKey : $HxcApiKeyUDF:Company:##SVCurrentCompany
+    09 : END IF
+    10 : RETURN : Yes
 
 [Function: Hxc Fetch Connection]
-    01 : CALL : Hxc Sync Sys From Company
+    01 : CALL : Hxc Sync From Company
     02 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
-    03 :    SET : HxcConnectionStatus : "Not ready. " + @@HxcSysSummary + "  Save API Settings again (full API Key)."
+    03 :    SET : HxcConnectionStatus : "Not ready. " + @@HxcSysSummary + "  Accept API Settings with Ctrl+A first."
     04 :    RETURN : No
     05 : END IF
     06 : SET : HxcWorkspaceName : ""
@@ -175,7 +157,8 @@
     Key Item : Back         : B : Menu : Gateway of Tally
 
 ;; ---------------------------------------------------------------------------
-;; API Settings
+;; API Settings — official Alter + Object Company + Storage
+;; NO On Form Accept. Use Tally Accept (Ctrl+A).
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer API Settings]
@@ -186,11 +169,11 @@
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
     Button : Form Accept, Form Cancel
-    On     : Form Accept : Yes : Call : Hxc Confirm Save
 
 [Part: Helixcer API Settings]
     Lines  : Hxc Api Settings Title, +
-             Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line
+             Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line, +
+             Hxc Save Hint Line
     Scroll : Vertical
 
 [Line: Hxc Api Settings Title]
@@ -198,7 +181,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 341)"
+    Set as    : "Helixcer Chat — API Settings (build 342)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -233,37 +216,30 @@
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Api Key Line]
-    Fields : Medium Prompt, Hxc Api Key Password
+    Fields : Medium Prompt, HxcApiKeyFld
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
-[Field: Hxc Api Key Password]
+;; Plain Name Field + Storage (same as IDs). Visible so you can confirm it saved.
+;; Masking can come back after save is proven.
+[Field: HxcApiKeyFld]
     Use      : Name Field
     Storage  : HxcApiKeyUDF
     Set as   : $HxcApiKeyUDF
     Width    : 60
     Max      : 200
+    On       : Accept : Yes : SET : HxcSysApiKey : $Value
     On       : Accept : Yes : Field Accept
 
-;; MUST call Form Accept after Yes — otherwise Alter does not write Storage
-[Function: Hxc Confirm Save]
-    01 : CALL : Hxc Sync Sys From Alter
-    02 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId
-    03 :    Msg Box : "IDs missing" : "Tab through Workspace ID and Channel ID first. " + @@HxcSysSummary
-    04 :    RETURN : No
-    05 : END IF
-    06 : IF : $$IsEmpty:##HxcSysApiKey OR $$StringLength:##HxcSysApiKey < 20
-    07 :    Msg Box : "API Key missing" : "Delete the old * and type the FULL hxc_live_... key, then Tab. " + @@HxcSysSummary
-    08 :    RETURN : No
-    09 : END IF
-    10 : Query Box : "Do you want to save?" : Yes
-    11 : IF : NOT $$LastResult
-    12 :    RETURN : No
-    13 : END IF
-    14 : Form Accept
-    15 : CALL : Hxc Sync Sys From Alter
-    16 : Msg Box : "Helixcer saved" : @@HxcSysSummary
-    17 : RETURN : Yes
+[Line: Hxc Save Hint Line]
+    Field : Hxc Save Hint
+
+[Field: Hxc Save Hint]
+    Use       : Name Field
+    Set as    : "Tab all fields, then Ctrl+A to Accept (Tally default). No custom Yes/No."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; About
@@ -283,7 +259,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 341)"
+    Set as    : "Helixcer Chat (build 342)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -293,7 +269,7 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "After Yes you must see Helixcer saved with your NEW IDs and KeyChars>=20."
+    Set as    : "Settings = Company Storage + Ctrl+A. Status reads company UDFs then calls Helixcer."
     Align     : Centre
     FullWidth : Yes
 
