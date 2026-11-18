@@ -1,12 +1,21 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 331-no-hash-fields
-;; If save still says Bad formula '#Hxc Workspace Id', this file is NOT loaded.
+;; BUILD: 332-company-storage
+;; Title must show "(build 332)" — otherwise an old TDL is still loaded.
 ;;
-;; API Settings — save only. Drafts + SET (never #FieldName with spaces).
-;; Status — About-style Display; Alt+R Msg Box fetch.
+;; Credentials persist with Company UDFs via Storage (Tally company database).
+;; Also mirrored to Persistent system vars for Status HTTP headers.
 
 ;; ---------------------------------------------------------------------------
-;; System Persistent variables
+;; Company UDFs — Storage targets (numbers outside TSPL reserved 10000-20000)
+;; ---------------------------------------------------------------------------
+
+[System: UDF]
+    HxcWorkspaceIdUDF : String : 25101
+    HxcChannelIdUDF   : String : 25102
+    HxcApiKeyUDF      : String : 25103
+
+;; ---------------------------------------------------------------------------
+;; System Persistent mirrors (Status / HTTP Request)
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcWorkspaceId]
@@ -22,12 +31,6 @@
     Persistent : Yes
 
 [Variable: HxcApiKeyDraft]
-    Type : String
-
-[Variable: HxcWorkspaceIdDraft]
-    Type : String
-
-[Variable: HxcChannelIdDraft]
     Type : String
 
 [Variable: HxcWorkspaceName]
@@ -47,8 +50,6 @@
     HxcChannelId        : ""
     HxcApiKey           : ""
     HxcApiKeyDraft      : ""
-    HxcWorkspaceIdDraft : ""
-    HxcChannelIdDraft   : ""
     HxcWorkspaceName    : ""
     HxcChannelName      : ""
     HxcConnectionStatus : ""
@@ -81,6 +82,12 @@
     Set as : ""
     Skip   : Yes
 
+[Function: Hxc Sync Creds From Company]
+    01 : SET : HxcWorkspaceId : $HxcWorkspaceIdUDF
+    02 : SET : HxcChannelId : $HxcChannelIdUDF
+    03 : SET : HxcApiKey : $HxcApiKeyUDF
+    04 : RETURN : Yes
+
 [Function: Hxc Apply Connection Response]
     Variable : Platform : String
     01 : SET : HxcWorkspaceName : ""
@@ -103,26 +110,26 @@
     18 : RETURN : Yes
 
 [Function: Hxc Fetch Connection]
-    01 : IF : $$IsEmpty:##HxcWorkspaceId OR $$IsEmpty:##HxcChannelId OR $$IsEmpty:##HxcApiKey
-    02 :    SET : HxcWorkspaceName : ""
-    03 :    SET : HxcChannelName : ""
-    04 :    SET : HxcConnectionStatus : "Save Workspace ID, Channel ID, and API Key in API Settings first."
-    05 :    RETURN : No
-    06 : END IF
-    07 : SET : HxcWorkspaceName : ""
-    08 : SET : HxcChannelName : ""
-    09 : SET : HxcConnectionStatus : "Checking..."
-    10 : Start Progress : 1 : "Helixcer Chat" : "Connection status" : "Fetching workspace and channel"
-    11 : HTTP Request : @@HxcConnectionUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Connection Response
-    12 : End Progress
-    13 : IF : $$IsEmpty:##HxcWorkspaceName
-    14 :    IF : ##HxcConnectionStatus = "Checking..."
-    15 :       SET : HxcConnectionStatus : "Could not fetch. Check IDs and API Key."
-    16 :    END IF
-    17 : END IF
-    18 : RETURN : Yes
+    01 : CALL : Hxc Sync Creds From Company
+    02 : IF : $$IsEmpty:##HxcWorkspaceId OR $$IsEmpty:##HxcChannelId OR $$IsEmpty:##HxcApiKey
+    03 :    SET : HxcWorkspaceName : ""
+    04 :    SET : HxcChannelName : ""
+    05 :    SET : HxcConnectionStatus : "Save Workspace ID, Channel ID, and API Key in API Settings first."
+    06 :    RETURN : No
+    07 : END IF
+    08 : SET : HxcWorkspaceName : ""
+    09 : SET : HxcChannelName : ""
+    10 : SET : HxcConnectionStatus : "Checking..."
+    11 : Start Progress : 1 : "Helixcer Chat" : "Connection status" : "Fetching workspace and channel"
+    12 : HTTP Request : @@HxcConnectionUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Connection Response
+    13 : End Progress
+    14 : IF : $$IsEmpty:##HxcWorkspaceName
+    15 :    IF : ##HxcConnectionStatus = "Checking..."
+    16 :       SET : HxcConnectionStatus : "Could not fetch. Check IDs and API Key."
+    17 :    END IF
+    18 : END IF
+    19 : RETURN : Yes
 
-;; Fetch then one message (used from Status Alt+R). Do not Display from here.
 [Function: Hxc Show Status]
     01 : CALL : Hxc Fetch Connection
     02 : Msg Box : "Helixcer Connection Status" : ##HxcConnectionStatus
@@ -139,22 +146,25 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    Key Item : API Settings : S : Modify Variable : Helixcer API Settings
+    ;; Alter + Object Company so Storage UDFs write into the open company
+    Key Item : API Settings : S : Alter : Helixcer API Settings
     Key Item : Status       : T : Display : Helixcer Chat Status
     Key Item : About        : A : Display : Helixcer Chat About
     Key Item : Back         : B : Menu : Gateway of Tally
 
 ;; ---------------------------------------------------------------------------
-;; API Settings — save only
+;; API Settings — Company object + Storage (save only, no HTTP)
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer API Settings]
-    Form  : Helixcer API Settings
-    Title : "API Settings"
+    Form   : Helixcer API Settings
+    Title  : "API Settings"
+    Object : Company
 
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
     Button : Form Accept, Form Cancel
+    On     : Form Create : Yes : Call : Hxc Sync Creds From Company
     On     : Form Accept : Yes : Call : Hxc Confirm Save
 
 [Part: Helixcer API Settings]
@@ -167,7 +177,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 331)"
+    Set as    : "Helixcer Chat — API Settings (build 332)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -180,13 +190,10 @@
 
 [Field: HxcWorkspaceIdFld]
     Use      : Name Field
-    Set as   : ##HxcWorkspaceId
-    Modifies : HxcWorkspaceIdDraft : Yes
+    Storage  : HxcWorkspaceIdUDF
+    Set as   : $HxcWorkspaceIdUDF
     Width    : 60
     Max      : 64
-    On       : Accept : Yes : SET : HxcWorkspaceIdDraft : $Value
-    On       : Accept : Yes : SET : HxcWorkspaceId : $Value
-    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Channel Id Line]
     Fields : Medium Prompt, HxcChannelIdFld
@@ -195,19 +202,17 @@
 
 [Field: HxcChannelIdFld]
     Use      : Name Field
-    Set as   : ##HxcChannelId
-    Modifies : HxcChannelIdDraft : Yes
+    Storage  : HxcChannelIdUDF
+    Set as   : $HxcChannelIdUDF
     Width    : 60
     Max      : 64
-    On       : Accept : Yes : SET : HxcChannelIdDraft : $Value
-    On       : Accept : Yes : SET : HxcChannelId : $Value
-    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Api Key Line]
     Fields : Medium Prompt, HxcApiKeyFld
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
+;; No Storage here — masked Set as would overwrite the real key with ******
 [Field: HxcApiKeyFld]
     Use      : Name Field
     Set as   : @@HxcApiKeyMasked
@@ -231,24 +236,9 @@
     11 : IF : $Value = "********"
     12 :    RETURN : Yes
     13 : END IF
-    14 : SET : HxcApiKey : $Value
-    15 : RETURN : Yes
-
-;; Promote drafts → Persistent vars. Never use #FieldName (spaces = Bad formula).
-;; RETURN Yes/No only — never nest Form Accept.
-[Function: Hxc Confirm Save]
-    01 : IF : NOT $$IsEmpty:##HxcWorkspaceIdDraft
-    02 :    SET : HxcWorkspaceId : ##HxcWorkspaceIdDraft
-    03 : END IF
-    04 : IF : NOT $$IsEmpty:##HxcChannelIdDraft
-    05 :    SET : HxcChannelId : ##HxcChannelIdDraft
-    06 : END IF
-    07 : CALL : Hxc Capture Api Key From Draft
-    08 : Query Box : "Do you want to save?" : Yes
-    09 : IF : $$LastResult
-    10 :    RETURN : Yes
-    11 : END IF
-    12 : RETURN : No
+    14 : SET VALUE : HxcApiKeyUDF : $Value
+    15 : SET : HxcApiKey : $Value
+    16 : RETURN : Yes
 
 [Function: Hxc Capture Api Key From Draft]
     01 : IF : $$IsEmpty:##HxcApiKeyDraft
@@ -263,16 +253,30 @@
     10 : IF : ##HxcApiKeyDraft = "********"
     11 :    RETURN : Yes
     12 : END IF
-    13 : SET : HxcApiKey : ##HxcApiKeyDraft
-    14 : RETURN : Yes
+    13 : SET VALUE : HxcApiKeyUDF : ##HxcApiKeyDraft
+    14 : SET : HxcApiKey : ##HxcApiKeyDraft
+    15 : RETURN : Yes
+
+;; RETURN Yes commits Company Alter (Storage). Never nest Form Accept.
+[Function: Hxc Confirm Save]
+    01 : CALL : Hxc Capture Api Key From Draft
+    02 : SET : HxcWorkspaceId : $HxcWorkspaceIdUDF
+    03 : SET : HxcChannelId : $HxcChannelIdUDF
+    04 : SET : HxcApiKey : $HxcApiKeyUDF
+    05 : Query Box : "Do you want to save?" : Yes
+    06 : IF : $$LastResult
+    07 :    RETURN : Yes
+    08 : END IF
+    09 : RETURN : No
 
 ;; ---------------------------------------------------------------------------
-;; Status — same shape as About (plain Display). Alt+R fetches + Msg Box.
+;; Status — plain Display; Alt+R fetches
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Chat Status]
-    Form  : Helixcer Chat Status
-    Title : "Status"
+    Form   : Helixcer Chat Status
+    Title  : "Status"
+    Object : Company
 
 [Form: Helixcer Chat Status]
     Part   : Helixcer Chat Status
@@ -291,7 +295,7 @@
 
 [Field: Helixcer Chat Status Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — Status"
+    Set as    : "Helixcer Chat — Status (build 332)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -310,7 +314,8 @@
 
 [Field: Helixcer Chat Status Detail]
     Use       : Name Field
-    Set as    : If $$IsEmpty:##HxcWorkspaceName THEN "Alt+R loads workspace and channel names" ELSE ##HxcWorkspaceName + " / " + ##HxcChannelName
+    Set as    : If $$IsEmpty:$HxcWorkspaceIdUDF THEN "No Workspace ID saved in API Settings" ELSE +
+                "Workspace ID " + $HxcWorkspaceIdUDF + " / Channel ID " + $HxcChannelIdUDF
     Align     : Centre
     FullWidth : Yes
 
@@ -319,7 +324,8 @@
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Chat About]
-    Form : Helixcer Chat About
+    Form   : Helixcer Chat About
+    Object : Company
 
 [Form: Helixcer Chat About]
     Part : Helixcer Chat About
@@ -342,7 +348,7 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "API Settings saves credentials. Status checks the live connection."
+    Set as    : "API Settings stores credentials on this company (Storage). Status + Alt+R verifies."
     Align     : Centre
     FullWidth : Yes
 
@@ -351,10 +357,9 @@
 
 [Field: Helixcer Chat About Status]
     Use       : Name Field
-    Set as    : If $$IsEmpty:##HxcApiKey THEN "API Key: not set" ELSE +
-                If $$IsEmpty:##HxcWorkspaceId THEN "API Key saved; Workspace ID missing" ELSE +
-                If $$IsEmpty:##HxcChannelId THEN "API Key saved; Channel ID missing" ELSE +
-                If $$IsEmpty:##HxcConnectionStatus THEN "Credentials saved — open Status to verify" ELSE +
-                ##HxcConnectionStatus
+    Set as    : If $$IsEmpty:$HxcApiKeyUDF THEN "API Key: not set" ELSE +
+                If $$IsEmpty:$HxcWorkspaceIdUDF THEN "API Key saved; Workspace ID missing" ELSE +
+                If $$IsEmpty:$HxcChannelIdUDF THEN "API Key saved; Channel ID missing" ELSE +
+                "Saved on company — open Status, press Alt+R"
     Align     : Centre
     FullWidth : Yes
