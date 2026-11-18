@@ -1370,16 +1370,29 @@ async function getExternalConnection(env, url, principal, requestId) {
     FROM channels WHERE workspace_id=?1 AND channel_id=?2 LIMIT 1`)
     .bind(principal.workspaceId, channelId).first();
   if (!channel) throw apiError(404, 'channel_not_found', 'Channel not found in this workspace.');
+  const connectorType = logicalConnectorType(channel);
   return json({
     status: true,
     workspaceId: workspace.workspace_id,
     workspaceName: String(workspace.name || ''),
     channelId: channel.channel_id,
     channelName: String(channel.name || ''),
-    connectorType: logicalConnectorType(channel),
+    connectorType,
+    platformLabel: externalPlatformLabel(connectorType),
     enabled: Boolean(channel.enabled),
     requestId
   });
+}
+
+function externalPlatformLabel(connectorType) {
+  switch (String(connectorType || '')) {
+    case 'whatsapp_cloud': return 'WhatsApp';
+    case 'telegram': return 'Telegram';
+    case 'instagram': return 'Instagram';
+    case 'facebook_messenger': return 'Messenger';
+    case 'google_reviews': return 'Google Reviews';
+    default: return connectorType ? String(connectorType) : 'Channel';
+  }
 }
 
 function externalContactView(item) {

@@ -1031,6 +1031,7 @@ test('Developer API connection endpoint returns workspace and channel names', as
     assert.equal(body.channelId, 'wa-sales');
     assert.equal(body.channelName, 'WhatsApp Sales');
     assert.equal(body.connectorType, 'whatsapp_cloud');
+    assert.equal(body.platformLabel, 'WhatsApp');
     assert.equal(body.enabled, true);
 
     const missing = await handleRequest(new Request(
