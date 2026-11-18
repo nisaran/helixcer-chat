@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 352-fix-template-fetch
-;; Title must show "(build 352)".
+;; BUILD: 353-fetch-button
+;; Title must show "(build 353)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter → fetch →
@@ -241,20 +241,16 @@
     01 : SET : HxcVcFetched : No
     02 : SET : HxcVcPreviewText : ""
     03 : SET : HxcVcFetchStatus : ""
-    04 : SET : HxcVcFetchName : ""
-    05 : SET : HxcVcFK1 : ""
-    06 : SET : HxcVcFK2 : ""
-    07 : SET : HxcVcFK3 : ""
-    08 : SET : HxcVcFK4 : ""
-    09 : RETURN : Yes
+    04 : SET : HxcVcFK1 : ""
+    05 : SET : HxcVcFK2 : ""
+    06 : SET : HxcVcFK3 : ""
+    07 : SET : HxcVcFK4 : ""
+    08 : RETURN : Yes
 
 [Function: Hxc Apply Template Response]
     Variable : I : Number
     Variable : CompType : String
     Variable : ItemLang : String
-    Variable : WantLang : String
-    Variable : PickThis : Logical
-    Variable : HavePick : Logical
     01 : SET : I : 0
     02 : SET : HxcVcFetched : No
     03 : SET : HxcVcPreviewText : ""
@@ -262,96 +258,73 @@
     05 : SET : HxcVcFK2 : ""
     06 : SET : HxcVcFK3 : ""
     07 : SET : HxcVcFK4 : ""
-    08 : SET : HavePick : No
-    09 : SET : WantLang : ##HxcVcFetchLang
-    10 : SET : HxcVcFetchStatus : "Template not found or empty response."
-    11 : WALK COLLECTION : Parameter Collection
-    12 :    IF : NOT $$IsEmpty:$message
-    13 :       SET : HxcVcFetchStatus : $message
-    14 :    END IF
-    15 :    WALK COLLECTION : error
-    16 :       IF : NOT $$IsEmpty:$message
-    17 :          SET : HxcVcFetchStatus : $message
-    18 :       END IF
-    19 :    END WALK
-    20 :    WALK COLLECTION : items
-    21 :       SET : ItemLang : ""
-    22 :       WALK COLLECTION : language
-    23 :          SET : ItemLang : $code
-    24 :       END WALK
-    25 :       IF : $$IsEmpty:##ItemLang
-    26 :          SET : ItemLang : $language
-    27 :       END IF
-    28 :       SET : PickThis : No
-    29 :       IF : NOT ##HavePick
-    30 :          SET : PickThis : Yes
-    31 :       END IF
-    32 :       IF : NOT $$IsEmpty:##WantLang AND ##ItemLang = ##WantLang
-    33 :          SET : PickThis : Yes
-    34 :       END IF
-    35 :       IF : ##WantLang = "en" AND ##ItemLang = "en_US"
-    36 :          SET : PickThis : Yes
-    37 :       END IF
-    38 :       IF : ##PickThis
-    39 :          SET : HavePick : Yes
-    40 :          SET : I : 0
-    41 :          SET : HxcVcPreviewText : ""
-    42 :          SET : HxcVcFK1 : ""
-    43 :          SET : HxcVcFK2 : ""
-    44 :          SET : HxcVcFK3 : ""
-    45 :          SET : HxcVcFK4 : ""
-    46 :          WALK COLLECTION : components
-    47 :             SET : CompType : $type
-    48 :             IF : ##CompType = "body" OR ##CompType = "BODY" OR ##CompType = "Body"
-    49 :                IF : NOT $$IsEmpty:$text
-    50 :                   SET : HxcVcPreviewText : $text
-    51 :                END IF
-    52 :             END IF
-    53 :          END WALK
-    54 :          WALK COLLECTION : variables
-    55 :             SET : I : ##I + 1
-    56 :             IF : ##I = 1
-    57 :                SET : HxcVcFK1 : $key
-    58 :             END IF
-    59 :             IF : ##I = 2
-    60 :                SET : HxcVcFK2 : $key
-    61 :             END IF
-    62 :             IF : ##I = 3
-    63 :                SET : HxcVcFK3 : $key
-    64 :             END IF
-    65 :             IF : ##I = 4
-    66 :                SET : HxcVcFK4 : $key
-    67 :             END IF
-    68 :          END WALK
-    69 :          SET : HxcVcFetched : Yes
-    70 :          IF : NOT $$IsEmpty:##ItemLang
-    71 :             SET : HxcVcFetchLang : ##ItemLang
-    72 :          END IF
-    73 :          IF : ##I > 4
-    74 :             SET : HxcVcFetchStatus : "Template loaded. Mapping first 4 variables only."
-    75 :          ELSE
-    76 :             SET : HxcVcFetchStatus : "Template loaded."
-    77 :          END IF
-    78 :       END IF
-    79 :    END WALK
-    80 : END WALK
-    81 : IF : ##HxcVcFetched
-    82 :    IF : $$IsEmpty:##HxcVcPreviewText
-    83 :       SET : HxcVcPreviewText : "(No body text in template)"
-    84 :    END IF
-    85 : END IF
-    86 : RETURN : Yes
+    08 : SET : HxcVcFetchStatus : "Template not found or empty response."
+    09 : WALK COLLECTION : Parameter Collection
+    10 :    IF : NOT $$IsEmpty:$message
+    11 :       SET : HxcVcFetchStatus : $message
+    12 :    END IF
+    13 :    WALK COLLECTION : error
+    14 :       IF : NOT $$IsEmpty:$message
+    15 :          SET : HxcVcFetchStatus : $message
+    16 :       END IF
+    17 :    END WALK
+    18 :    WALK COLLECTION : items
+    19 :       SET : ItemLang : ""
+    20 :       WALK COLLECTION : language
+    21 :          SET : ItemLang : $code
+    22 :       END WALK
+    23 :       WALK COLLECTION : components
+    24 :          SET : CompType : $type
+    25 :          IF : ##CompType = "body" OR ##CompType = "BODY" OR ##CompType = "Body"
+    26 :             IF : NOT $$IsEmpty:$text
+    27 :                SET : HxcVcPreviewText : $text
+    28 :             END IF
+    29 :          END IF
+    30 :       END WALK
+    31 :       WALK COLLECTION : variables
+    32 :          SET : I : ##I + 1
+    33 :          IF : ##I = 1
+    34 :             SET : HxcVcFK1 : $key
+    35 :          END IF
+    36 :          IF : ##I = 2
+    37 :             SET : HxcVcFK2 : $key
+    38 :          END IF
+    39 :          IF : ##I = 3
+    40 :             SET : HxcVcFK3 : $key
+    41 :          END IF
+    42 :          IF : ##I = 4
+    43 :             SET : HxcVcFK4 : $key
+    44 :          END IF
+    45 :       END WALK
+    46 :       SET : HxcVcFetched : Yes
+    47 :       IF : NOT $$IsEmpty:##ItemLang
+    48 :          SET : HxcVcFetchLang : ##ItemLang
+    49 :       END IF
+    50 :       IF : ##I > 4
+    51 :          SET : HxcVcFetchStatus : "Template loaded. Mapping first 4 variables only."
+    52 :       ELSE
+    53 :          SET : HxcVcFetchStatus : "Template loaded."
+    54 :       END IF
+    55 :       ;; First matching item is enough (response usually has one)
+    56 :    END WALK
+    57 : END WALK
+    58 : IF : ##HxcVcFetched
+    59 :    IF : $$IsEmpty:##HxcVcPreviewText
+    60 :       SET : HxcVcPreviewText : "(No body text in template)"
+    61 :    END IF
+    62 : END IF
+    63 : RETURN : Yes
 
 [Function: Hxc Fetch Template]
     01 : CALL : Hxc Sync From Company
-    02 : CALL : Hxc Clear Fetch Vars
-    03 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
-    04 :    SET : HxcVcFetchStatus : "Save API Settings (Ctrl+A) before fetching a template."
-    05 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    06 :    RETURN : No
-    07 : END IF
-    08 : ;; Copy Storage → ## vars (HTTP URL formulas have no Company $ context)
-    09 : SET : HxcVcFetchName : $HxcVcDraftTemplate
+    02 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
+    03 :    SET : HxcVcFetchStatus : "Save API Settings (Ctrl+A) before fetching a template."
+    04 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    05 :    RETURN : No
+    06 : END IF
+    07 : IF : $$IsEmpty:##HxcVcFetchName
+    08 :    SET : HxcVcFetchName : $HxcVcDraftTemplate
+    09 : END IF
     10 : IF : $$IsEmpty:##HxcVcFetchName
     11 :    SET : HxcVcFetchName : $HxcVcDraftTemplate:Company:##SVCurrentCompany
     12 : END IF
@@ -366,26 +339,25 @@
     21 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
     22 :    RETURN : No
     23 : END IF
-    24 : SET : HxcVcFetchStatus : "Fetching..."
-    25 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
+    24 : CALL : Hxc Clear Fetch Vars
+    25 : SET : HxcVcFetchStatus : "Fetching..."
     26 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
-    27 : End Progress
-    28 : IF : NOT ##HxcVcFetched
-    29 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
-    30 :       SET : HxcVcFetchStatus : "Could not reach API. Check network, template name, language (e.g. en_US), and API Settings."
-    31 :    END IF
-    32 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    33 :    RETURN : No
-    34 : END IF
-    35 : SET VALUE : HxcVcDMFld1 : ""
-    36 : SET VALUE : HxcVcDMFld2 : ""
-    37 : SET VALUE : HxcVcDMFld3 : ""
-    38 : SET VALUE : HxcVcDMFld4 : ""
-    39 : IF : NOT $$IsEmpty:##HxcVcFetchLang
-    40 :    SET VALUE : HxcVcDraftLang : ##HxcVcFetchLang
-    41 : END IF
-    42 : Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    43 : RETURN : Yes
+    27 : IF : NOT ##HxcVcFetched
+    28 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
+    29 :       SET : HxcVcFetchStatus : "Could not reach API / empty response. Check Status menu, template name, and network."
+    30 :    END IF
+    31 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    32 :    RETURN : No
+    33 : END IF
+    34 : SET VALUE : HxcVcDMFld1 : ""
+    35 : SET VALUE : HxcVcDMFld2 : ""
+    36 : SET VALUE : HxcVcDMFld3 : ""
+    37 : SET VALUE : HxcVcDMFld4 : ""
+    38 : IF : NOT $$IsEmpty:##HxcVcFetchLang
+    39 :    SET VALUE : HxcVcDraftLang : ##HxcVcFetchLang
+    40 : END IF
+    41 : Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    42 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; Pack helpers + commit draft → Aggregate config
@@ -584,7 +556,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 352)"
+    Set as    : "Helixcer Chat — API Settings (build 353)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -647,7 +619,8 @@
 ;; ---------------------------------------------------------------------------
 
 [Part: Hxc Vc Form Body]
-    Lines  : Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, Hxc Vc F Fetch Hint Line, +
+    Lines  : Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
+             Hxc Vc F Fetch Go Line, Hxc Vc F Fetch Status Line, Hxc Vc F Fetch Hint Line, +
              Hxc Vc F Prev Head, Hxc Vc F Prev Body, +
              Hxc Vc F Map Head, +
              Hxc Vc F Map1, Hxc Vc F Map2, Hxc Vc F Map3, Hxc Vc F Map4, +
@@ -658,7 +631,7 @@
 [Part: Hxc Vc Form Vch Part]
     Lines    : Hxc Vc F Vch Head, Hxc Vc F Vch Data
     Repeat   : Hxc Vc F Vch Data : HxcVcDraftVchs
-    Break On : $$IsEmpty:$HxcVcDraftVchName
+    Break On : $$IsEmpty:$HxcVcDraftVchName OR $HxcVcDraftVchName = "Not Applicable"
     Scroll   : Vertical
 
 [Part: Hxc Vc Form Settings Part]
@@ -687,8 +660,9 @@
     Set as   : $HxcVcDraftTemplate
     Width    : 40
     Max      : 80
-    On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
     On       : Accept : Yes : Field Accept
+    On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
+    On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
 
 [Line: Hxc Vc F Lang Line]
     Fields : Medium Prompt, Hxc Vc F Lang
@@ -701,17 +675,42 @@
     Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
     Width    : 16
     Max      : 16
-    ;; Enter on Language fetches template → preview + variable rows
-    On       : Accept : Yes : SET : HxcVcFetchLang : $Value
+    On       : Accept : Yes : Field Accept
+    On       : Accept : Yes : SET : HxcVcFetchLang : $HxcVcDraftLang
+    On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
+
+[Line: Hxc Vc F Fetch Go Line]
+    Fields : Medium Prompt, Hxc Vc F Fetch Go
+    Local  : Field : Medium Prompt : Set as : "Fetch Template"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Fetch Go]
+    Use      : Name Field
+    Set as   : "Yes"
+    Width    : 8
+    Max      : 8
+    ;; Enter on this field runs the HTTP fetch (more reliable than Language On Accept)
+    On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
+    On       : Accept : Yes : SET : HxcVcFetchLang : $HxcVcDraftLang
     On       : Accept : Yes : CALL : Hxc Fetch Template
     On       : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Fetch Status Line]
+    Field : Hxc Vc F Fetch Status
+
+[Field: Hxc Vc F Fetch Status]
+    Use        : Name Field
+    Set as     : If $$IsEmpty:##HxcVcFetchStatus THEN "Status: waiting — Enter on Fetch Template = Yes" ELSE ("Status: " + ##HxcVcFetchStatus)
+    Set Always : Yes
+    FullWidth  : Yes
+    Skip       : Yes
 
 [Line: Hxc Vc F Fetch Hint Line]
     Field : Hxc Vc F Fetch Hint
 
 [Field: Hxc Vc F Fetch Hint]
     Use       : Name Field
-    Set as    : "Enter Template Name + Language, then Enter on Language to fetch."
+    Set as    : "Tip: also press Alt+F, or Enter on Fetch Template."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -896,7 +895,8 @@
     Use      : Name Field
     Storage  : HxcVcDraftVchName
     Set as   : $HxcVcDraftVchName
-    Table    : Hxc Voucher Type List, Not Applicable
+    Table    : Hxc Voucher Type List
+    Show Table : Always
     Width    : 40
     Max      : 80
 
@@ -931,9 +931,14 @@
     Title  : "Create Voucher Config"
     Object : Company
 
+[Button: Hxc Fetch Template Btn]
+    Key    : Alt+F
+    Action : Call : Hxc Fetch Template
+    Title  : "Fetch Template"
+
 [Form: Helixcer Voucher Config Create]
     Part   : Hxc Vc Cr Title Part, Hxc Vc Form Body, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Cr Hint Part
-    Button : Form Accept, Form Cancel
+    Button : Hxc Fetch Template Btn, Form Accept, Form Cancel
     On     : Form Create : Yes : CALL : Hxc Vc Clear Draft
     On     : Form Accept : Yes : CALL : Hxc Vc Commit Draft
     On     : Form Accept : ##HxcVcSaveOk : Form Accept
@@ -946,7 +951,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 352)"
+    Set as    : "Create Voucher Config (build 353)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -960,7 +965,7 @@
 
 [Field: Hxc Vc Cr Hint]
     Use       : Name Field
-    Set as    : "Name → Template → Language (Enter to fetch) → map vars → voucher types → Ctrl+A."
+    Set as    : "Name → Template → Language → Fetch Template (Enter/Alt+F) → map → vouchers → Ctrl+A."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -1000,7 +1005,7 @@
 
 [Form: Helixcer Voucher Config Alter]
     Part   : Hxc Vc Al Title Part, Hxc Vc Al Pick Part, Hxc Vc Form Body, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Al Hint Part
-    Button : Form Accept, Form Cancel
+    Button : Hxc Fetch Template Btn, Form Accept, Form Cancel
     On     : Form Accept : Yes : CALL : Hxc Vc Commit Draft
     On     : Form Accept : ##HxcVcSaveOk : Form Accept
 
@@ -1012,7 +1017,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 352)"
+    Set as    : "Alter Voucher Config (build 353)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1071,7 +1076,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 352)"
+    Set as    : "Voucher Config List (build 353)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1186,7 +1191,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 352)"
+    Set as    : "Helixcer Chat (build 353)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
