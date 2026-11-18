@@ -1,24 +1,31 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 342-minimal
-;; Title must show "(build 342)".
+;; BUILD: 343-voucher-config-shell
+;; Title must show "(build 343)".
 ;;
-;; HONEST SCOPE: This file follows Tally's documented Company UDF Storage
-;; example only. No custom On Form Accept / Query Box / nested Form Accept.
-;; Save with Tally's normal Accept (Ctrl+A or Enter through fields).
-;;
-;; I cannot run TallyPrime in this environment. Verify locally.
+;; Phase 1 Voucher Config: list / create / edit shell on Company Aggregate UDF.
+;; No template fetch / send yet (phase 2).
+;; API Settings: Company Storage + Ctrl+A (no custom Form Accept).
 
 ;; ---------------------------------------------------------------------------
-;; Company UDFs — same pattern as Tally "CompanyVehicles" sample
+;; Company UDFs — API Settings
 ;; ---------------------------------------------------------------------------
 
 [System: UDF]
     HxcWorkspaceIdUDF : String : 25101
     HxcChannelIdUDF   : String : 25102
     HxcApiKeyUDF      : String : 25103
+    ;; Voucher Config aggregate + members (Tally Aggregate UDF pattern)
+    HxcVoucherConfigs      : Aggregate : 25110
+    HxcVcName              : String    : 25111
+    HxcVcTemplateName      : String    : 25112
+    HxcVcLanguage          : String    : 25113
+    HxcVcVoucherTypes      : String    : 25114
+    HxcVcMediaExport       : String    : 25115
+    HxcVcAutoSend          : Logical   : 25116
+    HxcVcConfirmBeforeSend : Logical   : 25117
 
 ;; ---------------------------------------------------------------------------
-;; Status / HTTP use these after you Accept settings (filled on field Accept)
+;; Status / HTTP mirrors
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcSysWorkspaceId]
@@ -58,7 +65,18 @@
     Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
 
 ;; ---------------------------------------------------------------------------
-;; HTTP
+;; Fixed tables for Voucher Config dropdowns
+;; ---------------------------------------------------------------------------
+
+[Collection: Hxc Media Export List]
+    List : "None", "Voucher PDF", "Voucher HTML", "Voucher XML", "Voucher Excel"
+
+[Collection: Hxc Voucher Type List]
+    Type : Voucher Type
+    Format : $Name, 40
+
+;; ---------------------------------------------------------------------------
+;; HTTP (Status)
 ;; ---------------------------------------------------------------------------
 
 [Report: Hxc Connection Request]
@@ -151,14 +169,14 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    Key Item : API Settings : S : Alter : Helixcer API Settings
-    Key Item : Status       : T : Call : Hxc Show Status
-    Key Item : About        : A : Display : Helixcer Chat About
-    Key Item : Back         : B : Menu : Gateway of Tally
+    Key Item : API Settings  : S : Alter : Helixcer API Settings
+    Key Item : Voucher Config : V : Alter : Helixcer Voucher Config
+    Key Item : Status        : T : Call : Hxc Show Status
+    Key Item : About         : A : Display : Helixcer Chat About
+    Key Item : Back          : B : Menu : Gateway of Tally
 
 ;; ---------------------------------------------------------------------------
-;; API Settings — official Alter + Object Company + Storage
-;; NO On Form Accept. Use Tally Accept (Ctrl+A).
+;; API Settings
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer API Settings]
@@ -181,7 +199,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 342)"
+    Set as    : "Helixcer Chat — API Settings (build 343)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -220,8 +238,6 @@
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
-;; Plain Name Field + Storage (same as IDs). Visible so you can confirm it saved.
-;; Masking can come back after save is proven.
 [Field: HxcApiKeyFld]
     Use      : Name Field
     Storage  : HxcApiKeyUDF
@@ -236,7 +252,152 @@
 
 [Field: Hxc Save Hint]
     Use       : Name Field
-    Set as    : "Tab all fields, then Ctrl+A to Accept (Tally default). No custom Yes/No."
+    Set as    : "Tab all fields, then Ctrl+A to Accept (Tally default)."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+;; ---------------------------------------------------------------------------
+;; Voucher Config — phase 1 shell (list / create / edit)
+;; Repeat Aggregate UDF on Company. Empty name line = new row.
+;; ---------------------------------------------------------------------------
+
+[Report: Helixcer Voucher Config]
+    Form   : Helixcer Voucher Config
+    Title  : "Voucher Config"
+    Object : Company
+
+[Form: Helixcer Voucher Config]
+    Part   : Hxc Vc Title Part, Hxc Vc List Part, Hxc Vc Hint Part
+    Button : Form Accept, Form Cancel
+
+[Part: Hxc Vc Title Part]
+    Lines : Hxc Vc Title Line
+
+[Line: Hxc Vc Title Line]
+    Field : Hxc Vc Title
+
+[Field: Hxc Vc Title]
+    Use       : Name Field
+    Set as    : "Helixcer Chat — Voucher Config (build 343)"
+    Style     : Bold
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Part: Hxc Vc List Part]
+    Lines    : Hxc Vc Header Line, Hxc Vc Data Line
+    Repeat   : Hxc Vc Data Line : HxcVoucherConfigs
+    Break On : $$IsEmpty:$HxcVcName
+    Scroll   : Vertical
+
+[Line: Hxc Vc Header Line]
+    Fields : Hxc Vc Hdr Name, Hxc Vc Hdr Template, Hxc Vc Hdr Lang, +
+             Hxc Vc Hdr Types, Hxc Vc Hdr Media, Hxc Vc Hdr Auto, Hxc Vc Hdr Confirm
+    Local  : Field : Default : Skip : Yes
+    Local  : Field : Default : Align : Centre
+    Local  : Field : Default : Style : Bold
+
+[Field: Hxc Vc Hdr Name]
+    Use    : Name Field
+    Set as : "Config Name"
+    Width  : 18
+
+[Field: Hxc Vc Hdr Template]
+    Use    : Name Field
+    Set as : "Template"
+    Width  : 18
+
+[Field: Hxc Vc Hdr Lang]
+    Use    : Name Field
+    Set as : "Lang"
+    Width  : 8
+
+[Field: Hxc Vc Hdr Types]
+    Use    : Name Field
+    Set as : "Voucher Types"
+    Width  : 20
+
+[Field: Hxc Vc Hdr Media]
+    Use    : Name Field
+    Set as : "Media"
+    Width  : 14
+
+[Field: Hxc Vc Hdr Auto]
+    Use    : Name Field
+    Set as : "Auto"
+    Width  : 6
+
+[Field: Hxc Vc Hdr Confirm]
+    Use    : Name Field
+    Set as : "Confirm"
+    Width  : 8
+
+[Line: Hxc Vc Data Line]
+    Fields : Hxc Vc Name Fld, Hxc Vc Template Fld, Hxc Vc Lang Fld, +
+             Hxc Vc Types Fld, Hxc Vc Media Fld, Hxc Vc Auto Fld, Hxc Vc Confirm Fld
+
+[Field: Hxc Vc Name Fld]
+    Use      : Name Field
+    Storage  : HxcVcName
+    Set as   : $HxcVcName
+    Width    : 18
+    Max      : 60
+
+[Field: Hxc Vc Template Fld]
+    Use      : Name Field
+    Storage  : HxcVcTemplateName
+    Set as   : $HxcVcTemplateName
+    Width    : 18
+    Max      : 80
+
+[Field: Hxc Vc Lang Fld]
+    Use      : Name Field
+    Storage  : HxcVcLanguage
+    Set as   : If $$IsEmpty:$HxcVcLanguage THEN "en_US" ELSE $HxcVcLanguage
+    Width    : 8
+    Max      : 16
+
+;; Phase 1: type voucher type names comma-separated, or pick from table once
+[Field: Hxc Vc Types Fld]
+    Use      : Name Field
+    Storage  : HxcVcVoucherTypes
+    Set as   : $HxcVcVoucherTypes
+    Table    : Hxc Voucher Type List, Not Applicable
+    Width    : 20
+    Max      : 120
+
+[Field: Hxc Vc Media Fld]
+    Use      : Name Field
+    Storage  : HxcVcMediaExport
+    Set as   : If $$IsEmpty:$HxcVcMediaExport THEN "None" ELSE $HxcVcMediaExport
+    Table    : Hxc Media Export List
+    Show Table : Always
+    Width    : 14
+    Max      : 40
+
+[Field: Hxc Vc Auto Fld]
+    Use      : Logical Field
+    Storage  : HxcVcAutoSend
+    Set as   : $HxcVcAutoSend
+    Width    : 6
+
+[Field: Hxc Vc Confirm Fld]
+    Use      : Logical Field
+    Storage  : HxcVcConfirmBeforeSend
+    Set as   : $HxcVcConfirmBeforeSend
+    Width    : 8
+    ;; Meaningful when Auto = Yes (enforced in send phase later)
+
+[Part: Hxc Vc Hint Part]
+    Lines : Hxc Vc Hint Line
+
+[Line: Hxc Vc Hint Line]
+    Field : Hxc Vc Hint
+
+[Field: Hxc Vc Hint]
+    Use       : Name Field
+    Set as    : "Add/edit rows, then Ctrl+A. Phase 1 shell only — template fetch/mapping comes next."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -259,7 +420,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 342)"
+    Set as    : "Helixcer Chat (build 343)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -269,7 +430,7 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "Settings = Company Storage + Ctrl+A. Status reads company UDFs then calls Helixcer."
+    Set as    : "API Settings + Voucher Config (phase 1 shell). Status checks connection."
     Align     : Centre
     FullWidth : Yes
 

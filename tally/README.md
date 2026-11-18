@@ -1,24 +1,35 @@
-# Helixcer Chat for TallyPrime — build 342
-
-## Honesty
-
-This agent **cannot run TallyPrime**. Earlier builds guessed around `On Form Accept` / `Query Box` / nested `Form Accept` and that broke saving. Build **342** is only the pattern Tally documents for company UDFs.
-
-## Load
+# Helixcer Chat for TallyPrime — build 343
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer_chat.tdl
 
-Title must show **(build 342)**. Company must be open. Disable every older Helixcer TDL.
+Company must be open. Title must show **(build 343)**.
 
-## Save (Tally default — no custom Yes/No)
+## API Settings
 
-1. Helixcer Chat → API Settings.
-2. Enter Workspace ID, Channel ID, API Key (key is **visible** on purpose so you can verify).
-3. **Ctrl+A** (Accept) — use Tally’s normal accept, not a custom dialog.
-4. Reopen API Settings — all three values must still be there.
-
-If reopen is blank, Storage is not attaching to the company on your Tally build; that needs a Tally TDL developer with a local Tally to debug.
+Enter Workspace ID / Channel ID / API Key → **Ctrl+A**.
 
 ## Status
 
-After a successful Accept, Status copies company UDFs and calls `GET /api/v1/connection`.
+Connection check via Helixcer `GET /api/v1/connection`.
+
+## Voucher Config (phase 1 shell)
+
+Menu → **Voucher Config** (`V`).
+
+| Column | Meaning |
+|--------|---------|
+| Config Name | Your label |
+| Template | WhatsApp template name (fetch in phase 2) |
+| Lang | e.g. `en_US` |
+| Voucher Types | Pick from list or type names |
+| Media | None / Voucher PDF / HTML / XML / Excel |
+| Auto | Auto-select after voucher save? |
+| Confirm | Confirm before send? (used when Auto = Yes) |
+
+Add rows in the grid → **Ctrl+A**.
+
+**Not in phase 1:** template API fetch, variable mapping, preview, send.
+
+## Honesty
+
+This agent cannot run TallyPrime. Verify Accept/list locally. If Aggregate rows do not persist, report the exact Tally message.
