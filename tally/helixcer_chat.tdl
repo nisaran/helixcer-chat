@@ -98,6 +98,7 @@
 [Variable: HxcVcFK4]
     Type : String
 
+
 [Variable: HxcVcFetchLang]
     Type : String
 
@@ -359,30 +360,72 @@
     07 : RETURN : ##S
 
 [Function: Hxc Clear Draft Vchs]
+    ;; Remove all draft voucher-type rows
     01 : WALK COLLECTION : HxcVcDraftVchs
-    02 :    SET VALUE : HxcVcDraftVchName : ""
+    02 :    DELETE OBJECT
     03 : END WALK
     04 : RETURN : Yes
+
+[Function: Hxc Seed Draft Vch Row]
+    ;; One blank row so Repeat Aggregate is editable
+    01 : INSERT COLLECTION OBJECT : HxcVcDraftVchs
+    02 : SET VALUE : HxcVcDraftVchName : ""
+    03 : SET TARGET : ..
+    04 : RETURN : Yes
+
+[Function: Hxc Parse Types Into Draft]
+    ;; Split saved CSV (type1,type2,) into Aggregate rows + trailing blank
+    Parameter : TypesCsv : String
+    Variable  : Piece : String
+    Variable  : Counter : Number
+    Variable  : ExpLen : Number
+    Variable  : Ch : String
+    01 : CALL : Hxc Clear Draft Vchs
+    02 : SET : Piece : ""
+    03 : SET : Counter : 0
+    04 : SET : ExpLen : $$StringLength:##TypesCsv
+    05 : WHILE : ##Counter < ##ExpLen
+    06 :    SET : Ch : $$StringPart:##TypesCsv:##Counter:1
+    07 :    IF : ##Ch = ","
+    08 :       IF : NOT $$IsEmpty:##Piece
+    09 :          INSERT COLLECTION OBJECT : HxcVcDraftVchs
+    10 :          SET VALUE : HxcVcDraftVchName : ##Piece
+    11 :          SET TARGET : ..
+    12 :       END IF
+    13 :       SET : Piece : ""
+    14 :    ELSE
+    15 :       SET : Piece : ##Piece + ##Ch
+    16 :    END IF
+    17 :    SET : Counter : ##Counter + 1
+    18 : END WHILE
+    19 : IF : NOT $$IsEmpty:##Piece
+    20 :    INSERT COLLECTION OBJECT : HxcVcDraftVchs
+    21 :    SET VALUE : HxcVcDraftVchName : ##Piece
+    22 :    SET TARGET : ..
+    23 : END IF
+    24 : CALL : Hxc Seed Draft Vch Row
+    25 : RETURN : Yes
 
 [Function: Hxc Vc Clear Draft]
     01 : CALL : Hxc Clear Fetch Vars
     02 : CALL : Hxc Clear Draft Vchs
-    03 : SET VALUE : HxcVcDraftName : ""
-    04 : SET VALUE : HxcVcDraftTemplate : ""
-    05 : SET VALUE : HxcVcDraftLang : "en"
-    06 : SET VALUE : HxcVcDraftMedia : "None"
-    07 : SET VALUE : HxcVcDraftAuto : No
-    08 : SET VALUE : HxcVcDraftConfirm : No
-    09 : SET VALUE : HxcVcDraftEditKey : ""
-    10 : SET VALUE : HxcVcDMKey1 : ""
-    11 : SET VALUE : HxcVcDMFld1 : ""
-    12 : SET VALUE : HxcVcDMKey2 : ""
-    13 : SET VALUE : HxcVcDMFld2 : ""
-    14 : SET VALUE : HxcVcDMKey3 : ""
-    15 : SET VALUE : HxcVcDMFld3 : ""
-    16 : SET VALUE : HxcVcDMKey4 : ""
-    17 : SET VALUE : HxcVcDMFld4 : ""
-    18 : RETURN : Yes
+    03 : CALL : Hxc Seed Draft Vch Row
+    04 : SET VALUE : HxcVcDraftName : ""
+    05 : SET VALUE : HxcVcDraftTemplate : ""
+    06 : SET VALUE : HxcVcDraftLang : "en"
+    07 : SET VALUE : HxcVcDraftMedia : "None"
+    08 : SET VALUE : HxcVcDraftAuto : No
+    09 : SET VALUE : HxcVcDraftConfirm : No
+    10 : SET VALUE : HxcVcDraftEditKey : ""
+    11 : SET VALUE : HxcVcDMKey1 : ""
+    12 : SET VALUE : HxcVcDMFld1 : ""
+    13 : SET VALUE : HxcVcDMKey2 : ""
+    14 : SET VALUE : HxcVcDMFld2 : ""
+    15 : SET VALUE : HxcVcDMKey3 : ""
+    16 : SET VALUE : HxcVcDMFld3 : ""
+    17 : SET VALUE : HxcVcDMKey4 : ""
+    18 : SET VALUE : HxcVcDMFld4 : ""
+    19 : RETURN : Yes
 
 [Function: Hxc Vc Commit Draft]
     Variable : Maps : String
@@ -876,24 +919,20 @@
     04 : END IF
     05 : CALL : Hxc Vc Clear Draft
     06 : SET VALUE : HxcVcDraftEditKey : ##EditKey
-    07 : WALK COLLECTION : Hxc Voucher Config Names
-    08 :    IF : $HxcVcName = ##EditKey
-    09 :       SET VALUE : HxcVcDraftName : $HxcVcName
-    10 :       SET VALUE : HxcVcDraftTemplate : $HxcVcTemplateName
-    11 :       SET VALUE : HxcVcDraftLang : $HxcVcLanguage
-    12 :       SET VALUE : HxcVcDraftMedia : $HxcVcMediaExport
-    13 :       SET VALUE : HxcVcDraftAuto : $HxcVcAutoSend
-    14 :       SET VALUE : HxcVcDraftConfirm : $HxcVcConfirmBeforeSend
-    15 :       SET : TypesRaw : $HxcVcVoucherTypes
-    16 :    END IF
-    17 : END WALK
-    18 : CALL : Hxc Clear Draft Vchs
-    19 : IF : NOT $$IsEmpty:##TypesRaw
-    20 :    INSERT COLLECTION OBJECT : HxcVcDraftVchs
-    21 :    SET VALUE : HxcVcDraftVchName : ##TypesRaw
-    22 :    SET TARGET : ..
-    23 : END IF
-    24 : RETURN : Yes
+    07 : SET : TypesRaw : ""
+    08 : WALK COLLECTION : Hxc Voucher Config Names
+    09 :    IF : $HxcVcName = ##EditKey
+    10 :       SET VALUE : HxcVcDraftName : $HxcVcName
+    11 :       SET VALUE : HxcVcDraftTemplate : $HxcVcTemplateName
+    12 :       SET VALUE : HxcVcDraftLang : $HxcVcLanguage
+    13 :       SET VALUE : HxcVcDraftMedia : $HxcVcMediaExport
+    14 :       SET VALUE : HxcVcDraftAuto : $HxcVcAutoSend
+    15 :       SET VALUE : HxcVcDraftConfirm : $HxcVcConfirmBeforeSend
+    16 :       SET : TypesRaw : $HxcVcVoucherTypes
+    17 :    END IF
+    18 : END WALK
+    19 : CALL : Hxc Parse Types Into Draft : ##TypesRaw
+    20 : RETURN : Yes
 
 [Report: Helixcer Voucher Config Alter]
     Form   : Helixcer Voucher Config Alter

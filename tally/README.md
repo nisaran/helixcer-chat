@@ -1,13 +1,18 @@
-# Helixcer Chat for TallyPrime — build 350
+# Helixcer Chat for TallyPrime — build 351
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 350)**.
+Title must show **(build 351)**.
 
-## Create
-1. Config Name → Template Name → Language → **Enter** (fetch)
-2. Preview + **Map Var** rows appear only after fetch (and only for returned vars)
-3. Media / voucher types / settings → Ctrl+A
+## Create Config
 
-## Fix
-Build 349 still showed empty `Map Var` labels because `Medium Prompt` was never `Inactive`. Build 350 uses prompt Fields with the same Inactive condition as the map values.
+1. Config Name → Template → Language **Enter** (fetch)
+2. Preview + **variable mapping** — only fetched vars, **max 4**
+3. Media Header
+4. **Voucher Types** — dynamic rows (pick a type; blank row ends the list)
+5. Auto / Confirm → **Ctrl+A**
+
+## Dynamic behaviour
+
+- Mapping rows appear only after a successful template fetch; at most four API variables are mapped (extras ignored).
+- Voucher types use a repeating Aggregate list (not fixed slots 1–8).
