@@ -33,6 +33,14 @@
     Type       : String
     Persistent : Yes
 
+;; Draft holds whatever is currently in the API Key field (including ******)
+[Variable: HxcApiKeyDraft]
+    Type : String
+
+;; Session-only: after a fetch, the next Form Accept must stay on the form
+[Variable: HxcJustFetched]
+    Type : Logical
+
 [System: Variable]
     HxcWorkspaceId      : ""
     HxcChannelId        : ""
@@ -40,6 +48,8 @@
     HxcWorkspaceName    : ""
     HxcChannelName      : ""
     HxcConnectionStatus : ""
+    HxcApiKeyDraft      : ""
+    HxcJustFetched      : No
 
 [System: Formula]
     Hxc Connection Url  : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcChannelId
@@ -71,7 +81,7 @@
     Skip   : Yes
 
 ;; ---------------------------------------------------------------------------
-;; Fetch connection (Tally Progress Bar = default loader)
+;; Fetch + Form Accept control
 ;; ---------------------------------------------------------------------------
 
 [Function: Hxc Apply Connection Response]
@@ -95,35 +105,57 @@
     17 : END WALK
     18 : RETURN : Yes
 
-[Function: Hxc Accept Api Key]
-    Variable : Input Key : String
-    01 : SET : Input Key : $Value
-    02 : IF : $$IsEmpty:##Input Key OR ##Input Key = "******" OR ##Input Key = "********"
-    03 :    ;; Mask accepted (no edit) — re-fetch with the saved key
-    04 :    CALL : Hxc Fetch Connection
-    05 :    RETURN : Yes
-    06 : END IF
-    07 : SET : HxcApiKey : ##Input Key
-    08 : CALL : Hxc Fetch Connection
-    09 : RETURN : Yes
+;; Promote draft → real key only when it looks like a real key (not ****** / *)
+[Function: Hxc Apply Api Key Draft]
+    01 : IF : $$NumberOfChar:##HxcApiKeyDraft > 20
+    02 :    SET : HxcApiKey : ##HxcApiKeyDraft
+    03 : END IF
+    04 : RETURN : Yes
 
 [Function: Hxc Fetch Connection]
-    01 : IF : $$IsEmpty:##HxcWorkspaceId OR $$IsEmpty:##HxcChannelId OR $$IsEmpty:##HxcApiKey
-    02 :    SET : HxcWorkspaceName : ""
-    03 :    SET : HxcChannelName : ""
-    04 :    SET : HxcConnectionStatus : ""
-    05 :    RETURN : No
-    06 : END IF
-    07 : SET : HxcWorkspaceName : ""
-    08 : SET : HxcChannelName : ""
-    09 : SET : HxcConnectionStatus : ""
-    10 : Start Progress : 1 : "Helixcer Chat" : "Verifying connection" : "Fetching workspace and channel"
-    11 : HTTP Request : @@HxcConnectionUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Connection Response
-    12 : End Progress
-    13 : IF : $$IsEmpty:##HxcWorkspaceName
-    14 :    SET : HxcConnectionStatus : "Could not fetch names. Check IDs and API Key."
-    15 : END IF
-    16 : RETURN : Yes
+    01 : CALL : Hxc Apply Api Key Draft
+    02 : SET : HxcJustFetched : No
+    03 : IF : $$IsEmpty:##HxcWorkspaceId OR $$IsEmpty:##HxcChannelId OR $$IsEmpty:##HxcApiKey
+    04 :    SET : HxcWorkspaceName : ""
+    05 :    SET : HxcChannelName : ""
+    06 :    SET : HxcConnectionStatus : ""
+    07 :    RETURN : No
+    08 : END IF
+    09 : SET : HxcWorkspaceName : ""
+    10 : SET : HxcChannelName : ""
+    11 : SET : HxcConnectionStatus : ""
+    12 : Start Progress : 1 : "Helixcer Chat" : "Verifying connection" : "Fetching workspace and channel"
+    13 : HTTP Request : @@HxcConnectionUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Connection Response
+    14 : End Progress
+    15 : IF : $$IsEmpty:##HxcWorkspaceName
+    16 :    SET : HxcConnectionStatus : "Could not fetch names. Check IDs and API Key."
+    17 : END IF
+    18 : SET : HxcJustFetched : Yes
+    19 : RETURN : Yes
+
+;; Enter on API Key = Form Accept on last field. Fetch first; do not close until a
+;; second Enter/Ctrl+A after details are shown.
+[Function: Hxc On Form Accept]
+    01 : CALL : Hxc Apply Api Key Draft
+    02 : IF : ##HxcJustFetched
+    03 :    SET : HxcJustFetched : No
+    04 :    RETURN : No
+    05 : END IF
+    06 : IF : $$IsEmpty:##HxcWorkspaceName OR ##HxcConnectionStatus != "Connected"
+    07 :    CALL : Hxc Fetch Connection
+    08 :    SET : HxcJustFetched : No
+    09 :    RETURN : No
+    10 : END IF
+    11 : Form Accept
+    12 : RETURN : Yes
+
+[Function: Hxc Accept Api Key]
+    01 : IF : $$NumberOfChar:$Value > 20
+    02 :    SET : HxcApiKeyDraft : $Value
+    03 :    SET : HxcApiKey : $Value
+    04 : END IF
+    05 : CALL : Hxc Fetch Connection
+    06 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; Gateway of Tally → Helixcer Chat
@@ -150,9 +182,10 @@
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
     Button : Form Accept, Form Cancel, Hxc Fetch Names Button
-    ;; Rebuild when names arrive so blue detail lines appear
     Option : Hxc Settings Refresh : ##HxcWorkspaceName
     Option : Hxc Settings Refresh Status : ##HxcConnectionStatus
+    ;; MUST call our function (which Form Accepts only when Connected)
+    On     : Form Accept : Yes : Call : Hxc On Form Accept
 
 [!Form: Hxc Settings Refresh]
 [!Form: Hxc Settings Refresh Status]
@@ -167,8 +200,7 @@
              Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line, +
              Hxc Details Spacer Line, +
              Hxc Connection Status Line, Hxc Workspace Name Line, Hxc Channel Name Line, +
-             Hxc Save Hint Line, +
-             Hxc Save Line
+             Hxc Save Hint Line
     Scroll : Vertical
 
 [Line: Hxc Api Settings Title]
@@ -190,7 +222,6 @@
 [Field: Hxc Workspace Id]
     Use      : Name Field
     Set as   : ##HxcWorkspaceId
-    ;; No = save on Form Accept (avoids refresh wiping). SET also on leave for fetch.
     Modifies : HxcWorkspaceId : No
     Width    : 60
     Max      : 64
@@ -212,15 +243,15 @@
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Api Key Line]
-    Fields : Medium Prompt, Hxc Api Key Password
+    Fields : Medium Prompt, Hxc Api Key
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
-;; "Password" in the field name masks typed characters as *
-;; Enter here must NOT close the form — Hxc Save Field is the last input field
-[Field: Hxc Api Key Password]
+;; Masked display. Draft captures edits; real key only updates when draft is long.
+[Field: Hxc Api Key]
     Use      : Name Field
     Set as   : @@HxcApiKeyMasked
+    Modifies : HxcApiKeyDraft : Yes
     Width    : 60
     Max      : 200
     On       : Accept : Yes : Call : Hxc Accept Api Key
@@ -293,20 +324,3 @@
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
-
-;; Always last editable field so Enter on API Key only verifies (does not Form Accept)
-[Line: Hxc Save Line]
-    Fields : Medium Prompt, Hxc Save Field
-    Local  : Field : Medium Prompt : Set as : If @@HxcDetailsVisible THEN "Save" ELSE " "
-    Local  : Field : Medium Prompt : Width  : 20
-    Local  : Field : Medium Prompt : Color  : Blue
-
-[Field: Hxc Save Field]
-    Use      : Name Field
-    Set as   : If @@HxcDetailsVisible THEN "Yes" ELSE " "
-    Set Always: Yes
-    Width    : 10
-    Max      : 10
-    Color    : Blue
-    Skip     : No
-    On       : Accept : Yes : Field Accept
