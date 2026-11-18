@@ -15,6 +15,6 @@ No Helixcer API call on this screen.
 
 ## Status
 
-1. Open **Status** (uses saved credentials).
-2. Shows **Status**, **Workspace**, **Channel** (platform in brackets) from `GET /api/v1/connection`.
-3. **Alt+R** refreshes.
+1. Open **Status** (safe open — no fetch yet).
+2. Press **Alt+R** to `GET /api/v1/connection` with saved credentials.
+3. Shows **Status**, **Workspace**, **Channel** (platform in brackets).
