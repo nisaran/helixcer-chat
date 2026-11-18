@@ -1,12 +1,11 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 344-voucher-config-forms
-;; Title must show "(build 344)".
+;; BUILD: 345-voucher-subform
+;; Title must show "(build 345)".
 ;;
-;; Voucher Config: Create / Alter / List.
-;; Create & Alter = popup form (labeled fields). List = read-only table.
-;; Persist via Company Aggregate UDF (procedural INSERT / WALK + ALTER TARGET).
-;; API Settings unchanged: Company Storage + Ctrl+A.
-;; No template fetch yet (phase 2).
+;; Crash fix: build 344 used Display + custom Form Accept / INSERT — c0000005.
+;; Voucher Config now uses ONLY Alter + Object Company + Storage (same as API Settings).
+;; Create/Alter: Config Name line → SubForm popup for the rest (Tally SubForm pattern).
+;; List: Alter read-only. No Display of Company reports. No On Form Accept.
 
 ;; ---------------------------------------------------------------------------
 ;; Company UDFs
@@ -26,7 +25,7 @@
     HxcVcConfirmBeforeSend : Logical   : 25117
 
 ;; ---------------------------------------------------------------------------
-;; Variables — Status mirrors + Voucher Config form buffers
+;; Status mirrors
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcSysWorkspaceId]
@@ -53,33 +52,6 @@
     Type       : String
     Persistent : Yes
 
-[Variable: HxcVcNameVar]
-    Type : String
-
-[Variable: HxcVcTemplateVar]
-    Type : String
-
-[Variable: HxcVcLangVar]
-    Type : String
-
-[Variable: HxcVcTypesVar]
-    Type : String
-
-[Variable: HxcVcMediaVar]
-    Type : String
-
-[Variable: HxcVcAutoVar]
-    Type : Logical
-
-[Variable: HxcVcConfirmVar]
-    Type : Logical
-
-[Variable: HxcVcEditKey]
-    Type : String
-
-[Variable: HxcVcSaveOk]
-    Type : Logical
-
 [System: Variable]
     HxcSysWorkspaceId   : ""
     HxcSysChannelId     : ""
@@ -87,22 +59,13 @@
     HxcWorkspaceName    : ""
     HxcChannelName      : ""
     HxcConnectionStatus : ""
-    HxcVcNameVar        : ""
-    HxcVcTemplateVar    : ""
-    HxcVcLangVar        : "en"
-    HxcVcTypesVar       : ""
-    HxcVcMediaVar       : "None"
-    HxcVcAutoVar        : No
-    HxcVcConfirmVar     : No
-    HxcVcEditKey        : ""
-    HxcVcSaveOk         : No
 
 [System: Formula]
     Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcSysChannelId
     Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
 
 ;; ---------------------------------------------------------------------------
-;; Tables / collections
+;; Tables
 ;; ---------------------------------------------------------------------------
 
 [Collection: Hxc Media Export List]
@@ -111,13 +74,6 @@
 [Collection: Hxc Voucher Type List]
     Type   : Voucher Type
     Format : $Name, 40
-
-[Collection: Hxc Voucher Config Names]
-    Type     : HxcVoucherConfigs : Company
-    Child Of : ##SVCurrentCompany
-    Format   : $HxcVcName, 40
-    Fetch    : HxcVcName, HxcVcTemplateName, HxcVcLanguage, HxcVcVoucherTypes, HxcVcMediaExport, HxcVcAutoSend, HxcVcConfirmBeforeSend
-    Title    : "Voucher Configs"
 
 ;; ---------------------------------------------------------------------------
 ;; HTTP (Status)
@@ -205,110 +161,6 @@
     07 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
-;; Voucher Config — clear / save / load / update
-;; ---------------------------------------------------------------------------
-
-[Function: Hxc Vc Clear Form]
-    01 : SET : HxcVcNameVar     : ""
-    02 : SET : HxcVcTemplateVar : ""
-    03 : SET : HxcVcLangVar     : "en"
-    04 : SET : HxcVcTypesVar    : ""
-    05 : SET : HxcVcMediaVar    : "None"
-    06 : SET : HxcVcAutoVar     : No
-    07 : SET : HxcVcConfirmVar  : No
-    08 : SET : HxcVcEditKey     : ""
-    09 : SET : HxcVcSaveOk      : No
-    10 : RETURN : Yes
-
-[Function: Hxc Vc Save New]
-    01 : SET : HxcVcSaveOk : No
-    02 : IF : $$IsEmpty:##HxcVcNameVar
-    03 :    Msg Box : "Helixcer Voucher Config" : "Config Name is required."
-    04 :    RETURN : No
-    05 : END IF
-    06 : IF : $$IsEmpty:##HxcVcTemplateVar
-    07 :    Msg Box : "Helixcer Voucher Config" : "Template is required."
-    08 :    RETURN : No
-    09 : END IF
-    10 : NEW OBJECT : Company : ##SVCurrentCompany
-    11 : INSERT COLLECTION OBJECT : HxcVoucherConfigs
-    12 : SET VALUE : HxcVcName : ##HxcVcNameVar
-    13 : SET VALUE : HxcVcTemplateName : ##HxcVcTemplateVar
-    14 : SET VALUE : HxcVcLanguage : ##HxcVcLangVar
-    15 : SET VALUE : HxcVcVoucherTypes : ##HxcVcTypesVar
-    16 : SET VALUE : HxcVcMediaExport : ##HxcVcMediaVar
-    17 : SET VALUE : HxcVcAutoSend : ##HxcVcAutoVar
-    18 : SET VALUE : HxcVcConfirmBeforeSend : ##HxcVcConfirmVar
-    19 : SET TARGET : ..
-    20 : ALTER TARGET
-    21 : SET : HxcVcSaveOk : Yes
-    22 : Msg Box : "Helixcer Voucher Config" : "Saved: " + ##HxcVcNameVar
-    23 : RETURN : Yes
-
-[Function: Hxc Vc Load For Alter]
-    01 : SET : HxcVcSaveOk : No
-    02 : IF : $$IsEmpty:##HxcVcEditKey
-    03 :    Msg Box : "Helixcer Voucher Config" : "Select a Config Name."
-    04 :    RETURN : No
-    05 : END IF
-    06 : SET : HxcVcNameVar     : ""
-    07 : SET : HxcVcTemplateVar : ""
-    08 : SET : HxcVcLangVar     : "en"
-    09 : SET : HxcVcTypesVar    : ""
-    10 : SET : HxcVcMediaVar    : "None"
-    11 : SET : HxcVcAutoVar     : No
-    12 : SET : HxcVcConfirmVar  : No
-    13 : WALK COLLECTION : Hxc Voucher Config Names
-    14 :    IF : $HxcVcName = ##HxcVcEditKey
-    15 :       SET : HxcVcNameVar     : $HxcVcName
-    16 :       SET : HxcVcTemplateVar : $HxcVcTemplateName
-    17 :       SET : HxcVcLangVar     : $HxcVcLanguage
-    18 :       SET : HxcVcTypesVar    : $HxcVcVoucherTypes
-    19 :       SET : HxcVcMediaVar    : $HxcVcMediaExport
-    20 :       SET : HxcVcAutoVar     : $HxcVcAutoSend
-    21 :       SET : HxcVcConfirmVar  : $HxcVcConfirmBeforeSend
-    22 :    END IF
-    23 : END WALK
-    24 : IF : $$IsEmpty:##HxcVcNameVar
-    25 :    Msg Box : "Helixcer Voucher Config" : "Config not found: " + ##HxcVcEditKey
-    26 :    RETURN : No
-    27 : END IF
-    28 : RETURN : Yes
-
-[Function: Hxc Vc Save Alter]
-    01 : SET : HxcVcSaveOk : No
-    02 : IF : $$IsEmpty:##HxcVcEditKey
-    03 :    Msg Box : "Helixcer Voucher Config" : "No config selected."
-    04 :    RETURN : No
-    05 : END IF
-    06 : IF : $$IsEmpty:##HxcVcNameVar
-    07 :    Msg Box : "Helixcer Voucher Config" : "Config Name is required."
-    08 :    RETURN : No
-    09 : END IF
-    10 : IF : $$IsEmpty:##HxcVcTemplateVar
-    11 :    Msg Box : "Helixcer Voucher Config" : "Template is required."
-    12 :    RETURN : No
-    13 : END IF
-    14 : NEW OBJECT : Company : ##SVCurrentCompany
-    15 : WALK COLLECTION : HxcVoucherConfigs
-    16 :    IF : $HxcVcName = ##HxcVcEditKey
-    17 :       SET TARGET
-    18 :       SET VALUE : HxcVcName : ##HxcVcNameVar
-    19 :       SET VALUE : HxcVcTemplateName : ##HxcVcTemplateVar
-    20 :       SET VALUE : HxcVcLanguage : ##HxcVcLangVar
-    21 :       SET VALUE : HxcVcVoucherTypes : ##HxcVcTypesVar
-    22 :       SET VALUE : HxcVcMediaExport : ##HxcVcMediaVar
-    23 :       SET VALUE : HxcVcAutoSend : ##HxcVcAutoVar
-    24 :       SET VALUE : HxcVcConfirmBeforeSend : ##HxcVcConfirmVar
-    25 :       SET TARGET : ..
-    26 :    END IF
-    27 : END WALK
-    28 : ALTER TARGET
-    29 : SET : HxcVcSaveOk : Yes
-    30 : Msg Box : "Helixcer Voucher Config" : "Updated: " + ##HxcVcNameVar
-    31 : RETURN : Yes
-
-;; ---------------------------------------------------------------------------
 ;; Menu
 ;; ---------------------------------------------------------------------------
 
@@ -317,18 +169,18 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    Key Item : API Settings   : S : Alter   : Helixcer API Settings
-    Key Item : Voucher Config : V : Menu    : Helixcer Voucher Config Menu
-    Key Item : Status         : T : Call    : Hxc Show Status
+    Key Item : API Settings   : S : Alter : Helixcer API Settings
+    Key Item : Voucher Config : V : Menu  : Helixcer Voucher Config Menu
+    Key Item : Status         : T : Call  : Hxc Show Status
     Key Item : About          : A : Display : Helixcer Chat About
-    Key Item : Back           : B : Menu    : Gateway of Tally
+    Key Item : Back           : B : Menu  : Gateway of Tally
 
 [Menu: Helixcer Voucher Config Menu]
     Title    : "Voucher Config"
-    Key Item : Create Config : C : Display : Helixcer Voucher Config Create
-    Key Item : Alter Config  : A : Display : Helixcer Voucher Config Alter
-    Key Item : List Configs  : L : Display : Helixcer Voucher Config List
-    Key Item : Back          : B : Menu    : Helixcer Chat Menu
+    Key Item : Create Config : C : Alter : Helixcer Voucher Config Create
+    Key Item : Alter Config  : A : Alter : Helixcer Voucher Config Alter
+    Key Item : List Configs  : L : Alter : Helixcer Voucher Config List
+    Key Item : Back          : B : Menu  : Helixcer Chat Menu
 
 ;; ---------------------------------------------------------------------------
 ;; API Settings
@@ -354,7 +206,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 344)"
+    Set as    : "Helixcer Chat — API Settings (build 345)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -413,213 +265,222 @@
     Skip      : Yes
 
 ;; ---------------------------------------------------------------------------
-;; Voucher Config — CREATE (popup form)
+;; Voucher Config — CREATE
+;; Blank Config Name line → SubForm popup (labeled fields) → Ctrl+A
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Voucher Config Create]
-    Form  : Helixcer Voucher Config Create
-    Title : "Create Voucher Config"
+    Form   : Helixcer Voucher Config Create
+    Title  : "Create Voucher Config"
+    Object : Company
 
 [Form: Helixcer Voucher Config Create]
-    Part       : Hxc Vc Form Title Create, Hxc Vc Form Body, Hxc Vc Form Hint Create
-    Button     : Form Accept, Form Cancel
-    Full Width : No
-    Height     : 80% Screen
-    Option     : Small Size Form
-    On         : Form Create : Yes : CALL : Hxc Vc Clear Form
-    On         : Form Accept : Yes : CALL : Hxc Vc Save New
-    On         : Form Accept : ##HxcVcSaveOk : Form Accept
+    Part   : Hxc Vc Cr Title Part, Hxc Vc Cr Name Part, Hxc Vc Cr Hint Part
+    Button : Form Accept, Form Cancel
 
-[Part: Hxc Vc Form Title Create]
-    Lines : Hxc Vc Form Title Create Line
+[Part: Hxc Vc Cr Title Part]
+    Lines : Hxc Vc Cr Title Line
 
-[Line: Hxc Vc Form Title Create Line]
-    Field : Hxc Vc Form Title Create
+[Line: Hxc Vc Cr Title Line]
+    Field : Hxc Vc Cr Title
 
-[Field: Hxc Vc Form Title Create]
+[Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 344)"
+    Set as    : "Create Voucher Config (build 345)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
 
-[Part: Hxc Vc Form Body]
-    Lines  : Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
-             Hxc Vc F Types Line, Hxc Vc F Media Line, Hxc Vc F Auto Line, Hxc Vc F Confirm Line
+[Part: Hxc Vc Cr Name Part]
+    Lines    : Hxc Vc Cr Name Line
+    Repeat   : Hxc Vc Cr Name Line : HxcVoucherConfigs
+    Break On : $$IsEmpty:$HxcVcName
+    Scroll   : Vertical
+
+[Line: Hxc Vc Cr Name Line]
+    Fields : Medium Prompt, Hxc Vc Cr Name Fld
+    Local  : Field : Medium Prompt : Set as : "Config Name"
+    Local  : Field : Medium Prompt : Width  : 18
+
+[Field: Hxc Vc Cr Name Fld]
+    Use      : Name Field
+    Storage  : HxcVcName
+    Set as   : $HxcVcName
+    Width    : 40
+    Max      : 60
+    ;; Popup detail form when name is entered (create or edit this row)
+    Sub Form : Helixcer Voucher Config Detail : NOT $$IsEmpty:$Value
+
+[Part: Hxc Vc Cr Hint Part]
+    Lines : Hxc Vc Cr Hint Line
+
+[Line: Hxc Vc Cr Hint Line]
+    Field : Hxc Vc Cr Hint
+
+[Field: Hxc Vc Cr Hint]
+    Use       : Name Field
+    Set as    : "Type a Config Name on the blank line → detail form opens. Then Ctrl+A."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+;; ---------------------------------------------------------------------------
+;; Voucher Config — ALTER (same Storage/SubForm; title differs)
+;; ---------------------------------------------------------------------------
+
+[Report: Helixcer Voucher Config Alter]
+    Form   : Helixcer Voucher Config Alter
+    Title  : "Alter Voucher Config"
+    Object : Company
+
+[Form: Helixcer Voucher Config Alter]
+    Part   : Hxc Vc Al Title Part, Hxc Vc Al Name Part, Hxc Vc Al Hint Part
+    Button : Form Accept, Form Cancel
+
+[Part: Hxc Vc Al Title Part]
+    Lines : Hxc Vc Al Title Line
+
+[Line: Hxc Vc Al Title Line]
+    Field : Hxc Vc Al Title
+
+[Field: Hxc Vc Al Title]
+    Use       : Name Field
+    Set as    : "Alter Voucher Config (build 345)"
+    Style     : Bold
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Part: Hxc Vc Al Name Part]
+    Lines    : Hxc Vc Al Name Line
+    Repeat   : Hxc Vc Al Name Line : HxcVoucherConfigs
+    Break On : $$IsEmpty:$HxcVcName
+    Scroll   : Vertical
+
+[Line: Hxc Vc Al Name Line]
+    Fields : Medium Prompt, Hxc Vc Al Name Fld
+    Local  : Field : Medium Prompt : Set as : "Config Name"
+    Local  : Field : Medium Prompt : Width  : 18
+
+[Field: Hxc Vc Al Name Fld]
+    Use      : Name Field
+    Storage  : HxcVcName
+    Set as   : $HxcVcName
+    Width    : 40
+    Max      : 60
+    Sub Form : Helixcer Voucher Config Detail : NOT $$IsEmpty:$Value
+
+[Part: Hxc Vc Al Hint Part]
+    Lines : Hxc Vc Al Hint Line
+
+[Line: Hxc Vc Al Hint Line]
+    Field : Hxc Vc Al Hint
+
+[Field: Hxc Vc Al Hint]
+    Use       : Name Field
+    Set as    : "Select a Config Name → detail form opens. Edit, then Ctrl+A."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+;; ---------------------------------------------------------------------------
+;; Voucher Config — DETAIL SubForm (popup labeled fields)
+;; Inherits Aggregate object from Config Name field. No Object / no Repeat.
+;; ---------------------------------------------------------------------------
+
+[Report: Helixcer Voucher Config Detail]
+    Form : Helixcer Voucher Config Detail
+    Auto : Yes
+
+[Form: Helixcer Voucher Config Detail]
+    Part       : FormSubTitle, Hxc Vc Det Body
+    Button     : Form Accept, Form Cancel
+    Full Width : No
+    Height     : 80% Screen
+    Option     : Small Size Form
+    Local      : Field : Form SubTitle : Info : "Voucher Config Details"
+
+[Part: Hxc Vc Det Body]
+    Lines  : Hxc Vc Det Template Line, Hxc Vc Det Lang Line, Hxc Vc Det Types Line, +
+             Hxc Vc Det Media Line, Hxc Vc Det Auto Line, Hxc Vc Det Confirm Line
     Scroll : Vertical
 
-[Line: Hxc Vc F Name Line]
-    Fields : Medium Prompt, Hxc Vc F Name
-    Local  : Field : Medium Prompt : Set as : "Config Name"
-    Local  : Field : Medium Prompt : Width  : 22
-
-[Field: Hxc Vc F Name]
-    Use        : Name Field
-    Modifies   : HxcVcNameVar
-    Set as     : ##HxcVcNameVar
-    Set Always : Yes
-    Width      : 40
-    Max        : 60
-
-[Line: Hxc Vc F Template Line]
-    Fields : Medium Prompt, Hxc Vc F Template
+[Line: Hxc Vc Det Template Line]
+    Fields : Medium Prompt, Hxc Vc Det Template
     Local  : Field : Medium Prompt : Set as : "Template"
     Local  : Field : Medium Prompt : Width  : 22
 
-[Field: Hxc Vc F Template]
-    Use        : Name Field
-    Modifies   : HxcVcTemplateVar
-    Set as     : ##HxcVcTemplateVar
-    Set Always : Yes
-    Width      : 40
-    Max        : 80
+[Field: Hxc Vc Det Template]
+    Use      : Name Field
+    Storage  : HxcVcTemplateName
+    Set as   : $HxcVcTemplateName
+    Width    : 40
+    Max      : 80
 
-[Line: Hxc Vc F Lang Line]
-    Fields : Medium Prompt, Hxc Vc F Lang
+[Line: Hxc Vc Det Lang Line]
+    Fields : Medium Prompt, Hxc Vc Det Lang
     Local  : Field : Medium Prompt : Set as : "Language"
     Local  : Field : Medium Prompt : Width  : 22
 
-[Field: Hxc Vc F Lang]
-    Use        : Name Field
-    Modifies   : HxcVcLangVar
-    Set as     : ##HxcVcLangVar
-    Set Always : Yes
-    Width      : 16
-    Max        : 16
+[Field: Hxc Vc Det Lang]
+    Use      : Name Field
+    Storage  : HxcVcLanguage
+    Set as   : If $$IsEmpty:$HxcVcLanguage THEN "en" ELSE $HxcVcLanguage
+    Width    : 16
+    Max      : 16
 
-[Line: Hxc Vc F Types Line]
-    Fields : Medium Prompt, Hxc Vc F Types
+[Line: Hxc Vc Det Types Line]
+    Fields : Medium Prompt, Hxc Vc Det Types
     Local  : Field : Medium Prompt : Set as : "Voucher Type"
     Local  : Field : Medium Prompt : Width  : 22
 
-[Field: Hxc Vc F Types]
-    Use        : Name Field
-    Modifies   : HxcVcTypesVar
-    Set as     : ##HxcVcTypesVar
-    Set Always : Yes
-    Table      : Hxc Voucher Type List, Not Applicable
-    Width      : 40
-    Max        : 120
+[Field: Hxc Vc Det Types]
+    Use      : Name Field
+    Storage  : HxcVcVoucherTypes
+    Set as   : $HxcVcVoucherTypes
+    Table    : Hxc Voucher Type List, Not Applicable
+    Width    : 40
+    Max      : 120
 
-[Line: Hxc Vc F Media Line]
-    Fields : Medium Prompt, Hxc Vc F Media
+[Line: Hxc Vc Det Media Line]
+    Fields : Medium Prompt, Hxc Vc Det Media
     Local  : Field : Medium Prompt : Set as : "Media Header"
     Local  : Field : Medium Prompt : Width  : 22
 
-[Field: Hxc Vc F Media]
+[Field: Hxc Vc Det Media]
     Use        : Name Field
-    Modifies   : HxcVcMediaVar
-    Set as     : ##HxcVcMediaVar
-    Set Always : Yes
+    Storage    : HxcVcMediaExport
+    Set as     : If $$IsEmpty:$HxcVcMediaExport THEN "None" ELSE $HxcVcMediaExport
     Table      : Hxc Media Export List
     Show Table : Always
     Width      : 40
     Max        : 40
 
-[Line: Hxc Vc F Auto Line]
-    Fields : Medium Prompt, Hxc Vc F Auto
+[Line: Hxc Vc Det Auto Line]
+    Fields : Medium Prompt, Hxc Vc Det Auto
     Local  : Field : Medium Prompt : Set as : "Auto Select after save?"
     Local  : Field : Medium Prompt : Width  : 22
 
-[Field: Hxc Vc F Auto]
-    Use        : Logical Field
-    Modifies   : HxcVcAutoVar
-    Set as     : ##HxcVcAutoVar
-    Set Always : Yes
-    Width      : 8
+[Field: Hxc Vc Det Auto]
+    Use      : Logical Field
+    Storage  : HxcVcAutoSend
+    Set as   : $HxcVcAutoSend
+    Width    : 8
 
-[Line: Hxc Vc F Confirm Line]
-    Fields : Medium Prompt, Hxc Vc F Confirm
+[Line: Hxc Vc Det Confirm Line]
+    Fields : Medium Prompt, Hxc Vc Det Confirm
     Local  : Field : Medium Prompt : Set as : "Confirm before send?"
     Local  : Field : Medium Prompt : Width  : 22
 
-[Field: Hxc Vc F Confirm]
-    Use        : Logical Field
-    Modifies   : HxcVcConfirmVar
-    Set as     : ##HxcVcConfirmVar
-    Set Always : Yes
-    Width      : 8
-
-[Part: Hxc Vc Form Hint Create]
-    Lines : Hxc Vc Form Hint Create Line
-
-[Line: Hxc Vc Form Hint Create Line]
-    Field : Hxc Vc Form Hint Create
-
-[Field: Hxc Vc Form Hint Create]
-    Use       : Name Field
-    Set as    : "Fill fields, then Ctrl+A to save. Template fetch comes in next phase."
-    Align     : Centre
-    FullWidth : Yes
-    Skip      : Yes
+[Field: Hxc Vc Det Confirm]
+    Use      : Logical Field
+    Storage  : HxcVcConfirmBeforeSend
+    Set as   : $HxcVcConfirmBeforeSend
+    Width    : 8
 
 ;; ---------------------------------------------------------------------------
-;; Voucher Config — ALTER (pick name, then same labeled form)
-;; ---------------------------------------------------------------------------
-
-[Report: Helixcer Voucher Config Alter]
-    Form  : Helixcer Voucher Config Alter
-    Title : "Alter Voucher Config"
-
-[Form: Helixcer Voucher Config Alter]
-    Part       : Hxc Vc Form Title Alter, Hxc Vc Alter Pick Part, Hxc Vc Form Body, Hxc Vc Form Hint Alter
-    Button     : Form Accept, Form Cancel
-    Full Width : No
-    Height     : 85% Screen
-    Option     : Small Size Form
-    On         : Form Create : Yes : CALL : Hxc Vc Clear Form
-    On         : Form Accept : Yes : CALL : Hxc Vc Save Alter
-    On         : Form Accept : ##HxcVcSaveOk : Form Accept
-
-[Part: Hxc Vc Form Title Alter]
-    Lines : Hxc Vc Form Title Alter Line
-
-[Line: Hxc Vc Form Title Alter Line]
-    Field : Hxc Vc Form Title Alter
-
-[Field: Hxc Vc Form Title Alter]
-    Use       : Name Field
-    Set as    : "Alter Voucher Config (build 344)"
-    Style     : Bold
-    Align     : Centre
-    FullWidth : Yes
-    Skip      : Yes
-
-[Part: Hxc Vc Alter Pick Part]
-    Lines : Hxc Vc Alter Pick Line
-
-[Line: Hxc Vc Alter Pick Line]
-    Fields : Medium Prompt, Hxc Vc Alter Pick
-    Local  : Field : Medium Prompt : Set as : "Select Config"
-    Local  : Field : Medium Prompt : Width  : 22
-
-[Field: Hxc Vc Alter Pick]
-    Use        : Name Field
-    Modifies   : HxcVcEditKey
-    Set as     : ##HxcVcEditKey
-    Table      : Hxc Voucher Config Names
-    Show Table : Always
-    Width      : 40
-    Max        : 60
-    On         : Accept : Yes : CALL : Hxc Vc Load For Alter
-    On         : Accept : Yes : Field Accept
-
-[Part: Hxc Vc Form Hint Alter]
-    Lines : Hxc Vc Form Hint Alter Line
-
-[Line: Hxc Vc Form Hint Alter Line]
-    Field : Hxc Vc Form Hint Alter
-
-[Field: Hxc Vc Form Hint Alter]
-    Use       : Name Field
-    Set as    : "Select config to load, edit fields, Ctrl+A to update."
-    Align     : Centre
-    FullWidth : Yes
-    Skip      : Yes
-
-;; ---------------------------------------------------------------------------
-;; Voucher Config — LIST (read-only)
+;; Voucher Config — LIST (Alter + Skip only — Display+Company crashed before)
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Voucher Config List]
@@ -628,119 +489,120 @@
     Object : Company
 
 [Form: Helixcer Voucher Config List]
-    Part : Hxc Vc List Title Part, Hxc Vc List Part, Hxc Vc List Hint Part
+    Part   : Hxc Vc Ls Title Part, Hxc Vc Ls Part, Hxc Vc Ls Hint Part
+    Button : Form Cancel
 
-[Part: Hxc Vc List Title Part]
-    Lines : Hxc Vc List Title Line
+[Part: Hxc Vc Ls Title Part]
+    Lines : Hxc Vc Ls Title Line
 
-[Line: Hxc Vc List Title Line]
-    Field : Hxc Vc List Title
+[Line: Hxc Vc Ls Title Line]
+    Field : Hxc Vc Ls Title
 
-[Field: Hxc Vc List Title]
+[Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — Voucher Config List (build 344)"
+    Set as    : "Voucher Config List (build 345)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
 
-[Part: Hxc Vc List Part]
-    Lines    : Hxc Vc List Header Line, Hxc Vc List Data Line
-    Repeat   : Hxc Vc List Data Line : HxcVoucherConfigs
+[Part: Hxc Vc Ls Part]
+    Lines    : Hxc Vc Ls Header Line, Hxc Vc Ls Data Line
+    Repeat   : Hxc Vc Ls Data Line : HxcVoucherConfigs
     Break On : $$IsEmpty:$HxcVcName
     Scroll   : Vertical
 
-[Line: Hxc Vc List Header Line]
-    Fields : Hxc Vc LH Name, Hxc Vc LH Template, Hxc Vc LH Lang, +
-             Hxc Vc LH Types, Hxc Vc LH Media, Hxc Vc LH Auto, Hxc Vc LH Confirm
+[Line: Hxc Vc Ls Header Line]
+    Fields : Hxc Vc Ls H Name, Hxc Vc Ls H Template, Hxc Vc Ls H Lang, +
+             Hxc Vc Ls H Types, Hxc Vc Ls H Media, Hxc Vc Ls H Auto, Hxc Vc Ls H Confirm
     Local  : Field : Default : Skip  : Yes
     Local  : Field : Default : Align : Centre
     Local  : Field : Default : Style : Bold
 
-[Field: Hxc Vc LH Name]
+[Field: Hxc Vc Ls H Name]
     Use    : Name Field
     Set as : "Config Name"
     Width  : 18
 
-[Field: Hxc Vc LH Template]
+[Field: Hxc Vc Ls H Template]
     Use    : Name Field
     Set as : "Template"
     Width  : 18
 
-[Field: Hxc Vc LH Lang]
+[Field: Hxc Vc Ls H Lang]
     Use    : Name Field
     Set as : "Lang"
     Width  : 8
 
-[Field: Hxc Vc LH Types]
+[Field: Hxc Vc Ls H Types]
     Use    : Name Field
     Set as : "Voucher Types"
     Width  : 20
 
-[Field: Hxc Vc LH Media]
+[Field: Hxc Vc Ls H Media]
     Use    : Name Field
     Set as : "Media"
     Width  : 14
 
-[Field: Hxc Vc LH Auto]
+[Field: Hxc Vc Ls H Auto]
     Use    : Name Field
     Set as : "Auto"
     Width  : 6
 
-[Field: Hxc Vc LH Confirm]
+[Field: Hxc Vc Ls H Confirm]
     Use    : Name Field
     Set as : "Confirm"
     Width  : 8
 
-[Line: Hxc Vc List Data Line]
-    Fields : Hxc Vc LD Name, Hxc Vc LD Template, Hxc Vc LD Lang, +
-             Hxc Vc LD Types, Hxc Vc LD Media, Hxc Vc LD Auto, Hxc Vc LD Confirm
+[Line: Hxc Vc Ls Data Line]
+    Fields : Hxc Vc Ls D Name, Hxc Vc Ls D Template, Hxc Vc Ls D Lang, +
+             Hxc Vc Ls D Types, Hxc Vc Ls D Media, Hxc Vc Ls D Auto, Hxc Vc Ls D Confirm
     Local  : Field : Default : Skip : Yes
 
-[Field: Hxc Vc LD Name]
+[Field: Hxc Vc Ls D Name]
     Use    : Name Field
     Set as : $HxcVcName
     Width  : 18
 
-[Field: Hxc Vc LD Template]
+[Field: Hxc Vc Ls D Template]
     Use    : Name Field
     Set as : $HxcVcTemplateName
     Width  : 18
 
-[Field: Hxc Vc LD Lang]
+[Field: Hxc Vc Ls D Lang]
     Use    : Name Field
     Set as : $HxcVcLanguage
     Width  : 8
 
-[Field: Hxc Vc LD Types]
+[Field: Hxc Vc Ls D Types]
     Use    : Name Field
     Set as : $HxcVcVoucherTypes
     Width  : 20
 
-[Field: Hxc Vc LD Media]
+[Field: Hxc Vc Ls D Media]
     Use    : Name Field
     Set as : $HxcVcMediaExport
     Width  : 14
 
-[Field: Hxc Vc LD Auto]
+[Field: Hxc Vc Ls D Auto]
     Use    : Name Field
     Set as : If $HxcVcAutoSend THEN "Yes" ELSE "No"
     Width  : 6
 
-[Field: Hxc Vc LD Confirm]
+[Field: Hxc Vc Ls D Confirm]
     Use    : Name Field
     Set as : If $HxcVcConfirmBeforeSend THEN "Yes" ELSE "No"
     Width  : 8
 
-[Part: Hxc Vc List Hint Part]
-    Lines : Hxc Vc List Hint Line
+[Part: Hxc Vc Ls Hint Part]
+    Lines : Hxc Vc Ls Hint Line
 
-[Line: Hxc Vc List Hint Line]
-    Field : Hxc Vc List Hint
+[Line: Hxc Vc Ls Hint Line]
+    Field : Hxc Vc Ls Hint
 
-[Field: Hxc Vc List Hint]
+[Field: Hxc Vc Ls Hint]
     Use       : Name Field
-    Set as    : "Read-only list. Use Create Config / Alter Config from the menu."
+    Set as    : "Read-only. Esc to leave. Use Create / Alter to change."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -763,7 +625,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 344)"
+    Set as    : "Helixcer Chat (build 345)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -773,7 +635,7 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "Voucher Config: Create / Alter popup forms + List. Status checks connection."
+    Set as    : "Voucher Config: Create/Alter open detail SubForm. List is read-only."
     Align     : Centre
     FullWidth : Yes
 
