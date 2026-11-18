@@ -1,21 +1,15 @@
-# Helixcer Chat for TallyPrime — build 347
+# Helixcer Chat for TallyPrime — build 348
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer_chat.tdl
 
-Company open. Titles **(build 347)**. API Settings must be saved first.
+Company open. Titles **(build 348)**. API Settings saved first.
 
 ## Create Config
 
-1. Config Name  
-2. Template Name  
-3. Language → **Enter** (fetches `GET /api/v1/whatsapp/templates/{name}?channelId=&language=`)  
-4. **Template Preview** appears (body text)  
-5. **Variable Mapping** rows appear only for vars returned by the API  
-6. Media Header, Voucher Types (multi), Auto / Confirm  
-7. **Ctrl+A**
+1. Config Name → Template Name → Language → **Enter** (fetch template)  
+2. Preview + variable mapping appear only after fetch  
+3. Media / voucher types / Auto / Confirm → **Ctrl+A**
 
-Mapping and preview stay hidden until fetch succeeds.
+## Fix in 348
 
-## Honesty
-
-Cannot run TallyPrime here. If preview/vars stay blank after a successful-looking fetch, the JSON walk (`items` / `components` / `variables`) may need a local TDL adjust. True left/right layout is limited in TDL — preview is a section above mapping.
+TDL error `T0014`: `Inactive` is not valid on **Line**. Moved to **Field** (and `Local : Field : Default : Inactive` on map rows).
