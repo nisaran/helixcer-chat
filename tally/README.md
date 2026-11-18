@@ -3,16 +3,18 @@
 ## Load
 
 1. Add `tally/helixcer-chat.tdl` (F1 → TDLs & AddOns) and enable it.
-2. Gateway → **Helixcer Chat** → **API Settings**.
-3. Enter Workspace ID, Channel ID, API Key (Tab through each field).
-4. Enter / Ctrl+A → **Do you want to save?** → Yes.
-5. Reopen: IDs stay filled; API Key shows `******`.
+2. Gateway → **Helixcer Chat**.
 
-## How values are kept
+## API Settings (save only)
 
-- System **Persistent** variables (via **Modify System**, not Modify Variable)
-- Backup file `HelixcerChat.pvf` via Save Variable / Load Variable
+1. Enter Workspace ID, Channel ID, API Key.
+2. Enter / Ctrl+A → **Do you want to save?** → Yes.
+3. Reopen: IDs stay filled; API Key shows `******`.
 
-`Storage:` is for master/voucher/UDF fields in an object context. This settings screen uses Persistent variables instead.
+No Helixcer API call on this screen.
 
-This screen **saves only** — it does not call the Helixcer API.
+## Status
+
+1. Open **Status** (uses saved credentials).
+2. Shows **Status**, **Workspace**, **Channel** (platform in brackets) from `GET /api/v1/connection`.
+3. **Alt+R** refreshes.

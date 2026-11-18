@@ -1,11 +1,13 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; API Settings: save Workspace ID / Channel ID / API Key only (no HTTP fetch).
 ;;
-;; Open with Modify Variable (Display caused c0000005 with this form).
-;; On Form Accept: return Yes/No only — never call Form Accept again (crash).
+;; API Settings — save Workspace ID / Channel ID / API Key only (no HTTP).
+;; Status       — GET /api/v1/connection with saved credentials and show names.
+;;
+;; Open API Settings with Modify Variable (Display caused c0000005 on that form).
+;; On Form Accept: return Yes/No only — never nest Form Accept (crash).
 
 ;; ---------------------------------------------------------------------------
-;; System Persistent variables
+;; System Persistent variables (credentials)
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcWorkspaceId]
@@ -23,14 +25,96 @@
 [Variable: HxcApiKeyDraft]
     Type : String
 
+;; Session/display — filled by Status fetch
+[Variable: HxcWorkspaceName]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcChannelName]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcConnectionStatus]
+    Type       : String
+    Persistent : Yes
+
 [System: Variable]
-    HxcWorkspaceId : ""
-    HxcChannelId   : ""
-    HxcApiKey      : ""
-    HxcApiKeyDraft : ""
+    HxcWorkspaceId      : ""
+    HxcChannelId        : ""
+    HxcApiKey           : ""
+    HxcApiKeyDraft      : ""
+    HxcWorkspaceName    : ""
+    HxcChannelName      : ""
+    HxcConnectionStatus : ""
 
 [System: Formula]
+    Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcChannelId
     Hxc Api Key Masked : If $$IsEmpty:##HxcApiKey THEN "" ELSE "******"
+
+;; ---------------------------------------------------------------------------
+;; HTTP GET /api/v1/connection — headers only (body empty)
+;; ---------------------------------------------------------------------------
+
+[Report: Hxc Connection Request]
+    Form          : Hxc Connection Request
+    Export Header : "Authorization: Bearer " + ##HxcApiKey
+    Export Header : "X-Workspace-Id: " + ##HxcWorkspaceId
+    Export Header : "Accept: application/json"
+
+[Form: Hxc Connection Request]
+    Part : Hxc Connection Request
+
+[Part: Hxc Connection Request]
+    Lines : Hxc Connection Request
+
+[Line: Hxc Connection Request]
+    Fields : Hxc Connection Request
+
+[Field: Hxc Connection Request]
+    Use    : Name Field
+    Set as : ""
+    Skip   : Yes
+
+[Function: Hxc Apply Connection Response]
+    Variable : Platform : String
+    01 : SET : HxcWorkspaceName : ""
+    02 : SET : HxcChannelName : ""
+    03 : SET : HxcConnectionStatus : "Could not fetch. Check IDs and API Key."
+    04 : WALK COLLECTION : Parameter Collection
+    05 :    IF : NOT $$IsEmpty:$workspaceName
+    06 :       SET : Platform : $platformLabel
+    07 :       IF : $$IsEmpty:##Platform
+    08 :          SET : Platform : $connectorType
+    09 :       END IF
+    10 :       IF : $$IsEmpty:##Platform
+    11 :          SET : Platform : "Channel"
+    12 :       END IF
+    13 :       SET : HxcWorkspaceName : $workspaceName
+    14 :       SET : HxcChannelName : $channelName + " (" + ##Platform + ")"
+    15 :       SET : HxcConnectionStatus : "Connected"
+    16 :    END IF
+    17 : END WALK
+    18 : RETURN : Yes
+
+[Function: Hxc Fetch Connection]
+    01 : IF : $$IsEmpty:##HxcWorkspaceId OR $$IsEmpty:##HxcChannelId OR $$IsEmpty:##HxcApiKey
+    02 :    SET : HxcWorkspaceName : ""
+    03 :    SET : HxcChannelName : ""
+    04 :    SET : HxcConnectionStatus : "Save Workspace ID, Channel ID, and API Key in API Settings first."
+    05 :    RETURN : No
+    06 : END IF
+    07 : SET : HxcWorkspaceName : ""
+    08 : SET : HxcChannelName : ""
+    09 : SET : HxcConnectionStatus : "Checking…"
+    10 : Start Progress : 1 : "Helixcer Chat" : "Connection status" : "Fetching workspace and channel"
+    11 : HTTP Request : @@HxcConnectionUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Connection Response
+    12 : End Progress
+    13 : IF : $$IsEmpty:##HxcWorkspaceName
+    14 :    IF : ##HxcConnectionStatus = "Checking…"
+    15 :       SET : HxcConnectionStatus : "Could not fetch. Check IDs and API Key."
+    16 :    END IF
+    17 : END IF
+    18 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; Gateway of Tally → Helixcer Chat
@@ -42,6 +126,7 @@
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
     Key Item : API Settings : S : Modify Variable : Helixcer API Settings
+    Key Item : Status       : T : Display : Helixcer Chat Status
     Key Item : About        : A : Display : Helixcer Chat About
     Key Item : Back         : B : Menu : Gateway of Tally
 
@@ -103,7 +188,6 @@
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
-;; Masked display — draft only; never write ****** into HxcApiKey
 [Field: Hxc Api Key]
     Use      : Name Field
     Set as   : @@HxcApiKeyMasked
@@ -111,8 +195,6 @@
     Width    : 60
     Max      : 200
 
-;; Do NOT call Form Accept here — On Form Accept already owns accept.
-;; RETURN Yes = continue accept / persist Modifies; RETURN No = cancel.
 [Function: Hxc Confirm Save]
     01 : IF : NOT $$IsEmpty:##HxcApiKeyDraft
     02 :    IF : ##HxcApiKeyDraft != "******"
@@ -128,6 +210,106 @@
     12 :    RETURN : Yes
     13 : END IF
     14 : RETURN : No
+
+;; ---------------------------------------------------------------------------
+;; Status — fetch on open, show Status / Workspace / Channel
+;; ---------------------------------------------------------------------------
+
+[Report: Helixcer Chat Status]
+    Form  : Helixcer Chat Status
+    Title : "Status"
+
+[Form: Helixcer Chat Status]
+    Part   : Helixcer Chat Status
+    Button : Form Cancel, Hxc Status Refresh Button
+    ;; Redraw after fetch updates Persistent/session vars
+    Option : Hxc Status Refresh : ##HxcConnectionStatus
+    Option : Hxc Status Refresh Names : ##HxcWorkspaceName
+    On     : Form Create : Yes : Call : Hxc Fetch Connection
+
+[!Form: Hxc Status Refresh]
+[!Form: Hxc Status Refresh Names]
+
+[Button: Hxc Status Refresh Button]
+    Key    : Alt+R
+    Title  : "Refresh"
+    Action : Call : Hxc Fetch Connection
+
+[Part: Helixcer Chat Status]
+    Lines  : Hxc Status Title, +
+             Hxc Status Spacer Line, +
+             Hxc Status Status Line, Hxc Status Workspace Line, Hxc Status Channel Line, +
+             Hxc Status Hint Line
+    Scroll : Vertical
+
+[Line: Hxc Status Title]
+    Field : Hxc Status Title
+
+[Field: Hxc Status Title]
+    Use       : Name Field
+    Set as    : "Helixcer Chat — Connection Status"
+    Style     : Bold
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Line: Hxc Status Spacer Line]
+    Field : Hxc Status Spacer
+    Local : Field : Hxc Status Spacer : Set as : ""
+    Local : Field : Hxc Status Spacer : Skip : Yes
+    Local : Field : Hxc Status Spacer : FullWidth : Yes
+
+[Field: Hxc Status Spacer]
+    Use : Name Field
+
+[Line: Hxc Status Status Line]
+    Fields : Medium Prompt, Hxc Status Status Value
+    Local  : Field : Medium Prompt : Set as : "Status"
+    Local  : Field : Medium Prompt : Width  : 20
+    Local  : Field : Medium Prompt : Color  : Blue
+    Local  : Field : Hxc Status Status Value : Color : Blue
+
+[Field: Hxc Status Status Value]
+    Use    : Name Field
+    Set as : ##HxcConnectionStatus
+    Width  : 60
+    Skip   : Yes
+
+[Line: Hxc Status Workspace Line]
+    Fields : Medium Prompt, Hxc Status Workspace Value
+    Local  : Field : Medium Prompt : Set as : "Workspace"
+    Local  : Field : Medium Prompt : Width  : 20
+    Local  : Field : Medium Prompt : Color  : Blue
+    Local  : Field : Hxc Status Workspace Value : Color : Blue
+
+[Field: Hxc Status Workspace Value]
+    Use    : Name Field
+    Set as : If $$IsEmpty:##HxcWorkspaceName THEN ##HxcWorkspaceId ELSE ##HxcWorkspaceName
+    Width  : 60
+    Skip   : Yes
+
+[Line: Hxc Status Channel Line]
+    Fields : Medium Prompt, Hxc Status Channel Value
+    Local  : Field : Medium Prompt : Set as : "Channel"
+    Local  : Field : Medium Prompt : Width  : 20
+    Local  : Field : Medium Prompt : Color  : Blue
+    Local  : Field : Hxc Status Channel Value : Color : Blue
+
+[Field: Hxc Status Channel Value]
+    Use    : Name Field
+    Set as : If $$IsEmpty:##HxcChannelName THEN ##HxcChannelId ELSE ##HxcChannelName
+    Width  : 60
+    Skip   : Yes
+
+[Line: Hxc Status Hint Line]
+    Field : Hxc Status Hint
+
+[Field: Hxc Status Hint]
+    Use       : Name Field
+    Set as    : "Alt+R to refresh. Configure credentials in API Settings."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; About
@@ -157,7 +339,7 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "API Settings saves Workspace ID, Channel ID, and API Key (Enter → Yes)."
+    Set as    : "API Settings saves credentials. Status checks the live connection."
     Align     : Centre
     FullWidth : Yes
 
@@ -169,6 +351,7 @@
     Set as    : If $$IsEmpty:##HxcApiKey THEN "API Key: not set" ELSE +
                 If $$IsEmpty:##HxcWorkspaceId THEN "API Key saved; Workspace ID missing" ELSE +
                 If $$IsEmpty:##HxcChannelId THEN "API Key saved; Channel ID missing" ELSE +
-                "Workspace " + ##HxcWorkspaceId + " / Channel " + ##HxcChannelId
+                If $$IsEmpty:##HxcConnectionStatus THEN "Credentials saved — open Status to verify" ELSE +
+                ##HxcConnectionStatus + " / " + ##HxcWorkspaceName + " / " + ##HxcChannelName
     Align     : Centre
     FullWidth : Yes
