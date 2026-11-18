@@ -1,16 +1,21 @@
-# Helixcer Chat for TallyPrime
+# Helixcer Chat — build 341
 
-TDL add-on that connects TallyPrime to Helixcer Chat.
+https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-live-field-vars-b545/tally/helixcer_chat.tdl
 
-## Load
+## Why replacement failed
 
-1. Add `tally/helixcer-chat.tdl` in TallyPrime (F1 → TDLs & AddOns) and enable it.
-2. Gateway → **Helixcer Chat** → **API Settings**.
-3. Enter Workspace ID, Channel ID, API Key.
-4. Press **Enter** on the API Key — Tally Progress runs and Helixcer is called.
-5. Blue Status / Workspace / Channel Name (`Name (Platform)`) appear.
-6. Press **Enter** or **Ctrl+A** again to save.
-7. Reopen: IDs and details stay; API Key shows `******`. Enter on the key again re-fetches.
+You entered new UUIDs + key and got **Do you want to save?**, but reopen showed the old `Sddcsdfsdfc` / single `*`.
 
-API: `GET https://api.chat.helixcer.com/api/v1/connection?channelId=…`  
-Headers: `Authorization: Bearer …`, `X-Workspace-Id: …`
+Cause: Confirm Save returned Yes **without** running `Form Accept`, so company **Storage was never committed**.
+
+## Fix
+
+After Yes → **`Form Accept`** (commits Alter) → **Helixcer saved** Msg Box.
+
+## Steps
+
+1. Title **(build 341)**.
+2. Enter new Workspace / Channel / full API Key (many `*`).
+3. Enter → Yes.
+4. Must see **Helixcer saved** with the **new** WS/CH and KeyChars ≥ 20.
+5. Reopen — new values must still be there (not the old dummy IDs).
