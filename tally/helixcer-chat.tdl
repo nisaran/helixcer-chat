@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 360-vars-inline-fetch
-;; Title must show "(build 360)".
+;; BUILD: 361-fix-line-inactive
+;; Title must show "(build 361)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -874,7 +874,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 360)"
+    Set as    : "Helixcer Chat — API Settings (build 361)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1647,11 +1647,10 @@
 
 [Line: Hxc Vc Cr Title Line]
     Field : Hxc Vc Cr Title
-    Inactive   : NOT ##HxcVcFetched
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 360)"
+    Set as    : "Create Voucher Config (build 361)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1717,7 +1716,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 360)"
+    Set as    : "Alter Voucher Config (build 361)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1776,7 +1775,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 360)"
+    Set as    : "Voucher Config List (build 361)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1891,7 +1890,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 360)"
+    Set as    : "Helixcer Chat (build 361)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
