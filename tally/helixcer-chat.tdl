@@ -1,11 +1,12 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 345-voucher-subform
-;; Title must show "(build 345)".
+;; BUILD: 346-create-form
+;; Title must show "(build 346)".
 ;;
-;; Crash fix: build 344 used Display + custom Form Accept / INSERT — c0000005.
-;; Voucher Config now uses ONLY Alter + Object Company + Storage (same as API Settings).
-;; Create/Alter: Config Name line → SubForm popup for the rest (Tally SubForm pattern).
-;; List: Alter read-only. No Display of Company reports. No On Form Accept.
+;; Create Config = ONE sequential form (not a name list):
+;;   Config Name → Template → Language → Variable Mapping → Media →
+;;   Voucher Types (multi) → Auto / Confirm → Ctrl+A
+;; Uses Company draft UDFs + Alter (no Display). On Accept commits into Aggregate.
+;; Template API fetch still phase 2.
 
 ;; ---------------------------------------------------------------------------
 ;; Company UDFs
@@ -15,6 +16,7 @@
     HxcWorkspaceIdUDF : String : 25101
     HxcChannelIdUDF   : String : 25102
     HxcApiKeyUDF      : String : 25103
+    ;; Saved configs
     HxcVoucherConfigs      : Aggregate : 25110
     HxcVcName              : String    : 25111
     HxcVcTemplateName      : String    : 25112
@@ -23,9 +25,36 @@
     HxcVcMediaExport       : String    : 25115
     HxcVcAutoSend          : Logical   : 25116
     HxcVcConfirmBeforeSend : Logical   : 25117
+    HxcVcVarMapsText       : String    : 25118
+    ;; Create/Alter draft buffer (one form, not a repeating name list)
+    HxcVcDraftName     : String  : 25120
+    HxcVcDraftTemplate : String  : 25121
+    HxcVcDraftLang     : String  : 25122
+    HxcVcDraftMedia    : String  : 25123
+    HxcVcDraftAuto     : Logical : 25124
+    HxcVcDraftConfirm  : Logical : 25125
+    HxcVcDraftEditKey  : String  : 25126
+    HxcVcDMKey1 : String : 25131
+    HxcVcDMFld1 : String : 25132
+    HxcVcDMKey2 : String : 25133
+    HxcVcDMFld2 : String : 25134
+    HxcVcDMKey3 : String : 25135
+    HxcVcDMFld3 : String : 25136
+    HxcVcDMKey4 : String : 25137
+    HxcVcDMFld4 : String : 25138
+    HxcVcDMKey5 : String : 25139
+    HxcVcDMFld5 : String : 25140
+    HxcVcDV1 : String : 25141
+    HxcVcDV2 : String : 25142
+    HxcVcDV3 : String : 25143
+    HxcVcDV4 : String : 25144
+    HxcVcDV5 : String : 25145
+    HxcVcDV6 : String : 25146
+    HxcVcDV7 : String : 25147
+    HxcVcDV8 : String : 25148
 
 ;; ---------------------------------------------------------------------------
-;; Status mirrors
+;; Status mirrors + save flag
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcSysWorkspaceId]
@@ -52,6 +81,9 @@
     Type       : String
     Persistent : Yes
 
+[Variable: HxcVcSaveOk]
+    Type : Logical
+
 [System: Variable]
     HxcSysWorkspaceId   : ""
     HxcSysChannelId     : ""
@@ -59,6 +91,7 @@
     HxcWorkspaceName    : ""
     HxcChannelName      : ""
     HxcConnectionStatus : ""
+    HxcVcSaveOk         : No
 
 [System: Formula]
     Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcSysChannelId
@@ -74,6 +107,18 @@
 [Collection: Hxc Voucher Type List]
     Type   : Voucher Type
     Format : $Name, 40
+
+[Collection: Hxc Voucher Field List]
+    List : "Voucher Number", "Voucher Date", "Amount", "Reference", "Narration", +
+           "Party Name", "Party Mobile", "Party Email", "Company Name", "Guid"
+
+[Collection: Hxc Voucher Config Names]
+    Type     : HxcVoucherConfigs : Company
+    Child Of : ##SVCurrentCompany
+    Format   : $HxcVcName, 40
+    Fetch    : HxcVcName, HxcVcTemplateName, HxcVcLanguage, HxcVcVoucherTypes, +
+               HxcVcMediaExport, HxcVcAutoSend, HxcVcConfirmBeforeSend, HxcVcVarMapsText
+    Title    : "Voucher Configs"
 
 ;; ---------------------------------------------------------------------------
 ;; HTTP (Status)
@@ -161,6 +206,135 @@
     07 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
+;; Pack helpers + commit draft → Aggregate config
+;; ---------------------------------------------------------------------------
+
+[Function: Hxc Pack Maps]
+    Variable : S : String
+    01 : SET : S : ""
+    02 : IF : NOT $$IsEmpty:$HxcVcDMKey1
+    03 :    SET : S : ##S + $HxcVcDMKey1 + "=" + $HxcVcDMFld1 + ";"
+    04 : END IF
+    05 : IF : NOT $$IsEmpty:$HxcVcDMKey2
+    06 :    SET : S : ##S + $HxcVcDMKey2 + "=" + $HxcVcDMFld2 + ";"
+    07 : END IF
+    08 : IF : NOT $$IsEmpty:$HxcVcDMKey3
+    09 :    SET : S : ##S + $HxcVcDMKey3 + "=" + $HxcVcDMFld3 + ";"
+    10 : END IF
+    11 : IF : NOT $$IsEmpty:$HxcVcDMKey4
+    12 :    SET : S : ##S + $HxcVcDMKey4 + "=" + $HxcVcDMFld4 + ";"
+    13 : END IF
+    14 : IF : NOT $$IsEmpty:$HxcVcDMKey5
+    15 :    SET : S : ##S + $HxcVcDMKey5 + "=" + $HxcVcDMFld5 + ";"
+    16 : END IF
+    17 : RETURN : ##S
+
+[Function: Hxc Pack Vouchers]
+    Variable : S : String
+    01 : SET : S : ""
+    02 : IF : NOT $$IsEmpty:$HxcVcDV1
+    03 :    SET : S : ##S + $HxcVcDV1 + ","
+    04 : END IF
+    05 : IF : NOT $$IsEmpty:$HxcVcDV2
+    06 :    SET : S : ##S + $HxcVcDV2 + ","
+    07 : END IF
+    08 : IF : NOT $$IsEmpty:$HxcVcDV3
+    09 :    SET : S : ##S + $HxcVcDV3 + ","
+    10 : END IF
+    11 : IF : NOT $$IsEmpty:$HxcVcDV4
+    12 :    SET : S : ##S + $HxcVcDV4 + ","
+    13 : END IF
+    14 : IF : NOT $$IsEmpty:$HxcVcDV5
+    15 :    SET : S : ##S + $HxcVcDV5 + ","
+    16 : END IF
+    17 : IF : NOT $$IsEmpty:$HxcVcDV6
+    18 :    SET : S : ##S + $HxcVcDV6 + ","
+    19 : END IF
+    20 : IF : NOT $$IsEmpty:$HxcVcDV7
+    21 :    SET : S : ##S + $HxcVcDV7 + ","
+    22 : END IF
+    23 : IF : NOT $$IsEmpty:$HxcVcDV8
+    24 :    SET : S : ##S + $HxcVcDV8 + ","
+    25 : END IF
+    26 : RETURN : ##S
+
+[Function: Hxc Vc Clear Draft]
+    01 : SET VALUE : HxcVcDraftName : ""
+    02 : SET VALUE : HxcVcDraftTemplate : ""
+    03 : SET VALUE : HxcVcDraftLang : "en"
+    04 : SET VALUE : HxcVcDraftMedia : "None"
+    05 : SET VALUE : HxcVcDraftAuto : No
+    06 : SET VALUE : HxcVcDraftConfirm : No
+    07 : SET VALUE : HxcVcDraftEditKey : ""
+    08 : SET VALUE : HxcVcDMKey1 : ""
+    09 : SET VALUE : HxcVcDMFld1 : ""
+    10 : SET VALUE : HxcVcDMKey2 : ""
+    11 : SET VALUE : HxcVcDMFld2 : ""
+    12 : SET VALUE : HxcVcDMKey3 : ""
+    13 : SET VALUE : HxcVcDMFld3 : ""
+    14 : SET VALUE : HxcVcDMKey4 : ""
+    15 : SET VALUE : HxcVcDMFld4 : ""
+    16 : SET VALUE : HxcVcDMKey5 : ""
+    17 : SET VALUE : HxcVcDMFld5 : ""
+    18 : SET VALUE : HxcVcDV1 : ""
+    19 : SET VALUE : HxcVcDV2 : ""
+    20 : SET VALUE : HxcVcDV3 : ""
+    21 : SET VALUE : HxcVcDV4 : ""
+    22 : SET VALUE : HxcVcDV5 : ""
+    23 : SET VALUE : HxcVcDV6 : ""
+    24 : SET VALUE : HxcVcDV7 : ""
+    25 : SET VALUE : HxcVcDV8 : ""
+    26 : RETURN : Yes
+
+[Function: Hxc Vc Commit Draft]
+    Variable : Maps : String
+    Variable : Vchs : String
+    Variable : EditKey : String
+    01 : SET : HxcVcSaveOk : No
+    02 : IF : $$IsEmpty:$HxcVcDraftName
+    03 :    Msg Box : "Helixcer Voucher Config" : "Config Name is required."
+    04 :    RETURN : No
+    05 : END IF
+    06 : IF : $$IsEmpty:$HxcVcDraftTemplate
+    07 :    Msg Box : "Helixcer Voucher Config" : "Template Name is required."
+    08 :    RETURN : No
+    09 : END IF
+    10 : SET : Maps : $$HxcPackMaps
+    11 : SET : Vchs : $$HxcPackVouchers
+    12 : SET : EditKey : $HxcVcDraftEditKey
+    13 : IF : NOT $$IsEmpty:##EditKey
+    14 :    WALK COLLECTION : HxcVoucherConfigs
+    15 :       IF : $HxcVcName = ##EditKey
+    16 :          SET TARGET
+    17 :          SET VALUE : HxcVcName : $HxcVcDraftName
+    18 :          SET VALUE : HxcVcTemplateName : $HxcVcDraftTemplate
+    19 :          SET VALUE : HxcVcLanguage : $HxcVcDraftLang
+    20 :          SET VALUE : HxcVcMediaExport : $HxcVcDraftMedia
+    21 :          SET VALUE : HxcVcAutoSend : $HxcVcDraftAuto
+    22 :          SET VALUE : HxcVcConfirmBeforeSend : $HxcVcDraftConfirm
+    23 :          SET VALUE : HxcVcVarMapsText : ##Maps
+    24 :          SET VALUE : HxcVcVoucherTypes : ##Vchs
+    25 :          SET TARGET : ..
+    26 :       END IF
+    27 :    END WALK
+    28 : ELSE
+    29 :    INSERT COLLECTION OBJECT : HxcVoucherConfigs
+    30 :    SET VALUE : HxcVcName : $HxcVcDraftName
+    31 :    SET VALUE : HxcVcTemplateName : $HxcVcDraftTemplate
+    32 :    SET VALUE : HxcVcLanguage : $HxcVcDraftLang
+    33 :    SET VALUE : HxcVcMediaExport : $HxcVcDraftMedia
+    34 :    SET VALUE : HxcVcAutoSend : $HxcVcDraftAuto
+    35 :    SET VALUE : HxcVcConfirmBeforeSend : $HxcVcDraftConfirm
+    36 :    SET VALUE : HxcVcVarMapsText : ##Maps
+    37 :    SET VALUE : HxcVcVoucherTypes : ##Vchs
+    38 :    SET TARGET : ..
+    39 : END IF
+    40 : CALL : Hxc Vc Clear Draft
+    41 : SET : HxcVcSaveOk : Yes
+    42 : Msg Box : "Helixcer Voucher Config" : "Config saved."
+    43 : RETURN : Yes
+
+;; ---------------------------------------------------------------------------
 ;; Menu
 ;; ---------------------------------------------------------------------------
 
@@ -206,7 +380,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 345)"
+    Set as    : "Helixcer Chat — API Settings (build 346)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -215,13 +389,13 @@
 [Line: Hxc Workspace Id Line]
     Fields : Medium Prompt, HxcWorkspaceIdFld
     Local  : Field : Medium Prompt : Set as : "Workspace ID"
-    Local  : Field : Medium Prompt : Width  : 20
+    Local  : Field : Medium Prompt : Width  : 22
 
 [Field: HxcWorkspaceIdFld]
     Use      : Name Field
     Storage  : HxcWorkspaceIdUDF
     Set as   : $HxcWorkspaceIdUDF
-    Width    : 60
+    Width    : 50
     Max      : 64
     On       : Accept : Yes : SET : HxcSysWorkspaceId : $Value
     On       : Accept : Yes : Field Accept
@@ -229,13 +403,13 @@
 [Line: Hxc Channel Id Line]
     Fields : Medium Prompt, HxcChannelIdFld
     Local  : Field : Medium Prompt : Set as : "Channel ID"
-    Local  : Field : Medium Prompt : Width  : 20
+    Local  : Field : Medium Prompt : Width  : 22
 
 [Field: HxcChannelIdFld]
     Use      : Name Field
     Storage  : HxcChannelIdUDF
     Set as   : $HxcChannelIdUDF
-    Width    : 60
+    Width    : 50
     Max      : 64
     On       : Accept : Yes : SET : HxcSysChannelId : $Value
     On       : Accept : Yes : Field Accept
@@ -243,13 +417,13 @@
 [Line: Hxc Api Key Line]
     Fields : Medium Prompt, HxcApiKeyFld
     Local  : Field : Medium Prompt : Set as : "API Key"
-    Local  : Field : Medium Prompt : Width  : 20
+    Local  : Field : Medium Prompt : Width  : 22
 
 [Field: HxcApiKeyFld]
     Use      : Name Field
     Storage  : HxcApiKeyUDF
     Set as   : $HxcApiKeyUDF
-    Width    : 60
+    Width    : 50
     Max      : 200
     On       : Accept : Yes : SET : HxcSysApiKey : $Value
     On       : Accept : Yes : Field Accept
@@ -259,14 +433,324 @@
 
 [Field: Hxc Save Hint]
     Use       : Name Field
-    Set as    : "Tab all fields, then Ctrl+A to Accept (Tally default)."
+    Set as    : "Tab all fields, then Ctrl+A to Accept."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
 
 ;; ---------------------------------------------------------------------------
-;; Voucher Config — CREATE
-;; Blank Config Name line → SubForm popup (labeled fields) → Ctrl+A
+;; Shared Create/Alter form body (draft fields — single form, not name list)
+;; ---------------------------------------------------------------------------
+
+[Part: Hxc Vc Form Body]
+    Lines  : Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
+             Hxc Vc F Map Head, +
+             Hxc Vc F Map1, Hxc Vc F Map2, Hxc Vc F Map3, Hxc Vc F Map4, Hxc Vc F Map5, +
+             Hxc Vc F Media Line, +
+             Hxc Vc F Vch Head, +
+             Hxc Vc F V1, Hxc Vc F V2, Hxc Vc F V3, Hxc Vc F V4, +
+             Hxc Vc F V5, Hxc Vc F V6, Hxc Vc F V7, Hxc Vc F V8, +
+             Hxc Vc F Auto Line, Hxc Vc F Confirm Line
+    Scroll : Vertical
+
+[Line: Hxc Vc F Name Line]
+    Fields : Medium Prompt, Hxc Vc F Name
+    Local  : Field : Medium Prompt : Set as : "Config Name"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Name]
+    Use      : Name Field
+    Storage  : HxcVcDraftName
+    Set as   : $HxcVcDraftName
+    Width    : 40
+    Max      : 60
+
+[Line: Hxc Vc F Template Line]
+    Fields : Medium Prompt, Hxc Vc F Template
+    Local  : Field : Medium Prompt : Set as : "Template Name"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Template]
+    Use      : Name Field
+    Storage  : HxcVcDraftTemplate
+    Set as   : $HxcVcDraftTemplate
+    Width    : 40
+    Max      : 80
+
+[Line: Hxc Vc F Lang Line]
+    Fields : Medium Prompt, Hxc Vc F Lang
+    Local  : Field : Medium Prompt : Set as : "Language"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Lang]
+    Use      : Name Field
+    Storage  : HxcVcDraftLang
+    Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
+    Width    : 16
+    Max      : 16
+
+[Line: Hxc Vc F Map Head]
+    Field : Hxc Vc F Map Head Fld
+
+[Field: Hxc Vc F Map Head Fld]
+    Use       : Name Field
+    Set as    : "— Variable Mapping (Var → Voucher field) —"
+    Style     : Bold
+    FullWidth : Yes
+    Skip      : Yes
+
+[Line: Hxc Vc F Map1]
+    Fields : Medium Prompt, Hxc Vc F MK1, Hxc Vc F MF1
+    Local  : Field : Medium Prompt : Set as : "Var 1"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F MK1]
+    Use      : Name Field
+    Storage  : HxcVcDMKey1
+    Set as   : If $$IsEmpty:$HxcVcDMKey1 THEN "1" ELSE $HxcVcDMKey1
+    Width    : 8
+    Max      : 8
+
+[Field: Hxc Vc F MF1]
+    Use      : Name Field
+    Storage  : HxcVcDMFld1
+    Set as   : $HxcVcDMFld1
+    Table    : Hxc Voucher Field List, Not Applicable
+    Width    : 28
+    Max      : 40
+
+[Line: Hxc Vc F Map2]
+    Fields : Medium Prompt, Hxc Vc F MK2, Hxc Vc F MF2
+    Local  : Field : Medium Prompt : Set as : "Var 2"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F MK2]
+    Use      : Name Field
+    Storage  : HxcVcDMKey2
+    Set as   : If $$IsEmpty:$HxcVcDMKey2 THEN "2" ELSE $HxcVcDMKey2
+    Width    : 8
+    Max      : 8
+
+[Field: Hxc Vc F MF2]
+    Use      : Name Field
+    Storage  : HxcVcDMFld2
+    Set as   : $HxcVcDMFld2
+    Table    : Hxc Voucher Field List, Not Applicable
+    Width    : 28
+    Max      : 40
+
+[Line: Hxc Vc F Map3]
+    Fields : Medium Prompt, Hxc Vc F MK3, Hxc Vc F MF3
+    Local  : Field : Medium Prompt : Set as : "Var 3"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F MK3]
+    Use      : Name Field
+    Storage  : HxcVcDMKey3
+    Set as   : If $$IsEmpty:$HxcVcDMKey3 THEN "3" ELSE $HxcVcDMKey3
+    Width    : 8
+    Max      : 8
+
+[Field: Hxc Vc F MF3]
+    Use      : Name Field
+    Storage  : HxcVcDMFld3
+    Set as   : $HxcVcDMFld3
+    Table    : Hxc Voucher Field List, Not Applicable
+    Width    : 28
+    Max      : 40
+
+[Line: Hxc Vc F Map4]
+    Fields : Medium Prompt, Hxc Vc F MK4, Hxc Vc F MF4
+    Local  : Field : Medium Prompt : Set as : "Var 4"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F MK4]
+    Use      : Name Field
+    Storage  : HxcVcDMKey4
+    Set as   : If $$IsEmpty:$HxcVcDMKey4 THEN "4" ELSE $HxcVcDMKey4
+    Width    : 8
+    Max      : 8
+
+[Field: Hxc Vc F MF4]
+    Use      : Name Field
+    Storage  : HxcVcDMFld4
+    Set as   : $HxcVcDMFld4
+    Table    : Hxc Voucher Field List, Not Applicable
+    Width    : 28
+    Max      : 40
+
+[Line: Hxc Vc F Map5]
+    Fields : Medium Prompt, Hxc Vc F MK5, Hxc Vc F MF5
+    Local  : Field : Medium Prompt : Set as : "Var 5"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F MK5]
+    Use      : Name Field
+    Storage  : HxcVcDMKey5
+    Set as   : If $$IsEmpty:$HxcVcDMKey5 THEN "5" ELSE $HxcVcDMKey5
+    Width    : 8
+    Max      : 8
+
+[Field: Hxc Vc F MF5]
+    Use      : Name Field
+    Storage  : HxcVcDMFld5
+    Set as   : $HxcVcDMFld5
+    Table    : Hxc Voucher Field List, Not Applicable
+    Width    : 28
+    Max      : 40
+
+[Line: Hxc Vc F Media Line]
+    Fields : Medium Prompt, Hxc Vc F Media
+    Local  : Field : Medium Prompt : Set as : "Media Header"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Media]
+    Use        : Name Field
+    Storage    : HxcVcDraftMedia
+    Set as     : If $$IsEmpty:$HxcVcDraftMedia THEN "None" ELSE $HxcVcDraftMedia
+    Table      : Hxc Media Export List
+    Show Table : Always
+    Width      : 40
+    Max        : 40
+
+[Line: Hxc Vc F Vch Head]
+    Field : Hxc Vc F Vch Head Fld
+
+[Field: Hxc Vc F Vch Head Fld]
+    Use       : Name Field
+    Set as    : "— Applicable Voucher Types (pick multiple) —"
+    Style     : Bold
+    FullWidth : Yes
+    Skip      : Yes
+
+[Line: Hxc Vc F V1]
+    Fields : Medium Prompt, Hxc Vc F DV1
+    Local  : Field : Medium Prompt : Set as : "Voucher Type 1"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F DV1]
+    Use      : Name Field
+    Storage  : HxcVcDV1
+    Set as   : $HxcVcDV1
+    Table    : Hxc Voucher Type List, Not Applicable
+    Width    : 40
+    Max      : 40
+
+[Line: Hxc Vc F V2]
+    Fields : Medium Prompt, Hxc Vc F DV2
+    Local  : Field : Medium Prompt : Set as : "Voucher Type 2"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F DV2]
+    Use      : Name Field
+    Storage  : HxcVcDV2
+    Set as   : $HxcVcDV2
+    Table    : Hxc Voucher Type List, Not Applicable
+    Width    : 40
+    Max      : 40
+
+[Line: Hxc Vc F V3]
+    Fields : Medium Prompt, Hxc Vc F DV3
+    Local  : Field : Medium Prompt : Set as : "Voucher Type 3"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F DV3]
+    Use      : Name Field
+    Storage  : HxcVcDV3
+    Set as   : $HxcVcDV3
+    Table    : Hxc Voucher Type List, Not Applicable
+    Width    : 40
+    Max      : 40
+
+[Line: Hxc Vc F V4]
+    Fields : Medium Prompt, Hxc Vc F DV4
+    Local  : Field : Medium Prompt : Set as : "Voucher Type 4"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F DV4]
+    Use      : Name Field
+    Storage  : HxcVcDV4
+    Set as   : $HxcVcDV4
+    Table    : Hxc Voucher Type List, Not Applicable
+    Width    : 40
+    Max      : 40
+
+[Line: Hxc Vc F V5]
+    Fields : Medium Prompt, Hxc Vc F DV5
+    Local  : Field : Medium Prompt : Set as : "Voucher Type 5"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F DV5]
+    Use      : Name Field
+    Storage  : HxcVcDV5
+    Set as   : $HxcVcDV5
+    Table    : Hxc Voucher Type List, Not Applicable
+    Width    : 40
+    Max      : 40
+
+[Line: Hxc Vc F V6]
+    Fields : Medium Prompt, Hxc Vc F DV6
+    Local  : Field : Medium Prompt : Set as : "Voucher Type 6"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F DV6]
+    Use      : Name Field
+    Storage  : HxcVcDV6
+    Set as   : $HxcVcDV6
+    Table    : Hxc Voucher Type List, Not Applicable
+    Width    : 40
+    Max      : 40
+
+[Line: Hxc Vc F V7]
+    Fields : Medium Prompt, Hxc Vc F DV7
+    Local  : Field : Medium Prompt : Set as : "Voucher Type 7"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F DV7]
+    Use      : Name Field
+    Storage  : HxcVcDV7
+    Set as   : $HxcVcDV7
+    Table    : Hxc Voucher Type List, Not Applicable
+    Width    : 40
+    Max      : 40
+
+[Line: Hxc Vc F V8]
+    Fields : Medium Prompt, Hxc Vc F DV8
+    Local  : Field : Medium Prompt : Set as : "Voucher Type 8"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F DV8]
+    Use      : Name Field
+    Storage  : HxcVcDV8
+    Set as   : $HxcVcDV8
+    Table    : Hxc Voucher Type List, Not Applicable
+    Width    : 40
+    Max      : 40
+
+[Line: Hxc Vc F Auto Line]
+    Fields : Medium Prompt, Hxc Vc F Auto
+    Local  : Field : Medium Prompt : Set as : "Auto Select after save?"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Auto]
+    Use      : Logical Field
+    Storage  : HxcVcDraftAuto
+    Set as   : $HxcVcDraftAuto
+    Width    : 8
+
+[Line: Hxc Vc F Confirm Line]
+    Fields : Medium Prompt, Hxc Vc F Confirm
+    Local  : Field : Medium Prompt : Set as : "Confirm before send?"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Confirm]
+    Use      : Logical Field
+    Storage  : HxcVcDraftConfirm
+    Set as   : $HxcVcDraftConfirm
+    Width    : 8
+
+;; ---------------------------------------------------------------------------
+;; CREATE — clear draft, show sequential form
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Voucher Config Create]
@@ -275,8 +759,11 @@
     Object : Company
 
 [Form: Helixcer Voucher Config Create]
-    Part   : Hxc Vc Cr Title Part, Hxc Vc Cr Name Part, Hxc Vc Cr Hint Part
+    Part   : Hxc Vc Cr Title Part, Hxc Vc Form Body, Hxc Vc Cr Hint Part
     Button : Form Accept, Form Cancel
+    On     : Form Create : Yes : CALL : Hxc Vc Clear Draft
+    On     : Form Accept : Yes : CALL : Hxc Vc Commit Draft
+    On     : Form Accept : ##HxcVcSaveOk : Form Accept
 
 [Part: Hxc Vc Cr Title Part]
     Lines : Hxc Vc Cr Title Line
@@ -286,31 +773,11 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 345)"
+    Set as    : "Create Voucher Config (build 346)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
-
-[Part: Hxc Vc Cr Name Part]
-    Lines    : Hxc Vc Cr Name Line
-    Repeat   : Hxc Vc Cr Name Line : HxcVoucherConfigs
-    Break On : $$IsEmpty:$HxcVcName
-    Scroll   : Vertical
-
-[Line: Hxc Vc Cr Name Line]
-    Fields : Medium Prompt, Hxc Vc Cr Name Fld
-    Local  : Field : Medium Prompt : Set as : "Config Name"
-    Local  : Field : Medium Prompt : Width  : 18
-
-[Field: Hxc Vc Cr Name Fld]
-    Use      : Name Field
-    Storage  : HxcVcName
-    Set as   : $HxcVcName
-    Width    : 40
-    Max      : 60
-    ;; Popup detail form when name is entered (create or edit this row)
-    Sub Form : Helixcer Voucher Config Detail : NOT $$IsEmpty:$Value
 
 [Part: Hxc Vc Cr Hint Part]
     Lines : Hxc Vc Cr Hint Line
@@ -320,14 +787,40 @@
 
 [Field: Hxc Vc Cr Hint]
     Use       : Name Field
-    Set as    : "Type a Config Name on the blank line → detail form opens. Then Ctrl+A."
+    Set as    : "Fill name → template → mapping → voucher types → Ctrl+A. Template fetch next phase."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
 
 ;; ---------------------------------------------------------------------------
-;; Voucher Config — ALTER (same Storage/SubForm; title differs)
+;; ALTER — pick config, load into draft, same form
 ;; ---------------------------------------------------------------------------
+
+[Function: Hxc Vc Load Draft From Config]
+    Variable : EditKey : String
+    01 : SET : EditKey : $HxcVcDraftEditKey
+    02 : IF : $$IsEmpty:##EditKey
+    03 :    RETURN : Yes
+    04 : END IF
+    05 : CALL : Hxc Vc Clear Draft
+    06 : SET VALUE : HxcVcDraftEditKey : ##EditKey
+    07 : WALK COLLECTION : Hxc Voucher Config Names
+    08 :    IF : $HxcVcName = ##EditKey
+    09 :       SET VALUE : HxcVcDraftName : $HxcVcName
+    10 :       SET VALUE : HxcVcDraftTemplate : $HxcVcTemplateName
+    11 :       SET VALUE : HxcVcDraftLang : $HxcVcLanguage
+    12 :       SET VALUE : HxcVcDraftMedia : $HxcVcMediaExport
+    13 :       SET VALUE : HxcVcDraftAuto : $HxcVcAutoSend
+    14 :       SET VALUE : HxcVcDraftConfirm : $HxcVcConfirmBeforeSend
+    15 :       SET VALUE : HxcVcDV1 : $HxcVcVoucherTypes
+    16 :    END IF
+    17 : END WALK
+    18 : SET VALUE : HxcVcDMKey1 : "1"
+    19 : SET VALUE : HxcVcDMKey2 : "2"
+    20 : SET VALUE : HxcVcDMKey3 : "3"
+    21 : SET VALUE : HxcVcDMKey4 : "4"
+    22 : SET VALUE : HxcVcDMKey5 : "5"
+    23 : RETURN : Yes
 
 [Report: Helixcer Voucher Config Alter]
     Form   : Helixcer Voucher Config Alter
@@ -335,8 +828,10 @@
     Object : Company
 
 [Form: Helixcer Voucher Config Alter]
-    Part   : Hxc Vc Al Title Part, Hxc Vc Al Name Part, Hxc Vc Al Hint Part
+    Part   : Hxc Vc Al Title Part, Hxc Vc Al Pick Part, Hxc Vc Form Body, Hxc Vc Al Hint Part
     Button : Form Accept, Form Cancel
+    On     : Form Accept : Yes : CALL : Hxc Vc Commit Draft
+    On     : Form Accept : ##HxcVcSaveOk : Form Accept
 
 [Part: Hxc Vc Al Title Part]
     Lines : Hxc Vc Al Title Line
@@ -346,30 +841,30 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 345)"
+    Set as    : "Alter Voucher Config (build 346)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
 
-[Part: Hxc Vc Al Name Part]
-    Lines    : Hxc Vc Al Name Line
-    Repeat   : Hxc Vc Al Name Line : HxcVoucherConfigs
-    Break On : $$IsEmpty:$HxcVcName
-    Scroll   : Vertical
+[Part: Hxc Vc Al Pick Part]
+    Lines : Hxc Vc Al Pick Line
 
-[Line: Hxc Vc Al Name Line]
-    Fields : Medium Prompt, Hxc Vc Al Name Fld
-    Local  : Field : Medium Prompt : Set as : "Config Name"
-    Local  : Field : Medium Prompt : Width  : 18
+[Line: Hxc Vc Al Pick Line]
+    Fields : Medium Prompt, Hxc Vc Al Pick
+    Local  : Field : Medium Prompt : Set as : "Select Config"
+    Local  : Field : Medium Prompt : Width  : 22
 
-[Field: Hxc Vc Al Name Fld]
-    Use      : Name Field
-    Storage  : HxcVcName
-    Set as   : $HxcVcName
-    Width    : 40
-    Max      : 60
-    Sub Form : Helixcer Voucher Config Detail : NOT $$IsEmpty:$Value
+[Field: Hxc Vc Al Pick]
+    Use        : Name Field
+    Storage    : HxcVcDraftEditKey
+    Set as     : $HxcVcDraftEditKey
+    Table      : Hxc Voucher Config Names
+    Show Table : Always
+    Width      : 40
+    Max        : 60
+    On         : Accept : Yes : CALL : Hxc Vc Load Draft From Config
+    On         : Accept : Yes : Field Accept
 
 [Part: Hxc Vc Al Hint Part]
     Lines : Hxc Vc Al Hint Line
@@ -379,108 +874,13 @@
 
 [Field: Hxc Vc Al Hint]
     Use       : Name Field
-    Set as    : "Select a Config Name → detail form opens. Edit, then Ctrl+A."
+    Set as    : "Select config, edit fields below, Ctrl+A."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
 
 ;; ---------------------------------------------------------------------------
-;; Voucher Config — DETAIL SubForm (popup labeled fields)
-;; Inherits Aggregate object from Config Name field. No Object / no Repeat.
-;; ---------------------------------------------------------------------------
-
-[Report: Helixcer Voucher Config Detail]
-    Form : Helixcer Voucher Config Detail
-    Auto : Yes
-
-[Form: Helixcer Voucher Config Detail]
-    Part       : FormSubTitle, Hxc Vc Det Body
-    Button     : Form Accept, Form Cancel
-    Full Width : No
-    Height     : 80% Screen
-    Option     : Small Size Form
-    Local      : Field : Form SubTitle : Info : "Voucher Config Details"
-
-[Part: Hxc Vc Det Body]
-    Lines  : Hxc Vc Det Template Line, Hxc Vc Det Lang Line, Hxc Vc Det Types Line, +
-             Hxc Vc Det Media Line, Hxc Vc Det Auto Line, Hxc Vc Det Confirm Line
-    Scroll : Vertical
-
-[Line: Hxc Vc Det Template Line]
-    Fields : Medium Prompt, Hxc Vc Det Template
-    Local  : Field : Medium Prompt : Set as : "Template"
-    Local  : Field : Medium Prompt : Width  : 22
-
-[Field: Hxc Vc Det Template]
-    Use      : Name Field
-    Storage  : HxcVcTemplateName
-    Set as   : $HxcVcTemplateName
-    Width    : 40
-    Max      : 80
-
-[Line: Hxc Vc Det Lang Line]
-    Fields : Medium Prompt, Hxc Vc Det Lang
-    Local  : Field : Medium Prompt : Set as : "Language"
-    Local  : Field : Medium Prompt : Width  : 22
-
-[Field: Hxc Vc Det Lang]
-    Use      : Name Field
-    Storage  : HxcVcLanguage
-    Set as   : If $$IsEmpty:$HxcVcLanguage THEN "en" ELSE $HxcVcLanguage
-    Width    : 16
-    Max      : 16
-
-[Line: Hxc Vc Det Types Line]
-    Fields : Medium Prompt, Hxc Vc Det Types
-    Local  : Field : Medium Prompt : Set as : "Voucher Type"
-    Local  : Field : Medium Prompt : Width  : 22
-
-[Field: Hxc Vc Det Types]
-    Use      : Name Field
-    Storage  : HxcVcVoucherTypes
-    Set as   : $HxcVcVoucherTypes
-    Table    : Hxc Voucher Type List, Not Applicable
-    Width    : 40
-    Max      : 120
-
-[Line: Hxc Vc Det Media Line]
-    Fields : Medium Prompt, Hxc Vc Det Media
-    Local  : Field : Medium Prompt : Set as : "Media Header"
-    Local  : Field : Medium Prompt : Width  : 22
-
-[Field: Hxc Vc Det Media]
-    Use        : Name Field
-    Storage    : HxcVcMediaExport
-    Set as     : If $$IsEmpty:$HxcVcMediaExport THEN "None" ELSE $HxcVcMediaExport
-    Table      : Hxc Media Export List
-    Show Table : Always
-    Width      : 40
-    Max        : 40
-
-[Line: Hxc Vc Det Auto Line]
-    Fields : Medium Prompt, Hxc Vc Det Auto
-    Local  : Field : Medium Prompt : Set as : "Auto Select after save?"
-    Local  : Field : Medium Prompt : Width  : 22
-
-[Field: Hxc Vc Det Auto]
-    Use      : Logical Field
-    Storage  : HxcVcAutoSend
-    Set as   : $HxcVcAutoSend
-    Width    : 8
-
-[Line: Hxc Vc Det Confirm Line]
-    Fields : Medium Prompt, Hxc Vc Det Confirm
-    Local  : Field : Medium Prompt : Set as : "Confirm before send?"
-    Local  : Field : Medium Prompt : Width  : 22
-
-[Field: Hxc Vc Det Confirm]
-    Use      : Logical Field
-    Storage  : HxcVcConfirmBeforeSend
-    Set as   : $HxcVcConfirmBeforeSend
-    Width    : 8
-
-;; ---------------------------------------------------------------------------
-;; Voucher Config — LIST (Alter + Skip only — Display+Company crashed before)
+;; LIST
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Voucher Config List]
@@ -500,7 +900,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 345)"
+    Set as    : "Voucher Config List (build 346)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -514,7 +914,7 @@
 
 [Line: Hxc Vc Ls Header Line]
     Fields : Hxc Vc Ls H Name, Hxc Vc Ls H Template, Hxc Vc Ls H Lang, +
-             Hxc Vc Ls H Types, Hxc Vc Ls H Media, Hxc Vc Ls H Auto, Hxc Vc Ls H Confirm
+             Hxc Vc Ls H Types, Hxc Vc Ls H Media, Hxc Vc Ls H Auto
     Local  : Field : Default : Skip  : Yes
     Local  : Field : Default : Align : Centre
     Local  : Field : Default : Style : Bold
@@ -522,77 +922,67 @@
 [Field: Hxc Vc Ls H Name]
     Use    : Name Field
     Set as : "Config Name"
-    Width  : 18
+    Width  : 16
 
 [Field: Hxc Vc Ls H Template]
     Use    : Name Field
     Set as : "Template"
-    Width  : 18
+    Width  : 16
 
 [Field: Hxc Vc Ls H Lang]
     Use    : Name Field
     Set as : "Lang"
-    Width  : 8
+    Width  : 6
 
 [Field: Hxc Vc Ls H Types]
     Use    : Name Field
     Set as : "Voucher Types"
-    Width  : 20
+    Width  : 24
 
 [Field: Hxc Vc Ls H Media]
     Use    : Name Field
     Set as : "Media"
-    Width  : 14
+    Width  : 12
 
 [Field: Hxc Vc Ls H Auto]
     Use    : Name Field
     Set as : "Auto"
     Width  : 6
 
-[Field: Hxc Vc Ls H Confirm]
-    Use    : Name Field
-    Set as : "Confirm"
-    Width  : 8
-
 [Line: Hxc Vc Ls Data Line]
     Fields : Hxc Vc Ls D Name, Hxc Vc Ls D Template, Hxc Vc Ls D Lang, +
-             Hxc Vc Ls D Types, Hxc Vc Ls D Media, Hxc Vc Ls D Auto, Hxc Vc Ls D Confirm
+             Hxc Vc Ls D Types, Hxc Vc Ls D Media, Hxc Vc Ls D Auto
     Local  : Field : Default : Skip : Yes
 
 [Field: Hxc Vc Ls D Name]
     Use    : Name Field
     Set as : $HxcVcName
-    Width  : 18
+    Width  : 16
 
 [Field: Hxc Vc Ls D Template]
     Use    : Name Field
     Set as : $HxcVcTemplateName
-    Width  : 18
+    Width  : 16
 
 [Field: Hxc Vc Ls D Lang]
     Use    : Name Field
     Set as : $HxcVcLanguage
-    Width  : 8
+    Width  : 6
 
 [Field: Hxc Vc Ls D Types]
     Use    : Name Field
     Set as : $HxcVcVoucherTypes
-    Width  : 20
+    Width  : 24
 
 [Field: Hxc Vc Ls D Media]
     Use    : Name Field
     Set as : $HxcVcMediaExport
-    Width  : 14
+    Width  : 12
 
 [Field: Hxc Vc Ls D Auto]
     Use    : Name Field
     Set as : If $HxcVcAutoSend THEN "Yes" ELSE "No"
     Width  : 6
-
-[Field: Hxc Vc Ls D Confirm]
-    Use    : Name Field
-    Set as : If $HxcVcConfirmBeforeSend THEN "Yes" ELSE "No"
-    Width  : 8
 
 [Part: Hxc Vc Ls Hint Part]
     Lines : Hxc Vc Ls Hint Line
@@ -602,7 +992,7 @@
 
 [Field: Hxc Vc Ls Hint]
     Use       : Name Field
-    Set as    : "Read-only. Esc to leave. Use Create / Alter to change."
+    Set as    : "Read-only. Esc to leave."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -625,7 +1015,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 345)"
+    Set as    : "Helixcer Chat (build 346)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -635,7 +1025,7 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "Voucher Config: Create/Alter open detail SubForm. List is read-only."
+    Set as    : "Create = one form: name, template, mapping, multi voucher types."
     Align     : Centre
     FullWidth : Yes
 
