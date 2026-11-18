@@ -1,19 +1,17 @@
 # Helixcer Chat for TallyPrime
 
-## Load (build 333)
+## Load (build 334)
 
-https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-live-field-vars-b545/tally/helixcer-chat-build333.tdl
+https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-live-field-vars-b545/tally/helixcer-chat-build334.tdl
 
 1. Quit Tally; disable older Helixcer TDLs.
-2. Add `helixcer-chat-build333.tdl`, enable, restart with a company open.
-3. API Settings / About must show **build 333**.
+2. Add `helixcer-chat-build334.tdl`, enable, restart with company open.
+3. Title must show **(build 334)**.
 
 ## API Settings
 
-Alter current company; Workspace/Channel use **Storage** UDFs; API Key via `SET VALUE`.
-
-Enter → Yes to save. Reopen should keep IDs and `******`.
+Tab through Workspace ID → Channel ID → API Key (each Accept writes Storage + `##` mirrors) → Enter → Yes.
 
 ## Status
 
-Choosing **Status** runs the connection check immediately (progress + message boxes). No Status screen — Display was crashing Tally (`c0000005`).
+Loads company UDFs, then `GET /api/v1/connection`, then Msg Boxes for Status / Workspace / Channel.
