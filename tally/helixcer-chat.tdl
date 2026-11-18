@@ -1,13 +1,9 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; API Settings saves Workspace ID / Channel ID / API Key only (no HTTP fetch).
-;;
-;; Persistence:
-;;   - System Persistent variables (tallycfg / TallySav)
-;;   - Plus SAVE VARIABLE / LOAD VARIABLE to HelixcerChat.pvf as a backup
-;; Storage: is for master/voucher/UDF object methods — not used here on purpose.
+;; API Settings: save Workspace ID / Channel ID / API Key only (no HTTP fetch).
+;; Open with Display (same as About). Persistent system vars + Modifies.
 
 ;; ---------------------------------------------------------------------------
-;; System Persistent variables
+;; System Persistent variables (kept across Tally sessions)
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcWorkspaceId]
@@ -43,9 +39,8 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    ;; Modify System (not Call / Modify Variable) so the form opens and
-    ;; edits system Persistent variables
-    Key Item : API Settings : S : Modify System : Helixcer API Settings
+    ;; Display — same action that already opens About
+    Key Item : API Settings : S : Display : Helixcer API Settings
     Key Item : About        : A : Display : Helixcer Chat About
     Key Item : Back         : B : Menu : Gateway of Tally
 
@@ -111,7 +106,7 @@
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
-;; Masked display — never Modifies HxcApiKey directly (would save ******)
+;; Masked display — draft only; never write ****** into HxcApiKey
 [Field: Hxc Api Key]
     Use      : Name Field
     Set as   : @@HxcApiKeyMasked
@@ -152,9 +147,8 @@
     11 : Query Box : "Do you want to save?" : Yes
     12 : IF : $$LastResult
     13 :    Form Accept
-    14 :    Save Variable : HelixcerChat.pvf : HxcWorkspaceId, HxcChannelId, HxcApiKey
-    15 : END IF
-    16 : RETURN : Yes
+    14 : END IF
+    15 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; About
