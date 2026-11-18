@@ -8535,8 +8535,27 @@
       );
       return;
     }
+    if (!editing) {
+      const duplicate = state.whatsappTemplates.find((template) =>
+        template.channelId === draft.channelId
+        && String(template.name || "").toLowerCase() === draft.name
+        && String(template.languageCode || "").toLowerCase() === String(draft.language || "").toLowerCase()
+      );
+      if (duplicate) {
+        showToast(
+          "Template already exists",
+          `${draft.name} (${draft.language}) is already on this channel as ${duplicate.status || "EXISTING"}. Use a different name or language, or edit the existing template.`,
+          true
+        );
+        return;
+      }
+    }
     let seenQuickReply = false;
     for (const button of draft.buttons) {
+      if (!button.text) {
+        showToast("Button text required", "Every button needs a label before submitting to Meta.", true);
+        return;
+      }
       if (button.type === "QUICK_REPLY") {
         seenQuickReply = true;
       } else if (seenQuickReply && (button.type === "URL" || button.type === "PHONE_NUMBER")) {
@@ -8547,7 +8566,15 @@
         );
         return;
       }
+      if (button.type === "PHONE_NUMBER" && !button.phoneNumber) {
+        showToast("Phone number required", "Enter a phone number with country code for Call phone buttons.", true);
+        return;
+      }
       if (button.type !== "URL") continue;
+      if (!button.url) {
+        showToast("Website URL required", "Enter an https:// link for Visit website buttons.", true);
+        return;
+      }
       if (button.urlMode === "dynamic") {
         const keys = createTemplatePlaceholders(button.url || "");
         if (!keys.length) {

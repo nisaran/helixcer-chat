@@ -40,6 +40,7 @@ import {
   buildMetaWhatsAppTemplateCreatePayload,
   buildMetaWhatsAppTemplateUpdatePayload,
   buildMetaComponentsFromHelixcerVariables,
+  providerError,
   metaResumableUploadSessionPath,
   metaResumableUploadSessionUrl,
   metaResumableUploadSessionIdFromResponse,
@@ -285,6 +286,31 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
   assert.equal(result.statuses[0].status, 'delivered');
   assert.equal(result.statuses[0].internalMessageId, 'internal-message-1');
   assert.deepEqual(result.phoneNumberIds, ['123456789']);
+});
+
+test('providerError surfaces Meta template create details beyond Invalid parameter', () => {
+  assert.equal(providerError({}, 502), 'HTTP 502');
+  assert.equal(
+    providerError({
+      error: {
+        message: '(#100) Invalid parameter',
+        code: 100,
+        error_subcode: 2388024,
+        error_user_title: 'Content in This Language Already Exists',
+        error_data: { details: 'Template already exists' }
+      }
+    }, 400),
+    '(#100) Invalid parameter — Content in This Language Already Exists — Template already exists'
+  );
+  assert.equal(
+    providerError({
+      error: {
+        message: '(#100) Invalid parameter',
+        error_data: { details: 'BODY is missing expected field (example)' }
+      }
+    }, 400),
+    '(#100) Invalid parameter — BODY is missing expected field (example)'
+  );
 });
 
 test('explains Meta unsupported inbound webhooks from Business API peers', () => {
@@ -708,6 +734,21 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
   assert.equal(payload.components[3].buttons[0].example[0], 'ORD-1001');
   assert.equal(payload.components[3].buttons[2].type, 'QUICK_REPLY');
 
+  const plain = validateWhatsAppTemplateCreateRequest({
+    channelId: 'wa-sales',
+    name: 'continue_chat',
+    language: 'en',
+    category: 'UTILITY',
+    parameterFormat: 'positional',
+    body: { text: 'Please click *Continue* to re-start the chat session.' },
+    buttons: [{ type: 'QUICK_REPLY', text: 'Continue' }]
+  });
+  const plainPayload = buildMetaWhatsAppTemplateCreatePayload(plain);
+  assert.equal(plainPayload.parameter_format, undefined);
+  assert.equal(plainPayload.components[0].type, 'BODY');
+  assert.equal(plainPayload.components[0].example, undefined);
+  assert.equal(plainPayload.components[1].buttons[0].type, 'QUICK_REPLY');
+
   const named = validateWhatsAppTemplateCreateRequest({
     channelId: 'wa-sales',
     name: 'named_hello',
@@ -723,6 +764,7 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
     { param_name: 'customer_name', example: 'Asha' },
     { param_name: 'store_name', example: 'Helixcer' }
   ]);
+  assert.equal(buildMetaWhatsAppTemplateCreatePayload(named).parameter_format, 'named');
 
   assert.throws(() => validateWhatsAppTemplateCreateRequest({
     channelId: 'wa-sales', name: 'Bad Name', language: 'en_US', category: 'UTILITY',

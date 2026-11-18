@@ -7106,14 +7106,25 @@ export function buildMetaWhatsAppTemplateComponents(input) {
   return components;
 }
 
+function whatsappTemplateCreateHasPlaceholders(input) {
+  if (input?.body?.keys?.length) return true;
+  if (Array.isArray(input?.header?.examples) && input.header.examples.length) return true;
+  return (input?.buttons || []).some((button) => Array.isArray(button.example) && button.example.length);
+}
+
 export function buildMetaWhatsAppTemplateCreatePayload(input) {
-  return {
+  const payload = {
     name: input.name,
     language: input.language,
     category: input.category,
-    parameter_format: input.parameterFormat,
     components: buildMetaWhatsAppTemplateComponents(input)
   };
+  // Meta defaults to positional. Only send parameter_format when the template
+  // actually uses placeholders (or the caller explicitly chose named).
+  if (input.parameterFormat === 'named' || whatsappTemplateCreateHasPlaceholders(input)) {
+    payload.parameter_format = input.parameterFormat;
+  }
+  return payload;
 }
 
 export function buildMetaWhatsAppTemplateUpdatePayload(input, { includeCategory = true } = {}) {
@@ -7391,6 +7402,23 @@ async function createWorkspaceWhatsAppTemplate(env, workspaceId, payload, princi
   if (!/^\d{5,40}$/.test(wabaId)) throw httpError(409, 'The WhatsApp Business Account ID is not configured.');
   const credentials = await readChannelCredentials(env, channel);
   if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
+  // Meta returns a generic "(#100) Invalid parameter" for duplicate name+language.
+  // Prefetch by name so we can fail with a clear conflict before create.
+  try {
+    const existing = await listWhatsAppTemplatesByName(env, channel, input.name);
+    const conflict = existing.find((template) =>
+      String(template.language?.code || template.language || '').toLowerCase() === input.language.toLowerCase()
+    );
+    if (conflict) {
+      throw httpError(
+        409,
+        `A WhatsApp template named "${input.name}" already exists for language ${input.language} (${conflict.status || 'EXISTING'}). Use a different name or language, or edit the existing template.`
+      );
+    }
+  } catch (error) {
+    if (Number(error?.status) === 409) throw error;
+    // Listing is best-effort; fall through and let Meta validate the create.
+  }
   const metaPayload = buildMetaWhatsAppTemplateCreatePayload(input);
   const version = metaApiVersion(channel.config?.apiVersion);
   const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/message_templates`);
@@ -11738,9 +11766,29 @@ function cleanError(error) {
   return String(error?.message || error || 'Unknown provider error').slice(0, 500);
 }
 
-function providerError(data, status) {
-  return String(data?.error?.message || data?.description || data?.error_description || `HTTP ${status}`)
-    .replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 240);
+export function providerError(data, status) {
+  const err = data?.error && typeof data.error === 'object' ? data.error : null;
+  const message = String(err?.message || data?.description || data?.error_description || '').trim();
+  const details = String(err?.error_data?.details || '').trim();
+  const userMsg = String(err?.error_user_msg || '').trim();
+  const userTitle = String(err?.error_user_title || '').trim();
+  // Meta often returns a generic "(#100) Invalid parameter" and puts the real
+  // reason in error_user_* / error_data.details (duplicate name, missing example, etc.).
+  const extras = [];
+  for (const part of [userTitle, userMsg, details]) {
+    if (!part) continue;
+    const lower = part.toLowerCase();
+    if (message && message.toLowerCase().includes(lower)) continue;
+    if (extras.some((existing) => {
+      const existingLower = existing.toLowerCase();
+      return existingLower === lower || existingLower.includes(lower) || lower.includes(existingLower);
+    })) continue;
+    extras.push(part);
+  }
+  const combined = [message || (extras.length ? extras.shift() : `HTTP ${status}`), ...extras]
+    .filter(Boolean)
+    .join(' — ');
+  return combined.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 320);
 }
 
 function isMetaObjectVisibilityError(data) {
