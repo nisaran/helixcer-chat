@@ -1,12 +1,12 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 346-create-form
-;; Title must show "(build 346)".
+;; BUILD: 347-template-fetch
+;; Title must show "(build 347)".
 ;;
-;; Create Config = ONE sequential form (not a name list):
-;;   Config Name → Template → Language → Variable Mapping → Media →
-;;   Voucher Types (multi) → Auto / Confirm → Ctrl+A
-;; Uses Company draft UDFs + Alter (no Display). On Accept commits into Aggregate.
-;; Template API fetch still phase 2.
+;; Create Config flow:
+;;   Config Name → Template Name → Language → Enter fetches template →
+;;   Preview + Variable Mapping (from API) → Media → Voucher Types → Settings → Ctrl+A
+;; Mapping/preview are hidden until fetch succeeds.
+;; Alter + Company Storage. No Display of Company reports.
 
 ;; ---------------------------------------------------------------------------
 ;; Company UDFs
@@ -84,6 +84,33 @@
 [Variable: HxcVcSaveOk]
     Type : Logical
 
+[Variable: HxcVcFetched]
+    Type : Logical
+
+[Variable: HxcVcPreviewText]
+    Type : String
+
+[Variable: HxcVcFetchStatus]
+    Type : String
+
+[Variable: HxcVcFK1]
+    Type : String
+
+[Variable: HxcVcFK2]
+    Type : String
+
+[Variable: HxcVcFK3]
+    Type : String
+
+[Variable: HxcVcFK4]
+    Type : String
+
+[Variable: HxcVcFK5]
+    Type : String
+
+[Variable: HxcVcFetchLang]
+    Type : String
+
 [System: Variable]
     HxcSysWorkspaceId   : ""
     HxcSysChannelId     : ""
@@ -92,10 +119,20 @@
     HxcChannelName      : ""
     HxcConnectionStatus : ""
     HxcVcSaveOk         : No
+    HxcVcFetched        : No
+    HxcVcPreviewText    : ""
+    HxcVcFetchStatus    : ""
+    HxcVcFK1            : ""
+    HxcVcFK2            : ""
+    HxcVcFK3            : ""
+    HxcVcFK4            : ""
+    HxcVcFK5            : ""
+    HxcVcFetchLang      : "en"
 
 [System: Formula]
     Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcSysChannelId
     Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
+    Hxc Template Url   : "https://api.chat.helixcer.com/api/v1/whatsapp/templates/" + $HxcVcDraftTemplate + "?channelId=" + ##HxcSysChannelId + "&language=" + ##HxcVcFetchLang
 
 ;; ---------------------------------------------------------------------------
 ;; Tables
@@ -205,6 +242,103 @@
     06 : END IF
     07 : RETURN : Yes
 
+[Function: Hxc Clear Fetch Vars]
+    01 : SET : HxcVcFetched : No
+    02 : SET : HxcVcPreviewText : ""
+    03 : SET : HxcVcFetchStatus : ""
+    04 : SET : HxcVcFK1 : ""
+    05 : SET : HxcVcFK2 : ""
+    06 : SET : HxcVcFK3 : ""
+    07 : SET : HxcVcFK4 : ""
+    08 : SET : HxcVcFK5 : ""
+    09 : RETURN : Yes
+
+[Function: Hxc Apply Template Response]
+    Variable : I : Number
+    Variable : CompType : String
+    01 : SET : I : 0
+    02 : SET : HxcVcFetched : No
+    03 : SET : HxcVcPreviewText : ""
+    04 : SET : HxcVcFK1 : ""
+    05 : SET : HxcVcFK2 : ""
+    06 : SET : HxcVcFK3 : ""
+    07 : SET : HxcVcFK4 : ""
+    08 : SET : HxcVcFK5 : ""
+    09 : SET : HxcVcFetchStatus : "Template not found or empty response."
+    10 : WALK COLLECTION : Parameter Collection
+    11 :    WALK COLLECTION : items
+    12 :       WALK COLLECTION : components
+    13 :          SET : CompType : $type
+    14 :          IF : ##CompType = "body" OR ##CompType = "BODY" OR ##CompType = "Body"
+    15 :             IF : NOT $$IsEmpty:$text
+    16 :                SET : HxcVcPreviewText : $text
+    17 :             END IF
+    18 :          END IF
+    19 :       END WALK
+    20 :       WALK COLLECTION : variables
+    21 :          SET : I : ##I + 1
+    22 :          IF : ##I = 1
+    23 :             SET : HxcVcFK1 : $key
+    24 :          END IF
+    25 :          IF : ##I = 2
+    26 :             SET : HxcVcFK2 : $key
+    27 :          END IF
+    28 :          IF : ##I = 3
+    29 :             SET : HxcVcFK3 : $key
+    30 :          END IF
+    31 :          IF : ##I = 4
+    32 :             SET : HxcVcFK4 : $key
+    33 :          END IF
+    34 :          IF : ##I = 5
+    35 :             SET : HxcVcFK5 : $key
+    36 :          END IF
+    37 :       END WALK
+    38 :       SET : HxcVcFetched : Yes
+    39 :       SET : HxcVcFetchStatus : "Template loaded."
+    40 :    END WALK
+    41 : END WALK
+    42 : IF : ##HxcVcFetched
+    43 :    IF : $$IsEmpty:##HxcVcPreviewText
+    44 :       SET : HxcVcPreviewText : "(No body text in template)"
+    45 :    END IF
+    46 : END IF
+    47 : RETURN : Yes
+
+[Function: Hxc Fetch Template]
+    01 : CALL : Hxc Sync From Company
+    02 : CALL : Hxc Clear Fetch Vars
+    03 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
+    04 :    SET : HxcVcFetchStatus : "Save API Settings (Ctrl+A) before fetching a template."
+    05 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    06 :    RETURN : No
+    07 : END IF
+    08 : IF : $$IsEmpty:$HxcVcDraftTemplate
+    09 :    SET : HxcVcFetchStatus : "Enter Template Name first."
+    10 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    11 :    RETURN : No
+    12 : END IF
+    13 : IF : $$IsEmpty:##HxcVcFetchLang
+    14 :    SET : HxcVcFetchLang : "en"
+    15 : END IF
+    16 : SET : HxcVcFetchStatus : "Fetching..."
+    17 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
+    18 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
+    19 : End Progress
+    20 : IF : NOT ##HxcVcFetched
+    21 :    IF : $$IsEmpty:##HxcVcFetchStatus
+    22 :       SET : HxcVcFetchStatus : "Could not fetch template. Check name, language, and API Settings."
+    23 :    END IF
+    24 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    25 :    RETURN : No
+    26 : END IF
+    27 : SET VALUE : HxcVcDMFld1 : ""
+    28 : SET VALUE : HxcVcDMFld2 : ""
+    29 : SET VALUE : HxcVcDMFld3 : ""
+    30 : SET VALUE : HxcVcDMFld4 : ""
+    31 : SET VALUE : HxcVcDMFld5 : ""
+    32 : Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    33 : RETURN : Yes
+
 ;; ---------------------------------------------------------------------------
 ;; Pack helpers + commit draft → Aggregate config
 ;; ---------------------------------------------------------------------------
@@ -212,20 +346,20 @@
 [Function: Hxc Pack Maps]
     Variable : S : String
     01 : SET : S : ""
-    02 : IF : NOT $$IsEmpty:$HxcVcDMKey1
-    03 :    SET : S : ##S + $HxcVcDMKey1 + "=" + $HxcVcDMFld1 + ";"
+    02 : IF : NOT $$IsEmpty:##HxcVcFK1
+    03 :    SET : S : ##S + ##HxcVcFK1 + "=" + $HxcVcDMFld1 + ";"
     04 : END IF
-    05 : IF : NOT $$IsEmpty:$HxcVcDMKey2
-    06 :    SET : S : ##S + $HxcVcDMKey2 + "=" + $HxcVcDMFld2 + ";"
+    05 : IF : NOT $$IsEmpty:##HxcVcFK2
+    06 :    SET : S : ##S + ##HxcVcFK2 + "=" + $HxcVcDMFld2 + ";"
     07 : END IF
-    08 : IF : NOT $$IsEmpty:$HxcVcDMKey3
-    09 :    SET : S : ##S + $HxcVcDMKey3 + "=" + $HxcVcDMFld3 + ";"
+    08 : IF : NOT $$IsEmpty:##HxcVcFK3
+    09 :    SET : S : ##S + ##HxcVcFK3 + "=" + $HxcVcDMFld3 + ";"
     10 : END IF
-    11 : IF : NOT $$IsEmpty:$HxcVcDMKey4
-    12 :    SET : S : ##S + $HxcVcDMKey4 + "=" + $HxcVcDMFld4 + ";"
+    11 : IF : NOT $$IsEmpty:##HxcVcFK4
+    12 :    SET : S : ##S + ##HxcVcFK4 + "=" + $HxcVcDMFld4 + ";"
     13 : END IF
-    14 : IF : NOT $$IsEmpty:$HxcVcDMKey5
-    15 :    SET : S : ##S + $HxcVcDMKey5 + "=" + $HxcVcDMFld5 + ";"
+    14 : IF : NOT $$IsEmpty:##HxcVcFK5
+    15 :    SET : S : ##S + ##HxcVcFK5 + "=" + $HxcVcDMFld5 + ";"
     16 : END IF
     17 : RETURN : ##S
 
@@ -259,32 +393,33 @@
     26 : RETURN : ##S
 
 [Function: Hxc Vc Clear Draft]
-    01 : SET VALUE : HxcVcDraftName : ""
-    02 : SET VALUE : HxcVcDraftTemplate : ""
-    03 : SET VALUE : HxcVcDraftLang : "en"
-    04 : SET VALUE : HxcVcDraftMedia : "None"
-    05 : SET VALUE : HxcVcDraftAuto : No
-    06 : SET VALUE : HxcVcDraftConfirm : No
-    07 : SET VALUE : HxcVcDraftEditKey : ""
-    08 : SET VALUE : HxcVcDMKey1 : ""
-    09 : SET VALUE : HxcVcDMFld1 : ""
-    10 : SET VALUE : HxcVcDMKey2 : ""
-    11 : SET VALUE : HxcVcDMFld2 : ""
-    12 : SET VALUE : HxcVcDMKey3 : ""
-    13 : SET VALUE : HxcVcDMFld3 : ""
-    14 : SET VALUE : HxcVcDMKey4 : ""
-    15 : SET VALUE : HxcVcDMFld4 : ""
-    16 : SET VALUE : HxcVcDMKey5 : ""
-    17 : SET VALUE : HxcVcDMFld5 : ""
-    18 : SET VALUE : HxcVcDV1 : ""
-    19 : SET VALUE : HxcVcDV2 : ""
-    20 : SET VALUE : HxcVcDV3 : ""
-    21 : SET VALUE : HxcVcDV4 : ""
-    22 : SET VALUE : HxcVcDV5 : ""
-    23 : SET VALUE : HxcVcDV6 : ""
-    24 : SET VALUE : HxcVcDV7 : ""
-    25 : SET VALUE : HxcVcDV8 : ""
-    26 : RETURN : Yes
+    01 : CALL : Hxc Clear Fetch Vars
+    02 : SET VALUE : HxcVcDraftName : ""
+    03 : SET VALUE : HxcVcDraftTemplate : ""
+    04 : SET VALUE : HxcVcDraftLang : "en"
+    05 : SET VALUE : HxcVcDraftMedia : "None"
+    06 : SET VALUE : HxcVcDraftAuto : No
+    07 : SET VALUE : HxcVcDraftConfirm : No
+    08 : SET VALUE : HxcVcDraftEditKey : ""
+    09 : SET VALUE : HxcVcDMKey1 : ""
+    10 : SET VALUE : HxcVcDMFld1 : ""
+    11 : SET VALUE : HxcVcDMKey2 : ""
+    12 : SET VALUE : HxcVcDMFld2 : ""
+    13 : SET VALUE : HxcVcDMKey3 : ""
+    14 : SET VALUE : HxcVcDMFld3 : ""
+    15 : SET VALUE : HxcVcDMKey4 : ""
+    16 : SET VALUE : HxcVcDMFld4 : ""
+    17 : SET VALUE : HxcVcDMKey5 : ""
+    18 : SET VALUE : HxcVcDMFld5 : ""
+    19 : SET VALUE : HxcVcDV1 : ""
+    20 : SET VALUE : HxcVcDV2 : ""
+    21 : SET VALUE : HxcVcDV3 : ""
+    22 : SET VALUE : HxcVcDV4 : ""
+    23 : SET VALUE : HxcVcDV5 : ""
+    24 : SET VALUE : HxcVcDV6 : ""
+    25 : SET VALUE : HxcVcDV7 : ""
+    26 : SET VALUE : HxcVcDV8 : ""
+    27 : RETURN : Yes
 
 [Function: Hxc Vc Commit Draft]
     Variable : Maps : String
@@ -299,40 +434,44 @@
     07 :    Msg Box : "Helixcer Voucher Config" : "Template Name is required."
     08 :    RETURN : No
     09 : END IF
-    10 : SET : Maps : $$HxcPackMaps
-    11 : SET : Vchs : $$HxcPackVouchers
-    12 : SET : EditKey : $HxcVcDraftEditKey
-    13 : IF : NOT $$IsEmpty:##EditKey
-    14 :    WALK COLLECTION : HxcVoucherConfigs
-    15 :       IF : $HxcVcName = ##EditKey
-    16 :          SET TARGET
-    17 :          SET VALUE : HxcVcName : $HxcVcDraftName
-    18 :          SET VALUE : HxcVcTemplateName : $HxcVcDraftTemplate
-    19 :          SET VALUE : HxcVcLanguage : $HxcVcDraftLang
-    20 :          SET VALUE : HxcVcMediaExport : $HxcVcDraftMedia
-    21 :          SET VALUE : HxcVcAutoSend : $HxcVcDraftAuto
-    22 :          SET VALUE : HxcVcConfirmBeforeSend : $HxcVcDraftConfirm
-    23 :          SET VALUE : HxcVcVarMapsText : ##Maps
-    24 :          SET VALUE : HxcVcVoucherTypes : ##Vchs
-    25 :          SET TARGET : ..
-    26 :       END IF
-    27 :    END WALK
-    28 : ELSE
-    29 :    INSERT COLLECTION OBJECT : HxcVoucherConfigs
-    30 :    SET VALUE : HxcVcName : $HxcVcDraftName
-    31 :    SET VALUE : HxcVcTemplateName : $HxcVcDraftTemplate
-    32 :    SET VALUE : HxcVcLanguage : $HxcVcDraftLang
-    33 :    SET VALUE : HxcVcMediaExport : $HxcVcDraftMedia
-    34 :    SET VALUE : HxcVcAutoSend : $HxcVcDraftAuto
-    35 :    SET VALUE : HxcVcConfirmBeforeSend : $HxcVcDraftConfirm
-    36 :    SET VALUE : HxcVcVarMapsText : ##Maps
-    37 :    SET VALUE : HxcVcVoucherTypes : ##Vchs
-    38 :    SET TARGET : ..
-    39 : END IF
-    40 : CALL : Hxc Vc Clear Draft
-    41 : SET : HxcVcSaveOk : Yes
-    42 : Msg Box : "Helixcer Voucher Config" : "Config saved."
-    43 : RETURN : Yes
+    10 : IF : NOT ##HxcVcFetched
+    11 :    Msg Box : "Helixcer Voucher Config" : "Fetch the template first (Enter on Language)."
+    12 :    RETURN : No
+    13 : END IF
+    14 : SET : Maps : $$HxcPackMaps
+    15 : SET : Vchs : $$HxcPackVouchers
+    16 : SET : EditKey : $HxcVcDraftEditKey
+    17 : IF : NOT $$IsEmpty:##EditKey
+    18 :    WALK COLLECTION : HxcVoucherConfigs
+    19 :       IF : $HxcVcName = ##EditKey
+    20 :          SET TARGET
+    21 :          SET VALUE : HxcVcName : $HxcVcDraftName
+    22 :          SET VALUE : HxcVcTemplateName : $HxcVcDraftTemplate
+    23 :          SET VALUE : HxcVcLanguage : $HxcVcDraftLang
+    24 :          SET VALUE : HxcVcMediaExport : $HxcVcDraftMedia
+    25 :          SET VALUE : HxcVcAutoSend : $HxcVcDraftAuto
+    26 :          SET VALUE : HxcVcConfirmBeforeSend : $HxcVcDraftConfirm
+    27 :          SET VALUE : HxcVcVarMapsText : ##Maps
+    28 :          SET VALUE : HxcVcVoucherTypes : ##Vchs
+    29 :          SET TARGET : ..
+    30 :       END IF
+    31 :    END WALK
+    32 : ELSE
+    33 :    INSERT COLLECTION OBJECT : HxcVoucherConfigs
+    34 :    SET VALUE : HxcVcName : $HxcVcDraftName
+    35 :    SET VALUE : HxcVcTemplateName : $HxcVcDraftTemplate
+    36 :    SET VALUE : HxcVcLanguage : $HxcVcDraftLang
+    37 :    SET VALUE : HxcVcMediaExport : $HxcVcDraftMedia
+    38 :    SET VALUE : HxcVcAutoSend : $HxcVcDraftAuto
+    39 :    SET VALUE : HxcVcConfirmBeforeSend : $HxcVcDraftConfirm
+    40 :    SET VALUE : HxcVcVarMapsText : ##Maps
+    41 :    SET VALUE : HxcVcVoucherTypes : ##Vchs
+    42 :    SET TARGET : ..
+    43 : END IF
+    44 : CALL : Hxc Vc Clear Draft
+    45 : SET : HxcVcSaveOk : Yes
+    46 : Msg Box : "Helixcer Voucher Config" : "Config saved."
+    47 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; Menu
@@ -380,7 +519,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 346)"
+    Set as    : "Helixcer Chat — API Settings (build 347)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -443,7 +582,8 @@
 ;; ---------------------------------------------------------------------------
 
 [Part: Hxc Vc Form Body]
-    Lines  : Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
+    Lines  : Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, Hxc Vc F Fetch Hint Line, +
+             Hxc Vc F Prev Head, Hxc Vc F Prev Body, +
              Hxc Vc F Map Head, +
              Hxc Vc F Map1, Hxc Vc F Map2, Hxc Vc F Map3, Hxc Vc F Map4, Hxc Vc F Map5, +
              Hxc Vc F Media Line, +
@@ -476,6 +616,8 @@
     Set as   : $HxcVcDraftTemplate
     Width    : 40
     Max      : 80
+    On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
+    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Lang Line]
     Fields : Medium Prompt, Hxc Vc F Lang
@@ -488,116 +630,164 @@
     Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
     Width    : 16
     Max      : 16
+    ;; Enter on Language fetches template → preview + variable rows
+    On       : Accept : Yes : SET : HxcVcFetchLang : $Value
+    On       : Accept : Yes : CALL : Hxc Fetch Template
+    On       : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Fetch Hint Line]
+    Field : Hxc Vc F Fetch Hint
+    Inactive : ##HxcVcFetched
+
+[Field: Hxc Vc F Fetch Hint]
+    Use       : Name Field
+    Set as    : "Enter Template Name + Language, then Enter on Language to fetch."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Line: Hxc Vc F Prev Head]
+    Field : Hxc Vc F Prev Head Fld
+    Inactive : NOT ##HxcVcFetched
+
+[Field: Hxc Vc F Prev Head Fld]
+    Use       : Name Field
+    Set as    : "— Template Preview —"
+    Style     : Bold
+    FullWidth : Yes
+    Skip      : Yes
+
+[Line: Hxc Vc F Prev Body]
+    Field : Hxc Vc F Prev Body Fld
+    Inactive : NOT ##HxcVcFetched
+
+[Field: Hxc Vc F Prev Body Fld]
+    Use        : Name Field
+    Set as     : ##HxcVcPreviewText
+    Set Always : Yes
+    FullWidth  : Yes
+    Skip       : Yes
 
 [Line: Hxc Vc F Map Head]
     Field : Hxc Vc F Map Head Fld
+    Inactive : NOT ##HxcVcFetched
 
 [Field: Hxc Vc F Map Head Fld]
     Use       : Name Field
-    Set as    : "— Variable Mapping (Var → Voucher field) —"
+    Set as    : "— Variable Mapping (from template → Voucher field) —"
     Style     : Bold
     FullWidth : Yes
     Skip      : Yes
 
 [Line: Hxc Vc F Map1]
     Fields : Medium Prompt, Hxc Vc F MK1, Hxc Vc F MF1
-    Local  : Field : Medium Prompt : Set as : "Var 1"
+    Local  : Field : Medium Prompt : Set as : "Map Var"
     Local  : Field : Medium Prompt : Width  : 22
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1
 
 [Field: Hxc Vc F MK1]
-    Use      : Name Field
-    Storage  : HxcVcDMKey1
-    Set as   : If $$IsEmpty:$HxcVcDMKey1 THEN "1" ELSE $HxcVcDMKey1
-    Width    : 8
-    Max      : 8
+    Use        : Name Field
+    Set as     : ##HxcVcFK1
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 8
 
 [Field: Hxc Vc F MF1]
-    Use      : Name Field
-    Storage  : HxcVcDMFld1
-    Set as   : $HxcVcDMFld1
-    Table    : Hxc Voucher Field List, Not Applicable
-    Width    : 28
-    Max      : 40
+    Use        : Name Field
+    Storage    : HxcVcDMFld1
+    Set as     : $HxcVcDMFld1
+    Set Always : Yes
+    Table      : Hxc Voucher Field List, Not Applicable
+    Width      : 28
+    Max        : 40
 
 [Line: Hxc Vc F Map2]
     Fields : Medium Prompt, Hxc Vc F MK2, Hxc Vc F MF2
-    Local  : Field : Medium Prompt : Set as : "Var 2"
+    Local  : Field : Medium Prompt : Set as : "Map Var"
     Local  : Field : Medium Prompt : Width  : 22
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2
 
 [Field: Hxc Vc F MK2]
-    Use      : Name Field
-    Storage  : HxcVcDMKey2
-    Set as   : If $$IsEmpty:$HxcVcDMKey2 THEN "2" ELSE $HxcVcDMKey2
-    Width    : 8
-    Max      : 8
+    Use        : Name Field
+    Set as     : ##HxcVcFK2
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 8
 
 [Field: Hxc Vc F MF2]
-    Use      : Name Field
-    Storage  : HxcVcDMFld2
-    Set as   : $HxcVcDMFld2
-    Table    : Hxc Voucher Field List, Not Applicable
-    Width    : 28
-    Max      : 40
+    Use        : Name Field
+    Storage    : HxcVcDMFld2
+    Set as     : $HxcVcDMFld2
+    Set Always : Yes
+    Table      : Hxc Voucher Field List, Not Applicable
+    Width      : 28
+    Max        : 40
 
 [Line: Hxc Vc F Map3]
     Fields : Medium Prompt, Hxc Vc F MK3, Hxc Vc F MF3
-    Local  : Field : Medium Prompt : Set as : "Var 3"
+    Local  : Field : Medium Prompt : Set as : "Map Var"
     Local  : Field : Medium Prompt : Width  : 22
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3
 
 [Field: Hxc Vc F MK3]
-    Use      : Name Field
-    Storage  : HxcVcDMKey3
-    Set as   : If $$IsEmpty:$HxcVcDMKey3 THEN "3" ELSE $HxcVcDMKey3
-    Width    : 8
-    Max      : 8
+    Use        : Name Field
+    Set as     : ##HxcVcFK3
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 8
 
 [Field: Hxc Vc F MF3]
-    Use      : Name Field
-    Storage  : HxcVcDMFld3
-    Set as   : $HxcVcDMFld3
-    Table    : Hxc Voucher Field List, Not Applicable
-    Width    : 28
-    Max      : 40
+    Use        : Name Field
+    Storage    : HxcVcDMFld3
+    Set as     : $HxcVcDMFld3
+    Set Always : Yes
+    Table      : Hxc Voucher Field List, Not Applicable
+    Width      : 28
+    Max        : 40
 
 [Line: Hxc Vc F Map4]
     Fields : Medium Prompt, Hxc Vc F MK4, Hxc Vc F MF4
-    Local  : Field : Medium Prompt : Set as : "Var 4"
+    Local  : Field : Medium Prompt : Set as : "Map Var"
     Local  : Field : Medium Prompt : Width  : 22
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4
 
 [Field: Hxc Vc F MK4]
-    Use      : Name Field
-    Storage  : HxcVcDMKey4
-    Set as   : If $$IsEmpty:$HxcVcDMKey4 THEN "4" ELSE $HxcVcDMKey4
-    Width    : 8
-    Max      : 8
+    Use        : Name Field
+    Set as     : ##HxcVcFK4
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 8
 
 [Field: Hxc Vc F MF4]
-    Use      : Name Field
-    Storage  : HxcVcDMFld4
-    Set as   : $HxcVcDMFld4
-    Table    : Hxc Voucher Field List, Not Applicable
-    Width    : 28
-    Max      : 40
+    Use        : Name Field
+    Storage    : HxcVcDMFld4
+    Set as     : $HxcVcDMFld4
+    Set Always : Yes
+    Table      : Hxc Voucher Field List, Not Applicable
+    Width      : 28
+    Max        : 40
 
 [Line: Hxc Vc F Map5]
     Fields : Medium Prompt, Hxc Vc F MK5, Hxc Vc F MF5
-    Local  : Field : Medium Prompt : Set as : "Var 5"
+    Local  : Field : Medium Prompt : Set as : "Map Var"
     Local  : Field : Medium Prompt : Width  : 22
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5
 
 [Field: Hxc Vc F MK5]
-    Use      : Name Field
-    Storage  : HxcVcDMKey5
-    Set as   : If $$IsEmpty:$HxcVcDMKey5 THEN "5" ELSE $HxcVcDMKey5
-    Width    : 8
-    Max      : 8
+    Use        : Name Field
+    Set as     : ##HxcVcFK5
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 8
 
 [Field: Hxc Vc F MF5]
-    Use      : Name Field
-    Storage  : HxcVcDMFld5
-    Set as   : $HxcVcDMFld5
-    Table    : Hxc Voucher Field List, Not Applicable
-    Width    : 28
-    Max      : 40
+    Use        : Name Field
+    Storage    : HxcVcDMFld5
+    Set as     : $HxcVcDMFld5
+    Set Always : Yes
+    Table      : Hxc Voucher Field List, Not Applicable
+    Width      : 28
+    Max        : 40
 
 [Line: Hxc Vc F Media Line]
     Fields : Medium Prompt, Hxc Vc F Media
@@ -773,7 +963,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 346)"
+    Set as    : "Create Voucher Config (build 347)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -787,7 +977,7 @@
 
 [Field: Hxc Vc Cr Hint]
     Use       : Name Field
-    Set as    : "Fill name → template → mapping → voucher types → Ctrl+A. Template fetch next phase."
+    Set as    : "Name → Template → Language (Enter to fetch) → map vars → voucher types → Ctrl+A."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -841,7 +1031,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 346)"
+    Set as    : "Alter Voucher Config (build 347)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -900,7 +1090,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 346)"
+    Set as    : "Voucher Config List (build 347)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1015,7 +1205,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 346)"
+    Set as    : "Helixcer Chat (build 347)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1025,7 +1215,7 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "Create = one form: name, template, mapping, multi voucher types."
+    Set as    : "Create: enter template+language → fetch → preview + mapping."
     Align     : Centre
     FullWidth : Yes
 
