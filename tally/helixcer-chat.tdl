@@ -1,12 +1,9 @@
 ;; Helixcer Chat — TallyPrime TDL
-;;
-;; Load in TallyPrime:
-;;   F1 (Help) → TDL & Add-On → select this file → Enable → Yes
-;; Or: Gateway of Tally → F4 (Manage Local TDLs) → add helixcer-chat.tdl
+;; Calls: GET https://api.chat.helixcer.com/api/v1/connection?channelId=...
+;; Headers: Authorization: Bearer <key>, X-Workspace-Id: <id>
 
 ;; ---------------------------------------------------------------------------
-;; Persistent settings (system scope → TallySav.Cfg)
-;; Do NOT re-declare these on the Report with "Variable :"
+;; Persistent settings
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcWorkspaceId]
@@ -33,6 +30,12 @@
     Type       : String
     Persistent : Yes
 
+[Variable: HxcApiKeyDraft]
+    Type : String
+
+[Variable: HxcJustFetched]
+    Type : Logical
+
 [System: Variable]
     HxcWorkspaceId      : ""
     HxcChannelId        : ""
@@ -40,14 +43,18 @@
     HxcWorkspaceName    : ""
     HxcChannelName      : ""
     HxcConnectionStatus : ""
+    HxcApiKeyDraft      : ""
+    HxcJustFetched      : No
 
 [System: Formula]
     Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcChannelId
     Hxc Auth Header    : "Authorization: Bearer " + ##HxcApiKey
     Hxc Ws Header      : "X-Workspace-Id: " + ##HxcWorkspaceId
+    Hxc Details Visible: If $$IsEmpty:##HxcWorkspaceName THEN No ELSE Yes
+    Hxc Api Key Masked : If $$IsEmpty:##HxcApiKey THEN "" ELSE "******"
 
 ;; ---------------------------------------------------------------------------
-;; HTTP JSON — resolves workspace/channel names after the API Key is entered
+;; GET via Collection (fires when WALK COLLECTION runs)
 ;; ---------------------------------------------------------------------------
 
 [Collection: Hxc Connection Info]
@@ -56,35 +63,153 @@
     Export Header    : @@HxcWsHeader
     Export Header    : "Accept: application/json"
     JSON Object Path : "."
-    Fetch            : workspaceName, channelName, workspaceId, channelId, status
+    Fetch            : workspaceName, channelName, platformLabel, connectorType, status
+
+;; Request report for HTTPRequest action (headers only on GET)
+[Report: Hxc Connection Request]
+    Form          : Hxc Connection Request
+    Export Header : @@HxcAuthHeader
+    Export Header : @@HxcWsHeader
+    Export Header : "Accept: application/json"
+
+[Form: Hxc Connection Request]
+    Part : Hxc Connection Request
+
+[Part: Hxc Connection Request]
+    Lines : Hxc Connection Request
+
+[Line: Hxc Connection Request]
+    Fields : Hxc Connection Request
+
+[Field: Hxc Connection Request]
+    Use    : Name Field
+    Set as : ""
+    Skip   : Yes
 
 ;; ---------------------------------------------------------------------------
-;; Fetch + permanently store names (Persistent variables)
+;; Apply response from Parameter Collection (HTTPRequest path)
 ;; ---------------------------------------------------------------------------
 
-[Function: Hxc Fetch Connection]
-    01 : IF : $$IsEmpty:##HxcWorkspaceId OR $$IsEmpty:##HxcChannelId OR $$IsEmpty:##HxcApiKey
-    02 :    SET : HxcWorkspaceName : ""
-    03 :    SET : HxcChannelName : ""
-    04 :    SET : HxcConnectionStatus : "Enter Workspace ID, Channel ID, and API Key"
-    05 :    RETURN : No
+[Function: Hxc Apply From Parameter Collection]
+    Variable : Platform : String
+    01 : SET : HxcWorkspaceName : ""
+    02 : SET : HxcChannelName : ""
+    03 : SET : HxcConnectionStatus : "No data from Helixcer"
+    04 : WALK COLLECTION : Parameter Collection
+    05 :    IF : NOT $$IsEmpty:$workspaceName
+    06 :       SET : Platform : $platformLabel
+    07 :       IF : $$IsEmpty:##Platform
+    08 :          SET : Platform : $connectorType
+    09 :       END IF
+    10 :       IF : $$IsEmpty:##Platform
+    11 :          SET : Platform : "Channel"
+    12 :       END IF
+    13 :       SET : HxcWorkspaceName : $workspaceName
+    14 :       SET : HxcChannelName : $channelName + " (" + ##Platform + ")"
+    15 :       SET : HxcConnectionStatus : "Connected"
+    16 :    END IF
+    17 : END WALK
+    18 : RETURN : Yes
+
+;; ---------------------------------------------------------------------------
+;; Apply response from Hxc Connection Info collection (WALK path)
+;; ---------------------------------------------------------------------------
+
+[Function: Hxc Apply From Collection]
+    Variable : Platform : String
+    01 : SET : HxcWorkspaceName : ""
+    02 : SET : HxcChannelName : ""
+    03 : SET : HxcConnectionStatus : "No data from Helixcer"
+    04 : WALK COLLECTION : Hxc Connection Info
+    05 :    IF : NOT $$IsEmpty:$workspaceName
+    06 :       SET : Platform : $platformLabel
+    07 :       IF : $$IsEmpty:##Platform
+    08 :          SET : Platform : $connectorType
+    09 :       END IF
+    10 :       IF : $$IsEmpty:##Platform
+    11 :          SET : Platform : "Channel"
+    12 :       END IF
+    13 :       SET : HxcWorkspaceName : $workspaceName
+    14 :       SET : HxcChannelName : $channelName + " (" + ##Platform + ")"
+    15 :       SET : HxcConnectionStatus : "Connected"
+    16 :    END IF
+    17 : END WALK
+    18 : RETURN : Yes
+
+[Function: Hxc Use Draft Key]
+    01 : IF : $$IsEmpty:##HxcApiKeyDraft
+    02 :    RETURN : Yes
+    03 : END IF
+    04 : IF : ##HxcApiKeyDraft = "******"
+    05 :    RETURN : Yes
     06 : END IF
-    07 : SET : HxcWorkspaceName : ""
-    08 : SET : HxcChannelName : ""
-    09 : SET : HxcConnectionStatus : "Fetching from Helixcer..."
-    10 : WALK COLLECTION : Hxc Connection Info
-    11 :    IF : NOT $$IsEmpty:$workspaceName
-    12 :       SET : HxcWorkspaceName : $workspaceName
-    13 :       SET : HxcChannelName : $channelName
-    14 :       SET : HxcConnectionStatus : "Connected"
-    15 :    END IF
-    16 : END WALK
-    17 : IF : $$IsEmpty:##HxcWorkspaceName
-    18 :    SET : HxcConnectionStatus : "Could not fetch names. Check IDs and API Key."
-    19 : END IF
+    07 : IF : ##HxcApiKeyDraft = "*"
+    08 :    RETURN : Yes
+    09 : END IF
+    10 : IF : ##HxcApiKeyDraft = "********"
+    11 :    RETURN : Yes
+    12 : END IF
+    13 : SET : HxcApiKey : ##HxcApiKeyDraft
+    14 : RETURN : Yes
+
+;; Primary fetch — Collection WALK (proven GET) then HTTPRequest as backup
+[Function: Hxc Fetch Connection]
+    01 : CALL : Hxc Use Draft Key
+    02 : SET : HxcJustFetched : No
+    03 : IF : $$IsEmpty:##HxcWorkspaceId OR $$IsEmpty:##HxcChannelId OR $$IsEmpty:##HxcApiKey
+    04 :    Msg Box : "Helixcer" : "Enter Workspace ID, Channel ID, and API Key first."
+    05 :    SET : HxcWorkspaceName : ""
+    06 :    SET : HxcChannelName : ""
+    07 :    SET : HxcConnectionStatus : ""
+    08 :    RETURN : No
+    09 : END IF
+    10 : SET : HxcWorkspaceName : ""
+    11 : SET : HxcChannelName : ""
+    12 : SET : HxcConnectionStatus : "Calling Helixcer..."
+    ;; 1) Collection GET — this is what actually opens the HTTPS request
+    13 : CALL : Hxc Apply From Collection
+    14 : IF : NOT $$IsEmpty:##HxcWorkspaceName
+    15 :    SET : HxcJustFetched : Yes
+    16 :    RETURN : Yes
+    17 : END IF
+    ;; 2) Fallback: documented HTTPRequest action (one word, JSONEX, ASCII)
+    18 : HTTPRequest : @@HxcConnectionUrl : GET : JSONEX : ASCII : Hxc Connection Request : Hxc Apply From Parameter Collection
+    19 : IF : $$IsEmpty:##HxcWorkspaceName
+    20 :    SET : HxcConnectionStatus : "Could not fetch. Check key / internet."
+    21 :    Msg Box : "Helixcer" : "GET /api/v1/connection failed. Check API Key and that Tally can reach api.chat.helixcer.com"
+    22 : END IF
+    23 : SET : HxcJustFetched : Yes
+    24 : RETURN : Yes
+
+;; Enter on last field runs Form Accept — fetch first, stay open after fetch
+[Function: Hxc On Form Accept]
+    01 : CALL : Hxc Use Draft Key
+    02 : IF : ##HxcJustFetched
+    03 :    SET : HxcJustFetched : No
+    04 :    RETURN : No
+    05 : END IF
+    06 : IF : $$IsEmpty:##HxcWorkspaceName OR ##HxcConnectionStatus != "Connected"
+    07 :    CALL : Hxc Fetch Connection
+    08 :    SET : HxcJustFetched : No
+    09 :    RETURN : No
+    10 : END IF
+    11 : Form Accept
+    12 : RETURN : Yes
+
+[Function: Hxc Accept Api Key]
+    01 : SET : HxcApiKeyDraft : $Value
+    02 : IF : NOT $$IsEmpty:$Value
+    03 :    IF : $Value != "******"
+    04 :       IF : $Value != "*"
+    05 :          SET : HxcApiKey : $Value
+    06 :       END IF
+    07 :    END IF
+    08 : END IF
+    09 : CALL : Hxc Fetch Connection
+    10 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
-;; Gateway of Tally → Helixcer Chat
+;; Menus
 ;; ---------------------------------------------------------------------------
 
 [#Menu: Gateway of Tally]
@@ -97,7 +222,7 @@
     Key Item : Back         : B : Menu : Gateway of Tally
 
 ;; ---------------------------------------------------------------------------
-;; API Settings
+;; API Settings form
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer API Settings]
@@ -108,6 +233,12 @@
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
     Button : Form Accept, Form Cancel, Hxc Fetch Names Button
+    Option : Hxc Settings Refresh : ##HxcWorkspaceName
+    Option : Hxc Settings Refresh Status : ##HxcConnectionStatus
+    On     : Form Accept : Yes : Call : Hxc On Form Accept
+
+[!Form: Hxc Settings Refresh]
+[!Form: Hxc Settings Refresh Status]
 
 [Button: Hxc Fetch Names Button]
     Key    : Alt+V
@@ -117,7 +248,9 @@
 [Part: Helixcer API Settings]
     Lines  : Hxc Api Settings Title, +
              Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line, +
-             Hxc Workspace Name Line, Hxc Channel Name Line, Hxc Connection Status Line
+             Hxc Details Spacer Line, +
+             Hxc Connection Status Line, Hxc Workspace Name Line, Hxc Channel Name Line, +
+             Hxc Save Hint Line
     Scroll : Vertical
 
 [Line: Hxc Api Settings Title]
@@ -139,9 +272,11 @@
 [Field: Hxc Workspace Id]
     Use      : Name Field
     Set as   : ##HxcWorkspaceId
-    Modifies : HxcWorkspaceId : Yes
-    Width    : 40
+    Modifies : HxcWorkspaceId : No
+    Width    : 60
     Max      : 64
+    On       : Accept : Yes : SET : HxcWorkspaceId : $Value
+    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Channel Id Line]
     Fields : Medium Prompt, Hxc Channel Id
@@ -151,9 +286,11 @@
 [Field: Hxc Channel Id]
     Use      : Name Field
     Set as   : ##HxcChannelId
-    Modifies : HxcChannelId : Yes
-    Width    : 40
+    Modifies : HxcChannelId : No
+    Width    : 60
     Max      : 64
+    On       : Accept : Yes : SET : HxcChannelId : $Value
+    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Api Key Line]
     Fields : Medium Prompt, Hxc Api Key
@@ -162,52 +299,80 @@
 
 [Field: Hxc Api Key]
     Use      : Name Field
-    Set as   : ##HxcApiKey
-    Modifies : HxcApiKey : Yes
-    Width    : 40
+    Set as   : @@HxcApiKeyMasked
+    Modifies : HxcApiKeyDraft : Yes
+    Width    : 60
     Max      : 200
-    ;; Leave this field (Tab / Enter) → fetch names and keep them permanently
-    On       : Accept : SET : HxcApiKey : $Value
-    On       : Accept : Call : Hxc Fetch Connection
+    On       : Accept : Yes : Call : Hxc Accept Api Key
+    On       : Accept : Yes : Field Accept
 
-[Line: Hxc Workspace Name Line]
-    Fields : Medium Prompt, Hxc Workspace Name
-    Local  : Field : Medium Prompt : Set as : "Workspace Name"
-    Local  : Field : Medium Prompt : Width  : 20
+[Line: Hxc Details Spacer Line]
+    Field     : Hxc Details Spacer
+    Invisible : NOT @@HxcDetailsVisible
 
-[Field: Hxc Workspace Name]
+[Field: Hxc Details Spacer]
     Use       : Name Field
-    Set as    : ##HxcWorkspaceName
-    Set Always: Yes
-    Width     : 40
+    Set as    : ""
     Skip      : Yes
-    Inactive  : Yes
-
-[Line: Hxc Channel Name Line]
-    Fields : Medium Prompt, Hxc Channel Name
-    Local  : Field : Medium Prompt : Set as : "Channel Name"
-    Local  : Field : Medium Prompt : Width  : 20
-
-[Field: Hxc Channel Name]
-    Use       : Name Field
-    Set as    : ##HxcChannelName
-    Set Always: Yes
-    Width     : 40
-    Skip      : Yes
-    Inactive  : Yes
+    FullWidth : Yes
 
 [Line: Hxc Connection Status Line]
-    Fields : Medium Prompt, Hxc Connection Status
-    Local  : Field : Medium Prompt : Set as : "Status"
-    Local  : Field : Medium Prompt : Width  : 20
+    Fields    : Medium Prompt, Hxc Connection Status
+    Local     : Field : Medium Prompt : Set as : "Status"
+    Local     : Field : Medium Prompt : Width  : 20
+    Local     : Field : Medium Prompt : Color  : Blue
+    Invisible : NOT @@HxcDetailsVisible
 
 [Field: Hxc Connection Status]
     Use       : Name Field
     Set as    : ##HxcConnectionStatus
     Set Always: Yes
-    Width     : 40
+    Color     : Blue
+    Width     : 60
     Skip      : Yes
-    Inactive  : Yes
+
+[Line: Hxc Workspace Name Line]
+    Fields    : Medium Prompt, Hxc Workspace Name
+    Local     : Field : Medium Prompt : Set as : "Workspace"
+    Local     : Field : Medium Prompt : Width  : 20
+    Local     : Field : Medium Prompt : Color  : Blue
+    Invisible : NOT @@HxcDetailsVisible
+
+[Field: Hxc Workspace Name]
+    Use       : Name Field
+    Set as    : ##HxcWorkspaceName
+    Set Always: Yes
+    Color     : Blue
+    Width     : 60
+    Skip      : Yes
+
+[Line: Hxc Channel Name Line]
+    Fields    : Medium Prompt, Hxc Channel Name
+    Local     : Field : Medium Prompt : Set as : "Channel Name"
+    Local     : Field : Medium Prompt : Width  : 20
+    Local     : Field : Medium Prompt : Color  : Blue
+    Invisible : NOT @@HxcDetailsVisible
+
+[Field: Hxc Channel Name]
+    Use       : Name Field
+    Set as    : ##HxcChannelName
+    Set Always: Yes
+    Color     : Blue
+    Width     : 60
+    Skip      : Yes
+
+[Line: Hxc Save Hint Line]
+    Field     : Hxc Save Hint
+    Invisible : NOT @@HxcDetailsVisible
+
+[Field: Hxc Save Hint]
+    Use       : Name Field
+    Set as    : "Press Enter or Ctrl+A to save"
+    Set Always: Yes
+    Color     : Blue
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; About
@@ -238,7 +403,7 @@
 [Field: Helixcer Chat About Body]
     Use       : Name Field
     Set as    : If $$IsEmpty:##HxcWorkspaceName THEN +
-                "Open API Settings, enter IDs and API Key, then leave the API Key field to fetch names." +
+                "API Settings → enter IDs and key → Enter or Alt+V (Verify)." +
                 ELSE ##HxcWorkspaceName + " / " + ##HxcChannelName
     Align     : Centre
     FullWidth : Yes

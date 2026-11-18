@@ -1312,8 +1312,12 @@ async function handleExternalApi(request, env, ctx, url) {
 }
 
 async function authenticateApiKey(request, env) {
-  const authorization = request.headers.get('Authorization') || '';
-  const match = authorization.match(/^Bearer (hxc_live_([A-Za-z0-9_-]{8,32})\.([A-Za-z0-9_-]{32,128}))$/);
+  // Tally and other clients sometimes add spaces/newlines around long pasted keys.
+  const authorization = String(request.headers.get('Authorization') || '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = authorization.match(/^Bearer\s+(hxc_live_([A-Za-z0-9_-]{8,32})\.([A-Za-z0-9_-]{32,128}))$/i);
   if (!match) throw apiError(401, 'invalid_api_key', 'A valid Bearer API key is required.');
   const token = match[1];
   const keyPrefix = `hxc_live_${match[2]}`;
@@ -1366,16 +1370,29 @@ async function getExternalConnection(env, url, principal, requestId) {
     FROM channels WHERE workspace_id=?1 AND channel_id=?2 LIMIT 1`)
     .bind(principal.workspaceId, channelId).first();
   if (!channel) throw apiError(404, 'channel_not_found', 'Channel not found in this workspace.');
+  const connectorType = logicalConnectorType(channel);
   return json({
     status: true,
     workspaceId: workspace.workspace_id,
     workspaceName: String(workspace.name || ''),
     channelId: channel.channel_id,
     channelName: String(channel.name || ''),
-    connectorType: logicalConnectorType(channel),
+    connectorType,
+    platformLabel: externalPlatformLabel(connectorType),
     enabled: Boolean(channel.enabled),
     requestId
   });
+}
+
+function externalPlatformLabel(connectorType) {
+  switch (String(connectorType || '')) {
+    case 'whatsapp_cloud': return 'WhatsApp';
+    case 'telegram': return 'Telegram';
+    case 'instagram': return 'Instagram';
+    case 'facebook_messenger': return 'Messenger';
+    case 'google_reviews': return 'Google Reviews';
+    default: return connectorType ? String(connectorType) : 'Channel';
+  }
 }
 
 function externalContactView(item) {
