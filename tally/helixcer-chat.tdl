@@ -43,15 +43,11 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    ;; Call (not Modify Variable) so we Load + Modify System Persistent vars
-    Key Item : API Settings : S : Call : Hxc Open Api Settings
+    ;; Modify System (not Call / Modify Variable) so the form opens and
+    ;; edits system Persistent variables
+    Key Item : API Settings : S : Modify System : Helixcer API Settings
     Key Item : About        : A : Display : Helixcer Chat About
     Key Item : Back         : B : Menu : Gateway of Tally
-
-[Function: Hxc Open Api Settings]
-    01 : Load Variable : HelixcerChat.pvf : HxcWorkspaceId, HxcChannelId, HxcApiKey
-    02 : Modify System : Helixcer API Settings
-    03 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; API Settings — save only
