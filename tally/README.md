@@ -1,15 +1,11 @@
-# Helixcer Chat for TallyPrime — build 348
+# Helixcer Chat for TallyPrime — build 349
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer_chat.tdl
 
-Company open. Titles **(build 348)**. API Settings saved first.
+**Reload must show (build 349).** If you still see T0014 at line 640, the old build 347 file is still loaded.
 
-## Create Config
+## Fix
+`Inactive` is only on **Field** now — never on **Line** (T0014).
 
-1. Config Name → Template Name → Language → **Enter** (fetch template)  
-2. Preview + variable mapping appear only after fetch  
-3. Media / voucher types / Auto / Confirm → **Ctrl+A**
-
-## Fix in 348
-
-TDL error `T0014`: `Inactive` is not valid on **Line**. Moved to **Field** (and `Local : Field : Default : Inactive` on map rows).
+## Create
+Config Name → Template → Language **Enter** → preview + mapping → Ctrl+A
