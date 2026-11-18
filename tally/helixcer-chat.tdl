@@ -23,6 +23,12 @@
 [Variable: HxcApiKeyDraft]
     Type : String
 
+[Variable: HxcWorkspaceIdDraft]
+    Type : String
+
+[Variable: HxcChannelIdDraft]
+    Type : String
+
 [Variable: HxcWorkspaceName]
     Type       : String
     Persistent : Yes
@@ -40,6 +46,8 @@
     HxcChannelId        : ""
     HxcApiKey           : ""
     HxcApiKeyDraft      : ""
+    HxcWorkspaceIdDraft : ""
+    HxcChannelIdDraft   : ""
     HxcWorkspaceName    : ""
     HxcChannelName      : ""
     HxcConnectionStatus : ""
@@ -165,39 +173,41 @@
     Skip      : Yes
 
 [Line: Hxc Workspace Id Line]
-    Fields : Medium Prompt, Hxc Workspace Id
+    Fields : Medium Prompt, HxcWorkspaceIdFld
     Local  : Field : Medium Prompt : Set as : "Workspace ID"
     Local  : Field : Medium Prompt : Width  : 20
 
-[Field: Hxc Workspace Id]
+[Field: HxcWorkspaceIdFld]
     Use      : Name Field
     Set as   : ##HxcWorkspaceId
-    Modifies : HxcWorkspaceId : Yes
+    Modifies : HxcWorkspaceIdDraft : Yes
     Width    : 60
     Max      : 64
+    On       : Accept : Yes : SET : HxcWorkspaceIdDraft : $Value
     On       : Accept : Yes : SET : HxcWorkspaceId : $Value
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Channel Id Line]
-    Fields : Medium Prompt, Hxc Channel Id
+    Fields : Medium Prompt, HxcChannelIdFld
     Local  : Field : Medium Prompt : Set as : "Channel ID"
     Local  : Field : Medium Prompt : Width  : 20
 
-[Field: Hxc Channel Id]
+[Field: HxcChannelIdFld]
     Use      : Name Field
     Set as   : ##HxcChannelId
-    Modifies : HxcChannelId : Yes
+    Modifies : HxcChannelIdDraft : Yes
     Width    : 60
     Max      : 64
+    On       : Accept : Yes : SET : HxcChannelIdDraft : $Value
     On       : Accept : Yes : SET : HxcChannelId : $Value
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Api Key Line]
-    Fields : Medium Prompt, Hxc Api Key
+    Fields : Medium Prompt, HxcApiKeyFld
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
-[Field: Hxc Api Key]
+[Field: HxcApiKeyFld]
     Use      : Name Field
     Set as   : @@HxcApiKeyMasked
     Modifies : HxcApiKeyDraft : Yes
@@ -223,18 +233,21 @@
     14 : SET : HxcApiKey : $Value
     15 : RETURN : Yes
 
-;; SET all three from field values so Persistent system vars actually keep them.
+;; Promote drafts → Persistent vars. Never use #FieldName (spaces = Bad formula).
 ;; RETURN Yes/No only — never nest Form Accept.
 [Function: Hxc Confirm Save]
-    01 : SET : HxcWorkspaceId : #Hxc Workspace Id
-    02 : SET : HxcChannelId : #Hxc Channel Id
-    03 : SET : HxcApiKeyDraft : #Hxc Api Key
-    04 : CALL : Hxc Capture Api Key From Draft
-    05 : Query Box : "Do you want to save?" : Yes
-    06 : IF : $$LastResult
-    07 :    RETURN : Yes
-    08 : END IF
-    09 : RETURN : No
+    01 : IF : NOT $$IsEmpty:##HxcWorkspaceIdDraft
+    02 :    SET : HxcWorkspaceId : ##HxcWorkspaceIdDraft
+    03 : END IF
+    04 : IF : NOT $$IsEmpty:##HxcChannelIdDraft
+    05 :    SET : HxcChannelId : ##HxcChannelIdDraft
+    06 : END IF
+    07 : CALL : Hxc Capture Api Key From Draft
+    08 : Query Box : "Do you want to save?" : Yes
+    09 : IF : $$LastResult
+    10 :    RETURN : Yes
+    11 : END IF
+    12 : RETURN : No
 
 [Function: Hxc Capture Api Key From Draft]
     01 : IF : $$IsEmpty:##HxcApiKeyDraft
