@@ -1,14 +1,16 @@
-# Helixcer Chat for TallyPrime — build 353
+# Helixcer Chat for TallyPrime — build 354
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 353)**.
+Title must show **(build 354)**.
 
 ## Create Config
 
-1. Config Name → Template Name → Language  
-2. **Fetch Template** field → type `Yes` → **Enter** (or press **Alt+F**)  
-3. Preview + variable mapping (max 4) appear after a successful fetch  
-4. Media → Voucher Types → Auto/Confirm → **Ctrl+A**
+1. Config Name → Template → Language  
+2. **Fetch Template** = `Yes` → Enter (or **Alt+F**)  
+3. Status line shows API result (including real error text when possible)  
+4. Map vars → voucher types → Ctrl+A  
 
-Status line under Fetch shows the last fetch result.
+## Fetch (354)
+
+Uses Collection HTTP JSON first (so 404/auth JSON errors can surface), then JSONEX HTTP Request fallback. Confirm **Helixcer Chat → Status** shows Connected before fetching.
