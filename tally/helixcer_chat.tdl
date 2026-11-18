@@ -1,37 +1,26 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 337-report-pvf
-;; Title must show "(build 337)".
+;; BUILD: 338-alter-storage
+;; Title must show "(build 338)".
 ;;
-;; ROOT CAUSE: Modify Variable edits PARENT scope, so Persistent system
-;; vars / Modifies never kept Workspace/Channel on reopen (empty form).
+;; Display of API Settings → c0000005 (screenshot: API Settings highlighted).
+;; Modify Variable opens but does not persist (parent scope).
 ;;
-;; FIX (Tally-documented):
-;;   - Report-scoped Persistent vars (NOT System: Variable)
-;;   - Open with Display (report owns the vars)
-;;   - Save Variable / Load Variable → HelixcerChat.pvf
-;;   - Copy into HxcSys* system mirrors for Status HTTP
+;; Working open+persist path:
+;;   Alter + Object Company + Storage UDFs (values stay on company)
+;;   On Yes: also SET HxcSys* for Status HTTP
+;; Status: Call + Msg Box only (no Display)
 
 ;; ---------------------------------------------------------------------------
-;; Report-scope Persistent vars (Save/Load Variable) — do NOT put in System:
+;; Company UDFs (Storage)
 ;; ---------------------------------------------------------------------------
 
-[Variable: HxcWorkspaceId]
-    Type       : String
-    Persistent : Yes
-
-[Variable: HxcChannelId]
-    Type       : String
-    Persistent : Yes
-
-[Variable: HxcApiKey]
-    Type       : String
-    Persistent : Yes
-
-[Variable: HxcApiKeyDraft]
-    Type : String
+[System: UDF]
+    HxcWorkspaceIdUDF : String : 25101
+    HxcChannelIdUDF   : String : 25102
+    HxcApiKeyUDF      : String : 25103
 
 ;; ---------------------------------------------------------------------------
-;; System mirrors — Status / HTTP only (filled on successful save)
+;; System mirrors for Status / HTTP (filled on save)
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcSysWorkspaceId]
@@ -46,6 +35,9 @@
     Type       : String
     Persistent : Yes
 
+[Variable: HxcApiKeyDraft]
+    Type : String
+
 [Variable: HxcWorkspaceName]
     Type       : String
     Persistent : Yes
@@ -58,10 +50,6 @@
     Type       : String
     Persistent : Yes
 
-[Variable: HxcPvfReady]
-    Type       : Logical
-    Persistent : Yes
-
 [System: Variable]
     HxcSysWorkspaceId   : ""
     HxcSysChannelId     : ""
@@ -70,16 +58,15 @@
     HxcWorkspaceName    : ""
     HxcChannelName      : ""
     HxcConnectionStatus : ""
-    HxcPvfReady         : No
 
 [System: Formula]
     Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcSysChannelId
-    Hxc Api Key Masked : If $$IsEmpty:##HxcApiKey THEN "" ELSE "******"
-    Hxc Creds Summary  : "WS=[" + ##HxcWorkspaceId + "] CH=[" + ##HxcChannelId + "] KeyChars=" + $$StringLength:##HxcApiKey
+    ;; Mask from system mirror (safe outside Company context)
+    Hxc Api Key Masked : If $$IsEmpty:##HxcSysApiKey THEN "" ELSE "******"
     Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
 
 ;; ---------------------------------------------------------------------------
-;; HTTP GET
+;; HTTP GET — headers from system mirrors
 ;; ---------------------------------------------------------------------------
 
 [Report: Hxc Connection Request]
@@ -123,6 +110,12 @@
     17 : END WALK
     18 : RETURN : Yes
 
+[Function: Hxc Sync Sys From Company]
+    01 : SET : HxcSysWorkspaceId : $HxcWorkspaceIdUDF
+    02 : SET : HxcSysChannelId : $HxcChannelIdUDF
+    03 : SET : HxcSysApiKey : $HxcApiKeyUDF
+    04 : RETURN : Yes
+
 [Function: Hxc Fetch Connection]
     01 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
     02 :    SET : HxcConnectionStatus : "Not saved. " + @@HxcSysSummary
@@ -151,7 +144,7 @@
     07 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
-;; Menu — Display so the report owns Variable: (Modify Variable cannot)
+;; Menu
 ;; ---------------------------------------------------------------------------
 
 [#Menu: Gateway of Tally]
@@ -159,32 +152,25 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    Key Item : API Settings : S : Display : Helixcer API Settings
+    ;; Alter — Display crashes; Modify Variable does not persist
+    Key Item : API Settings : S : Alter : Helixcer API Settings
     Key Item : Status       : T : Call : Hxc Show Status
     Key Item : About        : A : Display : Helixcer Chat About
     Key Item : Back         : B : Menu : Gateway of Tally
 
 ;; ---------------------------------------------------------------------------
-;; API Settings — report vars + Load/Save HelixcerChat.pvf
+;; API Settings — Company Alter + Storage
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer API Settings]
-    Form     : Helixcer API Settings
-    Title    : "API Settings"
-    Variable : HxcWorkspaceId, HxcChannelId, HxcApiKey, HxcApiKeyDraft
+    Form   : Helixcer API Settings
+    Title  : "API Settings"
+    Object : Company
 
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
     Button : Form Accept, Form Cancel
-    On     : Form Create : Yes : Call : Hxc Load Api Settings
     On     : Form Accept : Yes : Call : Hxc Confirm Save
-
-[Function: Hxc Load Api Settings]
-    ;; Skip Load until at least one successful Save (missing .pvf aborts otherwise)
-    01 : IF : ##HxcPvfReady
-    02 :    Load Variable : HelixcerChat.pvf : HxcWorkspaceId, HxcChannelId, HxcApiKey
-    03 : END IF
-    04 : RETURN : Yes
 
 [Part: Helixcer API Settings]
     Lines  : Hxc Api Settings Title, +
@@ -196,7 +182,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 337)"
+    Set as    : "Helixcer Chat — API Settings (build 338)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -209,11 +195,11 @@
 
 [Field: HxcWorkspaceIdFld]
     Use      : Name Field
-    Set as   : ##HxcWorkspaceId
-    Modifies : HxcWorkspaceId : Yes
+    Storage  : HxcWorkspaceIdUDF
+    Set as   : $HxcWorkspaceIdUDF
     Width    : 60
     Max      : 64
-    On       : Accept : Yes : SET : HxcWorkspaceId : $Value
+    On       : Accept : Yes : SET : HxcSysWorkspaceId : $Value
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Channel Id Line]
@@ -223,11 +209,11 @@
 
 [Field: HxcChannelIdFld]
     Use      : Name Field
-    Set as   : ##HxcChannelId
-    Modifies : HxcChannelId : Yes
+    Storage  : HxcChannelIdUDF
+    Set as   : $HxcChannelIdUDF
     Width    : 60
     Max      : 64
-    On       : Accept : Yes : SET : HxcChannelId : $Value
+    On       : Accept : Yes : SET : HxcSysChannelId : $Value
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Api Key Line]
@@ -235,6 +221,7 @@
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
+;; No Storage — masked value must not overwrite real key
 [Field: HxcApiKeyFld]
     Use      : Name Field
     Set as   : @@HxcApiKeyMasked
@@ -258,8 +245,9 @@
     11 : IF : $Value = "********"
     12 :    RETURN : Yes
     13 : END IF
-    14 : SET : HxcApiKey : $Value
-    15 : RETURN : Yes
+    14 : SET VALUE : HxcApiKeyUDF : $Value
+    15 : SET : HxcSysApiKey : $Value
+    16 : RETURN : Yes
 
 [Function: Hxc Confirm Save]
     01 : CALL : Hxc Capture Api Key
@@ -267,27 +255,22 @@
     03 :    IF : ##HxcApiKeyDraft != "******"
     04 :       IF : ##HxcApiKeyDraft != "*"
     05 :          IF : ##HxcApiKeyDraft != "********"
-    06 :             SET : HxcApiKey : ##HxcApiKeyDraft
-    07 :          END IF
-    08 :       END IF
-    09 :    END IF
-    10 : END IF
-    11 : Query Box : "Do you want to save?" : Yes
-    12 : IF : NOT $$LastResult
-    13 :    RETURN : No
-    14 : END IF
-    ;; Report-scope Save Variable (official persistence)
-    15 : Save Variable : HelixcerChat.pvf : HxcWorkspaceId, HxcChannelId, HxcApiKey
-    16 : SET : HxcPvfReady : Yes
-    ;; System mirrors for Status
-    17 : SET : HxcSysWorkspaceId : ##HxcWorkspaceId
-    18 : SET : HxcSysChannelId : ##HxcChannelId
-    19 : SET : HxcSysApiKey : ##HxcApiKey
-    20 : Msg Box : "Helixcer saved" : @@HxcCredsSummary
-    21 : RETURN : Yes
+    06 :             SET VALUE : HxcApiKeyUDF : ##HxcApiKeyDraft
+    07 :             SET : HxcSysApiKey : ##HxcApiKeyDraft
+    08 :          END IF
+    09 :       END IF
+    10 :    END IF
+    11 : END IF
+    12 : Query Box : "Do you want to save?" : Yes
+    13 : IF : NOT $$LastResult
+    14 :    RETURN : No
+    15 : END IF
+    16 : CALL : Hxc Sync Sys From Company
+    17 : Msg Box : "Helixcer saved" : @@HxcSysSummary
+    18 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
-;; About
+;; About — plain Display only (no Company / $UDF)
 ;; ---------------------------------------------------------------------------
 
 [Report: Helixcer Chat About]
@@ -304,7 +287,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 337)"
+    Set as    : "Helixcer Chat (build 338)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -314,7 +297,7 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "Settings use HelixcerChat.pvf (report vars). After Yes you must see Helixcer saved."
+    Set as    : "API Settings uses company Storage. After Yes you must see Helixcer saved."
     Align     : Centre
     FullWidth : Yes
 
