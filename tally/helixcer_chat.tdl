@@ -1,9 +1,9 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 355-restore-http-fetch
-;; Title must show "(build 355)".
+;; BUILD: 356-no-fetch-question
+;; Title must show "(build 356)".
 ;;
 ;; Create Config flow:
-;;   Config Name → Template → Language Enter → fetch →
+;;   Config Name → Template → Language Enter (fetch) →
 ;;   Preview + up to 4 dynamic var maps → Media →
 ;;   Dynamic voucher-type rows (Aggregate Repeat) → Settings → Ctrl+A
 ;; Mapping/preview hidden until fetch. Max 4 template variables.
@@ -535,7 +535,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 355)"
+    Set as    : "Helixcer Chat — API Settings (build 356)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -599,7 +599,7 @@
 
 [Part: Hxc Vc Form Body]
     Lines  : Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
-             Hxc Vc F Fetch Go Line, Hxc Vc F Fetch Status Line, Hxc Vc F Fetch Hint Line, +
+             Hxc Vc F Fetch Status Line, Hxc Vc F Fetch Hint Line, +
              Hxc Vc F Prev Head, Hxc Vc F Prev Body, +
              Hxc Vc F Map Head, +
              Hxc Vc F Map1, Hxc Vc F Map2, Hxc Vc F Map3, Hxc Vc F Map4, +
@@ -660,28 +660,12 @@
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
 
-[Line: Hxc Vc F Fetch Go Line]
-    Fields : Medium Prompt, Hxc Vc F Fetch Go
-    Local  : Field : Medium Prompt : Set as : "Fetch Template"
-    Local  : Field : Medium Prompt : Width  : 22
-
-[Field: Hxc Vc F Fetch Go]
-    Use      : Name Field
-    Set as   : "Yes"
-    Width    : 8
-    Max      : 8
-    ;; Backup trigger — same HTTP path as Language Enter
-    On       : Accept : Yes : Field Accept
-    On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
-    On       : Accept : Yes : SET : HxcVcFetchLang : $HxcVcDraftLang
-    On       : Accept : Yes : CALL : Hxc Fetch Template
-
 [Line: Hxc Vc F Fetch Status Line]
     Field : Hxc Vc F Fetch Status
 
 [Field: Hxc Vc F Fetch Status]
     Use        : Name Field
-    Set as     : If $$IsEmpty:##HxcVcFetchStatus THEN "Status: waiting — Enter on Language to fetch" ELSE ("Status: " + ##HxcVcFetchStatus)
+    Set as     : If $$IsEmpty:##HxcVcFetchStatus THEN "Status: Enter on Language to fetch template" ELSE ("Status: " + ##HxcVcFetchStatus)
     Set Always : Yes
     FullWidth  : Yes
     Skip       : Yes
@@ -691,7 +675,7 @@
 
 [Field: Hxc Vc F Fetch Hint]
     Use       : Name Field
-    Set as    : "Enter on Language or Fetch Template (or Alt+F) to load preview + maps."
+    Set as    : "Enter on Language to fetch template preview and variable maps."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -912,14 +896,9 @@
     Title  : "Create Voucher Config"
     Object : Company
 
-[Button: Hxc Fetch Template Btn]
-    Key    : Alt+F
-    Action : Call : Hxc Fetch Template
-    Title  : "Fetch Template"
-
 [Form: Helixcer Voucher Config Create]
     Part   : Hxc Vc Cr Title Part, Hxc Vc Form Body, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Cr Hint Part
-    Button : Hxc Fetch Template Btn, Form Accept, Form Cancel
+    Button : Form Accept, Form Cancel
     On     : Form Create : Yes : CALL : Hxc Vc Clear Draft
     On     : Form Accept : Yes : CALL : Hxc Vc Commit Draft
     On     : Form Accept : ##HxcVcSaveOk : Form Accept
@@ -932,7 +911,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 355)"
+    Set as    : "Create Voucher Config (build 356)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -946,7 +925,7 @@
 
 [Field: Hxc Vc Cr Hint]
     Use       : Name Field
-    Set as    : "Name → Template → Language → Fetch Template (Enter/Alt+F) → map → vouchers → Ctrl+A."
+    Set as    : "Name → Template → Language (Enter to fetch) → map → vouchers → Ctrl+A."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -986,7 +965,7 @@
 
 [Form: Helixcer Voucher Config Alter]
     Part   : Hxc Vc Al Title Part, Hxc Vc Al Pick Part, Hxc Vc Form Body, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Al Hint Part
-    Button : Hxc Fetch Template Btn, Form Accept, Form Cancel
+    Button : Form Accept, Form Cancel
     On     : Form Accept : Yes : CALL : Hxc Vc Commit Draft
     On     : Form Accept : ##HxcVcSaveOk : Form Accept
 
@@ -998,7 +977,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 355)"
+    Set as    : "Alter Voucher Config (build 356)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1057,7 +1036,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 355)"
+    Set as    : "Voucher Config List (build 356)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1172,7 +1151,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 355)"
+    Set as    : "Helixcer Chat (build 356)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
