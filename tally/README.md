@@ -2,10 +2,17 @@
 
 ## Load
 
-1. Add `tally/helixcer-chat.tdl` in TallyPrime (F1 → TDLs & AddOns) and enable it.
+1. Add `tally/helixcer-chat.tdl` (F1 → TDLs & AddOns) and enable it.
 2. Gateway → **Helixcer Chat** → **API Settings**.
-3. Enter **Workspace ID**, **Channel ID**, and **API Key**.
-4. Press **Enter** or **Ctrl+A** → Tally asks **Do you want to save?** → **Yes**.
+3. Enter Workspace ID, Channel ID, API Key (Tab through each field).
+4. Enter / Ctrl+A → **Do you want to save?** → Yes.
 5. Reopen: IDs stay filled; API Key shows `******`.
 
-This screen only **saves** settings. It does not call the Helixcer API.
+## How values are kept
+
+- System **Persistent** variables (via **Modify System**, not Modify Variable)
+- Backup file `HelixcerChat.pvf` via Save Variable / Load Variable
+
+`Storage:` is for master/voucher/UDF fields in an object context. This settings screen uses Persistent variables instead.
+
+This screen **saves only** — it does not call the Helixcer API.

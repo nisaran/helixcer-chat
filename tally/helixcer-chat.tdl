@@ -1,8 +1,13 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; API Settings: save Workspace ID / Channel ID / API Key only (no HTTP fetch)
+;; API Settings saves Workspace ID / Channel ID / API Key only (no HTTP fetch).
+;;
+;; Persistence:
+;;   - System Persistent variables (tallycfg / TallySav)
+;;   - Plus SAVE VARIABLE / LOAD VARIABLE to HelixcerChat.pvf as a backup
+;; Storage: is for master/voucher/UDF object methods — not used here on purpose.
 
 ;; ---------------------------------------------------------------------------
-;; Persistent settings (written to TallySav.Cfg on Form Accept)
+;; System Persistent variables
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcWorkspaceId]
@@ -38,9 +43,15 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    Key Item : API Settings : S : Modify Variable : Helixcer API Settings
+    ;; Call (not Modify Variable) so we Load + Modify System Persistent vars
+    Key Item : API Settings : S : Call : Hxc Open Api Settings
     Key Item : About        : A : Display : Helixcer Chat About
     Key Item : Back         : B : Menu : Gateway of Tally
+
+[Function: Hxc Open Api Settings]
+    01 : Load Variable : HelixcerChat.pvf : HxcWorkspaceId, HxcChannelId, HxcApiKey
+    02 : Modify System : Helixcer API Settings
+    03 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; API Settings — save only
@@ -76,13 +87,14 @@
     Local  : Field : Medium Prompt : Set as : "Workspace ID"
     Local  : Field : Medium Prompt : Width  : 20
 
-;; Modifies (not Variable) so Modify Variable + Form Accept persists to TallySav.Cfg
 [Field: Hxc Workspace Id]
     Use      : Name Field
     Set as   : ##HxcWorkspaceId
     Modifies : HxcWorkspaceId : Yes
     Width    : 60
     Max      : 64
+    On       : Accept : Yes : SET : HxcWorkspaceId : $Value
+    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Channel Id Line]
     Fields : Medium Prompt, Hxc Channel Id
@@ -95,37 +107,58 @@
     Modifies : HxcChannelId : Yes
     Width    : 60
     Max      : 64
+    On       : Accept : Yes : SET : HxcChannelId : $Value
+    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Api Key Line]
     Fields : Medium Prompt, Hxc Api Key
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
-;; Do not Modifies HxcApiKey directly — that would save "******" over the secret
+;; Masked display — never Modifies HxcApiKey directly (would save ******)
 [Field: Hxc Api Key]
     Use      : Name Field
     Set as   : @@HxcApiKeyMasked
     Modifies : HxcApiKeyDraft : Yes
     Width    : 60
     Max      : 200
+    On       : Accept : Yes : Call : Hxc Capture Api Key
+    On       : Accept : Yes : Field Accept
 
-;; Enter / Ctrl+A → Yes/No → persist (no Helixcer API call)
-[Function: Hxc Confirm Save]
-    ;; Copy a newly typed key into the persistent secret (ignore mask)
-    01 : IF : NOT $$IsEmpty:##HxcApiKeyDraft
-    02 :    IF : ##HxcApiKeyDraft != "******"
-    03 :       IF : ##HxcApiKeyDraft != "*"
-    04 :          IF : ##HxcApiKeyDraft != "********"
-    05 :             SET : HxcApiKey : ##HxcApiKeyDraft
-    06 :          END IF
-    07 :       END IF
-    08 :    END IF
-    09 : END IF
-    10 : Query Box : "Do you want to save?" : Yes
-    11 : IF : $$LastResult
-    12 :    Form Accept
+[Function: Hxc Capture Api Key]
+    01 : SET : HxcApiKeyDraft : $Value
+    02 : IF : $$IsEmpty:$Value
+    03 :    RETURN : Yes
+    04 : END IF
+    05 : IF : $Value = "******"
+    06 :    RETURN : Yes
+    07 : END IF
+    08 : IF : $Value = "*"
+    09 :    RETURN : Yes
+    10 : END IF
+    11 : IF : $Value = "********"
+    12 :    RETURN : Yes
     13 : END IF
-    14 : RETURN : Yes
+    14 : SET : HxcApiKey : $Value
+    15 : RETURN : Yes
+
+[Function: Hxc Confirm Save]
+    01 : CALL : Hxc Capture Api Key
+    02 : IF : NOT $$IsEmpty:##HxcApiKeyDraft
+    03 :    IF : ##HxcApiKeyDraft != "******"
+    04 :       IF : ##HxcApiKeyDraft != "*"
+    05 :          IF : ##HxcApiKeyDraft != "********"
+    06 :             SET : HxcApiKey : ##HxcApiKeyDraft
+    07 :          END IF
+    08 :       END IF
+    09 :    END IF
+    10 : END IF
+    11 : Query Box : "Do you want to save?" : Yes
+    12 : IF : $$LastResult
+    13 :    Form Accept
+    14 :    Save Variable : HelixcerChat.pvf : HxcWorkspaceId, HxcChannelId, HxcApiKey
+    15 : END IF
+    16 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; About
@@ -155,7 +188,7 @@
 
 [Field: Helixcer Chat About Body]
     Use       : Name Field
-    Set as    : "Open API Settings to save Workspace ID, Channel ID, and API Key."
+    Set as    : "API Settings saves Workspace ID, Channel ID, and API Key (Enter → Yes)."
     Align     : Centre
     FullWidth : Yes
 
@@ -165,8 +198,8 @@
 [Field: Helixcer Chat About Status]
     Use       : Name Field
     Set as    : If $$IsEmpty:##HxcApiKey THEN "API Key: not set" ELSE +
-                If $$IsEmpty:##HxcWorkspaceId THEN "API Key: saved (Workspace ID missing)" ELSE +
-                If $$IsEmpty:##HxcChannelId THEN "API Key: saved (Channel ID missing)" ELSE +
-                "Settings saved"
+                If $$IsEmpty:##HxcWorkspaceId THEN "API Key saved; Workspace ID missing" ELSE +
+                If $$IsEmpty:##HxcChannelId THEN "API Key saved; Channel ID missing" ELSE +
+                "Workspace " + ##HxcWorkspaceId + " / Channel " + ##HxcChannelId
     Align     : Centre
     FullWidth : Yes
