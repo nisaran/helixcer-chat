@@ -1,13 +1,15 @@
-# Helixcer Chat for TallyPrime — build 356
+# Helixcer Chat for TallyPrime — build 357
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 356)**.
+Title must show **(build 357)**.
 
 ## Create Config
 
-1. Config Name → Template Name → Language → **Enter** (fetches)  
-2. Preview + up to 4 variable maps  
-3. Media → Voucher Types → Ctrl+A  
-
-No separate Fetch Template question — fetch runs on Language Enter.
+1. Name → Template → Language **Enter** (fetch)
+2. Preview
+3. **Header** — only if the template has a header  
+   - media → Media Header picker  
+   - text → map the header variable  
+4. **Body Variables** — one row per template body/button var (dynamic count)
+5. Voucher types → Ctrl+A
