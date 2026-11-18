@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 349-no-line-inactive
-;; Title must show "(build 349)".
+;; BUILD: 350-hide-map-prompts
+;; Title must show "(build 350)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template Name → Language → Enter fetches template →
@@ -519,7 +519,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 349)"
+    Set as    : "Helixcer Chat — API Settings (build 350)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -680,9 +680,14 @@
     Inactive  : NOT ##HxcVcFetched
 
 [Line: Hxc Vc F Map1]
-    Fields : Medium Prompt, Hxc Vc F MK1, Hxc Vc F MF1
-    Local  : Field : Medium Prompt : Set as : "Map Var"
-    Local  : Field : Medium Prompt : Width  : 22
+    Fields : Hxc Vc F MP1, Hxc Vc F MK1, Hxc Vc F MF1
+
+[Field: Hxc Vc F MP1]
+    Use        : Name Field
+    Set as     : "Map Var"
+    Skip       : Yes
+    Width      : 22
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1
 
 [Field: Hxc Vc F MK1]
     Use        : Name Field
@@ -703,9 +708,14 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1
 
 [Line: Hxc Vc F Map2]
-    Fields : Medium Prompt, Hxc Vc F MK2, Hxc Vc F MF2
-    Local  : Field : Medium Prompt : Set as : "Map Var"
-    Local  : Field : Medium Prompt : Width  : 22
+    Fields : Hxc Vc F MP2, Hxc Vc F MK2, Hxc Vc F MF2
+
+[Field: Hxc Vc F MP2]
+    Use        : Name Field
+    Set as     : "Map Var"
+    Skip       : Yes
+    Width      : 22
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2
 
 [Field: Hxc Vc F MK2]
     Use        : Name Field
@@ -726,9 +736,14 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2
 
 [Line: Hxc Vc F Map3]
-    Fields : Medium Prompt, Hxc Vc F MK3, Hxc Vc F MF3
-    Local  : Field : Medium Prompt : Set as : "Map Var"
-    Local  : Field : Medium Prompt : Width  : 22
+    Fields : Hxc Vc F MP3, Hxc Vc F MK3, Hxc Vc F MF3
+
+[Field: Hxc Vc F MP3]
+    Use        : Name Field
+    Set as     : "Map Var"
+    Skip       : Yes
+    Width      : 22
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3
 
 [Field: Hxc Vc F MK3]
     Use        : Name Field
@@ -749,9 +764,14 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3
 
 [Line: Hxc Vc F Map4]
-    Fields : Medium Prompt, Hxc Vc F MK4, Hxc Vc F MF4
-    Local  : Field : Medium Prompt : Set as : "Map Var"
-    Local  : Field : Medium Prompt : Width  : 22
+    Fields : Hxc Vc F MP4, Hxc Vc F MK4, Hxc Vc F MF4
+
+[Field: Hxc Vc F MP4]
+    Use        : Name Field
+    Set as     : "Map Var"
+    Skip       : Yes
+    Width      : 22
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4
 
 [Field: Hxc Vc F MK4]
     Use        : Name Field
@@ -772,9 +792,14 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4
 
 [Line: Hxc Vc F Map5]
-    Fields : Medium Prompt, Hxc Vc F MK5, Hxc Vc F MF5
-    Local  : Field : Medium Prompt : Set as : "Map Var"
-    Local  : Field : Medium Prompt : Width  : 22
+    Fields : Hxc Vc F MP5, Hxc Vc F MK5, Hxc Vc F MF5
+
+[Field: Hxc Vc F MP5]
+    Use        : Name Field
+    Set as     : "Map Var"
+    Skip       : Yes
+    Width      : 22
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5
 
 [Field: Hxc Vc F MK5]
     Use        : Name Field
@@ -793,6 +818,7 @@
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5
+
 
 [Line: Hxc Vc F Media Line]
     Fields : Medium Prompt, Hxc Vc F Media
@@ -968,7 +994,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 349)"
+    Set as    : "Create Voucher Config (build 350)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1036,7 +1062,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 349)"
+    Set as    : "Alter Voucher Config (build 350)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1095,7 +1121,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 349)"
+    Set as    : "Voucher Config List (build 350)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1210,7 +1236,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 349)"
+    Set as    : "Helixcer Chat (build 350)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
