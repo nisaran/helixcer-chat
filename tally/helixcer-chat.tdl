@@ -1,8 +1,9 @@
 ;; Helixcer Chat — TallyPrime TDL
+;; BUILD: 331-no-hash-fields
+;; If save still says Bad formula '#Hxc Workspace Id', this file is NOT loaded.
 ;;
-;; API Settings — save only. Explicit SET of all three values on confirm
-;;   (Modifies alone under Modify Variable was keeping IDs blank on reopen).
-;; Status — Call + Msg Box (Display Status report was c0000005).
+;; API Settings — save only. Drafts + SET (never #FieldName with spaces).
+;; Status — About-style Display; Alt+R Msg Box fetch.
 
 ;; ---------------------------------------------------------------------------
 ;; System Persistent variables
@@ -166,7 +167,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings"
+    Set as    : "Helixcer Chat — API Settings (build 331)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
