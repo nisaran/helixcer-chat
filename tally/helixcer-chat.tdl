@@ -1,8 +1,8 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; API Settings: save Workspace ID / Channel ID / API Key only (no HTTP fetch here)
+;; API Settings: save Workspace ID / Channel ID / API Key only (no HTTP fetch)
 
 ;; ---------------------------------------------------------------------------
-;; Persistent settings (TallySav.Cfg)
+;; Persistent settings (written to TallySav.Cfg on Form Accept)
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcWorkspaceId]
@@ -49,7 +49,6 @@
 [Report: Helixcer API Settings]
     Form  : Helixcer API Settings
     Title : "API Settings"
-    ;; Do not use Auto:Yes — we want an explicit save confirmation
 
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
@@ -77,10 +76,11 @@
     Local  : Field : Medium Prompt : Set as : "Workspace ID"
     Local  : Field : Medium Prompt : Width  : 20
 
+;; Modifies (not Variable) so Modify Variable + Form Accept persists to TallySav.Cfg
 [Field: Hxc Workspace Id]
     Use      : Name Field
     Set as   : ##HxcWorkspaceId
-    Variable : HxcWorkspaceId
+    Modifies : HxcWorkspaceId : Yes
     Width    : 60
     Max      : 64
 
@@ -92,7 +92,7 @@
 [Field: Hxc Channel Id]
     Use      : Name Field
     Set as   : ##HxcChannelId
-    Variable : HxcChannelId
+    Modifies : HxcChannelId : Yes
     Width    : 60
     Max      : 64
 
@@ -101,16 +101,17 @@
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
-;; Shows ****** when a key is already saved; draft captures a newly typed key
+;; Do not Modifies HxcApiKey directly — that would save "******" over the secret
 [Field: Hxc Api Key]
     Use      : Name Field
     Set as   : @@HxcApiKeyMasked
-    Variable : HxcApiKeyDraft
+    Modifies : HxcApiKeyDraft : Yes
     Width    : 60
     Max      : 200
 
-;; Enter / Ctrl+A / Accept → Yes/No → save only (no Helixcer API call)
+;; Enter / Ctrl+A → Yes/No → persist (no Helixcer API call)
 [Function: Hxc Confirm Save]
+    ;; Copy a newly typed key into the persistent secret (ignore mask)
     01 : IF : NOT $$IsEmpty:##HxcApiKeyDraft
     02 :    IF : ##HxcApiKeyDraft != "******"
     03 :       IF : ##HxcApiKeyDraft != "*"
@@ -163,6 +164,9 @@
 
 [Field: Helixcer Chat About Status]
     Use       : Name Field
-    Set as    : If $$IsEmpty:##HxcApiKey THEN "API Key: not set" ELSE "API Key: saved"
+    Set as    : If $$IsEmpty:##HxcApiKey THEN "API Key: not set" ELSE +
+                If $$IsEmpty:##HxcWorkspaceId THEN "API Key: saved (Workspace ID missing)" ELSE +
+                If $$IsEmpty:##HxcChannelId THEN "API Key: saved (Channel ID missing)" ELSE +
+                "Settings saved"
     Align     : Centre
     FullWidth : Yes
