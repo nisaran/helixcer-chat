@@ -1,14 +1,10 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 338-alter-storage
-;; Title must show "(build 338)".
+;; BUILD: 339-api-key-storage
+;; Title must show "(build 339)".
 ;;
-;; Display of API Settings → c0000005 (screenshot: API Settings highlighted).
-;; Modify Variable opens but does not persist (parent scope).
-;;
-;; Working open+persist path:
-;;   Alter + Object Company + Storage UDFs (values stay on company)
-;;   On Yes: also SET HxcSys* for Status HTTP
-;; Status: Call + Msg Box only (no Display)
+;; IDs already persist via Storage. API Key was mask/SET VALUE only — blank
+;; on reopen. Official pattern: field name contains "Password" + Storage
+;; (displays * , stores real value in UDF).
 
 ;; ---------------------------------------------------------------------------
 ;; Company UDFs (Storage)
@@ -35,9 +31,6 @@
     Type       : String
     Persistent : Yes
 
-[Variable: HxcApiKeyDraft]
-    Type : String
-
 [Variable: HxcWorkspaceName]
     Type       : String
     Persistent : Yes
@@ -54,15 +47,12 @@
     HxcSysWorkspaceId   : ""
     HxcSysChannelId     : ""
     HxcSysApiKey        : ""
-    HxcApiKeyDraft      : ""
     HxcWorkspaceName    : ""
     HxcChannelName      : ""
     HxcConnectionStatus : ""
 
 [System: Formula]
     Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcSysChannelId
-    ;; Mask from system mirror (safe outside Company context)
-    Hxc Api Key Masked : If $$IsEmpty:##HxcSysApiKey THEN "" ELSE "******"
     Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
 
 ;; ---------------------------------------------------------------------------
@@ -170,6 +160,7 @@
 [Form: Helixcer API Settings]
     Part   : Helixcer API Settings
     Button : Form Accept, Form Cancel
+    On     : Form Create : Yes : Call : Hxc Sync Sys From Company
     On     : Form Accept : Yes : Call : Hxc Confirm Save
 
 [Part: Helixcer API Settings]
@@ -182,7 +173,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 338)"
+    Set as    : "Helixcer Chat — API Settings (build 339)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -217,57 +208,28 @@
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Api Key Line]
-    Fields : Medium Prompt, HxcApiKeyFld
+    Fields : Medium Prompt, Hxc Api Key Password
     Local  : Field : Medium Prompt : Set as : "API Key"
     Local  : Field : Medium Prompt : Width  : 20
 
-;; No Storage — masked value must not overwrite real key
-[Field: HxcApiKeyFld]
+;; Name contains "Password" → UI shows *; Storage keeps the real key (Tally FAQ)
+[Field: Hxc Api Key Password]
     Use      : Name Field
-    Set as   : @@HxcApiKeyMasked
-    Modifies : HxcApiKeyDraft : Yes
+    Storage  : HxcApiKeyUDF
+    Set as   : $HxcApiKeyUDF
     Width    : 60
     Max      : 200
-    On       : Accept : Yes : Call : Hxc Capture Api Key
+    On       : Accept : Yes : SET : HxcSysApiKey : $HxcApiKeyUDF
     On       : Accept : Yes : Field Accept
 
-[Function: Hxc Capture Api Key]
-    01 : SET : HxcApiKeyDraft : $Value
-    02 : IF : $$IsEmpty:$Value
-    03 :    RETURN : Yes
-    04 : END IF
-    05 : IF : $Value = "******"
-    06 :    RETURN : Yes
-    07 : END IF
-    08 : IF : $Value = "*"
-    09 :    RETURN : Yes
-    10 : END IF
-    11 : IF : $Value = "********"
-    12 :    RETURN : Yes
-    13 : END IF
-    14 : SET VALUE : HxcApiKeyUDF : $Value
-    15 : SET : HxcSysApiKey : $Value
-    16 : RETURN : Yes
-
 [Function: Hxc Confirm Save]
-    01 : CALL : Hxc Capture Api Key
-    02 : IF : NOT $$IsEmpty:##HxcApiKeyDraft
-    03 :    IF : ##HxcApiKeyDraft != "******"
-    04 :       IF : ##HxcApiKeyDraft != "*"
-    05 :          IF : ##HxcApiKeyDraft != "********"
-    06 :             SET VALUE : HxcApiKeyUDF : ##HxcApiKeyDraft
-    07 :             SET : HxcSysApiKey : ##HxcApiKeyDraft
-    08 :          END IF
-    09 :       END IF
-    10 :    END IF
-    11 : END IF
-    12 : Query Box : "Do you want to save?" : Yes
-    13 : IF : NOT $$LastResult
-    14 :    RETURN : No
-    15 : END IF
-    16 : CALL : Hxc Sync Sys From Company
-    17 : Msg Box : "Helixcer saved" : @@HxcSysSummary
-    18 : RETURN : Yes
+    01 : Query Box : "Do you want to save?" : Yes
+    02 : IF : NOT $$LastResult
+    03 :    RETURN : No
+    04 : END IF
+    05 : CALL : Hxc Sync Sys From Company
+    06 : Msg Box : "Helixcer saved" : @@HxcSysSummary
+    07 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; About — plain Display only (no Company / $UDF)
@@ -287,7 +249,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 338)"
+    Set as    : "Helixcer Chat (build 339)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes

@@ -1,23 +1,17 @@
 # Helixcer Chat for TallyPrime
 
-## Load (build 338)
+## Load (build 339)
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-live-field-vars-b545/tally/helixcer_chat.tdl
 
-Title must show **(build 338)**. Company must be open.
+Title **(build 339)**. Company must be open.
 
-## What crashed / what works
+## API Key fix
 
-| Action | Result |
-|--------|--------|
-| `Display` API Settings | `c0000005` crash |
-| `Modify Variable` | Opens, does **not** persist |
-| `Alter` + Company `Storage` | Opens + keeps values on company |
-| Status `Call` + Msg Box | OK (no Display) |
+Workspace/Channel already used `Storage` and stayed. API Key used mask/`SET VALUE` and came back blank.
 
-## Save
+Now the API Key field is named with **Password** (shows `*`) and uses the same **Storage** UDF as the IDs.
 
-1. API Settings (Alter) → Tab all three fields → Enter → Yes.
-2. Must see **Helixcer saved** with `WS=[...] CH=[...] KeyChars=N`.
-3. Reopen — IDs and `******` should still be there.
-4. Status uses mirrors filled on that save.
+1. Re-enter the API Key once (shows as `*`).
+2. Tab → Enter → Yes → **Helixcer saved** with KeyChars &gt; 0.
+3. Reopen — API Key should show as asterisks, not empty.
