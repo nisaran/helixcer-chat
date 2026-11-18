@@ -1,18 +1,27 @@
 # Helixcer Chat for TallyPrime
 
-## Load (build 336)
+## Why older builds lost data
+
+`Modify Variable` edits the **parent** menu scope. Values never stayed in durable storage, so reopen showed blank fields.
+
+## Load (build 337)
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-live-field-vars-b545/tally/helixcer_chat.tdl
 
-Replace local `helixcer_chat.tdl`. Title must show **(build 336)**.
+1. Quit Tally; replace `helixcer_chat.tdl`; disable other Helixcer TDLs.
+2. Title must show **(build 337)**.
+3. First open may be empty — that is expected before the first save.
 
-## Save
+## Save (must see confirmation)
 
 1. Tab Workspace ID → Channel ID → API Key.
-2. Enter → **Do you want to save?** → Yes.
-3. You **must** see **Helixcer saved** with `WS=[...] CH=[...] KeyChars=N`.
-4. If that box never appears, the old TDL is still loaded or Yes did not finish.
+2. Enter → Yes.
+3. **Helixcer saved** must appear with `WS=[...] CH=[...] KeyChars=N`.
+4. Reopen API Settings — values reload from `HelixcerChat.pvf`.
+5. Status uses the system mirrors filled on that save.
 
-## Status
+## Technical
 
-Uses the same saved values. If missing, Msg Box shows `Not saved. WS=[...]`.
+- Report-scoped Persistent vars + `Save Variable` / `Load Variable`
+- Open with `Display` (report owns the variables)
+- `HxcSys*` system copies for Status HTTP
