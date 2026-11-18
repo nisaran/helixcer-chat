@@ -1,9 +1,11 @@
 ;; Helixcer Chat — TallyPrime TDL
 ;; API Settings: save Workspace ID / Channel ID / API Key only (no HTTP fetch).
-;; Open with Display (same as About). Persistent system vars + Modifies.
+;;
+;; Open with Modify Variable (Display caused c0000005 with this form).
+;; On Form Accept: return Yes/No only — never call Form Accept again (crash).
 
 ;; ---------------------------------------------------------------------------
-;; System Persistent variables (kept across Tally sessions)
+;; System Persistent variables
 ;; ---------------------------------------------------------------------------
 
 [Variable: HxcWorkspaceId]
@@ -39,8 +41,7 @@
 
 [Menu: Helixcer Chat Menu]
     Title    : "Helixcer Chat"
-    ;; Display — same action that already opens About
-    Key Item : API Settings : S : Display : Helixcer API Settings
+    Key Item : API Settings : S : Modify Variable : Helixcer API Settings
     Key Item : About        : A : Display : Helixcer Chat About
     Key Item : Back         : B : Menu : Gateway of Tally
 
@@ -84,8 +85,6 @@
     Modifies : HxcWorkspaceId : Yes
     Width    : 60
     Max      : 64
-    On       : Accept : Yes : SET : HxcWorkspaceId : $Value
-    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Channel Id Line]
     Fields : Medium Prompt, Hxc Channel Id
@@ -98,8 +97,6 @@
     Modifies : HxcChannelId : Yes
     Width    : 60
     Max      : 64
-    On       : Accept : Yes : SET : HxcChannelId : $Value
-    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Api Key Line]
     Fields : Medium Prompt, Hxc Api Key
@@ -113,42 +110,24 @@
     Modifies : HxcApiKeyDraft : Yes
     Width    : 60
     Max      : 200
-    On       : Accept : Yes : Call : Hxc Capture Api Key
-    On       : Accept : Yes : Field Accept
 
-[Function: Hxc Capture Api Key]
-    01 : SET : HxcApiKeyDraft : $Value
-    02 : IF : $$IsEmpty:$Value
-    03 :    RETURN : Yes
-    04 : END IF
-    05 : IF : $Value = "******"
-    06 :    RETURN : Yes
-    07 : END IF
-    08 : IF : $Value = "*"
-    09 :    RETURN : Yes
-    10 : END IF
-    11 : IF : $Value = "********"
+;; Do NOT call Form Accept here — On Form Accept already owns accept.
+;; RETURN Yes = continue accept / persist Modifies; RETURN No = cancel.
+[Function: Hxc Confirm Save]
+    01 : IF : NOT $$IsEmpty:##HxcApiKeyDraft
+    02 :    IF : ##HxcApiKeyDraft != "******"
+    03 :       IF : ##HxcApiKeyDraft != "*"
+    04 :          IF : ##HxcApiKeyDraft != "********"
+    05 :             SET : HxcApiKey : ##HxcApiKeyDraft
+    06 :          END IF
+    07 :       END IF
+    08 :    END IF
+    09 : END IF
+    10 : Query Box : "Do you want to save?" : Yes
+    11 : IF : $$LastResult
     12 :    RETURN : Yes
     13 : END IF
-    14 : SET : HxcApiKey : $Value
-    15 : RETURN : Yes
-
-[Function: Hxc Confirm Save]
-    01 : CALL : Hxc Capture Api Key
-    02 : IF : NOT $$IsEmpty:##HxcApiKeyDraft
-    03 :    IF : ##HxcApiKeyDraft != "******"
-    04 :       IF : ##HxcApiKeyDraft != "*"
-    05 :          IF : ##HxcApiKeyDraft != "********"
-    06 :             SET : HxcApiKey : ##HxcApiKeyDraft
-    07 :          END IF
-    08 :       END IF
-    09 :    END IF
-    10 : END IF
-    11 : Query Box : "Do you want to save?" : Yes
-    12 : IF : $$LastResult
-    13 :    Form Accept
-    14 : END IF
-    15 : RETURN : Yes
+    14 : RETURN : No
 
 ;; ---------------------------------------------------------------------------
 ;; About
