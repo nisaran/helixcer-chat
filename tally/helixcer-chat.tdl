@@ -152,34 +152,59 @@
     13 : SET : HxcApiKey : ##HxcApiKeyDraft
     14 : RETURN : Yes
 
+;; If focus is on the API Key field during Verify, pick up $Value as the key
+[Function: Hxc Sync From Current Field]
+    01 : IF : $$IsEmpty:$Value
+    02 :    RETURN : Yes
+    03 : END IF
+    04 : IF : $Value = "******"
+    05 :    RETURN : Yes
+    06 : END IF
+    07 : IF : $Value = "*"
+    08 :    RETURN : Yes
+    09 : END IF
+    ;; Only copy when it looks like an API key (not a Workspace/Channel UUID)
+    10 : IF : $$IsEmpty:$$StringFind:$Value:"hxc_live_"
+    11 :    RETURN : Yes
+    12 : END IF
+    13 : SET : HxcApiKeyDraft : $Value
+    14 : SET : HxcApiKey : $Value
+    15 : RETURN : Yes
+
 ;; Primary fetch — Collection WALK (proven GET) then HTTPRequest as backup
 [Function: Hxc Fetch Connection]
     01 : CALL : Hxc Use Draft Key
-    02 : SET : HxcJustFetched : No
-    03 : IF : $$IsEmpty:##HxcWorkspaceId OR $$IsEmpty:##HxcChannelId OR $$IsEmpty:##HxcApiKey
-    04 :    Msg Box : "Helixcer" : "Enter Workspace ID, Channel ID, and API Key first."
-    05 :    SET : HxcWorkspaceName : ""
-    06 :    SET : HxcChannelName : ""
-    07 :    SET : HxcConnectionStatus : ""
-    08 :    RETURN : No
-    09 : END IF
-    10 : SET : HxcWorkspaceName : ""
-    11 : SET : HxcChannelName : ""
-    12 : SET : HxcConnectionStatus : "Calling Helixcer..."
+    02 : CALL : Hxc Sync From Current Field
+    03 : SET : HxcJustFetched : No
+    04 : IF : $$IsEmpty:##HxcWorkspaceId
+    05 :    Msg Box : "Helixcer" : "Workspace ID not saved yet. Click the Workspace ID field, then Tab."
+    06 :    RETURN : No
+    07 : END IF
+    08 : IF : $$IsEmpty:##HxcChannelId
+    09 :    Msg Box : "Helixcer" : "Channel ID not saved yet. Click the Channel ID field, then Tab."
+    10 :    RETURN : No
+    11 : END IF
+    12 : IF : $$IsEmpty:##HxcApiKey
+    13 :    Msg Box : "Helixcer" : "API Key not saved yet. Click the API Key field and type/paste the full key."
+    14 :    RETURN : No
+    15 : END IF
+    16 : SET : HxcWorkspaceName : ""
+    17 : SET : HxcChannelName : ""
+    18 : SET : HxcConnectionStatus : "Calling Helixcer..."
     ;; 1) Collection GET — this is what actually opens the HTTPS request
-    13 : CALL : Hxc Apply From Collection
-    14 : IF : NOT $$IsEmpty:##HxcWorkspaceName
-    15 :    SET : HxcJustFetched : Yes
-    16 :    RETURN : Yes
-    17 : END IF
+    19 : CALL : Hxc Apply From Collection
+    20 : IF : NOT $$IsEmpty:##HxcWorkspaceName
+    21 :    SET : HxcJustFetched : Yes
+    22 :    RETURN : Yes
+    23 : END IF
     ;; 2) Fallback: documented HTTPRequest action (one word, JSONEX, ASCII)
-    18 : HTTPRequest : @@HxcConnectionUrl : GET : JSONEX : ASCII : Hxc Connection Request : Hxc Apply From Parameter Collection
-    19 : IF : $$IsEmpty:##HxcWorkspaceName
-    20 :    SET : HxcConnectionStatus : "Could not fetch. Check key / internet."
-    21 :    Msg Box : "Helixcer" : "GET /api/v1/connection failed. Check API Key and that Tally can reach api.chat.helixcer.com"
-    22 : END IF
-    23 : SET : HxcJustFetched : Yes
-    24 : RETURN : Yes
+    24 : HTTPRequest : @@HxcConnectionUrl : GET : JSONEX : ASCII : Hxc Connection Request : Hxc Apply From Parameter Collection
+    25 : IF : $$IsEmpty:##HxcWorkspaceName
+    26 :    SET : HxcConnectionStatus : "Could not fetch. Check key / internet."
+    27 :    Msg Box : "Helixcer" : "GET /api/v1/connection failed. Check API Key and that Tally can reach api.chat.helixcer.com"
+    28 : END IF
+    29 : SET : HxcJustFetched : Yes
+    30 : RETURN : Yes
 
 ;; Enter on last field runs Form Accept — fetch first, stay open after fetch
 [Function: Hxc On Form Accept]
@@ -243,6 +268,8 @@
 [Button: Hxc Fetch Names Button]
     Key    : Alt+V
     Title  : "Verify"
+    ;; Accept current field first so typed values hit variables, then GET
+    Action : Field Accept
     Action : Call : Hxc Fetch Connection
 
 [Part: Helixcer API Settings]
@@ -269,10 +296,11 @@
     Local  : Field : Medium Prompt : Set as : "Workspace ID"
     Local  : Field : Medium Prompt : Width  : 20
 
+;; Variable: updates ##HxcWorkspaceId while typing (needed for Verify before Tab)
 [Field: Hxc Workspace Id]
     Use      : Name Field
     Set as   : ##HxcWorkspaceId
-    Modifies : HxcWorkspaceId : No
+    Variable : HxcWorkspaceId
     Width    : 60
     Max      : 64
     On       : Accept : Yes : SET : HxcWorkspaceId : $Value
@@ -286,7 +314,7 @@
 [Field: Hxc Channel Id]
     Use      : Name Field
     Set as   : ##HxcChannelId
-    Modifies : HxcChannelId : No
+    Variable : HxcChannelId
     Width    : 60
     Max      : 64
     On       : Accept : Yes : SET : HxcChannelId : $Value
@@ -300,7 +328,7 @@
 [Field: Hxc Api Key]
     Use      : Name Field
     Set as   : @@HxcApiKeyMasked
-    Modifies : HxcApiKeyDraft : Yes
+    Variable : HxcApiKeyDraft
     Width    : 60
     Max      : 200
     On       : Accept : Yes : Call : Hxc Accept Api Key
