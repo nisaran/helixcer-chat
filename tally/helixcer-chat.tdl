@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 358-fix-apply
-;; Title must show "(build 358)".
+;; BUILD: 359-fetch-before-accept
+;; Title must show "(build 359)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -643,7 +643,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 358)"
+    Set as    : "Helixcer Chat — API Settings (build 359)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -754,9 +754,10 @@
     Set as   : $HxcVcDraftTemplate
     Width    : 40
     Max      : 80
-    On       : Accept : Yes : Field Accept
-    On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
+    ;; Field Accept must be LAST or later On Accept actions are skipped
+    On       : Accept : Yes : SET : HxcVcFetchName : $Value
     On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
+    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Lang Line]
     Fields : Medium Prompt, Hxc Vc F Lang
@@ -769,11 +770,11 @@
     Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
     Width    : 16
     Max      : 16
-    ;; Enter on Language fetches (same as build 347)
-    On       : Accept : Yes : Field Accept
-    On       : Accept : Yes : SET : HxcVcFetchLang : $HxcVcDraftLang
+    ;; Enter on Language fetches — CALL before Field Accept (otherwise fetch is skipped)
+    On       : Accept : Yes : SET : HxcVcFetchLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
+    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Fetch Status Line]
     Field : Hxc Vc F Fetch Status
@@ -982,7 +983,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 358)"
+    Set as    : "Create Voucher Config (build 359)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1048,7 +1049,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 358)"
+    Set as    : "Alter Voucher Config (build 359)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1107,7 +1108,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 358)"
+    Set as    : "Voucher Config List (build 359)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1222,7 +1223,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 358)"
+    Set as    : "Helixcer Chat (build 359)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
