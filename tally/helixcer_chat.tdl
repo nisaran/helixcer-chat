@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 357-dynamic-maps-header
-;; Title must show "(build 357)".
+;; BUILD: 358-fix-apply
+;; Title must show "(build 358)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -256,7 +256,6 @@
     04 : RETURN : Yes
 
 [Function: Hxc Parse Maps Into Draft]
-    ;; CSV entries: comp:key,comp:key,...  → Aggregate rows
     Parameter : MapsCsv : String
     Variable  : Rest : String
     Variable  : Piece : String
@@ -265,222 +264,197 @@
     Variable  : Counter : Number
     Variable  : ExpLen : Number
     Variable  : Ch : String
-    Variable  : ColonAt : Number
+    Variable  : KeyLen : Number
     01 : CALL : Hxc Clear Draft Maps
     02 : SET : Rest : ##MapsCsv
     03 : SET : Piece : ""
     04 : SET : Counter : 0
     05 : SET : ExpLen : $$StringLength:##Rest
-    06 : WHILE : ##Counter < ##ExpLen
-    07 :    SET : Ch : $$StringPart:##Rest:##Counter:1
-    08 :    IF : ##Ch = ","
-    09 :       IF : NOT $$IsEmpty:##Piece
-    10 :          SET : ColonAt : 0
-    11 :          SET : Comp : ""
-    12 :          SET : Key : ##Piece
-    13 :          ;; split comp:key (first colon)
-    14 :          SET : ColonAt : 0
-    15 :          IF : $$StringPart:##Piece:0:5 = "body:"
-    16 :             SET : Comp : "body"
-    17 :             SET : Key : $$StringPart:##Piece:5:($$StringLength:##Piece)
-    18 :          END IF
-    19 :          IF : $$StringPart:##Piece:0:7 = "header:"
-    20 :             SET : Comp : "header"
-    21 :             SET : Key : $$StringPart:##Piece:7:($$StringLength:##Piece)
-    22 :          END IF
-    23 :          IF : $$StringPart:##Piece:0:7 = "button:"
-    24 :             SET : Comp : "button"
-    25 :             SET : Key : $$StringPart:##Piece:7:($$StringLength:##Piece)
-    26 :          END IF
-    27 :          IF : $$IsEmpty:##Comp
-    28 :             SET : Comp : "body"
-    29 :             SET : Key : ##Piece
+    06 : WHILE : ##Counter <= ##ExpLen
+    07 :    IF : ##Counter = ##ExpLen
+    08 :       SET : Ch : ","
+    09 :    ELSE
+    10 :       SET : Ch : $$StringPart:##Rest:##Counter:1
+    11 :    END IF
+    12 :    IF : ##Ch = ","
+    13 :       IF : NOT $$IsEmpty:##Piece
+    14 :          SET : Comp : "body"
+    15 :          SET : Key : ##Piece
+    16 :          IF : $$StringPart:##Piece:0:5 = "body:"
+    17 :             SET : Comp : "body"
+    18 :             SET : KeyLen : $$StringLength:##Piece - 5
+    19 :             SET : Key : $$StringPart:##Piece:5:##KeyLen
+    20 :          END IF
+    21 :          IF : $$StringPart:##Piece:0:7 = "header:"
+    22 :             SET : Comp : "header"
+    23 :             SET : KeyLen : $$StringLength:##Piece - 7
+    24 :             SET : Key : $$StringPart:##Piece:7:##KeyLen
+    25 :          END IF
+    26 :          IF : $$StringPart:##Piece:0:7 = "button:"
+    27 :             SET : Comp : "button"
+    28 :             SET : KeyLen : $$StringLength:##Piece - 7
+    29 :             SET : Key : $$StringPart:##Piece:7:##KeyLen
     30 :          END IF
     31 :          IF : ##Comp = "header"
     32 :             SET : HxcVcHeaderKey : ##Key
     33 :          ELSE
-    34 :             INSERT COLLECTION OBJECT : HxcVcDraftMaps
-    35 :             SET VALUE : HxcVcDraftMapComp : ##Comp
-    36 :             SET VALUE : HxcVcDraftMapKey : ##Key
-    37 :             SET VALUE : HxcVcDraftMapFld : ""
-    38 :             SET TARGET : ..
-    39 :          END IF
-    40 :       END IF
-    41 :       SET : Piece : ""
-    42 :    ELSE
-    43 :       SET : Piece : ##Piece + ##Ch
-    44 :    END IF
-    45 :    SET : Counter : ##Counter + 1
-    46 : END WHILE
-    47 : IF : NOT $$IsEmpty:##Piece
-    48 :    SET : Comp : "body"
-    49 :    SET : Key : ##Piece
-    50 :    IF : $$StringPart:##Piece:0:5 = "body:"
-    51 :       SET : Comp : "body"
-    52 :       SET : Key : $$StringPart:##Piece:5:($$StringLength:##Piece)
-    53 :    END IF
-    54 :    IF : $$StringPart:##Piece:0:7 = "header:"
-    55 :       SET : Comp : "header"
-    56 :       SET : Key : $$StringPart:##Piece:7:($$StringLength:##Piece)
-    57 :    END IF
-    58 :    IF : $$StringPart:##Piece:0:7 = "button:"
-    59 :       SET : Comp : "button"
-    60 :       SET : Key : $$StringPart:##Piece:7:($$StringLength:##Piece)
-    61 :    END IF
-    62 :    IF : ##Comp = "header"
-    63 :       SET : HxcVcHeaderKey : ##Key
-    64 :    ELSE
-    65 :       INSERT COLLECTION OBJECT : HxcVcDraftMaps
-    66 :       SET VALUE : HxcVcDraftMapComp : ##Comp
-    67 :       SET VALUE : HxcVcDraftMapKey : ##Key
-    68 :       SET VALUE : HxcVcDraftMapFld : ""
-    69 :       SET TARGET : ..
-    70 :    END IF
-    71 : END IF
-    72 : RETURN : Yes
+    34 :             IF : NOT $$IsEmpty:##Key
+    35 :                INSERT COLLECTION OBJECT : HxcVcDraftMaps
+    36 :                SET VALUE : HxcVcDraftMapComp : ##Comp
+    37 :                SET VALUE : HxcVcDraftMapKey : ##Key
+    38 :                SET VALUE : HxcVcDraftMapFld : ""
+    39 :                SET TARGET : ..
+    40 :             END IF
+    41 :          END IF
+    42 :       END IF
+    43 :       SET : Piece : ""
+    44 :    ELSE
+    45 :       SET : Piece : ##Piece + ##Ch
+    46 :    END IF
+    47 :    SET : Counter : ##Counter + 1
+    48 : END WHILE
+    49 : RETURN : Yes
 
 [Function: Hxc Apply Template Response]
-    Variable : I : Number
+    ;; Keep this simple — empty IF branches / $$String break Tally Apply
     Variable : CompType : String
     Variable : Fmt : String
     Variable : VComp : String
     Variable : VKey : String
     Variable : Entry : String
-    01 : SET : I : 0
-    02 : SET : HxcVcFetched : No
-    03 : SET : HxcVcPreviewText : ""
-    04 : SET : HxcVcMapsCsv : ""
-    05 : SET : HxcVcHasHeader : No
-    06 : SET : HxcVcHeaderKind : ""
-    07 : SET : HxcVcHeaderFormat : ""
-    08 : SET : HxcVcHeaderKey : ""
-    09 : SET : HxcVcFetchStatus : "Template not found or empty response."
-    10 : WALK COLLECTION : Parameter Collection
-    11 :    WALK COLLECTION : items
-    12 :       WALK COLLECTION : components
-    13 :          SET : CompType : $type
-    14 :          IF : ##CompType = "header" OR ##CompType = "HEADER" OR ##CompType = "Header"
-    15 :             SET : HxcVcHasHeader : Yes
-    16 :             SET : Fmt : $format
-    17 :             IF : $$IsEmpty:##Fmt
-    18 :                SET : Fmt : "TEXT"
-    19 :             END IF
-    20 :             SET : HxcVcHeaderFormat : ##Fmt
-    21 :             IF : ##Fmt = "IMAGE" OR ##Fmt = "image" OR ##Fmt = "VIDEO" OR ##Fmt = "video" OR ##Fmt = "DOCUMENT" OR ##Fmt = "document" OR ##Fmt = "GIF" OR ##Fmt = "gif"
-    22 :                SET : HxcVcHeaderKind : "media"
-    23 :             ELSE
-    24 :                SET : HxcVcHeaderKind : "text"
-    25 :                IF : NOT $$IsEmpty:$text
-    26 :                   SET : HxcVcPreviewText : "[Header] " + $text + "  |  "
-    27 :                END IF
-    28 :             END IF
-    29 :          END IF
-    30 :          IF : ##CompType = "body" OR ##CompType = "BODY" OR ##CompType = "Body"
-    31 :             IF : NOT $$IsEmpty:$text
-    32 :                SET : HxcVcPreviewText : ##HxcVcPreviewText + $text
-    33 :             END IF
-    34 :          END IF
-    35 :       END WALK
-    36 :       WALK COLLECTION : variables
-    37 :          SET : VComp : $component
-    38 :          SET : VKey : $key
-    39 :          IF : $$IsEmpty:##VComp
-    40 :             SET : VComp : "body"
-    41 :          END IF
-    42 :          IF : ##VComp = "HEADER"
-    43 :             SET : VComp : "header"
-    44 :          END IF
-    45 :          IF : ##VComp = "BODY"
-    46 :             SET : VComp : "body"
-    47 :          END IF
-    48 :          IF : ##VComp = "BUTTON"
-    49 :             SET : VComp : "button"
-    50 :          END IF
-    51 :          IF : $$IsEmpty:##VKey
-    52 :             SET : I : ##I + 1
-    53 :             SET : VKey : $$String:##I
-    54 :          END IF
-    55 :          IF : ##VComp = "header"
-    56 :             IF : ##HxcVcHeaderKind = "media"
-    57 :                ;; media header uses Media Header field, not a text map row
-    58 :             ELSE
-    59 :                SET : HxcVcHasHeader : Yes
-    60 :                IF : $$IsEmpty:##HxcVcHeaderKind
-    61 :                   SET : HxcVcHeaderKind : "text"
-    62 :                END IF
-    63 :                SET : HxcVcHeaderKey : ##VKey
-    64 :                SET : Entry : "header:" + ##VKey
-    65 :                IF : $$IsEmpty:##HxcVcMapsCsv
-    66 :                   SET : HxcVcMapsCsv : ##Entry
-    67 :                ELSE
-    68 :                   SET : HxcVcMapsCsv : ##HxcVcMapsCsv + "," + ##Entry
-    69 :                END IF
-    70 :             END IF
-    71 :          ELSE
-    72 :             SET : Entry : ##VComp + ":" + ##VKey
-    73 :             IF : $$IsEmpty:##HxcVcMapsCsv
-    74 :                SET : HxcVcMapsCsv : ##Entry
-    75 :             ELSE
-    76 :                SET : HxcVcMapsCsv : ##HxcVcMapsCsv + "," + ##Entry
-    77 :             END IF
-    78 :          END IF
-    79 :       END WALK
-    80 :       SET : HxcVcFetched : Yes
-    81 :       SET : HxcVcFetchStatus : "Template loaded."
-    82 :    END WALK
-    83 : END WALK
-    84 : IF : ##HxcVcFetched
-    85 :    IF : $$IsEmpty:##HxcVcPreviewText
-    86 :       SET : HxcVcPreviewText : "(No body text in template)"
-    87 :    END IF
-    88 : END IF
-    89 : RETURN : Yes
+    01 : SET : HxcVcFetched : No
+    02 : SET : HxcVcPreviewText : ""
+    03 : SET : HxcVcMapsCsv : ""
+    04 : SET : HxcVcHasHeader : No
+    05 : SET : HxcVcHeaderKind : ""
+    06 : SET : HxcVcHeaderFormat : ""
+    07 : SET : HxcVcHeaderKey : ""
+    08 : SET : HxcVcFetchStatus : "Template not found or empty response."
+    09 : WALK COLLECTION : Parameter Collection
+    10 :    WALK COLLECTION : items
+    11 :       WALK COLLECTION : components
+    12 :          SET : CompType : $type
+    13 :          IF : ##CompType = "header" OR ##CompType = "HEADER" OR ##CompType = "Header"
+    14 :             SET : HxcVcHasHeader : Yes
+    15 :             SET : Fmt : $format
+    16 :             IF : $$IsEmpty:##Fmt
+    17 :                SET : Fmt : "TEXT"
+    18 :             END IF
+    19 :             SET : HxcVcHeaderFormat : ##Fmt
+    20 :             IF : ##Fmt = "IMAGE" OR ##Fmt = "VIDEO" OR ##Fmt = "DOCUMENT" OR ##Fmt = "GIF" OR ##Fmt = "image" OR ##Fmt = "video" OR ##Fmt = "document" OR ##Fmt = "gif"
+    21 :                SET : HxcVcHeaderKind : "media"
+    22 :             ELSE
+    23 :                SET : HxcVcHeaderKind : "text"
+    24 :             END IF
+    25 :             IF : ##HxcVcHeaderKind = "text"
+    26 :                IF : NOT $$IsEmpty:$text
+    27 :                   SET : HxcVcPreviewText : "[Header] " + $text + " | "
+    28 :                END IF
+    29 :             END IF
+    30 :          END IF
+    31 :          IF : ##CompType = "body" OR ##CompType = "BODY" OR ##CompType = "Body"
+    32 :             IF : NOT $$IsEmpty:$text
+    33 :                SET : HxcVcPreviewText : ##HxcVcPreviewText + $text
+    34 :             END IF
+    35 :          END IF
+    36 :       END WALK
+    37 :       WALK COLLECTION : variables
+    38 :          SET : VComp : $component
+    39 :          SET : VKey : $key
+    40 :          IF : $$IsEmpty:##VComp
+    41 :             SET : VComp : "body"
+    42 :          END IF
+    43 :          IF : ##VComp = "HEADER"
+    44 :             SET : VComp : "header"
+    45 :          END IF
+    46 :          IF : ##VComp = "BODY"
+    47 :             SET : VComp : "body"
+    48 :          END IF
+    49 :          IF : ##VComp = "BUTTON"
+    50 :             SET : VComp : "button"
+    51 :          END IF
+    52 :          IF : NOT $$IsEmpty:##VKey
+    53 :             IF : ##VComp = "header"
+    54 :                IF : NOT ##HxcVcHeaderKind = "media"
+    55 :                   SET : HxcVcHasHeader : Yes
+    56 :                   IF : $$IsEmpty:##HxcVcHeaderKind
+    57 :                      SET : HxcVcHeaderKind : "text"
+    58 :                   END IF
+    59 :                   SET : HxcVcHeaderKey : ##VKey
+    60 :                   SET : Entry : "header:" + ##VKey
+    61 :                   IF : $$IsEmpty:##HxcVcMapsCsv
+    62 :                      SET : HxcVcMapsCsv : ##Entry
+    63 :                   ELSE
+    64 :                      SET : HxcVcMapsCsv : ##HxcVcMapsCsv + "," + ##Entry
+    65 :                   END IF
+    66 :                END IF
+    67 :             ELSE
+    68 :                SET : Entry : ##VComp + ":" + ##VKey
+    69 :                IF : $$IsEmpty:##HxcVcMapsCsv
+    70 :                   SET : HxcVcMapsCsv : ##Entry
+    71 :                ELSE
+    72 :                   SET : HxcVcMapsCsv : ##HxcVcMapsCsv + "," + ##Entry
+    73 :                END IF
+    74 :             END IF
+    75 :          END IF
+    76 :       END WALK
+    77 :       SET : HxcVcFetched : Yes
+    78 :       SET : HxcVcFetchStatus : "Template loaded."
+    79 :    END WALK
+    80 : END WALK
+    81 : IF : ##HxcVcFetched
+    82 :    IF : $$IsEmpty:##HxcVcPreviewText
+    83 :       SET : HxcVcPreviewText : "(No body text in template)"
+    84 :    END IF
+    85 : END IF
+    86 : RETURN : Yes
 
 [Function: Hxc Fetch Template]
     01 : CALL : Hxc Sync From Company
     02 : CALL : Hxc Clear Fetch Vars
-    03 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
-    04 :    SET : HxcVcFetchStatus : "Save API Settings (Ctrl+A) before fetching a template."
-    05 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    06 :    RETURN : No
-    07 : END IF
-    08 : SET : HxcVcFetchName : $HxcVcDraftTemplate
-    09 : IF : $$IsEmpty:##HxcVcFetchName
-    10 :    SET : HxcVcFetchName : $HxcVcDraftTemplate:Company:##SVCurrentCompany
-    11 : END IF
-    12 : IF : $$IsEmpty:##HxcVcFetchLang
-    13 :    SET : HxcVcFetchLang : $HxcVcDraftLang
-    14 : END IF
-    15 : IF : $$IsEmpty:##HxcVcFetchLang
-    16 :    SET : HxcVcFetchLang : "en"
-    17 : END IF
-    18 : IF : $$IsEmpty:##HxcVcFetchName
-    19 :    SET : HxcVcFetchStatus : "Enter Template Name first."
-    20 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    21 :    RETURN : No
-    22 : END IF
-    23 : SET : HxcVcFetchStatus : "Fetching..."
-    24 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
-    25 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
-    26 : End Progress
-    27 : IF : NOT ##HxcVcFetched
-    28 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
-    29 :       SET : HxcVcFetchStatus : "Could not fetch [" + ##HxcVcFetchName + "]. Check Status menu and template name."
-    30 :    END IF
-    31 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    32 :    RETURN : No
-    33 : END IF
-    34 : CALL : Hxc Parse Maps Into Draft : ##HxcVcMapsCsv
-    35 : SET VALUE : HxcVcDraftHeaderFld : ""
-    36 : IF : ##HxcVcHeaderKind = "media"
-    37 :    IF : $$IsEmpty:$HxcVcDraftMedia OR $HxcVcDraftMedia = "None"
-    38 :       SET VALUE : HxcVcDraftMedia : "Voucher PDF"
-    39 :    END IF
-    40 : ELSE
-    41 :    SET VALUE : HxcVcDraftMedia : "None"
-    42 : END IF
-    43 : Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    44 : RETURN : Yes
+    03 : CALL : Hxc Clear Draft Maps
+    04 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
+    05 :    SET : HxcVcFetchStatus : "Save API Settings (Ctrl+A) before fetching a template."
+    06 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    07 :    RETURN : No
+    08 : END IF
+    09 : SET : HxcVcFetchName : $HxcVcDraftTemplate
+    10 : IF : $$IsEmpty:##HxcVcFetchName
+    11 :    SET : HxcVcFetchName : $HxcVcDraftTemplate:Company:##SVCurrentCompany
+    12 : END IF
+    13 : IF : $$IsEmpty:##HxcVcFetchLang
+    14 :    SET : HxcVcFetchLang : $HxcVcDraftLang
+    15 : END IF
+    16 : IF : $$IsEmpty:##HxcVcFetchLang
+    17 :    SET : HxcVcFetchLang : "en"
+    18 : END IF
+    19 : IF : $$IsEmpty:##HxcVcFetchName
+    20 :    SET : HxcVcFetchStatus : "Enter Template Name first."
+    21 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    22 :    RETURN : No
+    23 : END IF
+    24 : SET : HxcVcFetchStatus : "Fetching..."
+    25 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
+    26 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
+    27 : End Progress
+    28 : IF : NOT ##HxcVcFetched
+    29 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
+    30 :       SET : HxcVcFetchStatus : "Could not fetch [" + ##HxcVcFetchName + "]. Open Helixcer Chat → Status. If Connected, check the template name on this channel."
+    31 :    END IF
+    32 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    33 :    RETURN : No
+    34 : END IF
+    35 : CALL : Hxc Parse Maps Into Draft : ##HxcVcMapsCsv
+    36 : SET VALUE : HxcVcDraftHeaderFld : ""
+    37 : IF : ##HxcVcHeaderKind = "media"
+    38 :    IF : $$IsEmpty:$HxcVcDraftMedia OR $HxcVcDraftMedia = "None"
+    39 :       SET VALUE : HxcVcDraftMedia : "Voucher PDF"
+    40 :    END IF
+    41 : ELSE
+    42 :    SET VALUE : HxcVcDraftMedia : "None"
+    43 : END IF
+    44 : Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    45 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; Pack helpers + commit draft → Aggregate config
@@ -669,7 +643,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 357)"
+    Set as    : "Helixcer Chat — API Settings (build 358)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -918,6 +892,7 @@
     Set as     : If $HxcVcDraftMapComp = "button" THEN "Button Var" ELSE "Body Var"
     Skip       : Yes
     Width      : 22
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:$HxcVcDraftMapKey
 
 [Field: Hxc Vc F Map MK]
     Use        : Name Field
@@ -925,6 +900,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 8
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:$HxcVcDraftMapKey
 
 [Field: Hxc Vc F Map MF]
     Use        : Name Field
@@ -934,6 +910,7 @@
     Table      : Hxc Voucher Field List, Not Applicable
     Width      : 28
     Max        : 40
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:$HxcVcDraftMapKey
 
 [Line: Hxc Vc F Vch Head]
     Field : Hxc Vc F Vch Head Fld
@@ -1005,7 +982,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 357)"
+    Set as    : "Create Voucher Config (build 358)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1071,7 +1048,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 357)"
+    Set as    : "Alter Voucher Config (build 358)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1130,7 +1107,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 357)"
+    Set as    : "Voucher Config List (build 358)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1245,7 +1222,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 357)"
+    Set as    : "Helixcer Chat (build 358)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
