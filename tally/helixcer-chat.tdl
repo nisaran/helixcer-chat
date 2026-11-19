@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 387-clear-before-open
-;; Title must show "(build 387)".
+;; BUILD: 388-create-opens-blank
+;; Title must show "(build 388)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -124,6 +124,9 @@
     Type : Logical
 
 [Variable: HxcVcCreateNeedsReset]
+    Type : Logical
+
+[Variable: HxcVcCreateBlank]
     Type : Logical
 
 [Variable: HxcVcMoveToConfirm]
@@ -269,6 +272,7 @@
     HxcVcAutoSendEnabled : No
     HxcVcMoveToConfirm : No
     HxcVcCreateNeedsReset : No
+    HxcVcCreateBlank    : No
     HxcVcFetched        : No
     HxcVcPreviewText    : ""
     HxcVcFetchStatus    : ""
@@ -896,25 +900,17 @@
     25 : RETURN : Yes
 
 [Function: Hxc Initialize New Config]
-    ;; Wipe Company draft UDFs so Create never shows the previous session.
-    ;; Must run BEFORE the form opens (Storage fields load once on create).
-    01 : SET OBJECT : Company : ##SVCurrentCompany
-    02 : SET : HxcVcCreateNeedsReset : No
-    03 : SET : HxcVcMoveToMapping : No
-    04 : SET : HxcVcMoveToConfirm : No
-    05 : SET : HxcVcAutoSendEnabled : No
-    06 : SET : HxcVcFetched : No
-    07 : CALL : Hxc Vc Clear Draft
+    ;; Wipe Company draft UDFs; CreateBlank forces Storage fields to paint empty.
+    01 : SET : HxcVcCreateNeedsReset : No
+    02 : SET : HxcVcMoveToMapping : No
+    03 : SET : HxcVcMoveToConfirm : No
+    04 : SET : HxcVcAutoSendEnabled : No
+    05 : SET : HxcVcFetched : No
+    06 : CALL : Hxc Vc Clear Draft
+    07 : SET : HxcVcCreateBlank : Yes
     08 : RETURN : Yes
 
-[Function: Hxc Open Create Config]
-    ;; Clear draft first, then open Create — Form Create is too late for Storage paint.
-    01 : CALL : Hxc Initialize New Config
-    02 : Action : Alter : Helixcer Voucher Config Create
-    03 : RETURN : Yes
-
 [Function: Hxc Vc Clear Draft]
-    00 : SET OBJECT : Company : ##SVCurrentCompany
     01 : CALL : Hxc Clear Fetch Vars
     02 : CALL : Hxc Clear Draft Vchs
     03 : CALL : Hxc Seed Draft Vch Row
@@ -1055,7 +1051,7 @@
 
 [Menu: Helixcer Voucher Config Menu]
     Title    : "Voucher Config"
-    Key Item : Create Config : C : Call  : Hxc Open Create Config
+    Key Item : Create Config : C : Alter : Helixcer Voucher Config Create
     Key Item : Alter Config  : A : Alter : Helixcer Voucher Config Alter
     Key Item : List Configs  : L : Alter : Helixcer Voucher Config List
     Key Item : Back          : B : Menu  : Helixcer Chat Menu
@@ -1084,7 +1080,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 387)"
+    Set as    : "Helixcer Chat — API Settings (build 388)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1216,9 +1212,11 @@
     Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
     Storage  : HxcVcDraftName
-    Set as   : $HxcVcDraftName
+    Set as   : If ##HxcVcCreateBlank THEN "" ELSE $HxcVcDraftName
+    Set Always : ##HxcVcCreateBlank
     Width    : 40
     Max      : 60
+    On       : Focus : ##HxcVcCreateBlank : SET : HxcVcCreateBlank : No
 
 [Line: Hxc Vc F Template Line]
     Fields : Medium Prompt, Hxc Vc F Template
@@ -1229,7 +1227,8 @@
     Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
     Storage  : HxcVcDraftTemplate
-    Set as   : $HxcVcDraftTemplate
+    Set as   : If ##HxcVcCreateBlank THEN "" ELSE $HxcVcDraftTemplate
+    Set Always : ##HxcVcCreateBlank
     Width    : 40
     Max      : 80
     On       : Accept : Yes : SET : HxcVcFetchName : $Value
@@ -1245,7 +1244,8 @@
     Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
     Storage  : HxcVcDraftLang
-    Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
+    Set as   : If ##HxcVcCreateBlank THEN "en" ELSE If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
+    Set Always : ##HxcVcCreateBlank
     Width    : 16
     Max      : 16
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
@@ -1288,7 +1288,8 @@
     Skip : ##HxcVcMoveToConfirm
     Use        : Name Field
     Storage    : HxcVcDraftMedia
-    Set as     : If $$IsEmpty:$HxcVcDraftMedia THEN "None" ELSE $HxcVcDraftMedia
+    Set as     : If ##HxcVcCreateBlank THEN "None" ELSE If $$IsEmpty:$HxcVcDraftMedia THEN "None" ELSE $HxcVcDraftMedia
+    Set Always : ##HxcVcCreateBlank
     Table      : Hxc Media Export List
     Show Table : Always
     Width      : 40
@@ -1793,7 +1794,8 @@
 [Field: HxcVcVoucherTypeInput]
     Use        : Name Field
     Storage    : HxcVcDraftVchName
-    Set as     : $HxcVcDraftVchName
+    Set as     : If ##HxcVcCreateBlank THEN "" ELSE $HxcVcDraftVchName
+    Set Always : ##HxcVcCreateBlank
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -1811,7 +1813,8 @@
 [Field: HxcVcAutoSendInput]
     Use      : Logical Field
     Storage  : HxcVcDraftAuto
-    Set as   : $HxcVcDraftAuto
+    Set as   : If ##HxcVcCreateBlank THEN No ELSE $HxcVcDraftAuto
+    Set Always : ##HxcVcCreateBlank
     Width    : 8
     Inactive   : NOT ##HxcVcFetched
     On       : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
@@ -1841,7 +1844,8 @@
     On : Focus : ##HxcVcMoveToConfirm : SET : HxcVcMoveToConfirm : No
     Use      : Logical Field
     Storage  : HxcVcDraftConfirm
-    Set as   : $HxcVcDraftConfirm
+    Set as   : If ##HxcVcCreateBlank THEN No ELSE $HxcVcDraftConfirm
+    Set Always : ##HxcVcCreateBlank
     Width    : 12
     Inactive : NOT ##HxcVcFetched
     Skip     : NOT ##HxcVcAutoSendEnabled
@@ -1868,6 +1872,7 @@
     Set    : HxcVcPreviewText : ""
     Set    : HxcVcFetchStatus : ""
     Set    : HxcVcCreateNeedsReset : Yes
+    Set    : HxcVcCreateBlank : Yes
 
 [Form: Helixcer Voucher Config Create]
     Part   : Hxc Vc Cr Title Part, Hxc Vc Form Template Part, Hxc Vc Form Mid Row, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Cr Hint Part
@@ -1886,7 +1891,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 387)"
+    Set as    : "Create Voucher Config (build 388)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1942,6 +1947,7 @@
     Set    : HxcVcPreviewText : ""
     Set    : HxcVcFetchStatus : ""
     Set    : HxcVcCreateNeedsReset : No
+    Set    : HxcVcCreateBlank : No
 
 [Form: Helixcer Voucher Config Alter]
     Part   : Hxc Vc Al Title Part, Hxc Vc Al Pick Part, Hxc Vc Form Template Part, Hxc Vc Form Mid Row, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Al Hint Part
@@ -1961,7 +1967,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 387)"
+    Set as    : "Alter Voucher Config (build 388)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2021,7 +2027,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 387)"
+    Set as    : "Voucher Config List (build 388)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2136,7 +2142,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 387)"
+    Set as    : "Helixcer Chat (build 388)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes

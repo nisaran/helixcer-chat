@@ -1,10 +1,10 @@
-# Helixcer Chat for TallyPrime — build 387
+# Helixcer Chat for TallyPrime — build 388
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 387)**.
+Title must show **(build 388)**.
 
 ## Fix
-Create Config fields use Company `Storage` UDFs. Clearing them on `Form Create` is too late — Tally has already painted the previous values.
+Build 387 broke Create Config open (`Call` + `Action : Alter`). Menu is back to `Alter` so the form opens.
 
-Create Config menu now calls `Hxc Open Create Config`, which clears the Company draft (with `SET OBJECT : Company`) **before** opening the form.
+Create still blanks previous draft via `HxcVcCreateBlank` + `Set Always` on Storage fields (Form Create clear alone paints too late).
