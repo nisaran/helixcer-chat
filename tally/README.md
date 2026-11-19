@@ -1,7 +1,7 @@
-# Helixcer Chat for TallyPrime — build 382
+# Helixcer Chat for TallyPrime — build 383
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 382)**.
+Title must show **(build 383)**.
 
-User-corrected Create Config (MoveToMapping focus after fetch + language query param).
+Same as user-corrected build 382 (MoveToMapping + language param); build label only.
