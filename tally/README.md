@@ -1,21 +1,15 @@
-# Helixcer Chat — build 341
+# Helixcer Chat for TallyPrime — build 364
 
-https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-live-field-vars-b545/tally/helixcer_chat.tdl
+https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer-chat.tdl
 
-## Why replacement failed
+Title must show **(build 364)**.
 
-You entered new UUIDs + key and got **Do you want to save?**, but reopen showed the old `Sddcsdfsdfc` / single `*`.
+## UI updates (functions unchanged)
 
-Cause: Confirm Save returned Yes **without** running `Form Accept`, so company **Storage was never committed**.
+- **Variable Mapping** voucher-field table: Tally voucher/party labels + native lists (`Ledger`, `Stock Item`, `Godown`, `Cost Centre`, `Currency`, `Unit`) + End of List / Not Applicable
+- **Voucher Types**: `End of List` to finish adding rows
+- **New Create**: Form Create/Destroy clears draft so old mapping/preview does not linger
+- **Message Preview**: multiline (12 lines) for paragraph templates
+- **T0014 fix**: `Inactive` only on Fields (not Parts)
 
-## Fix
-
-After Yes → **`Form Accept`** (commits Alter) → **Helixcer saved** Msg Box.
-
-## Steps
-
-1. Title **(build 341)**.
-2. Enter new Workspace / Channel / full API Key (many `*`).
-3. Enter → Yes.
-4. Must see **Helixcer saved** with the **new** WS/CH and KeyChars ≥ 20.
-5. Reopen — new values must still be there (not the old dummy IDs).
+Fetch still: Enter on Language or Alt+F.
