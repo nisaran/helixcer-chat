@@ -1,13 +1,12 @@
-# Helixcer Chat for TallyPrime — build 402
+# Helixcer Chat for TallyPrime — build 403
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 402)**.
+Title must show **(build 403)**.
 
 ## Fix
-Fetch said "Enter Template Name first" while Template Name was filled on screen: fields used `Variable` without `Modifies`, so the typed input never landed in `##HxcVcDraftTemplate`. Fetch then read the empty Variable (not the input field).
+When a Header / Body / Button variable is mapped to **Custom Value**, the text input is mandatory.
 
-- Name / Template / Language / voucher slots use `Modifies` (same pattern as API Settings)
-- Template Accept locks `HxcVcFetchName` from `$Value`
-- Language Accept does not overwrite FetchName with an empty Variable
-- `Clear Fetch Vars` no longer wipes FetchName / FetchLang (request inputs)
+- Custom inputs use `Modifies` so typed text syncs into the draft Variable
+- Empty Accept on a Custom Value input shows: "Custom Value text is required." and stays on the field
+- Ctrl+A still blocks save via `@@HxcVcMissingCustomValue` if any Custom Value text is blank

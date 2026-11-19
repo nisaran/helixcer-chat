@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 402-modifies-input-sync
-;; Title must show "(build 402)".
+;; BUILD: 403-custom-value-required
+;; Title must show "(build 403)".
 ;;
 ;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
 ;; Company Storage is used for saved HxcVoucherConfigs on Commit — never for Create UI.
@@ -1278,7 +1278,7 @@
     12 :    RETURN : No
     13 : END IF
     131 : IF : @@HxcVcMissingCustomValue
-    132 :    Msg Box : "Helixcer Voucher Config" : "Enter a value for each variable mapped to Custom Value."
+    132 :    Msg Box : "Helixcer Voucher Config" : "Custom Value text is required for every variable mapped to Custom Value."
     133 :    RETURN : No
     134 : END IF
     14 : SET : Maps : $$HxcPackMaps
@@ -1380,7 +1380,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 402)"
+    Set as    : "Helixcer Chat — API Settings (build 403)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1633,8 +1633,8 @@
 
 [Field: HxcVcHdrMapping]
     Use        : Name Field
-    Variable    : HxcVcDraftHeaderFld
     Set as     : ##HxcVcDraftHeaderFld
+    Modifies   : HxcVcDraftHeaderFld
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1692,8 +1692,8 @@
 
 [Field: HxcVcBody1Mapping]
     Use        : Name Field
-    Variable    : HxcVcDMFld1
     Set as     : ##HxcVcDMFld1
+    Modifies   : HxcVcDMFld1
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1719,8 +1719,8 @@
 
 [Field: HxcVcBody2Mapping]
     Use        : Name Field
-    Variable    : HxcVcDMFld2
     Set as     : ##HxcVcDMFld2
+    Modifies   : HxcVcDMFld2
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1746,8 +1746,8 @@
 
 [Field: HxcVcBody3Mapping]
     Use        : Name Field
-    Variable    : HxcVcDMFld3
     Set as     : ##HxcVcDMFld3
+    Modifies   : HxcVcDMFld3
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1773,8 +1773,8 @@
 
 [Field: HxcVcBody4Mapping]
     Use        : Name Field
-    Variable    : HxcVcDMFld4
     Set as     : ##HxcVcDMFld4
+    Modifies   : HxcVcDMFld4
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1800,8 +1800,8 @@
 
 [Field: HxcVcBody5Mapping]
     Use        : Name Field
-    Variable    : HxcVcDMFld5
     Set as     : ##HxcVcDMFld5
+    Modifies   : HxcVcDMFld5
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1827,8 +1827,8 @@
 
 [Field: HxcVcBody6Mapping]
     Use        : Name Field
-    Variable    : HxcVcDMFld6
     Set as     : ##HxcVcDMFld6
+    Modifies   : HxcVcDMFld6
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1854,8 +1854,8 @@
 
 [Field: HxcVcBody7Mapping]
     Use        : Name Field
-    Variable    : HxcVcDMFld7
     Set as     : ##HxcVcDMFld7
+    Modifies   : HxcVcDMFld7
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1881,8 +1881,8 @@
 
 [Field: HxcVcBody8Mapping]
     Use        : Name Field
-    Variable    : HxcVcDMFld8
     Set as     : ##HxcVcDMFld8
+    Modifies   : HxcVcDMFld8
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1941,8 +1941,8 @@
 
 [Field: HxcVcBtn1Mapping]
     Use        : Name Field
-    Variable    : HxcVcButtonField1
     Set as     : ##HxcVcButtonField1
+    Modifies   : HxcVcButtonField1
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1968,8 +1968,8 @@
 
 [Field: HxcVcBtn2Mapping]
     Use        : Name Field
-    Variable    : HxcVcButtonField2
     Set as     : ##HxcVcButtonField2
+    Modifies   : HxcVcButtonField2
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -1995,8 +1995,8 @@
 
 [Field: HxcVcBtn3Mapping]
     Use        : Name Field
-    Variable    : HxcVcButtonField3
     Set as     : ##HxcVcButtonField3
+    Modifies   : HxcVcButtonField3
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -2022,8 +2022,8 @@
 
 [Field: HxcVcBtn4Mapping]
     Use        : Name Field
-    Variable    : HxcVcButtonField4
     Set as     : ##HxcVcButtonField4
+    Modifies   : HxcVcButtonField4
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
@@ -2456,7 +2456,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 402)"
+    Set as    : "Create Voucher Config (build 403)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2532,7 +2532,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 402)"
+    Set as    : "Alter Voucher Config (build 403)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2592,7 +2592,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 402)"
+    Set as    : "Voucher Config List (build 403)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2707,7 +2707,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 402)"
+    Set as    : "Helixcer Chat (build 403)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2825,78 +2825,118 @@
 
 [Field: HxcVcHdrCustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcDraftCustom0
-    Set as : If ##HxcVcDraftHeaderFld = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom0 ELSE ""
+    Set as : If (##HxcVcDraftHeaderFld = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom0 ELSE ""
+    Modifies : HxcVcDraftCustom0
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDraftHeaderFld = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom0 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBody1CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcDraftCustom1
-    Set as : If ##HxcVcDMFld1 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom1 ELSE ""
+    Set as : If (##HxcVcDMFld1 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom1 ELSE ""
+    Modifies : HxcVcDraftCustom1
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld1 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom1 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBody2CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcDraftCustom2
-    Set as : If ##HxcVcDMFld2 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom2 ELSE ""
+    Set as : If (##HxcVcDMFld2 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom2 ELSE ""
+    Modifies : HxcVcDraftCustom2
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld2 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom2 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBody3CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcDraftCustom3
-    Set as : If ##HxcVcDMFld3 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom3 ELSE ""
+    Set as : If (##HxcVcDMFld3 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom3 ELSE ""
+    Modifies : HxcVcDraftCustom3
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld3 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom3 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBody4CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcDraftCustom4
-    Set as : If ##HxcVcDMFld4 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom4 ELSE ""
+    Set as : If (##HxcVcDMFld4 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom4 ELSE ""
+    Modifies : HxcVcDraftCustom4
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld4 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom4 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBody5CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcDraftCustom5
-    Set as : If ##HxcVcDMFld5 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom5 ELSE ""
+    Set as : If (##HxcVcDMFld5 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom5 ELSE ""
+    Modifies : HxcVcDraftCustom5
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld5 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom5 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBody6CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcDraftCustom6
-    Set as : If ##HxcVcDMFld6 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom6 ELSE ""
+    Set as : If (##HxcVcDMFld6 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom6 ELSE ""
+    Modifies : HxcVcDraftCustom6
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld6 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom6 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBody7CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcDraftCustom7
-    Set as : If ##HxcVcDMFld7 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom7 ELSE ""
+    Set as : If (##HxcVcDMFld7 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom7 ELSE ""
+    Modifies : HxcVcDraftCustom7
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld7 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom7 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBody8CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcDraftCustom8
-    Set as : If ##HxcVcDMFld8 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom8 ELSE ""
+    Set as : If (##HxcVcDMFld8 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom8 ELSE ""
+    Modifies : HxcVcDraftCustom8
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld8 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom8 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBtn1CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcButtonCustom1
-    Set as : If ##HxcVcButtonField1 = @@HxcCustomValueLabel THEN ##HxcVcButtonCustom1 ELSE ""
+    Set as : If (##HxcVcButtonField1 = @@HxcCustomValueLabel) THEN ##HxcVcButtonCustom1 ELSE ""
+    Modifies : HxcVcButtonCustom1
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcButtonField1 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcButtonCustom1 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBtn2CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcButtonCustom2
-    Set as : If ##HxcVcButtonField2 = @@HxcCustomValueLabel THEN ##HxcVcButtonCustom2 ELSE ""
+    Set as : If (##HxcVcButtonField2 = @@HxcCustomValueLabel) THEN ##HxcVcButtonCustom2 ELSE ""
+    Modifies : HxcVcButtonCustom2
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcButtonField2 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcButtonCustom2 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBtn3CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcButtonCustom3
-    Set as : If ##HxcVcButtonField3 = @@HxcCustomValueLabel THEN ##HxcVcButtonCustom3 ELSE ""
+    Set as : If (##HxcVcButtonField3 = @@HxcCustomValueLabel) THEN ##HxcVcButtonCustom3 ELSE ""
+    Modifies : HxcVcButtonCustom3
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcButtonField3 = @@HxcCustomValueLabel))
-
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcButtonCustom3 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
 [Field: HxcVcBtn4CustomInput]
     Use : Hxc Vc Custom Mapping Input
-    Variable : HxcVcButtonCustom4
-    Set as : If ##HxcVcButtonField4 = @@HxcCustomValueLabel THEN ##HxcVcButtonCustom4 ELSE ""
+    Set as : If (##HxcVcButtonField4 = @@HxcCustomValueLabel) THEN ##HxcVcButtonCustom4 ELSE ""
+    Modifies : HxcVcButtonCustom4
     Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcButtonField4 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcButtonCustom4 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept

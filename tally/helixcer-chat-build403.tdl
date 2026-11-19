@@ -1,0 +1,2942 @@
+;; Helixcer Chat — TallyPrime TDL
+;; BUILD: 403-custom-value-required
+;; Title must show "(build 403)".
+;;
+;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
+;; Company Storage is used for saved HxcVoucherConfigs on Commit — never for Create UI.
+;; Fetch reads ##HxcVcDraftTemplate after Modifies syncs the input field into the Variable.
+;; Never read Company draft Storage for Create. Clear Fetch Vars does not wipe FetchName.
+;;
+;; Create Config flow:
+;;   Config Name → Template → Language Enter (fetch) →
+;;   Preview → Header (only if template has header) → Body maps (dynamic count) →
+;;   Voucher types → Settings → Ctrl+A
+
+;; ---------------------------------------------------------------------------
+;; Company UDFs
+;; ---------------------------------------------------------------------------
+
+[System: UDF]
+    HxcWorkspaceIdUDF : String : 25101
+    HxcChannelIdUDF   : String : 25102
+    HxcApiKeyUDF      : String : 25103
+    ;; Saved configs
+    HxcVoucherConfigs      : Aggregate : 25110
+    HxcVcName              : String    : 25111
+    HxcVcTemplateName      : String    : 25112
+    HxcVcLanguage          : String    : 25113
+    HxcVcVoucherTypes      : String    : 25114
+    HxcVcMediaExport       : String    : 25115
+    HxcVcAutoSend          : Logical   : 25116
+    HxcVcConfirmBeforeSend : Logical   : 25117
+    HxcVcVarMapsText       : String    : 25118
+    ;; Legacy draft UDFs (kept for company-file schema; Create UI uses session Variables)
+    HxcVcDraftName     : String  : 25120
+    HxcVcDraftTemplate : String  : 25121
+    HxcVcDraftLang     : String  : 25122
+    HxcVcCustom0 : String : 25210
+    HxcVcCustom1 : String : 25211
+    HxcVcCustom2 : String : 25212
+    HxcVcCustom3 : String : 25213
+    HxcVcCustom4 : String : 25214
+    HxcVcCustom5 : String : 25215
+    HxcVcCustom6 : String : 25216
+    HxcVcCustom7 : String : 25217
+    HxcVcCustom8 : String : 25218
+    ;; Legacy draft aggregate (unused by Create UI; session HxcVcVchTypeN instead)
+    HxcVcDraftVchs    : Aggregate : 25150
+    HxcVcDraftVchName : String    : 25151
+
+;; ---------------------------------------------------------------------------
+;; Status mirrors + save flag
+;; ---------------------------------------------------------------------------
+
+[Variable: HxcSysWorkspaceId]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcSysChannelId]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcSysApiKey]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcWorkspaceName]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcChannelName]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcConnectionStatus]
+    Type       : String
+    Persistent : Yes
+
+[Variable: HxcVcSaveOk]
+    Type : Logical
+
+[Variable: HxcVcHasBodyMaps]
+    Type : Logical
+
+[Variable: HxcVcHasBtnMaps]
+    Type : Logical
+
+[Variable: HxcVcFetched]
+    Type : Logical
+
+[Variable: HxcVcMoveToMapping]
+    Type : Logical
+
+[Variable: HxcVcCreateNeedsReset]
+    Type : Logical
+
+[Variable: HxcVcCreateBlank]
+    Type : Logical
+
+[Variable: HxcVcDraftName]
+    Type : String
+
+[Variable: HxcVcDraftTemplate]
+    Type : String
+
+[Variable: HxcVcDraftLang]
+    Type : String
+
+[Variable: HxcVcVchType1]
+    Type : String
+
+[Variable: HxcVcVchType2]
+    Type : String
+
+[Variable: HxcVcVchType3]
+    Type : String
+
+[Variable: HxcVcVchType4]
+    Type : String
+
+[Variable: HxcVcVchType5]
+    Type : String
+
+[Variable: HxcVcVchType6]
+    Type : String
+
+[Variable: HxcVcVchType7]
+    Type : String
+
+[Variable: HxcVcVchType8]
+    Type : String
+
+[Variable: HxcVcVchType9]
+    Type : String
+
+[Variable: HxcVcVchType10]
+    Type : String
+
+[Variable: HxcVcVchType11]
+    Type : String
+
+[Variable: HxcVcVchType12]
+    Type : String
+
+[Variable: HxcVcDraftMedia]
+    Type : String
+
+[Variable: HxcVcDraftAuto]
+    Type : Logical
+
+[Variable: HxcVcDraftConfirm]
+    Type : Logical
+
+[Variable: HxcVcDraftEditKey]
+    Type : String
+
+[Variable: HxcVcDraftHeaderFld]
+    Type : String
+
+[Variable: HxcVcDMFld1]
+    Type : String
+
+[Variable: HxcVcDMFld2]
+    Type : String
+
+[Variable: HxcVcDMFld3]
+    Type : String
+
+[Variable: HxcVcDMFld4]
+    Type : String
+
+[Variable: HxcVcDMFld5]
+    Type : String
+
+[Variable: HxcVcDMFld6]
+    Type : String
+
+[Variable: HxcVcDMFld7]
+    Type : String
+
+[Variable: HxcVcDMFld8]
+    Type : String
+
+[Variable: HxcVcDMFld9]
+    Type : String
+
+[Variable: HxcVcDMFld10]
+    Type : String
+
+[Variable: HxcVcDMFld11]
+    Type : String
+
+[Variable: HxcVcDMFld12]
+    Type : String
+
+[Variable: HxcVcDMFld13]
+    Type : String
+
+[Variable: HxcVcDMFld14]
+    Type : String
+
+[Variable: HxcVcDMFld15]
+    Type : String
+
+[Variable: HxcVcDMFld16]
+    Type : String
+
+[Variable: HxcVcDraftCustom0]
+    Type : String
+
+[Variable: HxcVcDraftCustom1]
+    Type : String
+
+[Variable: HxcVcDraftCustom2]
+    Type : String
+
+[Variable: HxcVcDraftCustom3]
+    Type : String
+
+[Variable: HxcVcDraftCustom4]
+    Type : String
+
+[Variable: HxcVcDraftCustom5]
+    Type : String
+
+[Variable: HxcVcDraftCustom6]
+    Type : String
+
+[Variable: HxcVcDraftCustom7]
+    Type : String
+
+[Variable: HxcVcDraftCustom8]
+    Type : String
+
+[Variable: HxcVcButtonField1]
+    Type : String
+
+[Variable: HxcVcButtonCustom1]
+    Type : String
+
+[Variable: HxcVcButtonField2]
+    Type : String
+
+[Variable: HxcVcButtonCustom2]
+    Type : String
+
+[Variable: HxcVcButtonField3]
+    Type : String
+
+[Variable: HxcVcButtonCustom3]
+    Type : String
+
+[Variable: HxcVcButtonField4]
+    Type : String
+
+[Variable: HxcVcButtonCustom4]
+    Type : String
+
+[Variable: HxcVcMoveToConfirm]
+    Type : Logical
+
+[Variable: HxcVcAutoSendEnabled]
+    Type : Logical
+
+[Variable: HxcVcPreviewText]
+    Type : String
+
+[Variable: HxcVcFetchStatus]
+    Type : String
+
+[Variable: HxcVcFetchLang]
+    Type : String
+
+[Variable: HxcVcFetchName]
+    Type : String
+
+[Variable: HxcVcMapsCsv]
+    Type : String
+
+[Variable: HxcVcHasHeader]
+    Type : Logical
+
+[Variable: HxcVcHeaderKind]
+    Type : String
+
+[Variable: HxcVcHeaderFormat]
+    Type : String
+
+[Variable: HxcVcHeaderKey]
+    Type : String
+
+[Variable: HxcVcFK1]
+    Type : String
+
+[Variable: HxcVcFK2]
+    Type : String
+
+[Variable: HxcVcFK3]
+    Type : String
+
+[Variable: HxcVcFK4]
+    Type : String
+
+[Variable: HxcVcFK5]
+    Type : String
+
+[Variable: HxcVcFK6]
+    Type : String
+
+[Variable: HxcVcFK7]
+    Type : String
+
+[Variable: HxcVcFK8]
+    Type : String
+
+[Variable: HxcVcFK9]
+    Type : String
+
+[Variable: HxcVcFK10]
+    Type : String
+
+[Variable: HxcVcFK11]
+    Type : String
+
+[Variable: HxcVcFK12]
+    Type : String
+
+[Variable: HxcVcFK13]
+    Type : String
+
+[Variable: HxcVcFK14]
+    Type : String
+
+[Variable: HxcVcFK15]
+    Type : String
+
+[Variable: HxcVcFK16]
+    Type : String
+
+[Variable: HxcVcFC1]
+    Type : String
+
+[Variable: HxcVcFC2]
+    Type : String
+
+[Variable: HxcVcFC3]
+    Type : String
+
+[Variable: HxcVcFC4]
+    Type : String
+
+[Variable: HxcVcFC5]
+    Type : String
+
+[Variable: HxcVcFC6]
+    Type : String
+
+[Variable: HxcVcFC7]
+    Type : String
+
+[Variable: HxcVcFC8]
+    Type : String
+
+[Variable: HxcVcFC9]
+    Type : String
+
+[Variable: HxcVcFC10]
+    Type : String
+
+[Variable: HxcVcFC11]
+    Type : String
+
+[Variable: HxcVcFC12]
+    Type : String
+
+[Variable: HxcVcFC13]
+    Type : String
+
+[Variable: HxcVcFC14]
+    Type : String
+
+[Variable: HxcVcFC15]
+    Type : String
+
+[Variable: HxcVcFC16]
+    Type : String
+
+[System: Variable]
+    HxcSysWorkspaceId   : ""
+    HxcSysChannelId     : ""
+    HxcSysApiKey        : ""
+    HxcWorkspaceName    : ""
+    HxcChannelName      : ""
+    HxcConnectionStatus : ""
+    HxcVcSaveOk         : No
+    HxcVcHasBodyMaps    : No
+    HxcVcHasBtnMaps     : No
+    HxcVcMoveToMapping  : No
+    HxcVcAutoSendEnabled : No
+    HxcVcMoveToConfirm : No
+    HxcVcCreateNeedsReset : No
+    HxcVcCreateBlank    : No
+    HxcVcFetched        : No
+    HxcVcDraftName      : ""
+    HxcVcDraftTemplate  : ""
+    HxcVcDraftLang      : "en"
+    HxcVcVchType1 : ""
+    HxcVcVchType2 : ""
+    HxcVcVchType3 : ""
+    HxcVcVchType4 : ""
+    HxcVcVchType5 : ""
+    HxcVcVchType6 : ""
+    HxcVcVchType7 : ""
+    HxcVcVchType8 : ""
+    HxcVcVchType9 : ""
+    HxcVcVchType10 : ""
+    HxcVcVchType11 : ""
+    HxcVcVchType12 : ""
+    HxcVcDraftMedia : "None"
+    HxcVcDraftAuto : No
+    HxcVcDraftConfirm : No
+    HxcVcDraftEditKey : ""
+    HxcVcDraftHeaderFld : ""
+    HxcVcDMFld1 : ""
+    HxcVcDMFld2 : ""
+    HxcVcDMFld3 : ""
+    HxcVcDMFld4 : ""
+    HxcVcDMFld5 : ""
+    HxcVcDMFld6 : ""
+    HxcVcDMFld7 : ""
+    HxcVcDMFld8 : ""
+    HxcVcDMFld9 : ""
+    HxcVcDMFld10 : ""
+    HxcVcDMFld11 : ""
+    HxcVcDMFld12 : ""
+    HxcVcDMFld13 : ""
+    HxcVcDMFld14 : ""
+    HxcVcDMFld15 : ""
+    HxcVcDMFld16 : ""
+    HxcVcDraftCustom0 : ""
+    HxcVcDraftCustom1 : ""
+    HxcVcDraftCustom2 : ""
+    HxcVcDraftCustom3 : ""
+    HxcVcDraftCustom4 : ""
+    HxcVcDraftCustom5 : ""
+    HxcVcDraftCustom6 : ""
+    HxcVcDraftCustom7 : ""
+    HxcVcDraftCustom8 : ""
+    HxcVcButtonField1 : ""
+    HxcVcButtonCustom1 : ""
+    HxcVcButtonField2 : ""
+    HxcVcButtonCustom2 : ""
+    HxcVcButtonField3 : ""
+    HxcVcButtonCustom3 : ""
+    HxcVcButtonField4 : ""
+    HxcVcButtonCustom4 : ""
+    HxcVcPreviewText    : ""
+    HxcVcFetchStatus    : ""
+    HxcVcFetchLang      : "en"
+    HxcVcFetchName      : ""
+    HxcVcMapsCsv        : ""
+    HxcVcHasHeader      : No
+    HxcVcHeaderKind     : ""
+    HxcVcHeaderFormat   : ""
+    HxcVcHeaderKey      : ""
+    HxcVcFK1            : ""
+    HxcVcFK2            : ""
+    HxcVcFK3            : ""
+    HxcVcFK4            : ""
+    HxcVcFK5            : ""
+    HxcVcFK6            : ""
+    HxcVcFK7            : ""
+    HxcVcFK8            : ""
+    HxcVcFK9            : ""
+    HxcVcFK10            : ""
+    HxcVcFK11            : ""
+    HxcVcFK12            : ""
+    HxcVcFK13            : ""
+    HxcVcFK14            : ""
+    HxcVcFK15            : ""
+    HxcVcFK16            : ""
+    HxcVcFC1            : ""
+    HxcVcFC2            : ""
+    HxcVcFC3            : ""
+    HxcVcFC4            : ""
+    HxcVcFC5            : ""
+    HxcVcFC6            : ""
+    HxcVcFC7            : ""
+    HxcVcFC8            : ""
+    HxcVcFC9            : ""
+    HxcVcFC10            : ""
+    HxcVcFC11            : ""
+    HxcVcFC12            : ""
+    HxcVcFC13            : ""
+    HxcVcFC14            : ""
+    HxcVcFC15            : ""
+    HxcVcFC16            : ""
+
+[System: Formula]
+    Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcSysChannelId
+    Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
+    ;; Same pattern as working build 347 Status/HTTP, but template name in ## var
+    Hxc Template Url   : "https://api.chat.helixcer.com/api/v1/whatsapp/templates/" + ##HxcVcFetchName + "?channelId=" + ##HxcSysChannelId + "&language=" + ##HxcVcFetchLang
+
+;; ---------------------------------------------------------------------------
+;; Tables
+;; ---------------------------------------------------------------------------
+
+[Collection: Hxc Media Export List]
+    List : "None", "Voucher PDF", "Voucher HTML", "Voucher XML", "Voucher Excel"
+
+[Collection: Hxc Voucher Type List]
+    Type   : Voucher Type
+    Format : $Name, 40
+
+;; Dynamic voucher / party / company data labels for mapping (list only)
+[Collection: Hxc Voucher Field List]
+    Title  : "Voucher Dynamic Data"
+    Table Sort : @@HxcVoucherMappingSort
+    List : "♦ Custom Value", "Not Applicable", +
+           "Party Ledger Name", "Party Name", "Party Mailing Name", "Party Address", +
+           "Party Address 1", "Party Address 2", "Party Address 3", +
+           "Party State Name", "Party Country", "Party Pincode", "Party GSTIN/UIN", +
+           "Party Mobile", "Party Email", +
+           "Buyer Name", "Consignee Name", +
+           "Company Name", "Company Mailing Name", "Company GSTIN", "Company State Name", +
+           "Voucher Number", "Voucher Date", "Reference", "Narration", "Amount", +
+           "Basic Buyer Name", "Basic Buyer Address", "Basic Order Ref", "Basic Order Terms", +
+           "Basic Ship Delivery Date", "Basic Due Date", "Basic Base Value", +
+           "Sales Person", "Terms of Payment", "Terms of Delivery", "Dispatch Through", +
+           "Destination", "Carrier Name", "Bill of Lading", "Eway Bill Number", "IRN", +
+           "Guid", "Master ID"
+
+[Collection: Hxc Voucher Config Names]
+    Type     : HxcVoucherConfigs : Company
+    Child Of : ##SVCurrentCompany
+    Format   : $HxcVcName, 40
+    Fetch    : HxcVcName, HxcVcTemplateName, HxcVcLanguage, HxcVcVoucherTypes, +
+               HxcVcMediaExport, HxcVcAutoSend, HxcVcConfirmBeforeSend, HxcVcVarMapsText, +
+               HxcVcCustom0, HxcVcCustom1, HxcVcCustom2, HxcVcCustom3, HxcVcCustom4, HxcVcCustom5, HxcVcCustom6, HxcVcCustom7, HxcVcCustom8
+    Title    : "Voucher Configs"
+
+;; ---------------------------------------------------------------------------
+;; HTTP (Status)
+;; ---------------------------------------------------------------------------
+
+[Report: Hxc Connection Request]
+    Form          : Hxc Connection Request
+    Export Header : "Authorization: Bearer " + ##HxcSysApiKey
+    Export Header : "X-Workspace-Id: " + ##HxcSysWorkspaceId
+    Export Header : "Accept: application/json"
+
+[Form: Hxc Connection Request]
+    Part : Hxc Connection Request
+
+[Part: Hxc Connection Request]
+    Lines : Hxc Connection Request
+
+[Line: Hxc Connection Request]
+    Fields : Hxc Connection Request
+
+[Field: Hxc Connection Request]
+    Use    : Name Field
+    Set as : ""
+    Skip   : Yes
+
+[Function: Hxc Apply Connection Response]
+    Variable : Platform : String
+    01 : SET : HxcWorkspaceName : ""
+    02 : SET : HxcChannelName : ""
+    03 : SET : HxcConnectionStatus : "Could not fetch. Check IDs and API Key."
+    04 : WALK COLLECTION : Parameter Collection
+    05 :    IF : NOT $$IsEmpty:$workspaceName
+    06 :       SET : Platform : $platformLabel
+    07 :       IF : $$IsEmpty:##Platform
+    08 :          SET : Platform : $connectorType
+    09 :       END IF
+    10 :       IF : $$IsEmpty:##Platform
+    11 :          SET : Platform : "Channel"
+    12 :       END IF
+    13 :       SET : HxcWorkspaceName : $workspaceName
+    14 :       SET : HxcChannelName : $channelName + " (" + ##Platform + ")"
+    15 :       SET : HxcConnectionStatus : "Connected"
+    16 :    END IF
+    17 : END WALK
+    18 : RETURN : Yes
+
+[Function: Hxc Sync From Company]
+    01 : IF : NOT $$IsEmpty:$HxcWorkspaceIdUDF:Company:##SVCurrentCompany
+    02 :    SET : HxcSysWorkspaceId : $HxcWorkspaceIdUDF:Company:##SVCurrentCompany
+    03 : END IF
+    04 : IF : NOT $$IsEmpty:$HxcChannelIdUDF:Company:##SVCurrentCompany
+    05 :    SET : HxcSysChannelId : $HxcChannelIdUDF:Company:##SVCurrentCompany
+    06 : END IF
+    07 : IF : NOT $$IsEmpty:$HxcApiKeyUDF:Company:##SVCurrentCompany
+    08 :    SET : HxcSysApiKey : $HxcApiKeyUDF:Company:##SVCurrentCompany
+    09 : END IF
+    10 : RETURN : Yes
+
+[Function: Hxc Fetch Connection]
+    01 : CALL : Hxc Sync From Company
+    02 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
+    03 :    SET : HxcConnectionStatus : "Not ready. " + @@HxcSysSummary + "  Accept API Settings with Ctrl+A first."
+    04 :    RETURN : No
+    05 : END IF
+    06 : SET : HxcWorkspaceName : ""
+    07 : SET : HxcChannelName : ""
+    08 : SET : HxcConnectionStatus : "Checking..."
+    09 : Start Progress : 1 : "Helixcer Chat" : "Connection status" : "Fetching workspace and channel"
+    10 : HTTP Request : @@HxcConnectionUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Connection Response
+    11 : End Progress
+    12 : IF : $$IsEmpty:##HxcWorkspaceName
+    13 :    IF : ##HxcConnectionStatus = "Checking..."
+    14 :       SET : HxcConnectionStatus : "Could not fetch. Check IDs and API Key."
+    15 :    END IF
+    16 : END IF
+    17 : RETURN : Yes
+
+[Function: Hxc Show Status]
+    01 : CALL : Hxc Fetch Connection
+    02 : Msg Box : "Helixcer Connection Status" : ##HxcConnectionStatus
+    03 : IF : NOT $$IsEmpty:##HxcWorkspaceName
+    04 :    Msg Box : "Workspace" : ##HxcWorkspaceName
+    05 :    Msg Box : "Channel" : ##HxcChannelName
+    06 : END IF
+    07 : RETURN : Yes
+
+[Function: Hxc Clear Fetch Vars]
+    00 : SET : HxcVcMoveToMapping : No
+    01 : SET : HxcVcFetched : No
+    02 : SET : HxcVcPreviewText : ""
+    03 : SET : HxcVcFetchStatus : ""
+    04 : SET : HxcVcMapsCsv : ""
+    05 : SET : HxcVcHasHeader : No
+    06 : SET : HxcVcHeaderKind : ""
+    07 : SET : HxcVcHeaderFormat : ""
+    08 : SET : HxcVcHeaderKey : ""
+    09 : SET : HxcVcHasBodyMaps : No
+    10 : SET : HxcVcHasBtnMaps : No
+    11 : SET : HxcVcFK1 : ""
+    12 : SET : HxcVcFK2 : ""
+    13 : SET : HxcVcFK3 : ""
+    14 : SET : HxcVcFK4 : ""
+    15 : SET : HxcVcFK5 : ""
+    16 : SET : HxcVcFK6 : ""
+    17 : SET : HxcVcFK7 : ""
+    18 : SET : HxcVcFK8 : ""
+    19 : SET : HxcVcFK9 : ""
+    20 : SET : HxcVcFK10 : ""
+    21 : SET : HxcVcFK11 : ""
+    22 : SET : HxcVcFK12 : ""
+    23 : SET : HxcVcFK13 : ""
+    24 : SET : HxcVcFK14 : ""
+    25 : SET : HxcVcFK15 : ""
+    26 : SET : HxcVcFK16 : ""
+    27 : SET : HxcVcFC1 : ""
+    28 : SET : HxcVcFC2 : ""
+    29 : SET : HxcVcFC3 : ""
+    30 : SET : HxcVcFC4 : ""
+    31 : SET : HxcVcFC5 : ""
+    32 : SET : HxcVcFC6 : ""
+    33 : SET : HxcVcFC7 : ""
+    34 : SET : HxcVcFC8 : ""
+    35 : SET : HxcVcFC9 : ""
+    36 : SET : HxcVcFC10 : ""
+    37 : SET : HxcVcFC11 : ""
+    38 : SET : HxcVcFC12 : ""
+    39 : SET : HxcVcFC13 : ""
+    40 : SET : HxcVcFC14 : ""
+    41 : SET : HxcVcFC15 : ""
+    42 : SET : HxcVcFC16 : ""
+    ;; Keep HxcVcFetchName / HxcVcFetchLang — those are request inputs from the Template/Lang fields
+    45 : RETURN : Yes
+
+[Function: Hxc Set Map Slot]
+    Parameter : Idx : Number
+    Parameter : Key : String
+    Parameter : Comp : String
+    01 : IF : ##Idx = 1
+    02 :    SET : HxcVcFK1 : ##Key
+    03 :    SET : HxcVcFC1 : ##Comp
+    04 : END IF
+    05 : IF : ##Idx = 2
+    06 :    SET : HxcVcFK2 : ##Key
+    07 :    SET : HxcVcFC2 : ##Comp
+    08 : END IF
+    09 : IF : ##Idx = 3
+    10 :    SET : HxcVcFK3 : ##Key
+    11 :    SET : HxcVcFC3 : ##Comp
+    12 : END IF
+    13 : IF : ##Idx = 4
+    14 :    SET : HxcVcFK4 : ##Key
+    15 :    SET : HxcVcFC4 : ##Comp
+    16 : END IF
+    17 : IF : ##Idx = 5
+    18 :    SET : HxcVcFK5 : ##Key
+    19 :    SET : HxcVcFC5 : ##Comp
+    20 : END IF
+    21 : IF : ##Idx = 6
+    22 :    SET : HxcVcFK6 : ##Key
+    23 :    SET : HxcVcFC6 : ##Comp
+    24 : END IF
+    25 : IF : ##Idx = 7
+    26 :    SET : HxcVcFK7 : ##Key
+    27 :    SET : HxcVcFC7 : ##Comp
+    28 : END IF
+    29 : IF : ##Idx = 8
+    30 :    SET : HxcVcFK8 : ##Key
+    31 :    SET : HxcVcFC8 : ##Comp
+    32 : END IF
+    33 : IF : ##Idx = 9
+    34 :    SET : HxcVcFK9 : ##Key
+    35 :    SET : HxcVcFC9 : ##Comp
+    36 : END IF
+    37 : IF : ##Idx = 10
+    38 :    SET : HxcVcFK10 : ##Key
+    39 :    SET : HxcVcFC10 : ##Comp
+    40 : END IF
+    41 : IF : ##Idx = 11
+    42 :    SET : HxcVcFK11 : ##Key
+    43 :    SET : HxcVcFC11 : ##Comp
+    44 : END IF
+    45 : IF : ##Idx = 12
+    46 :    SET : HxcVcFK12 : ##Key
+    47 :    SET : HxcVcFC12 : ##Comp
+    48 : END IF
+    49 : IF : ##Idx = 13
+    50 :    SET : HxcVcFK13 : ##Key
+    51 :    SET : HxcVcFC13 : ##Comp
+    52 : END IF
+    53 : IF : ##Idx = 14
+    54 :    SET : HxcVcFK14 : ##Key
+    55 :    SET : HxcVcFC14 : ##Comp
+    56 : END IF
+    57 : IF : ##Idx = 15
+    58 :    SET : HxcVcFK15 : ##Key
+    59 :    SET : HxcVcFC15 : ##Comp
+    60 : END IF
+    61 : IF : ##Idx = 16
+    62 :    SET : HxcVcFK16 : ##Key
+    63 :    SET : HxcVcFC16 : ##Comp
+    64 : END IF
+    65 : IF : ##Comp = "body"
+    66 :    SET : HxcVcHasBodyMaps : Yes
+    67 : END IF
+    68 : IF : ##Comp = "button"
+    69 :    SET : HxcVcHasBtnMaps : Yes
+    70 : END IF
+    71 : RETURN : Yes
+
+[Function: Hxc Write Slot Fld]
+    Parameter : Slot : Number
+    Parameter : Val : String
+    01 : IF : ##Slot = 1
+    02 :    SET : HxcVcDMFld1 : ##Val
+    03 : END IF
+    04 : IF : ##Slot = 2
+    05 :    SET : HxcVcDMFld2 : ##Val
+    06 : END IF
+    07 : IF : ##Slot = 3
+    08 :    SET : HxcVcDMFld3 : ##Val
+    09 : END IF
+    10 : IF : ##Slot = 4
+    11 :    SET : HxcVcDMFld4 : ##Val
+    12 : END IF
+    13 : IF : ##Slot = 5
+    14 :    SET : HxcVcDMFld5 : ##Val
+    15 : END IF
+    16 : IF : ##Slot = 6
+    17 :    SET : HxcVcDMFld6 : ##Val
+    18 : END IF
+    19 : IF : ##Slot = 7
+    20 :    SET : HxcVcDMFld7 : ##Val
+    21 : END IF
+    22 : IF : ##Slot = 8
+    23 :    SET : HxcVcDMFld8 : ##Val
+    24 : END IF
+    25 : IF : ##Slot = 9
+    26 :    SET : HxcVcDMFld9 : ##Val
+    27 : END IF
+    28 : IF : ##Slot = 10
+    29 :    SET : HxcVcDMFld10 : ##Val
+    30 : END IF
+    31 : IF : ##Slot = 11
+    32 :    SET : HxcVcDMFld11 : ##Val
+    33 : END IF
+    34 : IF : ##Slot = 12
+    35 :    SET : HxcVcDMFld12 : ##Val
+    36 : END IF
+    37 : IF : ##Slot = 13
+    38 :    SET : HxcVcDMFld13 : ##Val
+    39 : END IF
+    40 : IF : ##Slot = 14
+    41 :    SET : HxcVcDMFld14 : ##Val
+    42 : END IF
+    43 : IF : ##Slot = 15
+    44 :    SET : HxcVcDMFld15 : ##Val
+    45 : END IF
+    46 : IF : ##Slot = 16
+    47 :    SET : HxcVcDMFld16 : ##Val
+    48 : END IF
+    49 : RETURN : Yes
+
+[Function: Hxc Apply Template Response]
+    ;; Proven walk (build 347) + header; body/button → FK1..16 via Set Map Slot
+    Variable : I : Number
+    Variable : CompType : String
+    Variable : Fmt : String
+    Variable : VComp : String
+    Variable : VKey : String
+    01 : SET : I : 0
+    02 : CALL : Hxc Clear Fetch Vars
+    03 : SET : HxcVcFetchStatus : "Template not found or empty response."
+    04 : WALK COLLECTION : Parameter Collection
+    05 :    WALK COLLECTION : items
+    06 :       WALK COLLECTION : components
+    07 :          SET : CompType : $type
+    08 :          IF : ##CompType = "header" OR ##CompType = "HEADER" OR ##CompType = "Header"
+    09 :             SET : HxcVcHasHeader : Yes
+    10 :             SET : Fmt : $format
+    11 :             IF : $$IsEmpty:##Fmt
+    12 :                SET : Fmt : "TEXT"
+    13 :             END IF
+    14 :             SET : HxcVcHeaderFormat : ##Fmt
+    15 :             IF : ##Fmt = "IMAGE" OR ##Fmt = "VIDEO" OR ##Fmt = "DOCUMENT" OR ##Fmt = "GIF" OR ##Fmt = "image" OR ##Fmt = "video" OR ##Fmt = "document" OR ##Fmt = "gif"
+    16 :                SET : HxcVcHeaderKind : "media"
+    17 :             ELSE
+    18 :                SET : HxcVcHeaderKind : "text"
+    19 :             END IF
+    20 :             IF : ##HxcVcHeaderKind = "text"
+    21 :                IF : NOT $$IsEmpty:$text
+    22 :                   SET : HxcVcPreviewText : "[Header] " + $text + " | "
+    23 :                END IF
+    24 :             END IF
+    25 :          END IF
+    26 :          IF : ##CompType = "body" OR ##CompType = "BODY" OR ##CompType = "Body"
+    27 :             IF : NOT $$IsEmpty:$text
+    28 :                SET : HxcVcPreviewText : ##HxcVcPreviewText + $text
+    29 :             END IF
+    30 :          END IF
+    31 :       END WALK
+    32 :       WALK COLLECTION : variables
+    33 :          SET : VComp : $component
+    34 :          SET : VKey : $key
+    35 :          IF : $$IsEmpty:##VComp
+    36 :             SET : VComp : "body"
+    37 :          END IF
+    38 :          IF : ##VComp = "HEADER"
+    39 :             SET : VComp : "header"
+    40 :          END IF
+    41 :          IF : ##VComp = "BODY"
+    42 :             SET : VComp : "body"
+    43 :          END IF
+    44 :          IF : ##VComp = "BUTTON"
+    45 :             SET : VComp : "button"
+    46 :          END IF
+    47 :          IF : NOT $$IsEmpty:##VKey
+    48 :             IF : ##VComp = "header"
+    49 :                IF : NOT ##HxcVcHeaderKind = "media"
+    50 :                   SET : HxcVcHasHeader : Yes
+    51 :                   IF : $$IsEmpty:##HxcVcHeaderKind
+    52 :                      SET : HxcVcHeaderKind : "text"
+    53 :                   END IF
+    54 :                   SET : HxcVcHeaderKey : ##VKey
+    55 :                END IF
+    56 :             ELSE
+    57 :                SET : I : ##I + 1
+    58 :                CALL : Hxc Set Map Slot : ##I : ##VKey : ##VComp
+    59 :             END IF
+    60 :          END IF
+    61 :       END WALK
+    611 :       SET : HxcVcMoveToMapping : Yes
+    62 :       SET : HxcVcFetched : Yes
+    63 :       SET : HxcVcFetchStatus : "Template loaded."
+    64 :    END WALK
+    65 : END WALK
+    66 : IF : ##HxcVcFetched
+    67 :    IF : $$IsEmpty:##HxcVcPreviewText
+    68 :       SET : HxcVcPreviewText : "(No body text in template)"
+    69 :    END IF
+    70 : END IF
+    71 : RETURN : Yes
+
+[Function: Hxc Fetch Template]
+    01 : CALL : Hxc Sync From Company
+    ;; Capture template/lang from session Variables FIRST (Modifies synced them from the input fields)
+    02 : SET : HxcVcFetchName : ##HxcVcDraftTemplate
+    03 : SET : HxcVcFetchLang : ##HxcVcDraftLang
+    04 : IF : $$IsEmpty:##HxcVcFetchLang
+    05 :    SET : HxcVcFetchLang : "en"
+    06 : END IF
+    07 : IF : $$IsEmpty:##HxcVcFetchName
+    08 :    SET : HxcVcFetchStatus : "Enter Template Name first."
+    09 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    10 :    RETURN : No
+    11 : END IF
+    12 : CALL : Hxc Clear Fetch Vars
+    ;; Restore request inputs after clearing prior response state
+    13 : SET : HxcVcFetchName : ##HxcVcDraftTemplate
+    14 : SET : HxcVcFetchLang : ##HxcVcDraftLang
+    15 : IF : $$IsEmpty:##HxcVcFetchLang
+    16 :    SET : HxcVcFetchLang : "en"
+    17 : END IF
+    18 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
+    19 :    SET : HxcVcFetchStatus : "Save API Settings (Ctrl+A) before fetching a template."
+    20 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    21 :    RETURN : No
+    22 : END IF
+    24 : SET : HxcVcFetchStatus : "Fetching..."
+    25 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
+    26 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
+    27 : End Progress
+    28 : IF : NOT ##HxcVcFetched
+    29 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
+    30 :       SET : HxcVcFetchStatus : "Could not fetch [" + ##HxcVcFetchName + "]. Open Helixcer Chat → Status. If Connected, check the template name on this channel."
+    31 :    END IF
+    32 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    33 :    RETURN : No
+    34 : END IF
+    ;; Fresh Create: never carry prior voucher-type rows into the new config
+    341 : CALL : Hxc Clear Draft Vchs
+    342 : CALL : Hxc Seed Draft Vch Row
+    343 : SET : HxcVcDraftAuto : No
+    344 : SET : HxcVcDraftConfirm : No
+    345 : SET : HxcVcAutoSendEnabled : No
+    35 : SET : HxcVcDMFld1 : ""
+    35 : SET : HxcVcDMFld2 : ""
+    36 : SET : HxcVcDMFld3 : ""
+    37 : SET : HxcVcDMFld4 : ""
+    38 : SET : HxcVcDMFld5 : ""
+    39 : SET : HxcVcDMFld6 : ""
+    40 : SET : HxcVcDMFld7 : ""
+    41 : SET : HxcVcDMFld8 : ""
+    42 : SET : HxcVcDMFld9 : ""
+    43 : SET : HxcVcDMFld10 : ""
+    44 : SET : HxcVcDMFld11 : ""
+    45 : SET : HxcVcDMFld12 : ""
+    46 : SET : HxcVcDMFld13 : ""
+    47 : SET : HxcVcDMFld14 : ""
+    48 : SET : HxcVcDMFld15 : ""
+    49 : SET : HxcVcDMFld16 : ""
+    50 : SET : HxcVcDraftHeaderFld : ""
+    501 : SET : HxcVcDraftCustom0 : ""
+    502 : SET : HxcVcDraftCustom1 : ""
+    503 : SET : HxcVcDraftCustom2 : ""
+    504 : SET : HxcVcDraftCustom3 : ""
+    505 : SET : HxcVcDraftCustom4 : ""
+    506 : SET : HxcVcDraftCustom5 : ""
+    507 : SET : HxcVcDraftCustom6 : ""
+    508 : SET : HxcVcDraftCustom7 : ""
+    509 : SET : HxcVcDraftCustom8 : ""
+    511 : SET : HxcVcButtonField1 : ""
+    512 : SET : HxcVcButtonCustom1 : ""
+    513 : SET : HxcVcButtonField2 : ""
+    514 : SET : HxcVcButtonCustom2 : ""
+    515 : SET : HxcVcButtonField3 : ""
+    516 : SET : HxcVcButtonCustom3 : ""
+    517 : SET : HxcVcButtonField4 : ""
+    518 : SET : HxcVcButtonCustom4 : ""
+    51 : IF : ##HxcVcHeaderKind = "media"
+    52 :    IF : $$IsEmpty:##HxcVcDraftMedia OR ##HxcVcDraftMedia = "None"
+    53 :       SET : HxcVcDraftMedia : "Voucher PDF"
+    54 :    END IF
+    55 : ELSE
+    56 :    SET : HxcVcDraftMedia : "None"
+    57 : END IF
+    571 : CALL : Hxc Restore Custom Mappings
+    58 : SET : HxcVcMoveToMapping : Yes
+    59 : RETURN : Yes
+
+;; ---------------------------------------------------------------------------
+;; Pack helpers + commit draft → Aggregate config
+;; ---------------------------------------------------------------------------
+
+[Function: Hxc Pack Maps]
+    Variable : S : String
+    01 : SET : S : ""
+    02 : IF : ##HxcVcHeaderKind = "text" AND NOT $$IsEmpty:##HxcVcHeaderKey
+    03 :    SET : S : ##S + "header:" + ##HxcVcHeaderKey + "=" + ##HxcVcDraftHeaderFld + ";"
+    04 : END IF
+    05 : IF : NOT $$IsEmpty:##HxcVcFK1
+    06 :    SET : S : ##S + ##HxcVcFC1 + ":" + ##HxcVcFK1 + "=" + @@HxcVcMappingField1 + ";"
+    07 : END IF
+    08 : IF : NOT $$IsEmpty:##HxcVcFK2
+    09 :    SET : S : ##S + ##HxcVcFC2 + ":" + ##HxcVcFK2 + "=" + @@HxcVcMappingField2 + ";"
+    10 : END IF
+    11 : IF : NOT $$IsEmpty:##HxcVcFK3
+    12 :    SET : S : ##S + ##HxcVcFC3 + ":" + ##HxcVcFK3 + "=" + @@HxcVcMappingField3 + ";"
+    13 : END IF
+    14 : IF : NOT $$IsEmpty:##HxcVcFK4
+    15 :    SET : S : ##S + ##HxcVcFC4 + ":" + ##HxcVcFK4 + "=" + @@HxcVcMappingField4 + ";"
+    16 : END IF
+    17 : IF : NOT $$IsEmpty:##HxcVcFK5
+    18 :    SET : S : ##S + ##HxcVcFC5 + ":" + ##HxcVcFK5 + "=" + ##HxcVcDMFld5 + ";"
+    19 : END IF
+    20 : IF : NOT $$IsEmpty:##HxcVcFK6
+    21 :    SET : S : ##S + ##HxcVcFC6 + ":" + ##HxcVcFK6 + "=" + ##HxcVcDMFld6 + ";"
+    22 : END IF
+    23 : IF : NOT $$IsEmpty:##HxcVcFK7
+    24 :    SET : S : ##S + ##HxcVcFC7 + ":" + ##HxcVcFK7 + "=" + ##HxcVcDMFld7 + ";"
+    25 : END IF
+    26 : IF : NOT $$IsEmpty:##HxcVcFK8
+    27 :    SET : S : ##S + ##HxcVcFC8 + ":" + ##HxcVcFK8 + "=" + ##HxcVcDMFld8 + ";"
+    28 : END IF
+    29 : IF : NOT $$IsEmpty:##HxcVcFK9
+    30 :    SET : S : ##S + ##HxcVcFC9 + ":" + ##HxcVcFK9 + "=" + ##HxcVcDMFld9 + ";"
+    31 : END IF
+    32 : IF : NOT $$IsEmpty:##HxcVcFK10
+    33 :    SET : S : ##S + ##HxcVcFC10 + ":" + ##HxcVcFK10 + "=" + ##HxcVcDMFld10 + ";"
+    34 : END IF
+    35 : IF : NOT $$IsEmpty:##HxcVcFK11
+    36 :    SET : S : ##S + ##HxcVcFC11 + ":" + ##HxcVcFK11 + "=" + ##HxcVcDMFld11 + ";"
+    37 : END IF
+    38 : IF : NOT $$IsEmpty:##HxcVcFK12
+    39 :    SET : S : ##S + ##HxcVcFC12 + ":" + ##HxcVcFK12 + "=" + ##HxcVcDMFld12 + ";"
+    40 : END IF
+    41 : IF : NOT $$IsEmpty:##HxcVcFK13
+    42 :    SET : S : ##S + ##HxcVcFC13 + ":" + ##HxcVcFK13 + "=" + ##HxcVcDMFld13 + ";"
+    43 : END IF
+    44 : IF : NOT $$IsEmpty:##HxcVcFK14
+    45 :    SET : S : ##S + ##HxcVcFC14 + ":" + ##HxcVcFK14 + "=" + ##HxcVcDMFld14 + ";"
+    46 : END IF
+    47 : IF : NOT $$IsEmpty:##HxcVcFK15
+    48 :    SET : S : ##S + ##HxcVcFC15 + ":" + ##HxcVcFK15 + "=" + ##HxcVcDMFld15 + ";"
+    49 : END IF
+    50 : IF : NOT $$IsEmpty:##HxcVcFK16
+    51 :    SET : S : ##S + ##HxcVcFC16 + ":" + ##HxcVcFK16 + "=" + ##HxcVcDMFld16 + ";"
+    52 : END IF
+    53 : RETURN : ##S
+[Function: Hxc Pack Vouchers]
+    Variable : S : String
+    01 : SET : S : ""
+    02 : IF : NOT $$IsEmpty:##HxcVcVchType1 AND NOT ##HxcVcVchType1 = "End of List" AND NOT ##HxcVcVchType1 = "Not Applicable"
+    03 :    SET : S : ##S + ##HxcVcVchType1 + ","
+    04 : END IF
+    05 : IF : NOT $$IsEmpty:##HxcVcVchType2 AND NOT ##HxcVcVchType2 = "End of List" AND NOT ##HxcVcVchType2 = "Not Applicable"
+    06 :    SET : S : ##S + ##HxcVcVchType2 + ","
+    07 : END IF
+    08 : IF : NOT $$IsEmpty:##HxcVcVchType3 AND NOT ##HxcVcVchType3 = "End of List" AND NOT ##HxcVcVchType3 = "Not Applicable"
+    09 :    SET : S : ##S + ##HxcVcVchType3 + ","
+    10 : END IF
+    11 : IF : NOT $$IsEmpty:##HxcVcVchType4 AND NOT ##HxcVcVchType4 = "End of List" AND NOT ##HxcVcVchType4 = "Not Applicable"
+    12 :    SET : S : ##S + ##HxcVcVchType4 + ","
+    13 : END IF
+    14 : IF : NOT $$IsEmpty:##HxcVcVchType5 AND NOT ##HxcVcVchType5 = "End of List" AND NOT ##HxcVcVchType5 = "Not Applicable"
+    15 :    SET : S : ##S + ##HxcVcVchType5 + ","
+    16 : END IF
+    17 : IF : NOT $$IsEmpty:##HxcVcVchType6 AND NOT ##HxcVcVchType6 = "End of List" AND NOT ##HxcVcVchType6 = "Not Applicable"
+    18 :    SET : S : ##S + ##HxcVcVchType6 + ","
+    19 : END IF
+    20 : IF : NOT $$IsEmpty:##HxcVcVchType7 AND NOT ##HxcVcVchType7 = "End of List" AND NOT ##HxcVcVchType7 = "Not Applicable"
+    21 :    SET : S : ##S + ##HxcVcVchType7 + ","
+    22 : END IF
+    23 : IF : NOT $$IsEmpty:##HxcVcVchType8 AND NOT ##HxcVcVchType8 = "End of List" AND NOT ##HxcVcVchType8 = "Not Applicable"
+    24 :    SET : S : ##S + ##HxcVcVchType8 + ","
+    25 : END IF
+    26 : IF : NOT $$IsEmpty:##HxcVcVchType9 AND NOT ##HxcVcVchType9 = "End of List" AND NOT ##HxcVcVchType9 = "Not Applicable"
+    27 :    SET : S : ##S + ##HxcVcVchType9 + ","
+    28 : END IF
+    29 : IF : NOT $$IsEmpty:##HxcVcVchType10 AND NOT ##HxcVcVchType10 = "End of List" AND NOT ##HxcVcVchType10 = "Not Applicable"
+    30 :    SET : S : ##S + ##HxcVcVchType10 + ","
+    31 : END IF
+    32 : IF : NOT $$IsEmpty:##HxcVcVchType11 AND NOT ##HxcVcVchType11 = "End of List" AND NOT ##HxcVcVchType11 = "Not Applicable"
+    33 :    SET : S : ##S + ##HxcVcVchType11 + ","
+    34 : END IF
+    35 : IF : NOT $$IsEmpty:##HxcVcVchType12 AND NOT ##HxcVcVchType12 = "End of List" AND NOT ##HxcVcVchType12 = "Not Applicable"
+    36 :    SET : S : ##S + ##HxcVcVchType12 + ","
+    37 : END IF
+    38 : RETURN : ##S
+
+[Function: Hxc Clear Draft Vchs]
+    ;; Session voucher-type slots — SET empties reliably (Company Aggregate DELETE did not)
+    01 : SET : HxcVcVchType1 : ""
+    02 : SET : HxcVcVchType2 : ""
+    03 : SET : HxcVcVchType3 : ""
+    04 : SET : HxcVcVchType4 : ""
+    05 : SET : HxcVcVchType5 : ""
+    06 : SET : HxcVcVchType6 : ""
+    07 : SET : HxcVcVchType7 : ""
+    08 : SET : HxcVcVchType8 : ""
+    09 : SET : HxcVcVchType9 : ""
+    10 : SET : HxcVcVchType10 : ""
+    11 : SET : HxcVcVchType11 : ""
+    12 : SET : HxcVcVchType12 : ""
+    13 : RETURN : Yes
+
+[Function: Hxc Seed Draft Vch Row]
+    ;; No-op — progressive Variable slots; slot 1 is the blank editable row
+    01 : RETURN : Yes
+
+[Function: Hxc Ensure Trailing Vch Blank]
+    ;; No-op — next slot appears via Invisible when previous is filled
+    01 : RETURN : Yes
+
+[Function: Hxc Parse Types Into Draft]
+    ;; Split saved CSV into session voucher-type slots
+    Parameter : TypesCsv : String
+    Variable  : Piece : String
+    Variable  : Counter : Number
+    Variable  : ExpLen : Number
+    Variable  : Ch : String
+    Variable  : Slot : Number
+    01 : CALL : Hxc Clear Draft Vchs
+    02 : SET : Piece : ""
+    03 : SET : Counter : 0
+    04 : SET : Slot : 1
+    05 : SET : ExpLen : $$StringLength:##TypesCsv
+    06 : WHILE : ##Counter < ##ExpLen
+    07 :    SET : Ch : $$StringPart:##TypesCsv:##Counter:1
+    08 :    IF : ##Ch = ","
+    09 :       IF : NOT $$IsEmpty:##Piece AND ##Slot <= 12
+    10 :          IF : ##Slot = 1
+    11 :             SET : HxcVcVchType1 : ##Piece
+    12 :          END IF
+    13 :          IF : ##Slot = 2
+    14 :             SET : HxcVcVchType2 : ##Piece
+    15 :          END IF
+    16 :          IF : ##Slot = 3
+    17 :             SET : HxcVcVchType3 : ##Piece
+    18 :          END IF
+    19 :          IF : ##Slot = 4
+    20 :             SET : HxcVcVchType4 : ##Piece
+    21 :          END IF
+    22 :          IF : ##Slot = 5
+    23 :             SET : HxcVcVchType5 : ##Piece
+    24 :          END IF
+    25 :          IF : ##Slot = 6
+    26 :             SET : HxcVcVchType6 : ##Piece
+    27 :          END IF
+    28 :          IF : ##Slot = 7
+    29 :             SET : HxcVcVchType7 : ##Piece
+    30 :          END IF
+    31 :          IF : ##Slot = 8
+    32 :             SET : HxcVcVchType8 : ##Piece
+    33 :          END IF
+    34 :          IF : ##Slot = 9
+    35 :             SET : HxcVcVchType9 : ##Piece
+    36 :          END IF
+    37 :          IF : ##Slot = 10
+    38 :             SET : HxcVcVchType10 : ##Piece
+    39 :          END IF
+    40 :          IF : ##Slot = 11
+    41 :             SET : HxcVcVchType11 : ##Piece
+    42 :          END IF
+    43 :          IF : ##Slot = 12
+    44 :             SET : HxcVcVchType12 : ##Piece
+    45 :          END IF
+    46 :          SET : Slot : ##Slot + 1
+    47 :       END IF
+    48 :       SET : Piece : ""
+    49 :    ELSE
+    50 :       SET : Piece : ##Piece + ##Ch
+    51 :    END IF
+    52 :    SET : Counter : ##Counter + 1
+    53 : END WHILE
+    54 : IF : NOT $$IsEmpty:##Piece AND ##Slot <= 12
+    55 :    IF : ##Slot = 1
+    56 :       SET : HxcVcVchType1 : ##Piece
+    57 :    END IF
+    58 :    IF : ##Slot = 2
+    59 :       SET : HxcVcVchType2 : ##Piece
+    60 :    END IF
+    61 :    IF : ##Slot = 3
+    62 :       SET : HxcVcVchType3 : ##Piece
+    63 :    END IF
+    64 :    IF : ##Slot = 4
+    65 :       SET : HxcVcVchType4 : ##Piece
+    66 :    END IF
+    67 :    IF : ##Slot = 5
+    68 :       SET : HxcVcVchType5 : ##Piece
+    69 :    END IF
+    70 :    IF : ##Slot = 6
+    71 :       SET : HxcVcVchType6 : ##Piece
+    72 :    END IF
+    73 :    IF : ##Slot = 7
+    74 :       SET : HxcVcVchType7 : ##Piece
+    75 :    END IF
+    76 :    IF : ##Slot = 8
+    77 :       SET : HxcVcVchType8 : ##Piece
+    78 :    END IF
+    79 :    IF : ##Slot = 9
+    80 :       SET : HxcVcVchType9 : ##Piece
+    81 :    END IF
+    82 :    IF : ##Slot = 10
+    83 :       SET : HxcVcVchType10 : ##Piece
+    84 :    END IF
+    85 :    IF : ##Slot = 11
+    86 :       SET : HxcVcVchType11 : ##Piece
+    87 :    END IF
+    88 :    IF : ##Slot = 12
+    89 :       SET : HxcVcVchType12 : ##Piece
+    90 :    END IF
+    91 : END IF
+    92 : RETURN : Yes
+
+[Function: Hxc Initialize New Config]
+    ;; Clear Company draft Storage for a fresh Create form.
+    01 : SET : HxcVcCreateNeedsReset : No
+    02 : SET : HxcVcMoveToMapping : No
+    03 : SET : HxcVcMoveToConfirm : No
+    04 : SET : HxcVcAutoSendEnabled : No
+    05 : SET : HxcVcFetched : No
+    06 : SET : HxcVcCreateBlank : No
+    07 : CALL : Hxc Vc Clear Draft
+    08 : RETURN : Yes
+
+[Function: Hxc Release Create Blank]
+    ;; Legacy no-op — CreateBlank paint removed; session Variables are cleared directly
+    01 : SET : HxcVcCreateBlank : No
+    02 : RETURN : Yes
+
+[Function: Hxc Vc Clear Draft]
+    01 : CALL : Hxc Clear Fetch Vars
+    011 : SET : HxcVcFetchName : ""
+    012 : SET : HxcVcFetchLang : "en"
+    02 : CALL : Hxc Clear Draft Vchs
+    03 : CALL : Hxc Seed Draft Vch Row
+    04 : SET : HxcVcDraftName : ""
+    05 : SET : HxcVcDraftTemplate : ""
+    06 : SET : HxcVcDraftLang : "en"
+    07 : SET : HxcVcDraftMedia : "None"
+    08 : SET : HxcVcDraftAuto : No
+    081 : SET : HxcVcAutoSendEnabled : No
+    082 : SET : HxcVcMoveToConfirm : No
+    09 : SET : HxcVcDraftConfirm : No
+    10 : SET : HxcVcDraftEditKey : ""
+    11 : SET : HxcVcDraftHeaderFld : ""
+    12 : SET : HxcVcDMFld1 : ""
+    13 : SET : HxcVcDMFld2 : ""
+    14 : SET : HxcVcDMFld3 : ""
+    15 : SET : HxcVcDMFld4 : ""
+    16 : SET : HxcVcDMFld5 : ""
+    17 : SET : HxcVcDMFld6 : ""
+    18 : SET : HxcVcDMFld7 : ""
+    19 : SET : HxcVcDMFld8 : ""
+    20 : SET : HxcVcDMFld9 : ""
+    21 : SET : HxcVcDMFld10 : ""
+    22 : SET : HxcVcDMFld11 : ""
+    23 : SET : HxcVcDMFld12 : ""
+    24 : SET : HxcVcDMFld13 : ""
+    25 : SET : HxcVcDMFld14 : ""
+    26 : SET : HxcVcDMFld15 : ""
+    27 : SET : HxcVcDMFld16 : ""
+    30 : SET : HxcVcDraftCustom0 : ""
+    31 : SET : HxcVcDraftCustom1 : ""
+    32 : SET : HxcVcDraftCustom2 : ""
+    33 : SET : HxcVcDraftCustom3 : ""
+    34 : SET : HxcVcDraftCustom4 : ""
+    35 : SET : HxcVcDraftCustom5 : ""
+    36 : SET : HxcVcDraftCustom6 : ""
+    37 : SET : HxcVcDraftCustom7 : ""
+    38 : SET : HxcVcDraftCustom8 : ""
+    39 : SET : HxcVcButtonField1 : ""
+    40 : SET : HxcVcButtonCustom1 : ""
+    41 : SET : HxcVcButtonField2 : ""
+    42 : SET : HxcVcButtonCustom2 : ""
+    43 : SET : HxcVcButtonField3 : ""
+    44 : SET : HxcVcButtonCustom3 : ""
+    45 : SET : HxcVcButtonField4 : ""
+    46 : SET : HxcVcButtonCustom4 : ""
+    47 : RETURN : Yes
+
+
+[Function: Hxc Vc Commit Draft]
+    Variable : Maps : String
+    Variable : Vchs : String
+    Variable : EditKey : String
+    01 : SET : HxcVcSaveOk : No
+    02 : IF : $$IsEmpty:##HxcVcDraftName
+    03 :    Msg Box : "Helixcer Voucher Config" : "Config Name is required."
+    04 :    RETURN : No
+    05 : END IF
+    06 : IF : $$IsEmpty:##HxcVcDraftTemplate
+    07 :    Msg Box : "Helixcer Voucher Config" : "Template Name is required."
+    08 :    RETURN : No
+    09 : END IF
+    10 : IF : NOT ##HxcVcFetched
+    11 :    Msg Box : "Helixcer Voucher Config" : "Fetch the template first (Enter on Language)."
+    12 :    RETURN : No
+    13 : END IF
+    131 : IF : @@HxcVcMissingCustomValue
+    132 :    Msg Box : "Helixcer Voucher Config" : "Custom Value text is required for every variable mapped to Custom Value."
+    133 :    RETURN : No
+    134 : END IF
+    14 : SET : Maps : $$HxcPackMaps
+    15 : SET : Vchs : $$HxcPackVouchers
+    16 : SET : EditKey : ##HxcVcDraftEditKey
+    17 : IF : NOT $$IsEmpty:##EditKey
+    18 :    WALK COLLECTION : HxcVoucherConfigs
+    19 :       IF : $HxcVcName = ##EditKey
+    20 :          SET TARGET
+    21 :          SET VALUE : HxcVcName : ##HxcVcDraftName
+    22 :          SET VALUE : HxcVcTemplateName : ##HxcVcDraftTemplate
+    23 :          SET VALUE : HxcVcLanguage : ##HxcVcDraftLang
+    24 :          SET VALUE : HxcVcMediaExport : ##HxcVcDraftMedia
+    25 :          SET VALUE : HxcVcAutoSend : ##HxcVcDraftAuto
+    26 :          SET VALUE : HxcVcConfirmBeforeSend : ##HxcVcDraftConfirm
+    27 :          SET VALUE : HxcVcVarMapsText : ##Maps
+    271 :          SET VALUE : HxcVcCustom0 : If (##HxcVcDraftHeaderFld = @@HxcCustomValueLabel AND (##HxcVcHeaderKind = "text" AND NOT $$IsEmpty:##HxcVcHeaderKey)) THEN ##HxcVcDraftCustom0 ELSE ""
+    272 :          SET VALUE : HxcVcCustom1 : If (@@HxcVcMappingField1 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK1 AND (##HxcVcFC1 = "body" OR ##HxcVcFC1 = "button"))) THEN @@HxcVcMappingCustom1 ELSE ""
+    273 :          SET VALUE : HxcVcCustom2 : If (@@HxcVcMappingField2 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK2 AND (##HxcVcFC2 = "body" OR ##HxcVcFC2 = "button"))) THEN @@HxcVcMappingCustom2 ELSE ""
+    274 :          SET VALUE : HxcVcCustom3 : If (@@HxcVcMappingField3 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK3 AND (##HxcVcFC3 = "body" OR ##HxcVcFC3 = "button"))) THEN @@HxcVcMappingCustom3 ELSE ""
+    275 :          SET VALUE : HxcVcCustom4 : If (@@HxcVcMappingField4 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK4 AND (##HxcVcFC4 = "body" OR ##HxcVcFC4 = "button"))) THEN @@HxcVcMappingCustom4 ELSE ""
+    276 :          SET VALUE : HxcVcCustom5 : If (##HxcVcDMFld5 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK5 AND (##HxcVcFC5 = "body"))) THEN ##HxcVcDraftCustom5 ELSE ""
+    277 :          SET VALUE : HxcVcCustom6 : If (##HxcVcDMFld6 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK6 AND (##HxcVcFC6 = "body"))) THEN ##HxcVcDraftCustom6 ELSE ""
+    278 :          SET VALUE : HxcVcCustom7 : If (##HxcVcDMFld7 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK7 AND (##HxcVcFC7 = "body"))) THEN ##HxcVcDraftCustom7 ELSE ""
+    279 :          SET VALUE : HxcVcCustom8 : If (##HxcVcDMFld8 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK8 AND (##HxcVcFC8 = "body"))) THEN ##HxcVcDraftCustom8 ELSE ""
+    28 :          SET VALUE : HxcVcVoucherTypes : ##Vchs
+    29 :          SET TARGET : ..
+    30 :       END IF
+    31 :    END WALK
+    32 : ELSE
+    33 :    INSERT COLLECTION OBJECT : HxcVoucherConfigs
+    34 :    SET VALUE : HxcVcName : ##HxcVcDraftName
+    35 :    SET VALUE : HxcVcTemplateName : ##HxcVcDraftTemplate
+    36 :    SET VALUE : HxcVcLanguage : ##HxcVcDraftLang
+    37 :    SET VALUE : HxcVcMediaExport : ##HxcVcDraftMedia
+    38 :    SET VALUE : HxcVcAutoSend : ##HxcVcDraftAuto
+    39 :    SET VALUE : HxcVcConfirmBeforeSend : ##HxcVcDraftConfirm
+    40 :    SET VALUE : HxcVcVarMapsText : ##Maps
+    401 :    SET VALUE : HxcVcCustom0 : If (##HxcVcDraftHeaderFld = @@HxcCustomValueLabel AND (##HxcVcHeaderKind = "text" AND NOT $$IsEmpty:##HxcVcHeaderKey)) THEN ##HxcVcDraftCustom0 ELSE ""
+    402 :    SET VALUE : HxcVcCustom1 : If (@@HxcVcMappingField1 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK1 AND (##HxcVcFC1 = "body" OR ##HxcVcFC1 = "button"))) THEN @@HxcVcMappingCustom1 ELSE ""
+    403 :    SET VALUE : HxcVcCustom2 : If (@@HxcVcMappingField2 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK2 AND (##HxcVcFC2 = "body" OR ##HxcVcFC2 = "button"))) THEN @@HxcVcMappingCustom2 ELSE ""
+    404 :    SET VALUE : HxcVcCustom3 : If (@@HxcVcMappingField3 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK3 AND (##HxcVcFC3 = "body" OR ##HxcVcFC3 = "button"))) THEN @@HxcVcMappingCustom3 ELSE ""
+    405 :    SET VALUE : HxcVcCustom4 : If (@@HxcVcMappingField4 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK4 AND (##HxcVcFC4 = "body" OR ##HxcVcFC4 = "button"))) THEN @@HxcVcMappingCustom4 ELSE ""
+    406 :    SET VALUE : HxcVcCustom5 : If (##HxcVcDMFld5 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK5 AND (##HxcVcFC5 = "body"))) THEN ##HxcVcDraftCustom5 ELSE ""
+    407 :    SET VALUE : HxcVcCustom6 : If (##HxcVcDMFld6 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK6 AND (##HxcVcFC6 = "body"))) THEN ##HxcVcDraftCustom6 ELSE ""
+    408 :    SET VALUE : HxcVcCustom7 : If (##HxcVcDMFld7 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK7 AND (##HxcVcFC7 = "body"))) THEN ##HxcVcDraftCustom7 ELSE ""
+    409 :    SET VALUE : HxcVcCustom8 : If (##HxcVcDMFld8 = @@HxcCustomValueLabel AND (NOT $$IsEmpty:##HxcVcFK8 AND (##HxcVcFC8 = "body"))) THEN ##HxcVcDraftCustom8 ELSE ""
+    41 :    SET VALUE : HxcVcVoucherTypes : ##Vchs
+    42 :    SET TARGET : ..
+    43 : END IF
+    44 : CALL : Hxc Vc Clear Draft
+    45 : SET : HxcVcSaveOk : Yes
+    46 : Msg Box : "Helixcer Voucher Config" : "Config saved."
+    47 : RETURN : Yes
+
+;; ---------------------------------------------------------------------------
+;; Menu
+;; ---------------------------------------------------------------------------
+
+[#Menu: Gateway of Tally]
+    Add : Key Item : Before : @@LOCQuit : Helixcer Chat : H : Menu : Helixcer Chat Menu
+
+[Menu: Helixcer Chat Menu]
+    Title    : "Helixcer Chat"
+    Key Item : API Settings   : S : Alter : Helixcer API Settings
+    Key Item : Voucher Config : V : Menu  : Helixcer Voucher Config Menu
+    Key Item : Status         : T : Call  : Hxc Show Status
+    Key Item : About          : A : Display : Helixcer Chat About
+    Key Item : Back           : B : Menu  : Gateway of Tally
+
+[Menu: Helixcer Voucher Config Menu]
+    Title    : "Voucher Config"
+    Key Item : Create Config : C : Alter : Helixcer Voucher Config Create
+    Key Item : Alter Config  : A : Alter : Helixcer Voucher Config Alter
+    Key Item : List Configs  : L : Alter : Helixcer Voucher Config List
+    Key Item : Back          : B : Menu  : Helixcer Chat Menu
+
+;; ---------------------------------------------------------------------------
+;; API Settings
+;; ---------------------------------------------------------------------------
+
+[Report: Helixcer API Settings]
+    Form   : Helixcer API Settings
+    Title  : "API Settings"
+    Object : Company
+
+[Form: Helixcer API Settings]
+    Part   : Helixcer API Settings
+    Button : Form Accept, Form Cancel
+
+[Part: Helixcer API Settings]
+    Lines  : Hxc Api Settings Title, +
+             Hxc Workspace Id Line, Hxc Channel Id Line, Hxc Api Key Line, +
+             Hxc Save Hint Line
+    Scroll : Vertical
+
+[Line: Hxc Api Settings Title]
+    Field : Hxc Api Settings Title
+
+[Field: Hxc Api Settings Title]
+    Use       : Name Field
+    Set as    : "Helixcer Chat — API Settings (build 403)"
+    Style     : Bold
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Line: Hxc Workspace Id Line]
+    Fields : Medium Prompt, HxcWorkspaceIdFld
+    Local  : Field : Medium Prompt : Set as : "Workspace ID"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: HxcWorkspaceIdFld]
+    Use      : Name Field
+    Storage  : HxcWorkspaceIdUDF
+    Set as   : $HxcWorkspaceIdUDF
+    Width    : 50
+    Max      : 64
+    On       : Accept : Yes : SET : HxcSysWorkspaceId : $Value
+    On       : Accept : Yes : Field Accept
+
+[Line: Hxc Channel Id Line]
+    Fields : Medium Prompt, HxcChannelIdFld
+    Local  : Field : Medium Prompt : Set as : "Channel ID"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: HxcChannelIdFld]
+    Use      : Name Field
+    Storage  : HxcChannelIdUDF
+    Set as   : $HxcChannelIdUDF
+    Width    : 50
+    Max      : 64
+    On       : Accept : Yes : SET : HxcSysChannelId : $Value
+    On       : Accept : Yes : Field Accept
+
+[Line: Hxc Api Key Line]
+    Fields : Medium Prompt, HxcApiKeyFld
+    Local  : Field : Medium Prompt : Set as : "API Key"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: HxcApiKeyFld]
+    Use      : Name Field
+    Storage  : HxcApiKeyUDF
+    Set as   : $HxcApiKeyUDF
+    Width    : 50
+    Max      : 200
+    On       : Accept : Yes : SET : HxcSysApiKey : $Value
+    On       : Accept : Yes : Field Accept
+
+[Line: Hxc Save Hint Line]
+    Field : Hxc Save Hint
+
+[Field: Hxc Save Hint]
+    Use       : Name Field
+    Set as    : "Tab all fields, then Ctrl+A to Accept."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+;; ---------------------------------------------------------------------------
+;; Shared Create/Alter form body — layout only (functions unchanged)
+;; Sections: Template | Mapping+Preview (side-by-side) | Voucher Rules | Settings
+;; ---------------------------------------------------------------------------
+
+;; Template card
+[Part: Hxc Vc Form Template Part]
+    On : Focus : ##HxcVcCreateNeedsReset : CALL : Hxc Initialize New Config
+    Lines  : Hxc Vc F Template Sect, +
+             Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
+             Hxc Vc F Fetch Status Line
+
+;; Mapping (left) + Message Preview (right) — single-line preview
+;; Mapping LEFT + Preview RIGHT (no Height on Mid Row — Height/% broke Horizontal)
+[Part: Hxc Vc Form Mid Row]
+    Parts      : Hxc Vc Form Left Col, Hxc Vc Form Preview Part
+    Horizontal : Yes
+
+[Part: Hxc Vc Form Left Col]
+    Lines  : Hxc Vc F Map Sect, +
+             Hxc Vc F Hdr Media Line, Hxc Vc F Hdr Col Head, Hxc Vc F Hdr Text Line, +
+             Hxc Vc F Body Sect, Hxc Vc F Body Col Head, +
+             Hxc Vc F Body1, +
+             Hxc Vc F Body2, +
+             Hxc Vc F Body3, +
+             Hxc Vc F Body4, +
+             Hxc Vc F Body5, +
+             Hxc Vc F Body6, +
+             Hxc Vc F Body7, +
+             Hxc Vc F Body8, +
+             Hxc Vc F Btn Sect, Hxc Vc F Btn Col Head, +
+             Hxc Vc F Btn1, +
+             Hxc Vc F Btn2, +
+             Hxc Vc F Btn3, +
+             Hxc Vc F Btn4
+    Scroll : Vertical
+    Width  : 55% Screen
+
+[Part: Hxc Vc Form Preview Part]
+    Lines  : Hxc Vc F Prev Head, Hxc Vc F Prev Body
+    Width  : 45% Screen
+
+;; Voucher Rules
+[Part: Hxc Vc Form Vch Part]
+    Lines    : Hxc Vc F Vch Sect, Hxc Vc F Vch Head, +
+               Hxc Vc F Vch1, Hxc Vc F Vch2, Hxc Vc F Vch3, Hxc Vc F Vch4, Hxc Vc F Vch5, Hxc Vc F Vch6, +
+               Hxc Vc F Vch7, Hxc Vc F Vch8, Hxc Vc F Vch9, Hxc Vc F Vch10, Hxc Vc F Vch11, Hxc Vc F Vch12
+    Scroll   : Vertical
+
+[Part: Hxc Vc Form Settings Part]
+    Lines    : Hxc Vc F Auto Line, Hxc Vc F Confirm Line
+
+;; --- Template fields ---
+
+[Line: Hxc Vc F Template Sect]
+    Field : Hxc Vc F Template Sect Fld
+
+[Field: Hxc Vc F Template Sect Fld]
+    Use       : Name Field
+    Set as    : "Template"
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
+
+[Line: Hxc Vc F Name Line]
+    Fields : Medium Prompt, Hxc Vc F Name
+    Local  : Field : Medium Prompt : Set as : "Config Name"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Name]
+    Skip     : ##HxcVcMoveToConfirm
+    Use      : Name Field
+    Set as   : ##HxcVcDraftName
+    Modifies : HxcVcDraftName
+    Width    : 40
+    Max      : 60
+    On       : Accept : Yes : SET : HxcVcDraftName : $Value
+    On       : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Template Line]
+    Fields : Medium Prompt, Hxc Vc F Template
+    Local  : Field : Medium Prompt : Set as : "Template Name"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Template]
+    Skip     : ##HxcVcMoveToConfirm
+    Use      : Name Field
+    Set as   : ##HxcVcDraftTemplate
+    Modifies : HxcVcDraftTemplate
+    Width    : 40
+    Max      : 80
+    ;; Modifies writes the INPUT field into ##HxcVcDraftTemplate; also lock FetchName from $Value
+    On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
+    On       : Accept : Yes : SET : HxcVcDraftTemplate : $Value
+    On       : Accept : Yes : SET : HxcVcFetchName : $Value
+    On       : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Lang Line]
+    Fields : Medium Prompt, Hxc Vc F Lang
+    Local  : Field : Medium Prompt : Set as : "Language"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Lang]
+    Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
+    Use      : Name Field
+    Set as   : If $$IsEmpty:##HxcVcDraftLang THEN "en" ELSE ##HxcVcDraftLang
+    Modifies : HxcVcDraftLang
+    Width    : 16
+    Max      : 16
+    On       : Accept : Yes : SET : HxcVcDraftLang : $Value
+    On       : Accept : Yes : SET : HxcVcFetchLang : $Value
+    ;; Prefer draft Variable (Modifies from Template input); else keep FetchName set on Template Accept
+    On       : Accept : NOT $$IsEmpty:##HxcVcDraftTemplate : SET : HxcVcFetchName : ##HxcVcDraftTemplate
+    On       : Accept : Yes : CALL : Hxc Fetch Template
+    On       : Accept : ##HxcVcFetched : Field Accept
+
+[Line: Hxc Vc F Fetch Status Line]
+    Field : Hxc Vc F Fetch Status
+
+[Field: Hxc Vc F Fetch Status]
+    Use        : Name Field
+    Set as     : If NOT ##HxcVcFetched THEN "Enter Language, then Fetch Template (Enter / Alt+F)" ELSE If $$IsEmpty:##HxcVcFetchStatus THEN "Template loaded." ELSE ##HxcVcFetchStatus
+    Set Always : Yes
+    Color      : Dark Green
+    FullWidth  : Yes
+    Skip       : Yes
+
+;; --- Mapping + header ---
+
+[Line: Hxc Vc F Map Sect]
+    Field : Hxc Vc F Map Sect Fld
+
+[Field: Hxc Vc F Map Sect Fld]
+    Use       : Name Field
+    Set as    : "Variable Mapping"
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
+    Inactive  : NOT ##HxcVcFetched
+
+[Line: Hxc Vc F Hdr Media Line]
+    Fields : Medium Prompt, Hxc Vc F Media
+    Local  : Field : Medium Prompt : Set as : "Media Header"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "media"
+
+[Field: Hxc Vc F Media]
+    Skip : ##HxcVcMoveToConfirm
+    Use        : Name Field
+    Variable    : HxcVcDraftMedia
+    Set as     : If $$IsEmpty:##HxcVcDraftMedia THEN "None" ELSE ##HxcVcDraftMedia
+    Table      : Hxc Media Export List
+    Show Table : Always
+    Width      : 40
+    Max        : 40
+    Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "media"
+    On : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Hdr Col Head]
+    Invisible : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
+    Fields    : Hxc Vc F Hdr Col Key, Hxc Vc F Hdr Col Fld
+
+[Field: Hxc Vc F Hdr Col Key]
+    Use    : Name Field
+    Set as : "Header variable"
+    Style  : Bold
+    Color  : Dark Green
+    Skip   : Yes
+    Width  : 28
+
+[Field: Hxc Vc F Hdr Col Fld]
+    Use    : Name Field
+    Set as : "Voucher field"
+    Style  : Bold
+    Color  : Dark Green
+    Skip   : Yes
+    Width  : 28
+
+[Line: Hxc Vc F Hdr Text Line]
+    Invisible : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
+    Fields    : Hxc Vc F Hdr MK, HxcVcHdrMapping, HxcVcHdrCustomInput
+
+[Field: Hxc Vc F Hdr MK]
+    Use        : Name Field
+    Set as     : If $$IsEmpty:##HxcVcHeaderKey THEN "" ELSE ("{{" + ##HxcVcHeaderKey + "}}")
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
+
+[Field: HxcVcHdrMapping]
+    Use        : Name Field
+    Set as     : ##HxcVcDraftHeaderFld
+    Modifies   : HxcVcDraftHeaderFld
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
+    On         : Accept : Yes : SET : HxcVcDraftHeaderFld : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Body Sect]
+    Field : Hxc Vc F Body Sect Fld
+
+[Field: Hxc Vc F Body Sect Fld]
+    Use       : Name Field
+    Set as    : ""
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
+    Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBodyMaps
+
+[Line: Hxc Vc F Body Col Head]
+    Fields : Hxc Vc F Body Col Key, Hxc Vc F Body Col Fld
+
+[Field: Hxc Vc F Body Col Key]
+    Use       : Name Field
+    Set as    : "Body variable"
+    Style     : Bold
+    Color     : Dark Green
+    Skip      : Yes
+    Width     : 28
+    Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBodyMaps
+
+[Field: Hxc Vc F Body Col Fld]
+    Use       : Name Field
+    Set as    : "Voucher field"
+    Style     : Bold
+    Color     : Dark Green
+    Skip      : Yes
+    Width     : 28
+    Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBodyMaps
+
+[Line: Hxc Vc F Body1]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
+    Fields : Hxc Vc F Body1 MK, HxcVcBody1Mapping, HxcVcBody1CustomInput
+
+[Field: Hxc Vc F Body1 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK1 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
+
+[Field: HxcVcBody1Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcDMFld1
+    Modifies   : HxcVcDMFld1
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
+    On         : Accept : Yes : SET : HxcVcDMFld1 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Body2]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
+    Fields : Hxc Vc F Body2 MK, HxcVcBody2Mapping, HxcVcBody2CustomInput
+
+[Field: Hxc Vc F Body2 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK2 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
+
+[Field: HxcVcBody2Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcDMFld2
+    Modifies   : HxcVcDMFld2
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
+    On         : Accept : Yes : SET : HxcVcDMFld2 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Body3]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
+    Fields : Hxc Vc F Body3 MK, HxcVcBody3Mapping, HxcVcBody3CustomInput
+
+[Field: Hxc Vc F Body3 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK3 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
+
+[Field: HxcVcBody3Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcDMFld3
+    Modifies   : HxcVcDMFld3
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
+    On         : Accept : Yes : SET : HxcVcDMFld3 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Body4]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
+    Fields : Hxc Vc F Body4 MK, HxcVcBody4Mapping, HxcVcBody4CustomInput
+
+[Field: Hxc Vc F Body4 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK4 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
+
+[Field: HxcVcBody4Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcDMFld4
+    Modifies   : HxcVcDMFld4
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
+    On         : Accept : Yes : SET : HxcVcDMFld4 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Body5]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
+    Fields : Hxc Vc F Body5 MK, HxcVcBody5Mapping, HxcVcBody5CustomInput
+
+[Field: Hxc Vc F Body5 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK5 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
+
+[Field: HxcVcBody5Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcDMFld5
+    Modifies   : HxcVcDMFld5
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
+    On         : Accept : Yes : SET : HxcVcDMFld5 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Body6]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
+    Fields : Hxc Vc F Body6 MK, HxcVcBody6Mapping, HxcVcBody6CustomInput
+
+[Field: Hxc Vc F Body6 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK6 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
+
+[Field: HxcVcBody6Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcDMFld6
+    Modifies   : HxcVcDMFld6
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
+    On         : Accept : Yes : SET : HxcVcDMFld6 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Body7]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
+    Fields : Hxc Vc F Body7 MK, HxcVcBody7Mapping, HxcVcBody7CustomInput
+
+[Field: Hxc Vc F Body7 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK7 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
+
+[Field: HxcVcBody7Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcDMFld7
+    Modifies   : HxcVcDMFld7
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
+    On         : Accept : Yes : SET : HxcVcDMFld7 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Body8]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "body"
+    Fields : Hxc Vc F Body8 MK, HxcVcBody8Mapping, HxcVcBody8CustomInput
+
+[Field: Hxc Vc F Body8 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK8 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "body"
+
+[Field: HxcVcBody8Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcDMFld8
+    Modifies   : HxcVcDMFld8
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "body"
+    On         : Accept : Yes : SET : HxcVcDMFld8 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Btn Sect]
+    Field : Hxc Vc F Btn Sect Fld
+
+[Field: Hxc Vc F Btn Sect Fld]
+    Use       : Name Field
+    Set as    : ""
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
+    Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBtnMaps
+
+[Line: Hxc Vc F Btn Col Head]
+    Fields : Hxc Vc F Btn Col Key, Hxc Vc F Btn Col Fld
+
+[Field: Hxc Vc F Btn Col Key]
+    Use       : Name Field
+    Set as    : "Button variable"
+    Style     : Bold
+    Color     : Dark Green
+    Skip      : Yes
+    Width     : 28
+    Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBtnMaps
+
+[Field: Hxc Vc F Btn Col Fld]
+    Use       : Name Field
+    Set as    : "Voucher field"
+    Style     : Bold
+    Color     : Dark Green
+    Skip      : Yes
+    Width     : 28
+    Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBtnMaps
+
+[Line: Hxc Vc F Btn1]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "button"
+    Fields : Hxc Vc F Btn1 MK, HxcVcBtn1Mapping, HxcVcBtn1CustomInput
+
+[Field: Hxc Vc F Btn1 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK1 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "button"
+
+[Field: HxcVcBtn1Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcButtonField1
+    Modifies   : HxcVcButtonField1
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "button"
+    On         : Accept : Yes : SET : HxcVcButtonField1 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Btn2]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "button"
+    Fields : Hxc Vc F Btn2 MK, HxcVcBtn2Mapping, HxcVcBtn2CustomInput
+
+[Field: Hxc Vc F Btn2 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK2 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "button"
+
+[Field: HxcVcBtn2Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcButtonField2
+    Modifies   : HxcVcButtonField2
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "button"
+    On         : Accept : Yes : SET : HxcVcButtonField2 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Btn3]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "button"
+    Fields : Hxc Vc F Btn3 MK, HxcVcBtn3Mapping, HxcVcBtn3CustomInput
+
+[Field: Hxc Vc F Btn3 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK3 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "button"
+
+[Field: HxcVcBtn3Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcButtonField3
+    Modifies   : HxcVcButtonField3
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "button"
+    On         : Accept : Yes : SET : HxcVcButtonField3 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Btn4]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "button"
+    Fields : Hxc Vc F Btn4 MK, HxcVcBtn4Mapping, HxcVcBtn4CustomInput
+
+[Field: Hxc Vc F Btn4 MK]
+    Use        : Name Field
+    Set as     : "{{" + ##HxcVcFK4 + "}}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "button"
+
+[Field: HxcVcBtn4Mapping]
+    Use        : Name Field
+    Set as     : ##HxcVcButtonField4
+    Modifies   : HxcVcButtonField4
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "button"
+    On         : Accept : Yes : SET : HxcVcButtonField4 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+
+;; --- Message Preview ---
+
+[Line: Hxc Vc F Prev Head]
+    Field : Hxc Vc F Prev Head Fld
+
+[Field: Hxc Vc F Prev Head Fld]
+    Use       : Name Field
+    Set as    : "Message Preview"
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
+    Inactive  : NOT ##HxcVcFetched
+
+[Line: Hxc Vc F Prev Body]
+    Field : Hxc Vc F Prev Body Fld
+
+[Field: Hxc Vc F Prev Body Fld]
+    Use        : Name Field
+    Set as     : ##HxcVcPreviewText
+    Set Always : Yes
+    FullWidth  : Yes
+    Skip       : Yes
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched
+
+;; --- Voucher Rules ---
+
+[Line: Hxc Vc F Vch Sect]
+    Field : Hxc Vc F Vch Sect Fld
+
+[Field: Hxc Vc F Vch Sect Fld]
+    Use       : Name Field
+    Set as    : "Voucher Rules"
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
+    Inactive  : NOT ##HxcVcFetched
+
+[Line: Hxc Vc F Vch Head]
+    Field : Hxc Vc F Vch Head Fld
+
+[Field: Hxc Vc F Vch Head Fld]
+    Use       : Name Field
+    Set as    : "Applicable Voucher Types  (add rows; End of List / blank to end)"
+    FullWidth : Yes
+    Skip      : Yes
+    Inactive  : NOT ##HxcVcFetched
+
+[Line: Hxc Vc F Vch1]
+    Invisible : NOT ##HxcVcFetched
+    Fields : Medium Prompt, HxcVcVchType1Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType1Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType1
+    Modifies   : HxcVcVchType1
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType1 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch2]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType1 OR ##HxcVcVchType1 = "End of List" OR ##HxcVcVchType1 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType2Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType2Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType2
+    Modifies   : HxcVcVchType2
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType2 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch3]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType2 OR ##HxcVcVchType2 = "End of List" OR ##HxcVcVchType2 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType3Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType3Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType3
+    Modifies   : HxcVcVchType3
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType3 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch4]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType3 OR ##HxcVcVchType3 = "End of List" OR ##HxcVcVchType3 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType4Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType4Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType4
+    Modifies   : HxcVcVchType4
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType4 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch5]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType4 OR ##HxcVcVchType4 = "End of List" OR ##HxcVcVchType4 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType5Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType5Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType5
+    Modifies   : HxcVcVchType5
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType5 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch6]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType5 OR ##HxcVcVchType5 = "End of List" OR ##HxcVcVchType5 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType6Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType6Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType6
+    Modifies   : HxcVcVchType6
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType6 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch7]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType6 OR ##HxcVcVchType6 = "End of List" OR ##HxcVcVchType6 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType7Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType7Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType7
+    Modifies   : HxcVcVchType7
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType7 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch8]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType7 OR ##HxcVcVchType7 = "End of List" OR ##HxcVcVchType7 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType8Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType8Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType8
+    Modifies   : HxcVcVchType8
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType8 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch9]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType8 OR ##HxcVcVchType8 = "End of List" OR ##HxcVcVchType8 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType9Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType9Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType9
+    Modifies   : HxcVcVchType9
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType9 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch10]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType9 OR ##HxcVcVchType9 = "End of List" OR ##HxcVcVchType9 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType10Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType10Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType10
+    Modifies   : HxcVcVchType10
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType10 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch11]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType10 OR ##HxcVcVchType10 = "End of List" OR ##HxcVcVchType10 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType11Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType11Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType11
+    Modifies   : HxcVcVchType11
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType11 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+[Line: Hxc Vc F Vch12]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType11 OR ##HxcVcVchType11 = "End of List" OR ##HxcVcVchType11 = "Not Applicable"
+    Fields : Medium Prompt, HxcVcVchType12Input
+    Local  : Field : Medium Prompt : Set as : "Voucher Type"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcVchType12Input]
+    Use        : Name Field
+    Set as     : ##HxcVcVchType12
+    Modifies   : HxcVcVchType12
+    Table      : Hxc Voucher Type List, End of List
+    Show Table : Always
+    Width      : 40
+    Max        : 80
+    Inactive   : NOT ##HxcVcFetched
+    Skip Sysname : Yes
+    Skip : ##HxcVcMoveToConfirm
+    On         : Accept : Yes : SET : HxcVcVchType12 : $Value
+    On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On         : Accept : Yes : Field Accept
+
+
+[Line: Hxc Vc F Auto Line]
+    Fields : Medium Prompt, HxcVcAutoSendInput
+    Local  : Field : Medium Prompt : Set as : "Auto send after save"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
+
+[Field: HxcVcAutoSendInput]
+    Use      : Logical Field
+    Variable  : HxcVcDraftAuto
+    Set as   : ##HxcVcDraftAuto
+    Width    : 8
+    Inactive   : NOT ##HxcVcFetched
+    On       : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
+    On       : Accept : Yes : SET : HxcVcMoveToConfirm : $$Value
+    On       : Accept : Yes : SET : HxcVcAutoSendEnabled : $$Value
+    On       : Accept : Yes : SET : HxcVcDraftAuto : ##HxcVcAutoSendEnabled
+    On       : Accept : Yes : Field Accept
+    Skip : ##HxcVcMoveToConfirm
+
+[Line: Hxc Vc F Confirm Line]
+    Fields : Hxc Vc Confirm Prompt, Hxc Vc F Confirm
+
+[Field: Hxc Vc Confirm Prompt]
+    Use      : Medium Prompt
+    Set as   : "Confirm before send"
+    Width    : 22
+    Inactive : NOT ##HxcVcFetched
+    Option   : Hxc Vc Confirm Grey Text : NOT ##HxcVcAutoSendEnabled
+
+[!Field: Hxc Vc Confirm Grey Text]
+    Color : Hxc Confirm Grey
+
+[Color: Hxc Confirm Grey]
+    RGB : 128, 128, 128
+
+[Field: Hxc Vc F Confirm]
+    On : Focus : ##HxcVcMoveToConfirm : SET : HxcVcMoveToConfirm : No
+    Use      : Logical Field
+    Variable  : HxcVcDraftConfirm
+    Set as   : ##HxcVcDraftConfirm
+    Width    : 12
+    Inactive : NOT ##HxcVcFetched
+    Skip     : NOT ##HxcVcAutoSendEnabled
+    Option   : Hxc Vc Confirm Grey Text : NOT ##HxcVcAutoSendEnabled
+
+
+;; ---------------------------------------------------------------------------
+;; CREATE — clear draft, show sequential form
+;; ---------------------------------------------------------------------------
+
+
+[Button: Hxc Fetch Template Btn]
+    Key    : Alt + F
+    Action : Call : Hxc Fetch Template
+    Title  : "Fetch Template"
+
+[Report: Helixcer Voucher Config Create]
+    Form   : Helixcer Voucher Config Create
+    Title  : "Create Voucher Config"
+    Object : Company
+    Set    : HxcVcFetched : No
+    Set    : HxcVcMoveToMapping : No
+    Set    : HxcVcMoveToConfirm : No
+    Set    : HxcVcPreviewText : ""
+    Set    : HxcVcFetchStatus : ""
+    Set    : HxcVcCreateNeedsReset : Yes
+    Set    : HxcVcCreateBlank : No
+    Set    : HxcVcDraftName : ""
+    Set    : HxcVcDraftTemplate : ""
+    Set    : HxcVcDraftLang : "en"
+    Set    : HxcVcVchType1 : ""
+    Set    : HxcVcVchType2 : ""
+    Set    : HxcVcVchType3 : ""
+    Set    : HxcVcVchType4 : ""
+    Set    : HxcVcVchType5 : ""
+    Set    : HxcVcVchType6 : ""
+    Set    : HxcVcVchType7 : ""
+    Set    : HxcVcVchType8 : ""
+    Set    : HxcVcVchType9 : ""
+    Set    : HxcVcVchType10 : ""
+    Set    : HxcVcVchType11 : ""
+    Set    : HxcVcVchType12 : ""
+    Set    : HxcVcDraftMedia : "None"
+    Set    : HxcVcDraftAuto : No
+    Set    : HxcVcDraftConfirm : No
+    Set    : HxcVcDraftEditKey : ""
+    Set    : HxcVcDraftHeaderFld : ""
+
+[Form: Helixcer Voucher Config Create]
+    Part   : Hxc Vc Cr Title Part, Hxc Vc Form Template Part, Hxc Vc Form Mid Row, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Cr Hint Part
+    Button : Hxc Fetch Template Btn, Form Accept, Form Cancel
+    On     : Form Create  : Yes : CALL : Hxc Initialize New Config
+    On     : Form Destroy : Yes : CALL : Hxc Vc Clear Draft
+    On     : Form Destroy : Yes : CALL : Hxc Clear Fetch Vars
+    On     : Form Accept  : Yes : CALL : Hxc Vc Commit Draft
+    On     : Form Accept  : ##HxcVcSaveOk : Form Accept
+
+[Part: Hxc Vc Cr Title Part]
+    Lines : Hxc Vc Cr Title Line
+
+[Line: Hxc Vc Cr Title Line]
+    Field : Hxc Vc Cr Title
+
+[Field: Hxc Vc Cr Title]
+    Use       : Name Field
+    Set as    : "Create Voucher Config (build 403)"
+    Style     : Bold
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Part: Hxc Vc Cr Hint Part]
+    Lines : Hxc Vc Cr Hint Line
+
+[Line: Hxc Vc Cr Hint Line]
+    Field : Hxc Vc Cr Hint
+
+[Field: Hxc Vc Cr Hint]
+    Use       : Name Field
+    Set as    : "Fetch Template: Enter on Language or Alt+F.  Save Config: Ctrl+A."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+;; ---------------------------------------------------------------------------
+;; ALTER — pick config, load into draft, same form
+;; ---------------------------------------------------------------------------
+
+[Function: Hxc Vc Load Draft From Config]
+    Variable : EditKey : String
+    Variable : TypesRaw : String
+    01 : SET : EditKey : ##HxcVcDraftEditKey
+    02 : IF : $$IsEmpty:##EditKey
+    03 :    RETURN : Yes
+    04 : END IF
+    05 : CALL : Hxc Vc Clear Draft
+    06 : SET : HxcVcDraftEditKey : ##EditKey
+    07 : SET : TypesRaw : ""
+    08 : WALK COLLECTION : Hxc Voucher Config Names
+    09 :    IF : $HxcVcName = ##EditKey
+    10 :       SET : HxcVcDraftName : $HxcVcName
+    11 :       SET : HxcVcDraftTemplate : $HxcVcTemplateName
+    12 :       SET : HxcVcDraftLang : $HxcVcLanguage
+    13 :       SET : HxcVcDraftMedia : $HxcVcMediaExport
+    14 :       SET : HxcVcDraftAuto : $HxcVcAutoSend
+    141 :       SET : HxcVcAutoSendEnabled : $HxcVcAutoSend
+    15 :       SET : HxcVcDraftConfirm : $HxcVcConfirmBeforeSend
+    16 :       SET : TypesRaw : $HxcVcVoucherTypes
+    17 :    END IF
+    18 : END WALK
+    19 : CALL : Hxc Parse Types Into Draft : ##TypesRaw
+    20 : RETURN : Yes
+
+[Report: Helixcer Voucher Config Alter]
+    Form   : Helixcer Voucher Config Alter
+    Title  : "Alter Voucher Config"
+    Object : Company
+    Set    : HxcVcFetched : No
+    Set    : HxcVcPreviewText : ""
+    Set    : HxcVcFetchStatus : ""
+    Set    : HxcVcCreateNeedsReset : No
+    Set    : HxcVcCreateBlank : No
+
+[Form: Helixcer Voucher Config Alter]
+    Part   : Hxc Vc Al Title Part, Hxc Vc Al Pick Part, Hxc Vc Form Template Part, Hxc Vc Form Mid Row, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Al Hint Part
+    Button : Hxc Fetch Template Btn, Form Accept, Form Cancel
+    On     : Form Create  : Yes : CALL : Hxc Vc Clear Draft
+    On     : Form Create  : Yes : CALL : Hxc Clear Fetch Vars
+    On     : Form Destroy : Yes : CALL : Hxc Vc Clear Draft
+    On     : Form Destroy : Yes : CALL : Hxc Clear Fetch Vars
+    On     : Form Accept  : Yes : CALL : Hxc Vc Commit Draft
+    On     : Form Accept  : ##HxcVcSaveOk : Form Accept
+
+[Part: Hxc Vc Al Title Part]
+    Lines : Hxc Vc Al Title Line
+
+[Line: Hxc Vc Al Title Line]
+    Field : Hxc Vc Al Title
+
+[Field: Hxc Vc Al Title]
+    Use       : Name Field
+    Set as    : "Alter Voucher Config (build 403)"
+    Style     : Bold
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Part: Hxc Vc Al Pick Part]
+    Lines : Hxc Vc Al Pick Line
+
+[Line: Hxc Vc Al Pick Line]
+    Fields : Medium Prompt, Hxc Vc Al Pick
+    Local  : Field : Medium Prompt : Set as : "Select Config"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc Al Pick]
+    Skip : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
+    Use        : Name Field
+    Variable    : HxcVcDraftEditKey
+    Set as     : ##HxcVcDraftEditKey
+    Table      : Hxc Voucher Config Names
+    Show Table : Always
+    Width      : 40
+    Max        : 60
+    On         : Accept : Yes : CALL : Hxc Vc Load Draft From Config
+    On         : Accept : Yes : Field Accept
+
+[Part: Hxc Vc Al Hint Part]
+    Lines : Hxc Vc Al Hint Line
+
+[Line: Hxc Vc Al Hint Line]
+    Field : Hxc Vc Al Hint
+
+[Field: Hxc Vc Al Hint]
+    Use       : Name Field
+    Set as    : "Select config, edit fields below, Ctrl+A."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+;; ---------------------------------------------------------------------------
+;; LIST
+;; ---------------------------------------------------------------------------
+
+[Report: Helixcer Voucher Config List]
+    Form   : Helixcer Voucher Config List
+    Title  : "List Voucher Configs"
+    Object : Company
+
+[Form: Helixcer Voucher Config List]
+    Part   : Hxc Vc Ls Title Part, Hxc Vc Ls Part, Hxc Vc Ls Hint Part
+    Button : Form Cancel
+
+[Part: Hxc Vc Ls Title Part]
+    Lines : Hxc Vc Ls Title Line
+
+[Line: Hxc Vc Ls Title Line]
+    Field : Hxc Vc Ls Title
+
+[Field: Hxc Vc Ls Title]
+    Use       : Name Field
+    Set as    : "Voucher Config List (build 403)"
+    Style     : Bold
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+[Part: Hxc Vc Ls Part]
+    Lines    : Hxc Vc Ls Header Line, Hxc Vc Ls Data Line
+    Repeat   : Hxc Vc Ls Data Line : HxcVoucherConfigs
+    Break On : $$IsEmpty:$HxcVcName
+    Scroll   : Vertical
+
+[Line: Hxc Vc Ls Header Line]
+    Fields : Hxc Vc Ls H Name, Hxc Vc Ls H Template, Hxc Vc Ls H Lang, +
+             Hxc Vc Ls H Types, Hxc Vc Ls H Media, Hxc Vc Ls H Auto
+    Local  : Field : Default : Skip  : Yes
+    Local  : Field : Default : Align : Centre
+    Local  : Field : Default : Style : Bold
+
+[Field: Hxc Vc Ls H Name]
+    Use    : Name Field
+    Set as : "Config Name"
+    Width  : 16
+
+[Field: Hxc Vc Ls H Template]
+    Use    : Name Field
+    Set as : "Template"
+    Width  : 16
+
+[Field: Hxc Vc Ls H Lang]
+    Use    : Name Field
+    Set as : "Lang"
+    Width  : 6
+
+[Field: Hxc Vc Ls H Types]
+    Use    : Name Field
+    Set as : "Voucher Types"
+    Width  : 24
+
+[Field: Hxc Vc Ls H Media]
+    Use    : Name Field
+    Set as : "Media"
+    Width  : 12
+
+[Field: Hxc Vc Ls H Auto]
+    Use    : Name Field
+    Set as : "Auto"
+    Width  : 6
+
+[Line: Hxc Vc Ls Data Line]
+    Fields : Hxc Vc Ls D Name, Hxc Vc Ls D Template, Hxc Vc Ls D Lang, +
+             Hxc Vc Ls D Types, Hxc Vc Ls D Media, Hxc Vc Ls D Auto
+    Local  : Field : Default : Skip : Yes
+
+[Field: Hxc Vc Ls D Name]
+    Use    : Name Field
+    Set as : $HxcVcName
+    Width  : 16
+
+[Field: Hxc Vc Ls D Template]
+    Use    : Name Field
+    Set as : $HxcVcTemplateName
+    Width  : 16
+
+[Field: Hxc Vc Ls D Lang]
+    Use    : Name Field
+    Set as : $HxcVcLanguage
+    Width  : 6
+
+[Field: Hxc Vc Ls D Types]
+    Use    : Name Field
+    Set as : $HxcVcVoucherTypes
+    Width  : 24
+
+[Field: Hxc Vc Ls D Media]
+    Use    : Name Field
+    Set as : $HxcVcMediaExport
+    Width  : 12
+
+[Field: Hxc Vc Ls D Auto]
+    Use    : Name Field
+    Set as : If $HxcVcAutoSend THEN "Yes" ELSE "No"
+    Width  : 6
+
+[Part: Hxc Vc Ls Hint Part]
+    Lines : Hxc Vc Ls Hint Line
+
+[Line: Hxc Vc Ls Hint Line]
+    Field : Hxc Vc Ls Hint
+
+[Field: Hxc Vc Ls Hint]
+    Use       : Name Field
+    Set as    : "Read-only. Esc to leave."
+    Align     : Centre
+    FullWidth : Yes
+    Skip      : Yes
+
+;; ---------------------------------------------------------------------------
+;; About
+;; ---------------------------------------------------------------------------
+
+[Report: Helixcer Chat About]
+    Form : Helixcer Chat About
+
+[Form: Helixcer Chat About]
+    Part : Helixcer Chat About
+
+[Part: Helixcer Chat About]
+    Lines : Helixcer Chat About Title, Helixcer Chat About Body, Helixcer Chat About Status
+
+[Line: Helixcer Chat About Title]
+    Field : Helixcer Chat About Title
+
+[Field: Helixcer Chat About Title]
+    Use       : Name Field
+    Set as    : "Helixcer Chat (build 403)"
+    Style     : Bold
+    Align     : Centre
+    FullWidth : Yes
+
+[Line: Helixcer Chat About Body]
+    Field : Helixcer Chat About Body
+
+[Field: Helixcer Chat About Body]
+    Use       : Name Field
+    Set as    : "Create: enter template+language → fetch → preview + mapping."
+    Align     : Centre
+    FullWidth : Yes
+
+[Line: Helixcer Chat About Status]
+    Field : Helixcer Chat About Status
+
+[Field: Helixcer Chat About Status]
+    Use       : Name Field
+    Set as    : @@HxcSysSummary
+    Align     : Centre
+    FullWidth : Yes
+[System: Formula]
+    HxcCustomValueLabel : "♦ Custom Value"
+    HxcVcMissingCustomValue :     (##HxcVcHeaderKind = "text" AND NOT $$IsEmpty:##HxcVcHeaderKey AND ##HxcVcDraftHeaderFld = @@HxcCustomValueLabel AND $$IsEmpty:##HxcVcDraftCustom0) OR +
+        (NOT $$IsEmpty:##HxcVcFK1 AND (##HxcVcFC1 = "body" OR ##HxcVcFC1 = "button") AND @@HxcVcMappingField1 = @@HxcCustomValueLabel AND $$IsEmpty:@@HxcVcMappingCustom1) OR +
+        (NOT $$IsEmpty:##HxcVcFK2 AND (##HxcVcFC2 = "body" OR ##HxcVcFC2 = "button") AND @@HxcVcMappingField2 = @@HxcCustomValueLabel AND $$IsEmpty:@@HxcVcMappingCustom2) OR +
+        (NOT $$IsEmpty:##HxcVcFK3 AND (##HxcVcFC3 = "body" OR ##HxcVcFC3 = "button") AND @@HxcVcMappingField3 = @@HxcCustomValueLabel AND $$IsEmpty:@@HxcVcMappingCustom3) OR +
+        (NOT $$IsEmpty:##HxcVcFK4 AND (##HxcVcFC4 = "body" OR ##HxcVcFC4 = "button") AND @@HxcVcMappingField4 = @@HxcCustomValueLabel AND $$IsEmpty:@@HxcVcMappingCustom4) OR +
+        (NOT $$IsEmpty:##HxcVcFK5 AND (##HxcVcFC5 = "body") AND ##HxcVcDMFld5 = @@HxcCustomValueLabel AND $$IsEmpty:##HxcVcDraftCustom5) OR +
+        (NOT $$IsEmpty:##HxcVcFK6 AND (##HxcVcFC6 = "body") AND ##HxcVcDMFld6 = @@HxcCustomValueLabel AND $$IsEmpty:##HxcVcDraftCustom6) OR +
+        (NOT $$IsEmpty:##HxcVcFK7 AND (##HxcVcFC7 = "body") AND ##HxcVcDMFld7 = @@HxcCustomValueLabel AND $$IsEmpty:##HxcVcDraftCustom7) OR +
+        (NOT $$IsEmpty:##HxcVcFK8 AND (##HxcVcFC8 = "body") AND ##HxcVcDMFld8 = @@HxcCustomValueLabel AND $$IsEmpty:##HxcVcDraftCustom8)
+    HxcVoucherMappingSort : If $Name = @@HxcCustomValueLabel THEN "0" ELSE $Name
+    HxcVcMappingField1 : If ##HxcVcFC1 = "button" THEN ##HxcVcButtonField1 ELSE ##HxcVcDMFld1
+    HxcVcMappingCustom1 : If ##HxcVcFC1 = "button" THEN ##HxcVcButtonCustom1 ELSE ##HxcVcDraftCustom1
+    HxcVcMappingField2 : If ##HxcVcFC2 = "button" THEN ##HxcVcButtonField2 ELSE ##HxcVcDMFld2
+    HxcVcMappingCustom2 : If ##HxcVcFC2 = "button" THEN ##HxcVcButtonCustom2 ELSE ##HxcVcDraftCustom2
+    HxcVcMappingField3 : If ##HxcVcFC3 = "button" THEN ##HxcVcButtonField3 ELSE ##HxcVcDMFld3
+    HxcVcMappingCustom3 : If ##HxcVcFC3 = "button" THEN ##HxcVcButtonCustom3 ELSE ##HxcVcDraftCustom3
+    HxcVcMappingField4 : If ##HxcVcFC4 = "button" THEN ##HxcVcButtonField4 ELSE ##HxcVcDMFld4
+    HxcVcMappingCustom4 : If ##HxcVcFC4 = "button" THEN ##HxcVcButtonCustom4 ELSE ##HxcVcDraftCustom4
+
+[Function: Hxc Restore Custom Mappings]
+    Variable : EditKey : String
+    01 : SET : EditKey : ##HxcVcDraftEditKey
+    02 : IF : $$IsEmpty:##EditKey
+    03 :    RETURN : Yes
+    04 : END IF
+    05 : WALK COLLECTION : Hxc Voucher Config Names
+    06 :    IF : $HxcVcName = ##EditKey AND $HxcVcTemplateName = ##HxcVcFetchName AND $HxcVcLanguage = ##HxcVcFetchLang
+    10 :       IF : (##HxcVcHeaderKind = "text" AND NOT $$IsEmpty:##HxcVcHeaderKey) AND NOT $$IsEmpty:$HxcVcCustom0
+    11 :          SET : HxcVcDraftHeaderFld : @@HxcCustomValueLabel
+    12 :          SET : HxcVcDraftCustom0 : $HxcVcCustom0
+    13 :       END IF
+    14 :       IF : (NOT $$IsEmpty:##HxcVcFK1 AND (##HxcVcFC1 = "body" OR ##HxcVcFC1 = "button")) AND NOT $$IsEmpty:$HxcVcCustom1
+    15 :          IF : ##HxcVcFC1 = "button"
+    151 :             SET : HxcVcButtonField1 : @@HxcCustomValueLabel
+    152 :             SET : HxcVcButtonCustom1 : $HxcVcCustom1
+    153 :          ELSE
+    154 :             SET : HxcVcDMFld1 : @@HxcCustomValueLabel
+    155 :             SET : HxcVcDraftCustom1 : $HxcVcCustom1
+    16 :          END IF
+    17 :       END IF
+    18 :       IF : (NOT $$IsEmpty:##HxcVcFK2 AND (##HxcVcFC2 = "body" OR ##HxcVcFC2 = "button")) AND NOT $$IsEmpty:$HxcVcCustom2
+    19 :          IF : ##HxcVcFC2 = "button"
+    191 :             SET : HxcVcButtonField2 : @@HxcCustomValueLabel
+    192 :             SET : HxcVcButtonCustom2 : $HxcVcCustom2
+    193 :          ELSE
+    194 :             SET : HxcVcDMFld2 : @@HxcCustomValueLabel
+    195 :             SET : HxcVcDraftCustom2 : $HxcVcCustom2
+    20 :          END IF
+    21 :       END IF
+    22 :       IF : (NOT $$IsEmpty:##HxcVcFK3 AND (##HxcVcFC3 = "body" OR ##HxcVcFC3 = "button")) AND NOT $$IsEmpty:$HxcVcCustom3
+    23 :          IF : ##HxcVcFC3 = "button"
+    231 :             SET : HxcVcButtonField3 : @@HxcCustomValueLabel
+    232 :             SET : HxcVcButtonCustom3 : $HxcVcCustom3
+    233 :          ELSE
+    234 :             SET : HxcVcDMFld3 : @@HxcCustomValueLabel
+    235 :             SET : HxcVcDraftCustom3 : $HxcVcCustom3
+    24 :          END IF
+    25 :       END IF
+    26 :       IF : (NOT $$IsEmpty:##HxcVcFK4 AND (##HxcVcFC4 = "body" OR ##HxcVcFC4 = "button")) AND NOT $$IsEmpty:$HxcVcCustom4
+    27 :          IF : ##HxcVcFC4 = "button"
+    271 :             SET : HxcVcButtonField4 : @@HxcCustomValueLabel
+    272 :             SET : HxcVcButtonCustom4 : $HxcVcCustom4
+    273 :          ELSE
+    274 :             SET : HxcVcDMFld4 : @@HxcCustomValueLabel
+    275 :             SET : HxcVcDraftCustom4 : $HxcVcCustom4
+    28 :          END IF
+    29 :       END IF
+    30 :       IF : (NOT $$IsEmpty:##HxcVcFK5 AND (##HxcVcFC5 = "body")) AND NOT $$IsEmpty:$HxcVcCustom5
+    31 :          SET : HxcVcDMFld5 : @@HxcCustomValueLabel
+    32 :          SET : HxcVcDraftCustom5 : $HxcVcCustom5
+    33 :       END IF
+    34 :       IF : (NOT $$IsEmpty:##HxcVcFK6 AND (##HxcVcFC6 = "body")) AND NOT $$IsEmpty:$HxcVcCustom6
+    35 :          SET : HxcVcDMFld6 : @@HxcCustomValueLabel
+    36 :          SET : HxcVcDraftCustom6 : $HxcVcCustom6
+    37 :       END IF
+    38 :       IF : (NOT $$IsEmpty:##HxcVcFK7 AND (##HxcVcFC7 = "body")) AND NOT $$IsEmpty:$HxcVcCustom7
+    39 :          SET : HxcVcDMFld7 : @@HxcCustomValueLabel
+    40 :          SET : HxcVcDraftCustom7 : $HxcVcCustom7
+    41 :       END IF
+    42 :       IF : (NOT $$IsEmpty:##HxcVcFK8 AND (##HxcVcFC8 = "body")) AND NOT $$IsEmpty:$HxcVcCustom8
+    43 :          SET : HxcVcDMFld8 : @@HxcCustomValueLabel
+    44 :          SET : HxcVcDraftCustom8 : $HxcVcCustom8
+    45 :       END IF
+    46 :    END IF
+    47 : END WALK
+    48 : RETURN : Yes
+
+[Field: Hxc Vc Custom Mapping Input]
+    Use : Name Field
+    Width : 24
+    Max : 200
+
+[Field: HxcVcHdrCustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcDraftHeaderFld = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom0 ELSE ""
+    Modifies : HxcVcDraftCustom0
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDraftHeaderFld = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom0 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBody1CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcDMFld1 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom1 ELSE ""
+    Modifies : HxcVcDraftCustom1
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld1 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom1 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBody2CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcDMFld2 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom2 ELSE ""
+    Modifies : HxcVcDraftCustom2
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld2 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom2 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBody3CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcDMFld3 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom3 ELSE ""
+    Modifies : HxcVcDraftCustom3
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld3 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom3 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBody4CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcDMFld4 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom4 ELSE ""
+    Modifies : HxcVcDraftCustom4
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld4 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom4 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBody5CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcDMFld5 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom5 ELSE ""
+    Modifies : HxcVcDraftCustom5
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld5 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom5 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBody6CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcDMFld6 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom6 ELSE ""
+    Modifies : HxcVcDraftCustom6
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld6 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom6 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBody7CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcDMFld7 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom7 ELSE ""
+    Modifies : HxcVcDraftCustom7
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld7 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom7 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBody8CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcDMFld8 = @@HxcCustomValueLabel) THEN ##HxcVcDraftCustom8 ELSE ""
+    Modifies : HxcVcDraftCustom8
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcDMFld8 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcDraftCustom8 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBtn1CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcButtonField1 = @@HxcCustomValueLabel) THEN ##HxcVcButtonCustom1 ELSE ""
+    Modifies : HxcVcButtonCustom1
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcButtonField1 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcButtonCustom1 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBtn2CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcButtonField2 = @@HxcCustomValueLabel) THEN ##HxcVcButtonCustom2 ELSE ""
+    Modifies : HxcVcButtonCustom2
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcButtonField2 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcButtonCustom2 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBtn3CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcButtonField3 = @@HxcCustomValueLabel) THEN ##HxcVcButtonCustom3 ELSE ""
+    Modifies : HxcVcButtonCustom3
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcButtonField3 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcButtonCustom3 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
+[Field: HxcVcBtn4CustomInput]
+    Use : Hxc Vc Custom Mapping Input
+    Set as : If (##HxcVcButtonField4 = @@HxcCustomValueLabel) THEN ##HxcVcButtonCustom4 ELSE ""
+    Modifies : HxcVcButtonCustom4
+    Skip   : ##HxcVcMoveToConfirm OR (NOT (##HxcVcButtonField4 = @@HxcCustomValueLabel))
+    ;; When Custom Value is chosen, text is mandatory — empty Accept stays on this field
+    On     : Accept : $$IsEmpty:$Value : Msg Box : "Helixcer Voucher Config" : "Custom Value text is required."
+    On     : Accept : NOT $$IsEmpty:$Value : SET : HxcVcButtonCustom4 : $Value
+    On     : Accept : NOT $$IsEmpty:$Value : Field Accept
