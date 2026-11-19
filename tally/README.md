@@ -1,18 +1,14 @@
-# Helixcer Chat for TallyPrime — build 411
+# Helixcer Chat for TallyPrime — build 412
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 411)**.
+Title must show **(build 412)**.
 
-## Fix — c0000005 while saving
-Procedural save (`NEW OBJECT` / `SAVE TARGET` / `ACCEPT ALTER`) on Form Accept crashes Tally (`c0000005`).
+## Your Native Storage approach + flush fix
+Invisible Storage fields often do not write on Form Accept, so configs never appeared.
 
-**Crash-free path (same as API Settings / build 345):**
-- Create/Alter: `Alter` + `Object : Company` + `Storage` on Aggregate
-- Config Name line → **Detail SubForm** (fetch + mapping + voucher types + settings)
-- **Ctrl+A** on detail, then **Ctrl+A** on the name list (default Form Accept — no custom object code)
-
-## Flow
-1. Create Config → type name on blank line → detail opens
-2. Template + Language → Enter/Alt+F fetch → map fields
-3. Ctrl+A (detail) → Ctrl+A (list) → List Configs shows the row
+- Session Create UI kept
+- Commit validates only (no procedural INSERT — avoids c0000005)
+- `Hxc Vc Native Storage Part` repeats Aggregate with **Break After** empty name
+- Storage fields are small but **visible** (not Invisible); Name first
+- Ctrl+A → default Form Accept persists Company Aggregate
