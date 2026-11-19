@@ -1,11 +1,12 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 412-native-storage-flush
-;; Title must show "(build 412)".
+;; BUILD: 413-fetch-field-sync
+;; Title must show "(build 413)".
 ;;
 ;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
 ;; Create UI = session Variables. Persist = Aggregate Storage row + default Form Accept.
 ;; No procedural INSERT/ACCEPT ALTER/NEW OBJECT (c0000005).
-;; Fetch reads ##HxcVcDraftTemplate after Modifies syncs the input field into the Variable.
+;; Fetch/Commit read live fields #Hxc Vc F Template / Name / Lang (Modifies alone is not enough;
+;; On Accept $Value on non-Storage fields is empty and wiped DraftTemplate → "Enter Template Name first").
 ;; Never read Company draft Storage for Create. Clear Fetch Vars does not wipe FetchName.
 ;;
 ;; Create Config flow:
@@ -883,8 +884,17 @@
     71 : RETURN : Yes
 
 [Function: Hxc Fetch Template]
+    ;; Live field first — Modifies can lag; $Value on non-Storage fields is empty and must not wipe drafts
+    001 : IF : NOT $$IsEmpty:#Hxc Vc F Name
+    002 :    SET : HxcVcDraftName : #Hxc Vc F Name
+    003 : END IF
+    004 : IF : NOT $$IsEmpty:#Hxc Vc F Template
+    005 :    SET : HxcVcDraftTemplate : #Hxc Vc F Template
+    006 : END IF
+    007 : IF : NOT $$IsEmpty:#Hxc Vc F Lang
+    008 :    SET : HxcVcDraftLang : #Hxc Vc F Lang
+    009 : END IF
     01 : CALL : Hxc Sync From Company
-    ;; Capture template/lang from session Variables FIRST (Modifies synced them from the input fields)
     02 : SET : HxcVcFetchName : ##HxcVcDraftTemplate
     03 : SET : HxcVcFetchLang : ##HxcVcDraftLang
     04 : IF : $$IsEmpty:##HxcVcFetchLang
@@ -1265,12 +1275,15 @@
 [Function: Hxc Vc Commit Draft]
     ;; Validate only. Aggregate Storage Part writes on Form Accept.
     01 : SET : HxcVcSaveOk : No
-    011 : IF : NOT $$IsEmpty:#HxcVcConfigNameInput
-    012 :    SET : HxcVcDraftName : #HxcVcConfigNameInput
+    011 : IF : NOT $$IsEmpty:#Hxc Vc F Name
+    012 :    SET : HxcVcDraftName : #Hxc Vc F Name
     013 : END IF
-    014 : IF : NOT $$IsEmpty:#HxcVcTemplateNameInput
-    015 :    SET : HxcVcDraftTemplate : #HxcVcTemplateNameInput
+    014 : IF : NOT $$IsEmpty:#Hxc Vc F Template
+    015 :    SET : HxcVcDraftTemplate : #Hxc Vc F Template
     016 : END IF
+    017 : IF : NOT $$IsEmpty:#Hxc Vc F Lang
+    018 :    SET : HxcVcDraftLang : #Hxc Vc F Lang
+    019 : END IF
     02 : IF : $$IsEmpty:##HxcVcDraftName
     03 :    Msg Box : "Helixcer Voucher Config" : "Config Name is required."
     04 :    RETURN : No
@@ -1336,7 +1349,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 412)"
+    Set as    : "Helixcer Chat — API Settings (build 413)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1471,7 +1484,8 @@
     Modifies : HxcVcDraftName
     Width    : 40
     Max      : 60
-    On       : Accept : Yes : SET : HxcVcDraftName : $Value
+    ;; $$Value = field contents. $Value on non-Storage fields is empty and wipes the draft.
+    On       : Accept : Yes : SET : HxcVcDraftName : $$Value
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Template Line]
@@ -1486,10 +1500,9 @@
     Modifies : HxcVcDraftTemplate
     Width    : 40
     Max      : 80
-    ;; Modifies writes the INPUT field into ##HxcVcDraftTemplate; also lock FetchName from $Value
     On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
-    On       : Accept : Yes : SET : HxcVcDraftTemplate : $Value
-    On       : Accept : Yes : SET : HxcVcFetchName : $Value
+    On       : Accept : Yes : SET : HxcVcDraftTemplate : $$Value
+    On       : Accept : Yes : SET : HxcVcFetchName : $$Value
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Lang Line]
@@ -1504,9 +1517,9 @@
     Modifies : HxcVcDraftLang
     Width    : 16
     Max      : 16
-    On       : Accept : Yes : SET : HxcVcDraftLang : $Value
-    On       : Accept : Yes : SET : HxcVcFetchLang : $Value
-    ;; Prefer draft Variable (Modifies from Template input); else keep FetchName set on Template Accept
+    On       : Accept : Yes : SET : HxcVcDraftLang : $$Value
+    On       : Accept : Yes : SET : HxcVcFetchLang : $$Value
+    On       : Accept : NOT $$IsEmpty:#Hxc Vc F Template : SET : HxcVcDraftTemplate : #Hxc Vc F Template
     On       : Accept : NOT $$IsEmpty:##HxcVcDraftTemplate : SET : HxcVcFetchName : ##HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
     On       : Accept : ##HxcVcFetched : Field Accept
@@ -1596,7 +1609,7 @@
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
-    On         : Accept : Yes : SET : HxcVcDraftHeaderFld : $Value
+    On         : Accept : Yes : SET : HxcVcDraftHeaderFld : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1656,7 +1669,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
-    On         : Accept : Yes : SET : HxcVcDMFld1 : $Value
+    On         : Accept : Yes : SET : HxcVcDMFld1 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1683,7 +1696,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
-    On         : Accept : Yes : SET : HxcVcDMFld2 : $Value
+    On         : Accept : Yes : SET : HxcVcDMFld2 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1710,7 +1723,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
-    On         : Accept : Yes : SET : HxcVcDMFld3 : $Value
+    On         : Accept : Yes : SET : HxcVcDMFld3 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1737,7 +1750,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
-    On         : Accept : Yes : SET : HxcVcDMFld4 : $Value
+    On         : Accept : Yes : SET : HxcVcDMFld4 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1764,7 +1777,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
-    On         : Accept : Yes : SET : HxcVcDMFld5 : $Value
+    On         : Accept : Yes : SET : HxcVcDMFld5 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1791,7 +1804,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
-    On         : Accept : Yes : SET : HxcVcDMFld6 : $Value
+    On         : Accept : Yes : SET : HxcVcDMFld6 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1818,7 +1831,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
-    On         : Accept : Yes : SET : HxcVcDMFld7 : $Value
+    On         : Accept : Yes : SET : HxcVcDMFld7 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1845,7 +1858,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "body"
-    On         : Accept : Yes : SET : HxcVcDMFld8 : $Value
+    On         : Accept : Yes : SET : HxcVcDMFld8 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1905,7 +1918,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "button"
-    On         : Accept : Yes : SET : HxcVcButtonField1 : $Value
+    On         : Accept : Yes : SET : HxcVcButtonField1 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1932,7 +1945,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "button"
-    On         : Accept : Yes : SET : HxcVcButtonField2 : $Value
+    On         : Accept : Yes : SET : HxcVcButtonField2 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1959,7 +1972,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "button"
-    On         : Accept : Yes : SET : HxcVcButtonField3 : $Value
+    On         : Accept : Yes : SET : HxcVcButtonField3 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -1986,7 +1999,7 @@
     Max        : 40
     Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "button"
-    On         : Accept : Yes : SET : HxcVcButtonField4 : $Value
+    On         : Accept : Yes : SET : HxcVcButtonField4 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
     Skip : ##HxcVcMoveToConfirm
@@ -2060,7 +2073,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType1 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType1 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2082,7 +2095,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType2 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType2 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2104,7 +2117,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType3 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType3 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2126,7 +2139,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType4 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType4 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2148,7 +2161,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType5 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType5 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2170,7 +2183,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType6 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType6 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2192,7 +2205,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType7 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType7 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2214,7 +2227,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType8 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType8 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2236,7 +2249,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType9 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType9 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2258,7 +2271,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType10 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType10 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2280,7 +2293,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType11 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType11 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2302,7 +2315,7 @@
     Inactive   : NOT ##HxcVcFetched
     Skip Sysname : Yes
     Skip : ##HxcVcMoveToConfirm
-    On         : Accept : Yes : SET : HxcVcVchType12 : $Value
+    On         : Accept : Yes : SET : HxcVcVchType12 : $$Value
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 
@@ -2413,7 +2426,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 412)"
+    Set as    : "Create Voucher Config (build 413)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2490,7 +2503,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 412)"
+    Set as    : "Alter Voucher Config (build 413)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2550,7 +2563,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 412)"
+    Set as    : "Voucher Config List (build 413)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2665,7 +2678,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 412)"
+    Set as    : "Helixcer Chat (build 413)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
