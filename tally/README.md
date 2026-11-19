@@ -1,14 +1,13 @@
-# Helixcer Chat for TallyPrime — build 378
+# Helixcer Chat for TallyPrime — build 379
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 378)**.
+Title must show **(build 379)**.
 
-Based on working **build 368** fetch (unchanged).
+## Why the gap under Body?
+Inactive Field rows for unused Body3..16 / Button slots still take vertical space in Tally (Line `Inactive` is illegal — T0014).
 
-Variable Mapping:
-- **Header Variable** (when template has header)
-- **Body Variables** — rows where slot `FC=body` (same FK1..16 as 368)
-- **Button Variables** — rows where slot `FC=button`, immediately after Body
+## Fix
+Body and Button use **Repeat** collections with only real variables, so Button sits immediately under Body (or Voucher Rules if no buttons).
 
-No Repeat aggregates / Sync (those hid Body/Button). Field `Inactive` only (never Line/Part).
+Fetch stays build-368 style; Sync map rows runs before the success Msg Box; Sync helpers keep step numbers under 100.
