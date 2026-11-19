@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 379-no-body-btn-gap
-;; Title must show "(build 379)".
+;; BUILD: 380-sync-nested-if
+;; Title must show "(build 380)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -519,7 +519,13 @@
     62 :    SET : HxcVcFK16 : ##Key
     63 :    SET : HxcVcFC16 : ##Comp
     64 : END IF
-    65 : RETURN : Yes
+    65 : IF : ##Comp = "body"
+    66 :    SET : HxcVcHasBodyMaps : Yes
+    67 : END IF
+    68 : IF : ##Comp = "button"
+    69 :    SET : HxcVcHasBtnMaps : Yes
+    70 : END IF
+    71 : RETURN : Yes
 
 
 [Function: Hxc Clear Body Map Rows]
@@ -591,307 +597,339 @@
 
 [Function: Hxc Sync Map Slots 1 To 4]
     Variable : Fld : String
-    01 : IF : NOT $$IsEmpty:##HxcVcFK1 AND ##HxcVcFC1 = "body"
-    02 :    SET : Fld : $HxcVcDMFld1
-    03 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    04 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK1
-    05 :    SET VALUE : HxcVcBodyMapSlot : 1
-    06 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    07 :    SET TARGET : ..
-    08 :    SET : HxcVcHasBodyMaps : Yes
-    09 : END IF
-    10 : IF : NOT $$IsEmpty:##HxcVcFK1 AND ##HxcVcFC1 = "button"
-    11 :    SET : Fld : $HxcVcDMFld1
-    12 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    13 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK1
-    14 :    SET VALUE : HxcVcBtnMapSlot : 1
-    15 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    16 :    SET TARGET : ..
-    17 :    SET : HxcVcHasBtnMaps : Yes
-    18 : END IF
-    19 : IF : NOT $$IsEmpty:##HxcVcFK2 AND ##HxcVcFC2 = "body"
-    20 :    SET : Fld : $HxcVcDMFld2
-    21 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    22 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK2
-    23 :    SET VALUE : HxcVcBodyMapSlot : 2
-    24 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    25 :    SET TARGET : ..
-    26 :    SET : HxcVcHasBodyMaps : Yes
-    27 : END IF
-    28 : IF : NOT $$IsEmpty:##HxcVcFK2 AND ##HxcVcFC2 = "button"
-    29 :    SET : Fld : $HxcVcDMFld2
-    30 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    31 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK2
-    32 :    SET VALUE : HxcVcBtnMapSlot : 2
-    33 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    34 :    SET TARGET : ..
-    35 :    SET : HxcVcHasBtnMaps : Yes
-    36 : END IF
-    37 : IF : NOT $$IsEmpty:##HxcVcFK3 AND ##HxcVcFC3 = "body"
-    38 :    SET : Fld : $HxcVcDMFld3
-    39 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    40 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK3
-    41 :    SET VALUE : HxcVcBodyMapSlot : 3
-    42 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    43 :    SET TARGET : ..
-    44 :    SET : HxcVcHasBodyMaps : Yes
-    45 : END IF
-    46 : IF : NOT $$IsEmpty:##HxcVcFK3 AND ##HxcVcFC3 = "button"
-    47 :    SET : Fld : $HxcVcDMFld3
-    48 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    49 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK3
-    50 :    SET VALUE : HxcVcBtnMapSlot : 3
-    51 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    52 :    SET TARGET : ..
-    53 :    SET : HxcVcHasBtnMaps : Yes
-    54 : END IF
-    55 : IF : NOT $$IsEmpty:##HxcVcFK4 AND ##HxcVcFC4 = "body"
-    56 :    SET : Fld : $HxcVcDMFld4
-    57 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    58 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK4
-    59 :    SET VALUE : HxcVcBodyMapSlot : 4
-    60 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    61 :    SET TARGET : ..
-    62 :    SET : HxcVcHasBodyMaps : Yes
-    63 : END IF
-    64 : IF : NOT $$IsEmpty:##HxcVcFK4 AND ##HxcVcFC4 = "button"
-    65 :    SET : Fld : $HxcVcDMFld4
-    66 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    67 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK4
-    68 :    SET VALUE : HxcVcBtnMapSlot : 4
-    69 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    70 :    SET TARGET : ..
-    71 :    SET : HxcVcHasBtnMaps : Yes
-    72 : END IF
-    73 : RETURN : Yes
+    01 : IF : NOT $$IsEmpty:##HxcVcFK1
+    02 :    IF : ##HxcVcFC1 = "body"
+    03 :       SET : Fld : $HxcVcDMFld1
+    04 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    05 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK1
+    06 :       SET VALUE : HxcVcBodyMapSlot : 1
+    07 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    08 :       SET TARGET : ..
+    09 :       SET : HxcVcHasBodyMaps : Yes
+    10 :    END IF
+    11 :    IF : ##HxcVcFC1 = "button"
+    12 :       SET : Fld : $HxcVcDMFld1
+    13 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    14 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK1
+    15 :       SET VALUE : HxcVcBtnMapSlot : 1
+    16 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    17 :       SET TARGET : ..
+    18 :       SET : HxcVcHasBtnMaps : Yes
+    19 :    END IF
+    20 : END IF
+    21 : IF : NOT $$IsEmpty:##HxcVcFK2
+    22 :    IF : ##HxcVcFC2 = "body"
+    23 :       SET : Fld : $HxcVcDMFld2
+    24 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    25 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK2
+    26 :       SET VALUE : HxcVcBodyMapSlot : 2
+    27 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    28 :       SET TARGET : ..
+    29 :       SET : HxcVcHasBodyMaps : Yes
+    30 :    END IF
+    31 :    IF : ##HxcVcFC2 = "button"
+    32 :       SET : Fld : $HxcVcDMFld2
+    33 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    34 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK2
+    35 :       SET VALUE : HxcVcBtnMapSlot : 2
+    36 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    37 :       SET TARGET : ..
+    38 :       SET : HxcVcHasBtnMaps : Yes
+    39 :    END IF
+    40 : END IF
+    41 : IF : NOT $$IsEmpty:##HxcVcFK3
+    42 :    IF : ##HxcVcFC3 = "body"
+    43 :       SET : Fld : $HxcVcDMFld3
+    44 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    45 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK3
+    46 :       SET VALUE : HxcVcBodyMapSlot : 3
+    47 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    48 :       SET TARGET : ..
+    49 :       SET : HxcVcHasBodyMaps : Yes
+    50 :    END IF
+    51 :    IF : ##HxcVcFC3 = "button"
+    52 :       SET : Fld : $HxcVcDMFld3
+    53 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    54 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK3
+    55 :       SET VALUE : HxcVcBtnMapSlot : 3
+    56 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    57 :       SET TARGET : ..
+    58 :       SET : HxcVcHasBtnMaps : Yes
+    59 :    END IF
+    60 : END IF
+    61 : IF : NOT $$IsEmpty:##HxcVcFK4
+    62 :    IF : ##HxcVcFC4 = "body"
+    63 :       SET : Fld : $HxcVcDMFld4
+    64 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    65 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK4
+    66 :       SET VALUE : HxcVcBodyMapSlot : 4
+    67 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    68 :       SET TARGET : ..
+    69 :       SET : HxcVcHasBodyMaps : Yes
+    70 :    END IF
+    71 :    IF : ##HxcVcFC4 = "button"
+    72 :       SET : Fld : $HxcVcDMFld4
+    73 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    74 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK4
+    75 :       SET VALUE : HxcVcBtnMapSlot : 4
+    76 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    77 :       SET TARGET : ..
+    78 :       SET : HxcVcHasBtnMaps : Yes
+    79 :    END IF
+    80 : END IF
+    81 : RETURN : Yes
 
 [Function: Hxc Sync Map Slots 5 To 8]
     Variable : Fld : String
-    01 : IF : NOT $$IsEmpty:##HxcVcFK5 AND ##HxcVcFC5 = "body"
-    02 :    SET : Fld : $HxcVcDMFld5
-    03 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    04 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK5
-    05 :    SET VALUE : HxcVcBodyMapSlot : 5
-    06 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    07 :    SET TARGET : ..
-    08 :    SET : HxcVcHasBodyMaps : Yes
-    09 : END IF
-    10 : IF : NOT $$IsEmpty:##HxcVcFK5 AND ##HxcVcFC5 = "button"
-    11 :    SET : Fld : $HxcVcDMFld5
-    12 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    13 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK5
-    14 :    SET VALUE : HxcVcBtnMapSlot : 5
-    15 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    16 :    SET TARGET : ..
-    17 :    SET : HxcVcHasBtnMaps : Yes
-    18 : END IF
-    19 : IF : NOT $$IsEmpty:##HxcVcFK6 AND ##HxcVcFC6 = "body"
-    20 :    SET : Fld : $HxcVcDMFld6
-    21 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    22 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK6
-    23 :    SET VALUE : HxcVcBodyMapSlot : 6
-    24 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    25 :    SET TARGET : ..
-    26 :    SET : HxcVcHasBodyMaps : Yes
-    27 : END IF
-    28 : IF : NOT $$IsEmpty:##HxcVcFK6 AND ##HxcVcFC6 = "button"
-    29 :    SET : Fld : $HxcVcDMFld6
-    30 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    31 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK6
-    32 :    SET VALUE : HxcVcBtnMapSlot : 6
-    33 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    34 :    SET TARGET : ..
-    35 :    SET : HxcVcHasBtnMaps : Yes
-    36 : END IF
-    37 : IF : NOT $$IsEmpty:##HxcVcFK7 AND ##HxcVcFC7 = "body"
-    38 :    SET : Fld : $HxcVcDMFld7
-    39 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    40 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK7
-    41 :    SET VALUE : HxcVcBodyMapSlot : 7
-    42 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    43 :    SET TARGET : ..
-    44 :    SET : HxcVcHasBodyMaps : Yes
-    45 : END IF
-    46 : IF : NOT $$IsEmpty:##HxcVcFK7 AND ##HxcVcFC7 = "button"
-    47 :    SET : Fld : $HxcVcDMFld7
-    48 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    49 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK7
-    50 :    SET VALUE : HxcVcBtnMapSlot : 7
-    51 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    52 :    SET TARGET : ..
-    53 :    SET : HxcVcHasBtnMaps : Yes
-    54 : END IF
-    55 : IF : NOT $$IsEmpty:##HxcVcFK8 AND ##HxcVcFC8 = "body"
-    56 :    SET : Fld : $HxcVcDMFld8
-    57 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    58 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK8
-    59 :    SET VALUE : HxcVcBodyMapSlot : 8
-    60 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    61 :    SET TARGET : ..
-    62 :    SET : HxcVcHasBodyMaps : Yes
-    63 : END IF
-    64 : IF : NOT $$IsEmpty:##HxcVcFK8 AND ##HxcVcFC8 = "button"
-    65 :    SET : Fld : $HxcVcDMFld8
-    66 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    67 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK8
-    68 :    SET VALUE : HxcVcBtnMapSlot : 8
-    69 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    70 :    SET TARGET : ..
-    71 :    SET : HxcVcHasBtnMaps : Yes
-    72 : END IF
-    73 : RETURN : Yes
+    01 : IF : NOT $$IsEmpty:##HxcVcFK5
+    02 :    IF : ##HxcVcFC5 = "body"
+    03 :       SET : Fld : $HxcVcDMFld5
+    04 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    05 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK5
+    06 :       SET VALUE : HxcVcBodyMapSlot : 5
+    07 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    08 :       SET TARGET : ..
+    09 :       SET : HxcVcHasBodyMaps : Yes
+    10 :    END IF
+    11 :    IF : ##HxcVcFC5 = "button"
+    12 :       SET : Fld : $HxcVcDMFld5
+    13 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    14 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK5
+    15 :       SET VALUE : HxcVcBtnMapSlot : 5
+    16 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    17 :       SET TARGET : ..
+    18 :       SET : HxcVcHasBtnMaps : Yes
+    19 :    END IF
+    20 : END IF
+    21 : IF : NOT $$IsEmpty:##HxcVcFK6
+    22 :    IF : ##HxcVcFC6 = "body"
+    23 :       SET : Fld : $HxcVcDMFld6
+    24 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    25 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK6
+    26 :       SET VALUE : HxcVcBodyMapSlot : 6
+    27 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    28 :       SET TARGET : ..
+    29 :       SET : HxcVcHasBodyMaps : Yes
+    30 :    END IF
+    31 :    IF : ##HxcVcFC6 = "button"
+    32 :       SET : Fld : $HxcVcDMFld6
+    33 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    34 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK6
+    35 :       SET VALUE : HxcVcBtnMapSlot : 6
+    36 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    37 :       SET TARGET : ..
+    38 :       SET : HxcVcHasBtnMaps : Yes
+    39 :    END IF
+    40 : END IF
+    41 : IF : NOT $$IsEmpty:##HxcVcFK7
+    42 :    IF : ##HxcVcFC7 = "body"
+    43 :       SET : Fld : $HxcVcDMFld7
+    44 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    45 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK7
+    46 :       SET VALUE : HxcVcBodyMapSlot : 7
+    47 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    48 :       SET TARGET : ..
+    49 :       SET : HxcVcHasBodyMaps : Yes
+    50 :    END IF
+    51 :    IF : ##HxcVcFC7 = "button"
+    52 :       SET : Fld : $HxcVcDMFld7
+    53 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    54 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK7
+    55 :       SET VALUE : HxcVcBtnMapSlot : 7
+    56 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    57 :       SET TARGET : ..
+    58 :       SET : HxcVcHasBtnMaps : Yes
+    59 :    END IF
+    60 : END IF
+    61 : IF : NOT $$IsEmpty:##HxcVcFK8
+    62 :    IF : ##HxcVcFC8 = "body"
+    63 :       SET : Fld : $HxcVcDMFld8
+    64 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    65 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK8
+    66 :       SET VALUE : HxcVcBodyMapSlot : 8
+    67 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    68 :       SET TARGET : ..
+    69 :       SET : HxcVcHasBodyMaps : Yes
+    70 :    END IF
+    71 :    IF : ##HxcVcFC8 = "button"
+    72 :       SET : Fld : $HxcVcDMFld8
+    73 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    74 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK8
+    75 :       SET VALUE : HxcVcBtnMapSlot : 8
+    76 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    77 :       SET TARGET : ..
+    78 :       SET : HxcVcHasBtnMaps : Yes
+    79 :    END IF
+    80 : END IF
+    81 : RETURN : Yes
 
 [Function: Hxc Sync Map Slots 9 To 12]
     Variable : Fld : String
-    01 : IF : NOT $$IsEmpty:##HxcVcFK9 AND ##HxcVcFC9 = "body"
-    02 :    SET : Fld : $HxcVcDMFld9
-    03 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    04 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK9
-    05 :    SET VALUE : HxcVcBodyMapSlot : 9
-    06 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    07 :    SET TARGET : ..
-    08 :    SET : HxcVcHasBodyMaps : Yes
-    09 : END IF
-    10 : IF : NOT $$IsEmpty:##HxcVcFK9 AND ##HxcVcFC9 = "button"
-    11 :    SET : Fld : $HxcVcDMFld9
-    12 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    13 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK9
-    14 :    SET VALUE : HxcVcBtnMapSlot : 9
-    15 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    16 :    SET TARGET : ..
-    17 :    SET : HxcVcHasBtnMaps : Yes
-    18 : END IF
-    19 : IF : NOT $$IsEmpty:##HxcVcFK10 AND ##HxcVcFC10 = "body"
-    20 :    SET : Fld : $HxcVcDMFld10
-    21 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    22 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK10
-    23 :    SET VALUE : HxcVcBodyMapSlot : 10
-    24 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    25 :    SET TARGET : ..
-    26 :    SET : HxcVcHasBodyMaps : Yes
-    27 : END IF
-    28 : IF : NOT $$IsEmpty:##HxcVcFK10 AND ##HxcVcFC10 = "button"
-    29 :    SET : Fld : $HxcVcDMFld10
-    30 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    31 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK10
-    32 :    SET VALUE : HxcVcBtnMapSlot : 10
-    33 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    34 :    SET TARGET : ..
-    35 :    SET : HxcVcHasBtnMaps : Yes
-    36 : END IF
-    37 : IF : NOT $$IsEmpty:##HxcVcFK11 AND ##HxcVcFC11 = "body"
-    38 :    SET : Fld : $HxcVcDMFld11
-    39 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    40 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK11
-    41 :    SET VALUE : HxcVcBodyMapSlot : 11
-    42 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    43 :    SET TARGET : ..
-    44 :    SET : HxcVcHasBodyMaps : Yes
-    45 : END IF
-    46 : IF : NOT $$IsEmpty:##HxcVcFK11 AND ##HxcVcFC11 = "button"
-    47 :    SET : Fld : $HxcVcDMFld11
-    48 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    49 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK11
-    50 :    SET VALUE : HxcVcBtnMapSlot : 11
-    51 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    52 :    SET TARGET : ..
-    53 :    SET : HxcVcHasBtnMaps : Yes
-    54 : END IF
-    55 : IF : NOT $$IsEmpty:##HxcVcFK12 AND ##HxcVcFC12 = "body"
-    56 :    SET : Fld : $HxcVcDMFld12
-    57 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    58 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK12
-    59 :    SET VALUE : HxcVcBodyMapSlot : 12
-    60 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    61 :    SET TARGET : ..
-    62 :    SET : HxcVcHasBodyMaps : Yes
-    63 : END IF
-    64 : IF : NOT $$IsEmpty:##HxcVcFK12 AND ##HxcVcFC12 = "button"
-    65 :    SET : Fld : $HxcVcDMFld12
-    66 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    67 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK12
-    68 :    SET VALUE : HxcVcBtnMapSlot : 12
-    69 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    70 :    SET TARGET : ..
-    71 :    SET : HxcVcHasBtnMaps : Yes
-    72 : END IF
-    73 : RETURN : Yes
+    01 : IF : NOT $$IsEmpty:##HxcVcFK9
+    02 :    IF : ##HxcVcFC9 = "body"
+    03 :       SET : Fld : $HxcVcDMFld9
+    04 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    05 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK9
+    06 :       SET VALUE : HxcVcBodyMapSlot : 9
+    07 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    08 :       SET TARGET : ..
+    09 :       SET : HxcVcHasBodyMaps : Yes
+    10 :    END IF
+    11 :    IF : ##HxcVcFC9 = "button"
+    12 :       SET : Fld : $HxcVcDMFld9
+    13 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    14 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK9
+    15 :       SET VALUE : HxcVcBtnMapSlot : 9
+    16 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    17 :       SET TARGET : ..
+    18 :       SET : HxcVcHasBtnMaps : Yes
+    19 :    END IF
+    20 : END IF
+    21 : IF : NOT $$IsEmpty:##HxcVcFK10
+    22 :    IF : ##HxcVcFC10 = "body"
+    23 :       SET : Fld : $HxcVcDMFld10
+    24 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    25 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK10
+    26 :       SET VALUE : HxcVcBodyMapSlot : 10
+    27 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    28 :       SET TARGET : ..
+    29 :       SET : HxcVcHasBodyMaps : Yes
+    30 :    END IF
+    31 :    IF : ##HxcVcFC10 = "button"
+    32 :       SET : Fld : $HxcVcDMFld10
+    33 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    34 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK10
+    35 :       SET VALUE : HxcVcBtnMapSlot : 10
+    36 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    37 :       SET TARGET : ..
+    38 :       SET : HxcVcHasBtnMaps : Yes
+    39 :    END IF
+    40 : END IF
+    41 : IF : NOT $$IsEmpty:##HxcVcFK11
+    42 :    IF : ##HxcVcFC11 = "body"
+    43 :       SET : Fld : $HxcVcDMFld11
+    44 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    45 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK11
+    46 :       SET VALUE : HxcVcBodyMapSlot : 11
+    47 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    48 :       SET TARGET : ..
+    49 :       SET : HxcVcHasBodyMaps : Yes
+    50 :    END IF
+    51 :    IF : ##HxcVcFC11 = "button"
+    52 :       SET : Fld : $HxcVcDMFld11
+    53 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    54 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK11
+    55 :       SET VALUE : HxcVcBtnMapSlot : 11
+    56 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    57 :       SET TARGET : ..
+    58 :       SET : HxcVcHasBtnMaps : Yes
+    59 :    END IF
+    60 : END IF
+    61 : IF : NOT $$IsEmpty:##HxcVcFK12
+    62 :    IF : ##HxcVcFC12 = "body"
+    63 :       SET : Fld : $HxcVcDMFld12
+    64 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    65 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK12
+    66 :       SET VALUE : HxcVcBodyMapSlot : 12
+    67 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    68 :       SET TARGET : ..
+    69 :       SET : HxcVcHasBodyMaps : Yes
+    70 :    END IF
+    71 :    IF : ##HxcVcFC12 = "button"
+    72 :       SET : Fld : $HxcVcDMFld12
+    73 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    74 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK12
+    75 :       SET VALUE : HxcVcBtnMapSlot : 12
+    76 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    77 :       SET TARGET : ..
+    78 :       SET : HxcVcHasBtnMaps : Yes
+    79 :    END IF
+    80 : END IF
+    81 : RETURN : Yes
 
 [Function: Hxc Sync Map Slots 13 To 16]
     Variable : Fld : String
-    01 : IF : NOT $$IsEmpty:##HxcVcFK13 AND ##HxcVcFC13 = "body"
-    02 :    SET : Fld : $HxcVcDMFld13
-    03 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    04 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK13
-    05 :    SET VALUE : HxcVcBodyMapSlot : 13
-    06 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    07 :    SET TARGET : ..
-    08 :    SET : HxcVcHasBodyMaps : Yes
-    09 : END IF
-    10 : IF : NOT $$IsEmpty:##HxcVcFK13 AND ##HxcVcFC13 = "button"
-    11 :    SET : Fld : $HxcVcDMFld13
-    12 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    13 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK13
-    14 :    SET VALUE : HxcVcBtnMapSlot : 13
-    15 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    16 :    SET TARGET : ..
-    17 :    SET : HxcVcHasBtnMaps : Yes
-    18 : END IF
-    19 : IF : NOT $$IsEmpty:##HxcVcFK14 AND ##HxcVcFC14 = "body"
-    20 :    SET : Fld : $HxcVcDMFld14
-    21 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    22 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK14
-    23 :    SET VALUE : HxcVcBodyMapSlot : 14
-    24 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    25 :    SET TARGET : ..
-    26 :    SET : HxcVcHasBodyMaps : Yes
-    27 : END IF
-    28 : IF : NOT $$IsEmpty:##HxcVcFK14 AND ##HxcVcFC14 = "button"
-    29 :    SET : Fld : $HxcVcDMFld14
-    30 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    31 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK14
-    32 :    SET VALUE : HxcVcBtnMapSlot : 14
-    33 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    34 :    SET TARGET : ..
-    35 :    SET : HxcVcHasBtnMaps : Yes
-    36 : END IF
-    37 : IF : NOT $$IsEmpty:##HxcVcFK15 AND ##HxcVcFC15 = "body"
-    38 :    SET : Fld : $HxcVcDMFld15
-    39 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    40 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK15
-    41 :    SET VALUE : HxcVcBodyMapSlot : 15
-    42 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    43 :    SET TARGET : ..
-    44 :    SET : HxcVcHasBodyMaps : Yes
-    45 : END IF
-    46 : IF : NOT $$IsEmpty:##HxcVcFK15 AND ##HxcVcFC15 = "button"
-    47 :    SET : Fld : $HxcVcDMFld15
-    48 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    49 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK15
-    50 :    SET VALUE : HxcVcBtnMapSlot : 15
-    51 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    52 :    SET TARGET : ..
-    53 :    SET : HxcVcHasBtnMaps : Yes
-    54 : END IF
-    55 : IF : NOT $$IsEmpty:##HxcVcFK16 AND ##HxcVcFC16 = "body"
-    56 :    SET : Fld : $HxcVcDMFld16
-    57 :    INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    58 :    SET VALUE : HxcVcBodyMapKey : ##HxcVcFK16
-    59 :    SET VALUE : HxcVcBodyMapSlot : 16
-    60 :    SET VALUE : HxcVcBodyMapFld : ##Fld
-    61 :    SET TARGET : ..
-    62 :    SET : HxcVcHasBodyMaps : Yes
-    63 : END IF
-    64 : IF : NOT $$IsEmpty:##HxcVcFK16 AND ##HxcVcFC16 = "button"
-    65 :    SET : Fld : $HxcVcDMFld16
-    66 :    INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    67 :    SET VALUE : HxcVcBtnMapKey : ##HxcVcFK16
-    68 :    SET VALUE : HxcVcBtnMapSlot : 16
-    69 :    SET VALUE : HxcVcBtnMapFld : ##Fld
-    70 :    SET TARGET : ..
-    71 :    SET : HxcVcHasBtnMaps : Yes
-    72 : END IF
-    73 : RETURN : Yes
+    01 : IF : NOT $$IsEmpty:##HxcVcFK13
+    02 :    IF : ##HxcVcFC13 = "body"
+    03 :       SET : Fld : $HxcVcDMFld13
+    04 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    05 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK13
+    06 :       SET VALUE : HxcVcBodyMapSlot : 13
+    07 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    08 :       SET TARGET : ..
+    09 :       SET : HxcVcHasBodyMaps : Yes
+    10 :    END IF
+    11 :    IF : ##HxcVcFC13 = "button"
+    12 :       SET : Fld : $HxcVcDMFld13
+    13 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    14 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK13
+    15 :       SET VALUE : HxcVcBtnMapSlot : 13
+    16 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    17 :       SET TARGET : ..
+    18 :       SET : HxcVcHasBtnMaps : Yes
+    19 :    END IF
+    20 : END IF
+    21 : IF : NOT $$IsEmpty:##HxcVcFK14
+    22 :    IF : ##HxcVcFC14 = "body"
+    23 :       SET : Fld : $HxcVcDMFld14
+    24 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    25 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK14
+    26 :       SET VALUE : HxcVcBodyMapSlot : 14
+    27 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    28 :       SET TARGET : ..
+    29 :       SET : HxcVcHasBodyMaps : Yes
+    30 :    END IF
+    31 :    IF : ##HxcVcFC14 = "button"
+    32 :       SET : Fld : $HxcVcDMFld14
+    33 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    34 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK14
+    35 :       SET VALUE : HxcVcBtnMapSlot : 14
+    36 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    37 :       SET TARGET : ..
+    38 :       SET : HxcVcHasBtnMaps : Yes
+    39 :    END IF
+    40 : END IF
+    41 : IF : NOT $$IsEmpty:##HxcVcFK15
+    42 :    IF : ##HxcVcFC15 = "body"
+    43 :       SET : Fld : $HxcVcDMFld15
+    44 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    45 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK15
+    46 :       SET VALUE : HxcVcBodyMapSlot : 15
+    47 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    48 :       SET TARGET : ..
+    49 :       SET : HxcVcHasBodyMaps : Yes
+    50 :    END IF
+    51 :    IF : ##HxcVcFC15 = "button"
+    52 :       SET : Fld : $HxcVcDMFld15
+    53 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    54 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK15
+    55 :       SET VALUE : HxcVcBtnMapSlot : 15
+    56 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    57 :       SET TARGET : ..
+    58 :       SET : HxcVcHasBtnMaps : Yes
+    59 :    END IF
+    60 : END IF
+    61 : IF : NOT $$IsEmpty:##HxcVcFK16
+    62 :    IF : ##HxcVcFC16 = "body"
+    63 :       SET : Fld : $HxcVcDMFld16
+    64 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
+    65 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK16
+    66 :       SET VALUE : HxcVcBodyMapSlot : 16
+    67 :       SET VALUE : HxcVcBodyMapFld : ##Fld
+    68 :       SET TARGET : ..
+    69 :       SET : HxcVcHasBodyMaps : Yes
+    70 :    END IF
+    71 :    IF : ##HxcVcFC16 = "button"
+    72 :       SET : Fld : $HxcVcDMFld16
+    73 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
+    74 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK16
+    75 :       SET VALUE : HxcVcBtnMapSlot : 16
+    76 :       SET VALUE : HxcVcBtnMapFld : ##Fld
+    77 :       SET TARGET : ..
+    78 :       SET : HxcVcHasBtnMaps : Yes
+    79 :    END IF
+    80 : END IF
+    81 : RETURN : Yes
 
 [Function: Hxc Sync Map Rows From Slots]
     01 : CALL : Hxc Clear Body Map Rows
@@ -1290,7 +1328,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 379)"
+    Set as    : "Helixcer Chat — API Settings (build 380)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1759,7 +1797,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 379)"
+    Set as    : "Create Voucher Config (build 380)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1832,7 +1870,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 379)"
+    Set as    : "Alter Voucher Config (build 380)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1891,7 +1929,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 379)"
+    Set as    : "Voucher Config List (build 380)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2006,7 +2044,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 379)"
+    Set as    : "Helixcer Chat (build 380)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
