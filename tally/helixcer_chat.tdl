@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
 ;; BUILD: 363-lists-preview-clear
-;; Title must show "(build 363)".
+;; Title must show "(build 364)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -883,7 +883,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 363)"
+    Set as    : "Helixcer Chat — API Settings (build 364)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -957,7 +957,6 @@
 [Part: Hxc Vc Form Mid Row]
     Parts      : Hxc Vc Form Left Col, Hxc Vc Form Preview Part
     Horizontal : Yes
-    Inactive   : NOT ##HxcVcFetched
 
 [Part: Hxc Vc Form Left Col]
     Lines  : Hxc Vc F Map Sect, +
@@ -979,11 +978,9 @@
     Repeat   : Hxc Vc F Vch Data : HxcVcDraftVchs
     Break On : $$IsEmpty:$HxcVcDraftVchName OR $HxcVcDraftVchName = "End of List" OR $HxcVcDraftVchName = "Not Applicable"
     Scroll   : Vertical
-    Inactive : NOT ##HxcVcFetched
 
 [Part: Hxc Vc Form Settings Part]
     Lines    : Hxc Vc F Auto Line, Hxc Vc F Confirm Line
-    Inactive : NOT ##HxcVcFetched
 
 ;; --- Template fields ---
 
@@ -1604,7 +1601,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 363)"
+    Set as    : "Create Voucher Config (build 364)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1672,7 +1669,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 363)"
+    Set as    : "Alter Voucher Config (build 364)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1731,7 +1728,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 363)"
+    Set as    : "Voucher Config List (build 364)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1846,7 +1843,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 363)"
+    Set as    : "Helixcer Chat (build 364)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
