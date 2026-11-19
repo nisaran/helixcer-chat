@@ -1,15 +1,14 @@
-# Helixcer Chat for TallyPrime — build 364
+# Helixcer Chat for TallyPrime — build 365
 
-https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer-chat.tdl
+https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-mapping-preview-fix-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 364)**.
+Title must show **(build 365)**.
 
-## UI updates (functions unchanged)
+## UI fixes (functions unchanged)
 
-- **Variable Mapping** voucher-field table: Tally voucher/party labels + native lists (`Ledger`, `Stock Item`, `Godown`, `Cost Centre`, `Currency`, `Unit`) + End of List / Not Applicable
-- **Voucher Types**: `End of List` to finish adding rows
-- **New Create**: Form Create/Destroy clears draft so old mapping/preview does not linger
-- **Message Preview**: multiline (12 lines) for paragraph templates
-- **T0014 fix**: `Inactive` only on Fields (not Parts)
+- **Message Preview** restored (stacked above mapping; no Multi Line blank)
+- **Voucher field** list: dynamic data only (`Party Mailing Name`, `Company Mailing Name`, …) — no Ledger/Stock tables
+- **Layout**: removed horizontal Mid Row stretch gaps
+- **Map fields**: stable Width/Color; no Set Always on editable map fields
 
 Fetch still: Enter on Language or Alt+F.
