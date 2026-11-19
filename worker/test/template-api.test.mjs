@@ -908,6 +908,7 @@ test('external WhatsApp API lists and fetches templates by channel', async () =>
     assert.equal(listed.items[1].language.code, 'en_US');
     assert.equal(listed.items[1].variables.length, 2);
 
+    const namedBeforeFetch = providerPaths.filter(path => path.includes('name=')).length;
     const fetchResponse = await handleRequest(new Request(
       'https://api.chat.helixcer.com/api/v1/whatsapp/templates/order_confirmation?channelId=wa-sales&language=en_US',
       { headers: { Authorization: `Bearer ${token}`, 'X-Workspace-Id': 'ws_default' } }
@@ -920,6 +921,27 @@ test('external WhatsApp API lists and fetches templates by channel', async () =>
     assert.equal(fetched.items.length, 1);
     assert.equal(fetched.items[0].templateId, 'tmpl-order-en');
     assert.equal(fetched.items[0].status, 'APPROVED');
+    // Warm full-list cache from the list call above — by-name must not hit Meta again.
+    assert.equal(
+      providerPaths.filter(path => path.includes('name=')).length,
+      namedBeforeFetch,
+      'by-name fetch should reuse full template list cache'
+    );
+
+    // Soft language match: Tally "en" should resolve Meta "en_US".
+    const softLang = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/v1/whatsapp/templates/order_confirmation?channelId=wa-sales&language=en',
+      { headers: { Authorization: `Bearer ${token}`, 'X-Workspace-Id': 'ws_default' } }
+    ), env);
+    assert.equal(softLang.status, 200);
+    const softBody = await softLang.json();
+    assert.equal(softBody.items.length, 1);
+    assert.equal(softBody.items[0].language.code, 'en_US');
+    assert.equal(
+      providerPaths.filter(path => path.includes('name=')).length,
+      namedBeforeFetch,
+      'soft language match should reuse template cache'
+    );
 
     const missing = await handleRequest(new Request(
       'https://api.chat.helixcer.com/api/v1/whatsapp/templates/missing_template?channelId=wa-sales',
@@ -929,8 +951,6 @@ test('external WhatsApp API lists and fetches templates by channel', async () =>
     const missingBody = await missing.json();
     assert.equal(missingBody.status, false);
     assert.equal(missingBody.error.code, 'template_not_found');
-
-    assert.equal(providerPaths.some(path => path.includes('name=order_confirmation')), true);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();
