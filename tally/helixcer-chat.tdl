@@ -1,10 +1,11 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 408-alter-target-persist
-;; Title must show "(build 408)".
+;; BUILD: 409-save-target-no-clobber
+;; Title must show "(build 409)".
 ;;
 ;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
-;; Saved configs: NEW OBJECT Company + INSERT Aggregate + ALTER TARGET (not Form Accept alone).
-;; Company Storage draft UDFs are unused by Create UI.
+;; Saved configs: NEW OBJECT Company + INSERT Aggregate + SAVE TARGET.
+;; Create/Alter have NO Object:Company so Form Reject cannot clobber the save.
+;; Company draft UDFs unused by Create UI.
 ;; Fetch reads ##HxcVcDraftTemplate after Modifies syncs the input field into the Variable.
 ;; Never read Company draft Storage for Create. Clear Fetch Vars does not wipe FetchName.
 ;;
@@ -1293,8 +1294,8 @@
     14 : SET : Maps : $$HxcPackMaps
     15 : SET : Vchs : $$HxcPackVouchers
     16 : SET : EditKey : ##HxcVcDraftEditKey
-    ;; Proven shell pattern (build 344): open Company as target, mutate Aggregate, ALTER TARGET
-    ;; Form Accept alone does NOT persist procedural INSERT COLLECTION OBJECT rows.
+    ;; Persist outside the form Company object: NEW OBJECT + SAVE TARGET.
+    ;; Do NOT Form-Accept Object:Company afterward — that overwrites and wipes the Aggregate.
     17 : NEW OBJECT : Company : ##SVCurrentCompany
     18 : SET : Found : No
     19 : IF : NOT $$IsEmpty:##EditKey
@@ -1347,7 +1348,7 @@
     48 :    SET VALUE : HxcVcVoucherTypes : ##Vchs
     49 :    SET TARGET : ..
     50 : END IF
-    51 : ALTER TARGET
+    51 : SAVE TARGET
     52 : SET : HxcVcSaveOk : Yes
     53 : RETURN : Yes
 
@@ -1368,6 +1369,8 @@
 
 [Menu: Helixcer Voucher Config Menu]
     Title    : "Voucher Config"
+    ;; Create/Alter are session forms (no Object Company). Persist via SAVE TARGET in Commit.
+    ;; Use Alter (not Display) to avoid historical c0000005 with Display+Form Accept.
     Key Item : Create Config : C : Alter : Helixcer Voucher Config Create
     Key Item : Alter Config  : A : Alter : Helixcer Voucher Config Alter
     Key Item : List Configs  : L : Alter : Helixcer Voucher Config List
@@ -1397,7 +1400,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 408)"
+    Set as    : "Helixcer Chat — API Settings (build 409)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2186,7 +2189,6 @@
     List Variable : HxcVcVoucherDraft : String
     Form   : Helixcer Voucher Config Create
     Title  : "Create Voucher Config"
-    Object : Company
     Set    : HxcVcFetched : No
     Set    : HxcVcMoveToMapping : No
     Set    : HxcVcMoveToConfirm : No
@@ -2210,9 +2212,9 @@
     On     : Form Destroy : Yes : CALL : Hxc Vc Clear Draft
     On     : Form Destroy : Yes : CALL : Hxc Clear Fetch Vars
     On     : Form Accept  : Yes : CALL : Hxc Vc Commit Draft
-    On     : Form Accept  : ##HxcVcSaveOk : Form Accept
     On     : Form Accept  : ##HxcVcSaveOk : Msg Box : "Helixcer Voucher Config" : "Config saved."
     On     : Form Accept  : ##HxcVcSaveOk : CALL : Hxc Vc Clear Draft
+    On     : Form Accept  : ##HxcVcSaveOk : Form Reject
 
 [Part: Hxc Vc Cr Title Part]
     Lines : Hxc Vc Cr Title Line
@@ -2222,7 +2224,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 408)"
+    Set as    : "Create Voucher Config (build 409)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2369,7 +2371,6 @@
     List Variable : HxcVcVoucherDraft : String
     Form   : Helixcer Voucher Config Alter
     Title  : "Alter Voucher Config"
-    Object : Company
     Set    : HxcVcFetched : No
     Set    : HxcVcMoveToMapping : No
     Set    : HxcVcMoveToConfirm : No
@@ -2394,9 +2395,9 @@
     On     : Form Destroy : Yes : CALL : Hxc Vc Clear Draft
     On     : Form Destroy : Yes : CALL : Hxc Clear Fetch Vars
     On     : Form Accept  : Yes : CALL : Hxc Vc Commit Draft
-    On     : Form Accept  : ##HxcVcSaveOk : Form Accept
     On     : Form Accept  : ##HxcVcSaveOk : Msg Box : "Helixcer Voucher Config" : "Config saved."
     On     : Form Accept  : ##HxcVcSaveOk : CALL : Hxc Vc Clear Draft
+    On     : Form Accept  : ##HxcVcSaveOk : Form Reject
 
 [Part: Hxc Vc Al Title Part]
     Lines : Hxc Vc Al Title Line
@@ -2406,7 +2407,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 408)"
+    Set as    : "Alter Voucher Config (build 409)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2478,7 +2479,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 408)"
+    Set as    : "Voucher Config List (build 409)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2593,7 +2594,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 408)"
+    Set as    : "Helixcer Chat (build 409)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes

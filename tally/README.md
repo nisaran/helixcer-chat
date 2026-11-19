@@ -1,15 +1,13 @@
-# Helixcer Chat for TallyPrime — build 408
+# Helixcer Chat for TallyPrime — build 409
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 408)**.
+Title must show **(build 409)**.
 
-## Fix — saved configs not showing in List/Alter
-Procedural `INSERT COLLECTION OBJECT` only creates in-memory Aggregate rows. Persist with the proven shell pattern:
+## Fix — data not saving
+Create/Alter used `Object : Company` + Form Accept after `ALTER TARGET`. Form Accept wrote the form’s stale Company object back and wiped the Aggregate.
 
-1. `NEW OBJECT : Company : ##SVCurrentCompany`
-2. `INSERT COLLECTION OBJECT : HxcVoucherConfigs` (+ SET VALUE)
-3. `SET TARGET : ..`
-4. `ALTER TARGET`
-
-List/Alter read `Hxc Voucher Config Names` (`Belongs To : Yes`).
+- Persist with `NEW OBJECT : Company` + `SAVE TARGET`
+- Create/Alter have **no** `Object : Company` (session UI only)
+- After save: Msg Box → Form Reject (close UI, do not re-accept Company)
+- List still uses `Object : Company` to read saved rows
