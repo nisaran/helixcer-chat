@@ -1,14 +1,13 @@
-# Helixcer Chat for TallyPrime — build 365
+# Helixcer Chat for TallyPrime — build 366
 
-https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-mapping-preview-fix-b545/tally/helixcer-chat.tdl
+https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-preview-right-gate-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 365)**.
+Title must show **(build 366)**.
 
-## UI fixes (functions unchanged)
+## UI (functions unchanged)
 
-- **Message Preview** restored (stacked above mapping; no Multi Line blank)
-- **Voucher field** list: dynamic data only (`Party Mailing Name`, `Company Mailing Name`, …) — no Ledger/Stock tables
-- **Layout**: removed horizontal Mid Row stretch gaps
-- **Map fields**: stable Width/Color; no Set Always on editable map fields
+- **Message Preview** on the right of Variable Mapping again (side-by-side)
+- Preview is **single line** (multiline not used in that layout)
+- Mapping / preview / voucher rules / settings fields stay **Inactive until template fetch**
 
-Fetch still: Enter on Language or Alt+F.
+Fetch: Enter on Language or Alt+F.
