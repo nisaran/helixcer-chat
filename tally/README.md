@@ -1,10 +1,10 @@
-# Helixcer Chat for TallyPrime — build 392
+# Helixcer Chat for TallyPrime — build 393
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 392)**.
+Title must show **(build 393)**.
 
 ## Fix
-"Enter Template Name first" while Template Name was filled: Language Accept overwrote `HxcVcFetchName` with empty `##HxcVcDraftTemplate`, and Fetch did the same.
+Template Name was bound to a session `Variable`, so Fetch never saw the typed value ("Enter Template Name first").
 
-Template Accept now sets `FetchName` from `$Value` after clear. Language/Fetch **keep** that `FetchName` instead of wiping it.
+Config Name / Template Name / Language are Company `Storage` UDFs again. Fetch reads `$HxcVcDraftTemplate`.

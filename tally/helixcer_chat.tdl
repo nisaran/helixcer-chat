@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 392-keep-fetch-name
-;; Title must show "(build 392)".
+;; BUILD: 393-template-storage
+;; Title must show "(build 393)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -25,6 +25,10 @@
     HxcVcAutoSend          : Logical   : 25116
     HxcVcConfirmBeforeSend : Logical   : 25117
     HxcVcVarMapsText       : String    : 25118
+    ;; Template header draft — must be Company Storage so Fetch sees typed value
+    HxcVcDraftName     : String  : 25120
+    HxcVcDraftTemplate : String  : 25121
+    HxcVcDraftLang     : String  : 25122
     HxcVcCustom0 : String : 25210
     HxcVcCustom1 : String : 25211
     HxcVcCustom2 : String : 25212
@@ -86,15 +90,6 @@
 
 [Variable: HxcVcCreateBlank]
     Type : Logical
-
-[Variable: HxcVcDraftName]
-    Type : String
-
-[Variable: HxcVcDraftTemplate]
-    Type : String
-
-[Variable: HxcVcDraftLang]
-    Type : String
 
 [Variable: HxcVcDraftMedia]
     Type : String
@@ -355,9 +350,6 @@
     HxcVcCreateNeedsReset : No
     HxcVcCreateBlank    : No
     HxcVcFetched        : No
-    HxcVcDraftName : ""
-    HxcVcDraftTemplate : ""
-    HxcVcDraftLang : "en"
     HxcVcDraftMedia : "None"
     HxcVcDraftAuto : No
     HxcVcDraftConfirm : No
@@ -830,36 +822,35 @@
     05 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
     06 :    RETURN : No
     07 : END IF
-    ;; Prefer FetchName already set on Template Accept; only fill from draft if empty.
-    08 : IF : $$IsEmpty:##HxcVcFetchName
-    09 :    SET : HxcVcFetchName : ##HxcVcDraftTemplate
-    10 : END IF
-    11 : IF : $$IsEmpty:##HxcVcDraftTemplate AND NOT $$IsEmpty:##HxcVcFetchName
-    12 :    SET : HxcVcDraftTemplate : ##HxcVcFetchName
-    13 : END IF
-    14 : IF : $$IsEmpty:##HxcVcFetchLang
-    15 :    SET : HxcVcFetchLang : ##HxcVcDraftLang
-    16 : END IF
-    17 : IF : $$IsEmpty:##HxcVcFetchLang
-    18 :    SET : HxcVcFetchLang : "en"
-    19 : END IF
-    20 : IF : $$IsEmpty:##HxcVcFetchName
-    21 :    SET : HxcVcFetchStatus : "Enter Template Name first."
-    22 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    23 :    RETURN : No
-    24 : END IF
-    25 : SET : HxcVcFetchStatus : "Fetching..."
-    26 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
-    27 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
-    28 : End Progress
-    29 : IF : NOT ##HxcVcFetched
-    30 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
-    31 :       SET : HxcVcFetchStatus : "Could not fetch [" + ##HxcVcFetchName + "]. Open Helixcer Chat → Status. If Connected, check the template name on this channel."
-    32 :    END IF
-    33 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    34 :    RETURN : No
-    35 : END IF
-    34 : SET : HxcVcDMFld1 : ""
+    ;; Always take template/lang from Company Storage draft UDFs
+    08 : SET : HxcVcFetchName : $HxcVcDraftTemplate
+    09 : IF : $$IsEmpty:##HxcVcFetchName
+    10 :    SET : HxcVcFetchName : $HxcVcDraftTemplate:Company:##SVCurrentCompany
+    11 : END IF
+    12 : SET : HxcVcFetchLang : $HxcVcDraftLang
+    13 : IF : $$IsEmpty:##HxcVcFetchLang
+    14 :    SET : HxcVcFetchLang : $HxcVcDraftLang:Company:##SVCurrentCompany
+    15 : END IF
+    16 : IF : $$IsEmpty:##HxcVcFetchLang
+    17 :    SET : HxcVcFetchLang : "en"
+    18 : END IF
+    19 : IF : $$IsEmpty:##HxcVcFetchName
+    20 :    SET : HxcVcFetchStatus : "Enter Template Name first."
+    21 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    22 :    RETURN : No
+    23 : END IF
+    24 : SET : HxcVcFetchStatus : "Fetching..."
+    25 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
+    26 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
+    27 : End Progress
+    28 : IF : NOT ##HxcVcFetched
+    29 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
+    30 :       SET : HxcVcFetchStatus : "Could not fetch [" + ##HxcVcFetchName + "]. Open Helixcer Chat → Status. If Connected, check the template name on this channel."
+    31 :    END IF
+    32 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    33 :    RETURN : No
+    34 : END IF
+    35 : SET : HxcVcDMFld1 : ""
     35 : SET : HxcVcDMFld2 : ""
     36 : SET : HxcVcDMFld3 : ""
     37 : SET : HxcVcDMFld4 : ""
@@ -1038,9 +1029,9 @@
     01 : CALL : Hxc Clear Fetch Vars
     02 : CALL : Hxc Clear Draft Vchs
     03 : CALL : Hxc Seed Draft Vch Row
-    04 : SET : HxcVcDraftName : ""
-    05 : SET : HxcVcDraftTemplate : ""
-    06 : SET : HxcVcDraftLang : "en"
+    04 : SET VALUE : HxcVcDraftName : ""
+    05 : SET VALUE : HxcVcDraftTemplate : ""
+    06 : SET VALUE : HxcVcDraftLang : "en"
     07 : SET : HxcVcDraftMedia : "None"
     08 : SET : HxcVcDraftAuto : No
     081 : SET : HxcVcAutoSendEnabled : No
@@ -1089,11 +1080,11 @@
     Variable : Vchs : String
     Variable : EditKey : String
     01 : SET : HxcVcSaveOk : No
-    02 : IF : $$IsEmpty:##HxcVcDraftName
+    02 : IF : $$IsEmpty:$HxcVcDraftName
     03 :    Msg Box : "Helixcer Voucher Config" : "Config Name is required."
     04 :    RETURN : No
     05 : END IF
-    06 : IF : $$IsEmpty:##HxcVcDraftTemplate
+    06 : IF : $$IsEmpty:$HxcVcDraftTemplate
     07 :    Msg Box : "Helixcer Voucher Config" : "Template Name is required."
     08 :    RETURN : No
     09 : END IF
@@ -1112,9 +1103,9 @@
     18 :    WALK COLLECTION : HxcVoucherConfigs
     19 :       IF : $HxcVcName = ##EditKey
     20 :          SET TARGET
-    21 :          SET VALUE : HxcVcName : ##HxcVcDraftName
-    22 :          SET VALUE : HxcVcTemplateName : ##HxcVcDraftTemplate
-    23 :          SET VALUE : HxcVcLanguage : ##HxcVcDraftLang
+    21 :          SET VALUE : HxcVcName : $HxcVcDraftName
+    22 :          SET VALUE : HxcVcTemplateName : $HxcVcDraftTemplate
+    23 :          SET VALUE : HxcVcLanguage : $HxcVcDraftLang
     24 :          SET VALUE : HxcVcMediaExport : ##HxcVcDraftMedia
     25 :          SET VALUE : HxcVcAutoSend : ##HxcVcDraftAuto
     26 :          SET VALUE : HxcVcConfirmBeforeSend : ##HxcVcDraftConfirm
@@ -1134,9 +1125,9 @@
     31 :    END WALK
     32 : ELSE
     33 :    INSERT COLLECTION OBJECT : HxcVoucherConfigs
-    34 :    SET VALUE : HxcVcName : ##HxcVcDraftName
-    35 :    SET VALUE : HxcVcTemplateName : ##HxcVcDraftTemplate
-    36 :    SET VALUE : HxcVcLanguage : ##HxcVcDraftLang
+    34 :    SET VALUE : HxcVcName : $HxcVcDraftName
+    35 :    SET VALUE : HxcVcTemplateName : $HxcVcDraftTemplate
+    36 :    SET VALUE : HxcVcLanguage : $HxcVcDraftLang
     37 :    SET VALUE : HxcVcMediaExport : ##HxcVcDraftMedia
     38 :    SET VALUE : HxcVcAutoSend : ##HxcVcDraftAuto
     39 :    SET VALUE : HxcVcConfirmBeforeSend : ##HxcVcDraftConfirm
@@ -1204,7 +1195,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 392)"
+    Set as    : "Helixcer Chat — API Settings (build 393)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1335,12 +1326,10 @@
 [Field: Hxc Vc F Name]
     Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
-    Variable : HxcVcDraftName
-    Set as   : ##HxcVcDraftName
+    Storage  : HxcVcDraftName
+    Set as   : $HxcVcDraftName
     Width    : 40
     Max      : 60
-    On       : Accept : Yes : SET : HxcVcDraftName : $Value
-    On       : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Template Line]
     Fields : Medium Prompt, Hxc Vc F Template
@@ -1350,14 +1339,13 @@
 [Field: Hxc Vc F Template]
     Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
-    Variable : HxcVcDraftTemplate
-    Set as   : ##HxcVcDraftTemplate
+    Storage  : HxcVcDraftTemplate
+    Set as   : $HxcVcDraftTemplate
     Width    : 40
     Max      : 80
-    ;; Clear fetch state first, then lock template into both draft + FetchName from $Value
+    ;; Storage updates on Accept; then copy into FetchName for the HTTP call
     On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
-    On       : Accept : Yes : SET : HxcVcDraftTemplate : $Value
-    On       : Accept : Yes : SET : HxcVcFetchName : $Value
+    On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Lang Line]
@@ -1368,14 +1356,12 @@
 [Field: Hxc Vc F Lang]
     Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
-    Variable : HxcVcDraftLang
-    Set as   : If $$IsEmpty:##HxcVcDraftLang THEN "en" ELSE ##HxcVcDraftLang
+    Storage  : HxcVcDraftLang
+    Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
     Width    : 16
     Max      : 16
-    ;; Do NOT overwrite FetchName with empty DraftTemplate — Template Accept already set it.
-    On       : Accept : Yes : SET : HxcVcDraftLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
-    On       : Accept : Yes : SET : HxcVcDraftTemplate : If $$IsEmpty:##HxcVcDraftTemplate THEN ##HxcVcFetchName ELSE ##HxcVcDraftTemplate
+    On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
     On       : Accept : ##HxcVcFetched : Field Accept
 
@@ -1994,9 +1980,6 @@
     Set    : HxcVcPreviewText : ""
     Set    : HxcVcFetchStatus : ""
     Set    : HxcVcCreateNeedsReset : Yes
-    Set    : HxcVcDraftName : ""
-    Set    : HxcVcDraftTemplate : ""
-    Set    : HxcVcDraftLang : "en"
     Set    : HxcVcDraftMedia : "None"
     Set    : HxcVcDraftAuto : No
     Set    : HxcVcDraftConfirm : No
@@ -2020,7 +2003,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 392)"
+    Set as    : "Create Voucher Config (build 393)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2055,9 +2038,9 @@
     07 : SET : TypesRaw : ""
     08 : WALK COLLECTION : Hxc Voucher Config Names
     09 :    IF : $HxcVcName = ##EditKey
-    10 :       SET : HxcVcDraftName : $HxcVcName
-    11 :       SET : HxcVcDraftTemplate : $HxcVcTemplateName
-    12 :       SET : HxcVcDraftLang : $HxcVcLanguage
+    10 :       SET VALUE : HxcVcDraftName : $HxcVcName
+    11 :       SET VALUE : HxcVcDraftTemplate : $HxcVcTemplateName
+    12 :       SET VALUE : HxcVcDraftLang : $HxcVcLanguage
     13 :       SET : HxcVcDraftMedia : $HxcVcMediaExport
     14 :       SET : HxcVcDraftAuto : $HxcVcAutoSend
     141 :       SET : HxcVcAutoSendEnabled : $HxcVcAutoSend
@@ -2096,7 +2079,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 392)"
+    Set as    : "Alter Voucher Config (build 393)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2156,7 +2139,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 392)"
+    Set as    : "Voucher Config List (build 393)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2271,7 +2254,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 392)"
+    Set as    : "Helixcer Chat (build 393)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
