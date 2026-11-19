@@ -1,11 +1,13 @@
-# Helixcer Chat for TallyPrime — build 406
+# Helixcer Chat for TallyPrime — build 407
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 406)**.
+Title must show **(build 407)**.
 
-## Fix — config not saving
-`SET TARGET : Company` during Form Accept moved Aggregate writes off the form’s Company object, so Form Accept did not persist them. Msg Box inside Commit could also interrupt Accept.
+## Alter Config
+Removed the old Alter form. New Alter loads the Company `HxcVoucherConfigs` row saved by Create:
 
-- Write Aggregate on the form’s current Company object (no `SET TARGET : Company`)
-- Persist with Form Accept first, then show “Config saved.”
+1. Select Config (table of saved names) → Enter
+2. Loads name/template/lang/maps/customs/voucher types/settings from company DB
+3. Fetches that template and restores field mappings from `HxcVcVarMapsText`
+4. Edit + Ctrl+A updates the same Aggregate row
