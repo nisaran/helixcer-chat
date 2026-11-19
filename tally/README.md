@@ -1,8 +1,11 @@
-# Helixcer Chat for TallyPrime — build 383
+# Helixcer Chat for TallyPrime — build 384
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 383)**.
+Title must show **(build 384)**.
 
-## Gap fix
-Unused Body3–8 Field-Inactive rows caused the empty band under `{2}`. Body/Button are **Repeat** rows (only real variables). Sync uses nested IF (no `AND`). Section flags set only after Sync INSERT. Body/Btn row Storage is per-aggregate (`BodyMapFld` / `BtnMapFld`), copied to `HxcVcDMFld*` on Accept.
+Your corrected build 382, with one focus fix:
+
+After a successful template fetch, cursor moves to the first mapping field (Header / Body / Button / Voucher Type) instead of jumping back to **Config Name** (which re-ran fetch).
+
+Language Enter still fetches; it no longer runs `Field Accept` after the HTTP call.
