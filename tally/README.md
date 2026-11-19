@@ -1,13 +1,12 @@
-# Helixcer Chat for TallyPrime — build 369
+# Helixcer Chat for TallyPrime — build 370
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 369)**.
+Title must show **(build 370)**.
 
-## Variable mapping sections (functions unchanged)
+## Dynamic Body / Button rows
 
-- **Header Variable** (text header) / Media Header — as before
-- **Body Variables** — slots where component is `body`
-- **Button Variables** — slots where component is `button`
+Body Variables and Button Variables use Repeat aggregates (row count = template vars).
+Button section follows immediately after the last body row — no fixed empty Map1–16 gap.
 
-Fetch still fills the same FK/FC slots; UI only splits how they are shown.
+Header / Body / Button sections unchanged in meaning. Pack still uses DMFld slots.
