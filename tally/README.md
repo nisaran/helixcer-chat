@@ -1,10 +1,10 @@
-# Helixcer Chat for TallyPrime — build 399
+# Helixcer Chat for TallyPrime — build 400
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 399)**.
+Title must show **(build 400)**.
 
 ## Fix
-Blank Template Name in the UI still fetched a previous template: `CreateBlank` painted the field empty while Company Storage still held the old name, and Fetch used Storage.
+Config Name / Template Name inputs vanished on Enter: `CreateBlank` + `Set Always` cleared/hid them, and Fetch release wiped Storage.
 
-Before Fetch, CreateBlank is released (Storage wiped if still masked). Stale `HxcVcFetchName` is cleared with fetch vars. Empty template → **Enter Template Name first** (real HTTP only when a name is present).
+Removed CreateBlank paint. Name/Template stay visible (only Language is skipped after a successful fetch to advance focus). Fetch still requires a real Template Name.

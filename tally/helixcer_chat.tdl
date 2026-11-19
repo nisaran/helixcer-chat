@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 399-no-stale-template-fetch
-;; Title must show "(build 399)".
+;; BUILD: 400-keep-template-inputs
+;; Title must show "(build 400)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -831,11 +831,6 @@
     05 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
     06 :    RETURN : No
     07 : END IF
-    ;; CreateBlank paints Template empty while Storage may still hold the previous name —
-    ;; wipe that before reading, so a blank UI cannot fetch a stale template.
-    071 : IF : ##HxcVcCreateBlank
-    072 :    CALL : Hxc Release Create Blank
-    073 : END IF
     08 : SET : HxcVcFetchName : $HxcVcDraftTemplate
     09 : IF : $$IsEmpty:##HxcVcFetchName
     10 :    SET : HxcVcFetchName : $HxcVcDraftTemplate:Company:##SVCurrentCompany
@@ -1063,14 +1058,14 @@
     25 : RETURN : Yes
 
 [Function: Hxc Initialize New Config]
-    ;; Clear Company draft Storage + force blank paint via CreateBlank.
+    ;; Clear Company draft Storage for a fresh Create form.
     01 : SET : HxcVcCreateNeedsReset : No
     02 : SET : HxcVcMoveToMapping : No
     03 : SET : HxcVcMoveToConfirm : No
     04 : SET : HxcVcAutoSendEnabled : No
     05 : SET : HxcVcFetched : No
-    06 : CALL : Hxc Vc Clear Draft
-    07 : SET : HxcVcCreateBlank : Yes
+    06 : SET : HxcVcCreateBlank : No
+    07 : CALL : Hxc Vc Clear Draft
     08 : RETURN : Yes
 
 [Function: Hxc Release Create Blank]
@@ -1259,7 +1254,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 399)"
+    Set as    : "Helixcer Chat — API Settings (build 400)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1388,14 +1383,12 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Name]
-    Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
+    Skip     : ##HxcVcMoveToConfirm
     Use      : Name Field
     Storage  : HxcVcDraftName
-    Set as   : If ##HxcVcCreateBlank THEN "" ELSE $HxcVcDraftName
-    Set Always : ##HxcVcCreateBlank
+    Set as   : $HxcVcDraftName
     Width    : 40
     Max      : 60
-    On       : Focus : ##HxcVcCreateBlank : CALL : Hxc Release Create Blank
 
 [Line: Hxc Vc F Template Line]
     Fields : Medium Prompt, Hxc Vc F Template
@@ -1403,15 +1396,12 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Template]
-    Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
+    Skip     : ##HxcVcMoveToConfirm
     Use      : Name Field
     Storage  : HxcVcDraftTemplate
-    Set as   : If ##HxcVcCreateBlank THEN "" ELSE $HxcVcDraftTemplate
-    Set Always : ##HxcVcCreateBlank
+    Set as   : $HxcVcDraftTemplate
     Width    : 40
     Max      : 80
-    On       : Focus : ##HxcVcCreateBlank : CALL : Hxc Release Create Blank
-    ;; Storage updates on Accept; then copy into FetchName for the HTTP call
     On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : Field Accept
@@ -1425,11 +1415,9 @@
     Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
     Storage  : HxcVcDraftLang
-    Set as   : If ##HxcVcCreateBlank THEN "en" ELSE If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
-    Set Always : ##HxcVcCreateBlank
+    Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
     Width    : 16
     Max      : 16
-    On       : Focus : ##HxcVcCreateBlank : CALL : Hxc Release Create Blank
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
@@ -2053,7 +2041,7 @@
     Set    : HxcVcPreviewText : ""
     Set    : HxcVcFetchStatus : ""
     Set    : HxcVcCreateNeedsReset : Yes
-    Set    : HxcVcCreateBlank : Yes
+    Set    : HxcVcCreateBlank : No
     Set    : HxcVcDraftMedia : "None"
     Set    : HxcVcDraftAuto : No
     Set    : HxcVcDraftConfirm : No
@@ -2077,7 +2065,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 399)"
+    Set as    : "Create Voucher Config (build 400)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2153,7 +2141,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 399)"
+    Set as    : "Alter Voucher Config (build 400)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2213,7 +2201,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 399)"
+    Set as    : "Voucher Config List (build 400)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2328,7 +2316,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 399)"
+    Set as    : "Helixcer Chat (build 400)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
