@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 390-sync-draft-vars
-;; Title must show "(build 390)".
+;; BUILD: 391-no-bad-value-formula
+;; Title must show "(build 391)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -831,37 +831,28 @@
     06 :    RETURN : No
     07 : END IF
     08 : SET : HxcVcFetchName : ##HxcVcDraftTemplate
-    09 : IF : $$IsEmpty:##HxcVcFetchName
-    10 :    SET : HxcVcFetchName : $$Value:Hxc Vc F Template
+    09 : IF : $$IsEmpty:##HxcVcFetchLang
+    10 :    SET : HxcVcFetchLang : ##HxcVcDraftLang
     11 : END IF
-    12 : IF : NOT $$IsEmpty:##HxcVcFetchName
-    13 :    SET : HxcVcDraftTemplate : ##HxcVcFetchName
+    12 : IF : $$IsEmpty:##HxcVcFetchLang
+    13 :    SET : HxcVcFetchLang : "en"
     14 : END IF
-    15 : IF : $$IsEmpty:##HxcVcFetchLang
-    16 :    SET : HxcVcFetchLang : ##HxcVcDraftLang
-    17 : END IF
-    18 : IF : $$IsEmpty:##HxcVcFetchLang
-    19 :    SET : HxcVcFetchLang : $$Value:Hxc Vc F Lang
-    20 : END IF
-    21 : IF : $$IsEmpty:##HxcVcFetchLang
-    22 :    SET : HxcVcFetchLang : "en"
-    23 : END IF
-    24 : IF : $$IsEmpty:##HxcVcFetchName
-    25 :    SET : HxcVcFetchStatus : "Enter Template Name first."
-    26 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    27 :    RETURN : No
-    28 : END IF
-    29 : SET : HxcVcFetchStatus : "Fetching..."
-    24 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
-    25 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
-    26 : End Progress
-    27 : IF : NOT ##HxcVcFetched
-    28 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
-    29 :       SET : HxcVcFetchStatus : "Could not fetch [" + ##HxcVcFetchName + "]. Open Helixcer Chat → Status. If Connected, check the template name on this channel."
-    30 :    END IF
-    31 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    32 :    RETURN : No
-    33 : END IF
+    15 : IF : $$IsEmpty:##HxcVcFetchName
+    16 :    SET : HxcVcFetchStatus : "Enter Template Name first."
+    17 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    18 :    RETURN : No
+    19 : END IF
+    20 : SET : HxcVcFetchStatus : "Fetching..."
+    21 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
+    22 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
+    23 : End Progress
+    24 : IF : NOT ##HxcVcFetched
+    25 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
+    26 :       SET : HxcVcFetchStatus : "Could not fetch [" + ##HxcVcFetchName + "]. Open Helixcer Chat → Status. If Connected, check the template name on this channel."
+    27 :    END IF
+    28 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    29 :    RETURN : No
+    30 : END IF
     34 : SET : HxcVcDMFld1 : ""
     35 : SET : HxcVcDMFld2 : ""
     36 : SET : HxcVcDMFld3 : ""
@@ -1207,7 +1198,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 390)"
+    Set as    : "Helixcer Chat — API Settings (build 391)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1375,8 +1366,6 @@
     Width    : 16
     Max      : 16
     On       : Accept : Yes : SET : HxcVcDraftLang : $Value
-    On       : Accept : Yes : SET : HxcVcDraftTemplate : $$Value:Hxc Vc F Template
-    On       : Accept : Yes : SET : HxcVcDraftName : $$Value:Hxc Vc F Name
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : ##HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
@@ -2023,7 +2012,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 390)"
+    Set as    : "Create Voucher Config (build 391)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2099,7 +2088,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 390)"
+    Set as    : "Alter Voucher Config (build 391)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2159,7 +2148,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 390)"
+    Set as    : "Voucher Config List (build 391)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2274,7 +2263,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 390)"
+    Set as    : "Helixcer Chat (build 391)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
