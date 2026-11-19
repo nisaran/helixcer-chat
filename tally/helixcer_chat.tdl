@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 405-list-alter-company-target
-;; Title must show "(build 405)".
+;; BUILD: 406-form-accept-persist
+;; Title must show "(build 406)".
 ;;
 ;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
 ;; Company Storage is used for saved HxcVoucherConfigs on Commit — never for Create UI.
@@ -1110,6 +1110,13 @@
     Variable : Vchs : String
     Variable : EditKey : String
     01 : SET : HxcVcSaveOk : No
+    ;; Pull visible inputs in case Accept/Modifies did not flush yet
+    011 : IF : NOT $$IsEmpty:#HxcVcConfigNameInput
+    012 :    SET : HxcVcDraftName : #HxcVcConfigNameInput
+    013 : END IF
+    014 : IF : NOT $$IsEmpty:#HxcVcTemplateNameInput
+    015 :    SET : HxcVcDraftTemplate : #HxcVcTemplateNameInput
+    016 : END IF
     02 : IF : $$IsEmpty:##HxcVcDraftName
     03 :    Msg Box : "Helixcer Voucher Config" : "Config Name is required."
     04 :    RETURN : No
@@ -1129,8 +1136,7 @@
     14 : SET : Maps : $$HxcPackMaps
     15 : SET : Vchs : $$HxcPackVouchers
     16 : SET : EditKey : ##HxcVcDraftEditKey
-    ;; Persist Aggregate on the current company so List/Alter can see saved configs
-    161 : SET TARGET : Company : ##SVCurrentCompany
+    ;; Form Object is already Company — do NOT SET TARGET Company (that orphans Aggregate from Form Accept)
     17 : IF : NOT $$IsEmpty:##EditKey
     18 :    WALK COLLECTION : HxcVoucherConfigs
     19 :       IF : $HxcVcName = ##EditKey
@@ -1176,10 +1182,10 @@
     41 :    SET VALUE : HxcVcVoucherTypes : ##Vchs
     42 :    SET TARGET : ..
     43 : END IF
-    44 : CALL : Hxc Vc Clear Draft
-    45 : SET : HxcVcSaveOk : Yes
-    46 : Msg Box : "Helixcer Voucher Config" : "Config saved."
-    47 : RETURN : Yes
+    ;; Leave Aggregate on the form's Company object; Form Accept persists it.
+    ;; Msg Box after Form Accept (Msg Box here can abort the company save).
+    44 : SET : HxcVcSaveOk : Yes
+    45 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; Menu
@@ -1227,7 +1233,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 405)"
+    Set as    : "Helixcer Chat — API Settings (build 406)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2041,6 +2047,8 @@
     On     : Form Destroy : Yes : CALL : Hxc Clear Fetch Vars
     On     : Form Accept  : Yes : CALL : Hxc Vc Commit Draft
     On     : Form Accept  : ##HxcVcSaveOk : Form Accept
+    On     : Form Accept  : ##HxcVcSaveOk : Msg Box : "Helixcer Voucher Config" : "Config saved."
+    On     : Form Accept  : ##HxcVcSaveOk : CALL : Hxc Vc Clear Draft
 
 [Part: Hxc Vc Cr Title Part]
     Lines : Hxc Vc Cr Title Line
@@ -2050,7 +2058,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 405)"
+    Set as    : "Create Voucher Config (build 406)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2118,6 +2126,8 @@
     On     : Form Destroy : Yes : CALL : Hxc Clear Fetch Vars
     On     : Form Accept  : Yes : CALL : Hxc Vc Commit Draft
     On     : Form Accept  : ##HxcVcSaveOk : Form Accept
+    On     : Form Accept  : ##HxcVcSaveOk : Msg Box : "Helixcer Voucher Config" : "Config saved."
+    On     : Form Accept  : ##HxcVcSaveOk : CALL : Hxc Vc Clear Draft
 
 [Part: Hxc Vc Al Title Part]
     Lines : Hxc Vc Al Title Line
@@ -2127,7 +2137,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 405)"
+    Set as    : "Alter Voucher Config (build 406)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2187,7 +2197,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 405)"
+    Set as    : "Voucher Config List (build 406)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2302,7 +2312,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 405)"
+    Set as    : "Helixcer Chat (build 406)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
