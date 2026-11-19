@@ -1,16 +1,14 @@
-# Helixcer Chat for TallyPrime — build 372
+# Helixcer Chat for TallyPrime — build 373
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 372)**.
+Title must show **(build 373)**.
 
-## Fetch Template (same mechanism as build 368)
+## Fetch Template (same as build 368)
 
-- **Enter** on **Language** → `SET` lang/name → `CALL : Hxc Fetch Template` → `Field Accept`
+- **Enter** on **Language** → SET lang/name → `CALL : Hxc Fetch Template` → Field Accept
 - **Alt+F**
-- **Enter** on the **Fetch** gate line (keeps Enter from jumping to Accept?)
+- **Enter** on **Fetch** gate
 
-HTTP path: `Hxc Fetch Template` → `HTTP Request` → `Hxc Apply Template Response` (sets FK/FC/preview/`HxcVcFetched`).  
-After success, clear draft map fields, then `CALL : Hxc Sync Map Rows From Slots` to build Body/Button Repeat rows (UI only).
-
-`Accept?` is **Save** (Ctrl+A), not fetch.
+`Hxc Clear Fetch Vars` matches build 368 (no Body/Button aggregate DELETE during HTTP Apply).  
+After success: Msg Box, then Sync Body/Button mapping rows for the UI.

@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 372-fetch-like-368
-;; Title must show "(build 372)".
+;; BUILD: 373-clear-fetch-like-368
+;; Title must show "(build 373)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -407,15 +407,15 @@
 
 [Function: Hxc Clear Fetch Vars]
     01 : SET : HxcVcFetched : No
-    02 : CALL : Hxc Clear Body Map Rows
-    03 : CALL : Hxc Clear Btn Map Rows
-    04 : SET : HxcVcPreviewText : ""
-    05 : SET : HxcVcFetchStatus : ""
-    06 : SET : HxcVcMapsCsv : ""
-    07 : SET : HxcVcHasHeader : No
-    08 : SET : HxcVcHeaderKind : ""
-    09 : SET : HxcVcHeaderFormat : ""
-    10 : SET : HxcVcHeaderKey : ""
+    02 : SET : HxcVcPreviewText : ""
+    03 : SET : HxcVcFetchStatus : ""
+    04 : SET : HxcVcMapsCsv : ""
+    05 : SET : HxcVcHasHeader : No
+    06 : SET : HxcVcHeaderKind : ""
+    07 : SET : HxcVcHeaderFormat : ""
+    08 : SET : HxcVcHeaderKey : ""
+    09 : SET : HxcVcHasBodyMaps : No
+    10 : SET : HxcVcHasBtnMaps : No
     11 : SET : HxcVcFK1 : ""
     12 : SET : HxcVcFK2 : ""
     13 : SET : HxcVcFK3 : ""
@@ -1055,8 +1055,8 @@
     55 : ELSE
     56 :    SET VALUE : HxcVcDraftMedia : "None"
     57 : END IF
-    58 : CALL : Hxc Sync Map Rows From Slots
-    59 : Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    58 : Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    59 : CALL : Hxc Sync Map Rows From Slots
     60 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
@@ -1177,33 +1177,36 @@
 
 [Function: Hxc Vc Clear Draft]
     01 : CALL : Hxc Clear Fetch Vars
-    02 : CALL : Hxc Clear Draft Vchs
-    03 : CALL : Hxc Seed Draft Vch Row
-    04 : SET VALUE : HxcVcDraftName : ""
-    05 : SET VALUE : HxcVcDraftTemplate : ""
-    06 : SET VALUE : HxcVcDraftLang : "en"
-    07 : SET VALUE : HxcVcDraftMedia : "None"
-    08 : SET VALUE : HxcVcDraftAuto : No
-    09 : SET VALUE : HxcVcDraftConfirm : No
-    10 : SET VALUE : HxcVcDraftEditKey : ""
-    11 : SET VALUE : HxcVcDraftHeaderFld : ""
-    12 : SET VALUE : HxcVcDMFld1 : ""
-    13 : SET VALUE : HxcVcDMFld2 : ""
-    14 : SET VALUE : HxcVcDMFld3 : ""
-    15 : SET VALUE : HxcVcDMFld4 : ""
-    16 : SET VALUE : HxcVcDMFld5 : ""
-    17 : SET VALUE : HxcVcDMFld6 : ""
-    18 : SET VALUE : HxcVcDMFld7 : ""
-    19 : SET VALUE : HxcVcDMFld8 : ""
-    20 : SET VALUE : HxcVcDMFld9 : ""
-    21 : SET VALUE : HxcVcDMFld10 : ""
-    22 : SET VALUE : HxcVcDMFld11 : ""
-    23 : SET VALUE : HxcVcDMFld12 : ""
-    24 : SET VALUE : HxcVcDMFld13 : ""
-    25 : SET VALUE : HxcVcDMFld14 : ""
-    26 : SET VALUE : HxcVcDMFld15 : ""
-    27 : SET VALUE : HxcVcDMFld16 : ""
-    28 : RETURN : Yes
+    02 : CALL : Hxc Clear Body Map Rows
+    03 : CALL : Hxc Clear Btn Map Rows
+    04 : CALL : Hxc Clear Draft Vchs
+    05 : CALL : Hxc Seed Draft Vch Row
+    06 : SET VALUE : HxcVcDraftName : ""
+    07 : SET VALUE : HxcVcDraftTemplate : ""
+    08 : SET VALUE : HxcVcDraftLang : "en"
+    09 : SET VALUE : HxcVcDraftMedia : "None"
+    10 : SET VALUE : HxcVcDraftAuto : No
+    11 : SET VALUE : HxcVcDraftConfirm : No
+    12 : SET VALUE : HxcVcDraftEditKey : ""
+    13 : SET VALUE : HxcVcDraftHeaderFld : ""
+    14 : SET VALUE : HxcVcDMFld1 : ""
+    15 : SET VALUE : HxcVcDMFld2 : ""
+    16 : SET VALUE : HxcVcDMFld3 : ""
+    17 : SET VALUE : HxcVcDMFld4 : ""
+    18 : SET VALUE : HxcVcDMFld5 : ""
+    19 : SET VALUE : HxcVcDMFld6 : ""
+    20 : SET VALUE : HxcVcDMFld7 : ""
+    21 : SET VALUE : HxcVcDMFld8 : ""
+    22 : SET VALUE : HxcVcDMFld9 : ""
+    23 : SET VALUE : HxcVcDMFld10 : ""
+    24 : SET VALUE : HxcVcDMFld11 : ""
+    25 : SET VALUE : HxcVcDMFld12 : ""
+    26 : SET VALUE : HxcVcDMFld13 : ""
+    27 : SET VALUE : HxcVcDMFld14 : ""
+    28 : SET VALUE : HxcVcDMFld15 : ""
+    29 : SET VALUE : HxcVcDMFld16 : ""
+    30 : RETURN : Yes
+
 
 
 [Function: Hxc Vc Commit Draft]
@@ -1304,7 +1307,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 372)"
+    Set as    : "Helixcer Chat — API Settings (build 373)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1786,7 +1789,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 372)"
+    Set as    : "Create Voucher Config (build 373)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1859,7 +1862,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 372)"
+    Set as    : "Alter Voucher Config (build 373)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1918,7 +1921,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 372)"
+    Set as    : "Voucher Config List (build 373)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2033,7 +2036,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 372)"
+    Set as    : "Helixcer Chat (build 373)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
