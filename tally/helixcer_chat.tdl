@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 385-skip-template-when-fetched
-;; Title must show "(build 385)".
+;; BUILD: 386-continue-gate
+;; Title must show "(build 386)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -981,7 +981,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 385)"
+    Set as    : "Helixcer Chat — API Settings (build 386)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1048,6 +1048,7 @@
 [Part: Hxc Vc Form Template Part]
     Lines  : Hxc Vc F Template Sect, +
              Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
+             Hxc Vc F Cont Line, +
              Hxc Vc F Fetch Status Line
 
 ;; Mapping (left) + Message Preview (right) — single-line preview
@@ -1149,8 +1150,26 @@
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
+    On       : Accept : ##HxcVcFetched : Focus Field : Hxc Vc F Cont
     On       : Accept : ##HxcVcFetched : Field Accept
-    On       : Focus : ##HxcVcFetched : CALL : Hxc After Fetch Focus
+    On       : Focus : ##HxcVcFetched : Focus Field : Hxc Vc F Cont
+
+
+[Line: Hxc Vc F Cont Line]
+    Fields : Medium Prompt, Hxc Vc F Cont
+    Local  : Field : Medium Prompt : Set as : "Continue"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Cont]
+    ;; Always active: Language Field Accept lands here after HTTP (mapping still Invisible).
+    Use        : Name Field
+    Set as     : If ##HxcVcFetched THEN "Enter → mapping" ELSE "Enter Language to fetch"
+    Set Always : Yes
+    Width      : 40
+    Max        : 40
+    Skip       : No
+    On         : Accept : NOT ##HxcVcFetched : CALL : Hxc Fetch Template
+    On         : Accept : ##HxcVcFetched : Field Accept
 
 [Line: Hxc Vc F Fetch Status Line]
     Field : Hxc Vc F Fetch Status
@@ -1711,7 +1730,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 385)"
+    Set as    : "Create Voucher Config (build 386)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1784,7 +1803,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 385)"
+    Set as    : "Alter Voucher Config (build 386)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1843,7 +1862,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 385)"
+    Set as    : "Voucher Config List (build 386)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1958,7 +1977,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 385)"
+    Set as    : "Helixcer Chat (build 386)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
