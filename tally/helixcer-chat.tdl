@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 396-vch-session-slots
-;; Title must show "(build 396)".
+;; BUILD: 397-all-vch-slots-visible
+;; Title must show "(build 397)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -1281,7 +1281,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 396)"
+    Set as    : "Helixcer Chat — API Settings (build 397)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1981,7 +1981,7 @@
 
 [Field: Hxc Vc F Vch Head Fld]
     Use       : Name Field
-    Set as    : "Applicable Voucher Types  (add rows; leave blank to end)"
+    Set as    : "Applicable Voucher Types  (up to 6; leave blank unused)"
     FullWidth : Yes
     Skip      : Yes
     Inactive  : NOT ##HxcVcFetched
@@ -2008,7 +2008,7 @@
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 [Line: Hxc Vc F Vch2]
-    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType1 OR ##HxcVcVchType1 = "End of List" OR ##HxcVcVchType1 = "Not Applicable"
+    Invisible : NOT ##HxcVcFetched
     Fields : Medium Prompt, HxcVcVchType2Input
     Local  : Field : Medium Prompt : Set as : "Voucher Type"
     Local  : Field : Medium Prompt : Width  : 22
@@ -2029,7 +2029,7 @@
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 [Line: Hxc Vc F Vch3]
-    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType2 OR ##HxcVcVchType2 = "End of List" OR ##HxcVcVchType2 = "Not Applicable"
+    Invisible : NOT ##HxcVcFetched
     Fields : Medium Prompt, HxcVcVchType3Input
     Local  : Field : Medium Prompt : Set as : "Voucher Type"
     Local  : Field : Medium Prompt : Width  : 22
@@ -2050,7 +2050,7 @@
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 [Line: Hxc Vc F Vch4]
-    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType3 OR ##HxcVcVchType3 = "End of List" OR ##HxcVcVchType3 = "Not Applicable"
+    Invisible : NOT ##HxcVcFetched
     Fields : Medium Prompt, HxcVcVchType4Input
     Local  : Field : Medium Prompt : Set as : "Voucher Type"
     Local  : Field : Medium Prompt : Width  : 22
@@ -2071,7 +2071,7 @@
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 [Line: Hxc Vc F Vch5]
-    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType4 OR ##HxcVcVchType4 = "End of List" OR ##HxcVcVchType4 = "Not Applicable"
+    Invisible : NOT ##HxcVcFetched
     Fields : Medium Prompt, HxcVcVchType5Input
     Local  : Field : Medium Prompt : Set as : "Voucher Type"
     Local  : Field : Medium Prompt : Width  : 22
@@ -2092,7 +2092,7 @@
     On         : Accept : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     On         : Accept : Yes : Field Accept
 [Line: Hxc Vc F Vch6]
-    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcVchType5 OR ##HxcVcVchType5 = "End of List" OR ##HxcVcVchType5 = "Not Applicable"
+    Invisible : NOT ##HxcVcFetched
     Fields : Medium Prompt, HxcVcVchType6Input
     Local  : Field : Medium Prompt : Set as : "Voucher Type"
     Local  : Field : Medium Prompt : Width  : 22
@@ -2210,7 +2210,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 396)"
+    Set as    : "Create Voucher Config (build 397)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2286,7 +2286,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 396)"
+    Set as    : "Alter Voucher Config (build 397)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2346,7 +2346,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 396)"
+    Set as    : "Voucher Config List (build 397)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2461,7 +2461,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 396)"
+    Set as    : "Helixcer Chat (build 397)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
