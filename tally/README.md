@@ -1,9 +1,13 @@
-# Helixcer Chat for TallyPrime — build 368
+# Helixcer Chat for TallyPrime — build 369
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 368)**.
+Title must show **(build 369)**.
 
-## Fix
+## Variable mapping sections (functions unchanged)
 
-Preview is **on the right** of Variable Mapping again. Build 367 `Height % Screen` on the Mid Row made Tally stack the parts vertically — that Height is removed. Width splits kept for side-by-side. Functions unchanged.
+- **Header Variable** (text header) / Media Header — as before
+- **Body Variables** — slots where component is `body`
+- **Button Variables** — slots where component is `button`
+
+Fetch still fills the same FK/FC slots; UI only splits how they are shown.

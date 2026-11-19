@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
 ;; BUILD: 363-lists-preview-clear
-;; Title must show "(build 368)".
+;; Title must show "(build 369)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -887,7 +887,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 368)"
+    Set as    : "Helixcer Chat — API Settings (build 369)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -965,11 +965,16 @@
 [Part: Hxc Vc Form Left Col]
     Lines  : Hxc Vc F Map Sect, +
              Hxc Vc F Hdr Media Line, Hxc Vc F Hdr Text Line, +
-             Hxc Vc F Map Col Head, +
+             Hxc Vc F Body Sect, Hxc Vc F Map Col Head, +
              Hxc Vc F Map1, Hxc Vc F Map2, Hxc Vc F Map3, Hxc Vc F Map4, +
              Hxc Vc F Map5, Hxc Vc F Map6, Hxc Vc F Map7, Hxc Vc F Map8, +
              Hxc Vc F Map9, Hxc Vc F Map10, Hxc Vc F Map11, Hxc Vc F Map12, +
-             Hxc Vc F Map13, Hxc Vc F Map14, Hxc Vc F Map15, Hxc Vc F Map16
+             Hxc Vc F Map13, Hxc Vc F Map14, Hxc Vc F Map15, Hxc Vc F Map16, +
+             Hxc Vc F Btn Sect, Hxc Vc F Btn Col Head, +
+             Hxc Vc F Map1B, Hxc Vc F Map2B, Hxc Vc F Map3B, Hxc Vc F Map4B, +
+             Hxc Vc F Map5B, Hxc Vc F Map6B, Hxc Vc F Map7B, Hxc Vc F Map8B, +
+             Hxc Vc F Map9B, Hxc Vc F Map10B, Hxc Vc F Map11B, Hxc Vc F Map12B, +
+             Hxc Vc F Map13B, Hxc Vc F Map14B, Hxc Vc F Map15B, Hxc Vc F Map16B
     Scroll : Vertical
     Width  : 55% Screen
 
@@ -1086,7 +1091,7 @@
 
 [Line: Hxc Vc F Hdr Text Line]
     Fields : Medium Prompt, Hxc Vc F Hdr MK, Hxc Vc F Hdr MF
-    Local  : Field : Medium Prompt : Set as : "Header Var"
+    Local  : Field : Medium Prompt : Set as : "Header Variable"
     Local  : Field : Medium Prompt : Width  : 22
     Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
 
@@ -1108,16 +1113,28 @@
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
 
+[Line: Hxc Vc F Body Sect]
+    Field : Hxc Vc F Body Sect Fld
+
+[Field: Hxc Vc F Body Sect Fld]
+    Use       : Name Field
+    Set as    : "Body Variables"
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
+    Inactive  : NOT ##HxcVcFetched OR NOT (##HxcVcFC1 = "body" OR ##HxcVcFC2 = "body" OR ##HxcVcFC3 = "body" OR ##HxcVcFC4 = "body" OR ##HxcVcFC5 = "body" OR ##HxcVcFC6 = "body" OR ##HxcVcFC7 = "body" OR ##HxcVcFC8 = "body" OR ##HxcVcFC9 = "body" OR ##HxcVcFC10 = "body" OR ##HxcVcFC11 = "body" OR ##HxcVcFC12 = "body" OR ##HxcVcFC13 = "body" OR ##HxcVcFC14 = "body" OR ##HxcVcFC15 = "body" OR ##HxcVcFC16 = "body")
+
 [Line: Hxc Vc F Map Col Head]
     Fields : Hxc Vc F Map Col Key, Hxc Vc F Map Col Fld
 
 [Field: Hxc Vc F Map Col Key]
     Use       : Name Field
-    Set as    : "Template variable"
+    Set as    : "Body variable"
     Style     : Bold
     Skip      : Yes
     Width     : 28
-    Inactive  : NOT ##HxcVcFetched
+    Inactive  : NOT ##HxcVcFetched OR NOT (##HxcVcFC1 = "body" OR ##HxcVcFC2 = "body" OR ##HxcVcFC3 = "body" OR ##HxcVcFC4 = "body" OR ##HxcVcFC5 = "body" OR ##HxcVcFC6 = "body" OR ##HxcVcFC7 = "body" OR ##HxcVcFC8 = "body" OR ##HxcVcFC9 = "body" OR ##HxcVcFC10 = "body" OR ##HxcVcFC11 = "body" OR ##HxcVcFC12 = "body" OR ##HxcVcFC13 = "body" OR ##HxcVcFC14 = "body" OR ##HxcVcFC15 = "body" OR ##HxcVcFC16 = "body")
 
 [Field: Hxc Vc F Map Col Fld]
     Use       : Name Field
@@ -1125,7 +1142,7 @@
     Style     : Bold
     Skip      : Yes
     Width     : 28
-    Inactive  : NOT ##HxcVcFetched
+    Inactive  : NOT ##HxcVcFetched OR NOT (##HxcVcFC1 = "body" OR ##HxcVcFC2 = "body" OR ##HxcVcFC3 = "body" OR ##HxcVcFC4 = "body" OR ##HxcVcFC5 = "body" OR ##HxcVcFC6 = "body" OR ##HxcVcFC7 = "body" OR ##HxcVcFC8 = "body" OR ##HxcVcFC9 = "body" OR ##HxcVcFC10 = "body" OR ##HxcVcFC11 = "body" OR ##HxcVcFC12 = "body" OR ##HxcVcFC13 = "body" OR ##HxcVcFC14 = "body" OR ##HxcVcFC15 = "body" OR ##HxcVcFC16 = "body")
 
 [Line: Hxc Vc F Map1]
     Fields : Hxc Vc F Map1 MK, Hxc Vc F Map1 MF
@@ -1136,7 +1153,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
 
 [Field: Hxc Vc F Map1 MF]
     Use        : Name Field
@@ -1147,7 +1164,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
 
 [Line: Hxc Vc F Map2]
     Fields : Hxc Vc F Map2 MK, Hxc Vc F Map2 MF
@@ -1158,7 +1175,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
 
 [Field: Hxc Vc F Map2 MF]
     Use        : Name Field
@@ -1169,7 +1186,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
 
 [Line: Hxc Vc F Map3]
     Fields : Hxc Vc F Map3 MK, Hxc Vc F Map3 MF
@@ -1180,7 +1197,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
 
 [Field: Hxc Vc F Map3 MF]
     Use        : Name Field
@@ -1191,7 +1208,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
 
 [Line: Hxc Vc F Map4]
     Fields : Hxc Vc F Map4 MK, Hxc Vc F Map4 MF
@@ -1202,7 +1219,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
 
 [Field: Hxc Vc F Map4 MF]
     Use        : Name Field
@@ -1213,7 +1230,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
 
 [Line: Hxc Vc F Map5]
     Fields : Hxc Vc F Map5 MK, Hxc Vc F Map5 MF
@@ -1224,7 +1241,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
 
 [Field: Hxc Vc F Map5 MF]
     Use        : Name Field
@@ -1235,7 +1252,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
 
 [Line: Hxc Vc F Map6]
     Fields : Hxc Vc F Map6 MK, Hxc Vc F Map6 MF
@@ -1246,7 +1263,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
 
 [Field: Hxc Vc F Map6 MF]
     Use        : Name Field
@@ -1257,7 +1274,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
 
 [Line: Hxc Vc F Map7]
     Fields : Hxc Vc F Map7 MK, Hxc Vc F Map7 MF
@@ -1268,7 +1285,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
 
 [Field: Hxc Vc F Map7 MF]
     Use        : Name Field
@@ -1279,7 +1296,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
 
 [Line: Hxc Vc F Map8]
     Fields : Hxc Vc F Map8 MK, Hxc Vc F Map8 MF
@@ -1290,7 +1307,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "body"
 
 [Field: Hxc Vc F Map8 MF]
     Use        : Name Field
@@ -1301,7 +1318,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "body"
 
 [Line: Hxc Vc F Map9]
     Fields : Hxc Vc F Map9 MK, Hxc Vc F Map9 MF
@@ -1312,7 +1329,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9 OR NOT ##HxcVcFC9 = "body"
 
 [Field: Hxc Vc F Map9 MF]
     Use        : Name Field
@@ -1323,7 +1340,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9 OR NOT ##HxcVcFC9 = "body"
 
 [Line: Hxc Vc F Map10]
     Fields : Hxc Vc F Map10 MK, Hxc Vc F Map10 MF
@@ -1334,7 +1351,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10 OR NOT ##HxcVcFC10 = "body"
 
 [Field: Hxc Vc F Map10 MF]
     Use        : Name Field
@@ -1345,7 +1362,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10 OR NOT ##HxcVcFC10 = "body"
 
 [Line: Hxc Vc F Map11]
     Fields : Hxc Vc F Map11 MK, Hxc Vc F Map11 MF
@@ -1356,7 +1373,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11 OR NOT ##HxcVcFC11 = "body"
 
 [Field: Hxc Vc F Map11 MF]
     Use        : Name Field
@@ -1367,7 +1384,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11 OR NOT ##HxcVcFC11 = "body"
 
 [Line: Hxc Vc F Map12]
     Fields : Hxc Vc F Map12 MK, Hxc Vc F Map12 MF
@@ -1378,7 +1395,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12 OR NOT ##HxcVcFC12 = "body"
 
 [Field: Hxc Vc F Map12 MF]
     Use        : Name Field
@@ -1389,7 +1406,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12 OR NOT ##HxcVcFC12 = "body"
 
 [Line: Hxc Vc F Map13]
     Fields : Hxc Vc F Map13 MK, Hxc Vc F Map13 MF
@@ -1400,7 +1417,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13 OR NOT ##HxcVcFC13 = "body"
 
 [Field: Hxc Vc F Map13 MF]
     Use        : Name Field
@@ -1411,7 +1428,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13 OR NOT ##HxcVcFC13 = "body"
 
 [Line: Hxc Vc F Map14]
     Fields : Hxc Vc F Map14 MK, Hxc Vc F Map14 MF
@@ -1422,7 +1439,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14 OR NOT ##HxcVcFC14 = "body"
 
 [Field: Hxc Vc F Map14 MF]
     Use        : Name Field
@@ -1433,7 +1450,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14 OR NOT ##HxcVcFC14 = "body"
 
 [Line: Hxc Vc F Map15]
     Fields : Hxc Vc F Map15 MK, Hxc Vc F Map15 MF
@@ -1444,7 +1461,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15 OR NOT ##HxcVcFC15 = "body"
 
 [Field: Hxc Vc F Map15 MF]
     Use        : Name Field
@@ -1455,7 +1472,7 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15 OR NOT ##HxcVcFC15 = "body"
 
 [Line: Hxc Vc F Map16]
     Fields : Hxc Vc F Map16 MK, Hxc Vc F Map16 MF
@@ -1466,7 +1483,7 @@
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16 OR NOT ##HxcVcFC16 = "body"
 
 [Field: Hxc Vc F Map16 MF]
     Use        : Name Field
@@ -1477,8 +1494,392 @@
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16 OR NOT ##HxcVcFC16 = "body"
 
+
+
+[Line: Hxc Vc F Btn Sect]
+    Field : Hxc Vc F Btn Sect Fld
+
+[Field: Hxc Vc F Btn Sect Fld]
+    Use       : Name Field
+    Set as    : "Button Variables"
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
+    Inactive  : NOT ##HxcVcFetched OR NOT (##HxcVcFC1 = "button" OR ##HxcVcFC2 = "button" OR ##HxcVcFC3 = "button" OR ##HxcVcFC4 = "button" OR ##HxcVcFC5 = "button" OR ##HxcVcFC6 = "button" OR ##HxcVcFC7 = "button" OR ##HxcVcFC8 = "button" OR ##HxcVcFC9 = "button" OR ##HxcVcFC10 = "button" OR ##HxcVcFC11 = "button" OR ##HxcVcFC12 = "button" OR ##HxcVcFC13 = "button" OR ##HxcVcFC14 = "button" OR ##HxcVcFC15 = "button" OR ##HxcVcFC16 = "button")
+
+[Line: Hxc Vc F Btn Col Head]
+    Fields : Hxc Vc F Btn Col Key, Hxc Vc F Btn Col Fld
+
+[Field: Hxc Vc F Btn Col Key]
+    Use       : Name Field
+    Set as    : "Button variable"
+    Style     : Bold
+    Skip      : Yes
+    Width     : 28
+    Inactive  : NOT ##HxcVcFetched OR NOT (##HxcVcFC1 = "button" OR ##HxcVcFC2 = "button" OR ##HxcVcFC3 = "button" OR ##HxcVcFC4 = "button" OR ##HxcVcFC5 = "button" OR ##HxcVcFC6 = "button" OR ##HxcVcFC7 = "button" OR ##HxcVcFC8 = "button" OR ##HxcVcFC9 = "button" OR ##HxcVcFC10 = "button" OR ##HxcVcFC11 = "button" OR ##HxcVcFC12 = "button" OR ##HxcVcFC13 = "button" OR ##HxcVcFC14 = "button" OR ##HxcVcFC15 = "button" OR ##HxcVcFC16 = "button")
+
+[Field: Hxc Vc F Btn Col Fld]
+    Use       : Name Field
+    Set as    : "Voucher field"
+    Style     : Bold
+    Skip      : Yes
+    Width     : 28
+    Inactive  : NOT ##HxcVcFetched OR NOT (##HxcVcFC1 = "button" OR ##HxcVcFC2 = "button" OR ##HxcVcFC3 = "button" OR ##HxcVcFC4 = "button" OR ##HxcVcFC5 = "button" OR ##HxcVcFC6 = "button" OR ##HxcVcFC7 = "button" OR ##HxcVcFC8 = "button" OR ##HxcVcFC9 = "button" OR ##HxcVcFC10 = "button" OR ##HxcVcFC11 = "button" OR ##HxcVcFC12 = "button" OR ##HxcVcFC13 = "button" OR ##HxcVcFC14 = "button" OR ##HxcVcFC15 = "button" OR ##HxcVcFC16 = "button")
+
+[Line: Hxc Vc F Map1B]
+    Fields : Hxc Vc F Map1B MK, Hxc Vc F Map1B MF
+
+[Field: Hxc Vc F Map1B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK1 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "button"
+
+[Field: Hxc Vc F Map1B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld1
+    Set as     : $HxcVcDMFld1
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "button"
+
+[Line: Hxc Vc F Map2B]
+    Fields : Hxc Vc F Map2B MK, Hxc Vc F Map2B MF
+
+[Field: Hxc Vc F Map2B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK2 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "button"
+
+[Field: Hxc Vc F Map2B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld2
+    Set as     : $HxcVcDMFld2
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "button"
+
+[Line: Hxc Vc F Map3B]
+    Fields : Hxc Vc F Map3B MK, Hxc Vc F Map3B MF
+
+[Field: Hxc Vc F Map3B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK3 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "button"
+
+[Field: Hxc Vc F Map3B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld3
+    Set as     : $HxcVcDMFld3
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "button"
+
+[Line: Hxc Vc F Map4B]
+    Fields : Hxc Vc F Map4B MK, Hxc Vc F Map4B MF
+
+[Field: Hxc Vc F Map4B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK4 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "button"
+
+[Field: Hxc Vc F Map4B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld4
+    Set as     : $HxcVcDMFld4
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "button"
+
+[Line: Hxc Vc F Map5B]
+    Fields : Hxc Vc F Map5B MK, Hxc Vc F Map5B MF
+
+[Field: Hxc Vc F Map5B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK5 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "button"
+
+[Field: Hxc Vc F Map5B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld5
+    Set as     : $HxcVcDMFld5
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "button"
+
+[Line: Hxc Vc F Map6B]
+    Fields : Hxc Vc F Map6B MK, Hxc Vc F Map6B MF
+
+[Field: Hxc Vc F Map6B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK6 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "button"
+
+[Field: Hxc Vc F Map6B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld6
+    Set as     : $HxcVcDMFld6
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "button"
+
+[Line: Hxc Vc F Map7B]
+    Fields : Hxc Vc F Map7B MK, Hxc Vc F Map7B MF
+
+[Field: Hxc Vc F Map7B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK7 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "button"
+
+[Field: Hxc Vc F Map7B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld7
+    Set as     : $HxcVcDMFld7
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "button"
+
+[Line: Hxc Vc F Map8B]
+    Fields : Hxc Vc F Map8B MK, Hxc Vc F Map8B MF
+
+[Field: Hxc Vc F Map8B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK8 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "button"
+
+[Field: Hxc Vc F Map8B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld8
+    Set as     : $HxcVcDMFld8
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "button"
+
+[Line: Hxc Vc F Map9B]
+    Fields : Hxc Vc F Map9B MK, Hxc Vc F Map9B MF
+
+[Field: Hxc Vc F Map9B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK9 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9 OR NOT ##HxcVcFC9 = "button"
+
+[Field: Hxc Vc F Map9B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld9
+    Set as     : $HxcVcDMFld9
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9 OR NOT ##HxcVcFC9 = "button"
+
+[Line: Hxc Vc F Map10B]
+    Fields : Hxc Vc F Map10B MK, Hxc Vc F Map10B MF
+
+[Field: Hxc Vc F Map10B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK10 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10 OR NOT ##HxcVcFC10 = "button"
+
+[Field: Hxc Vc F Map10B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld10
+    Set as     : $HxcVcDMFld10
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10 OR NOT ##HxcVcFC10 = "button"
+
+[Line: Hxc Vc F Map11B]
+    Fields : Hxc Vc F Map11B MK, Hxc Vc F Map11B MF
+
+[Field: Hxc Vc F Map11B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK11 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11 OR NOT ##HxcVcFC11 = "button"
+
+[Field: Hxc Vc F Map11B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld11
+    Set as     : $HxcVcDMFld11
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11 OR NOT ##HxcVcFC11 = "button"
+
+[Line: Hxc Vc F Map12B]
+    Fields : Hxc Vc F Map12B MK, Hxc Vc F Map12B MF
+
+[Field: Hxc Vc F Map12B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK12 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12 OR NOT ##HxcVcFC12 = "button"
+
+[Field: Hxc Vc F Map12B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld12
+    Set as     : $HxcVcDMFld12
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12 OR NOT ##HxcVcFC12 = "button"
+
+[Line: Hxc Vc F Map13B]
+    Fields : Hxc Vc F Map13B MK, Hxc Vc F Map13B MF
+
+[Field: Hxc Vc F Map13B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK13 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13 OR NOT ##HxcVcFC13 = "button"
+
+[Field: Hxc Vc F Map13B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld13
+    Set as     : $HxcVcDMFld13
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13 OR NOT ##HxcVcFC13 = "button"
+
+[Line: Hxc Vc F Map14B]
+    Fields : Hxc Vc F Map14B MK, Hxc Vc F Map14B MF
+
+[Field: Hxc Vc F Map14B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK14 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14 OR NOT ##HxcVcFC14 = "button"
+
+[Field: Hxc Vc F Map14B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld14
+    Set as     : $HxcVcDMFld14
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14 OR NOT ##HxcVcFC14 = "button"
+
+[Line: Hxc Vc F Map15B]
+    Fields : Hxc Vc F Map15B MK, Hxc Vc F Map15B MF
+
+[Field: Hxc Vc F Map15B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK15 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15 OR NOT ##HxcVcFC15 = "button"
+
+[Field: Hxc Vc F Map15B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld15
+    Set as     : $HxcVcDMFld15
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15 OR NOT ##HxcVcFC15 = "button"
+
+[Line: Hxc Vc F Map16B]
+    Fields : Hxc Vc F Map16B MK, Hxc Vc F Map16B MF
+
+[Field: Hxc Vc F Map16B MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK16 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16 OR NOT ##HxcVcFC16 = "button"
+
+[Field: Hxc Vc F Map16B MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld16
+    Set as     : $HxcVcDMFld16
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16 OR NOT ##HxcVcFC16 = "button"
 
 ;; --- Message Preview ---
 
@@ -1609,7 +2010,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 368)"
+    Set as    : "Create Voucher Config (build 369)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1682,7 +2083,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 368)"
+    Set as    : "Alter Voucher Config (build 369)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1741,7 +2142,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 368)"
+    Set as    : "Voucher Config List (build 369)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1856,7 +2257,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 368)"
+    Set as    : "Helixcer Chat (build 369)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
