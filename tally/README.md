@@ -1,14 +1,9 @@
-# Helixcer Chat for TallyPrime — build 367
+# Helixcer Chat for TallyPrime — build 368
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 367)**.
+Title must show **(build 368)**.
 
-## UI (functions unchanged)
+## Fix
 
-- Remove Template Part scroll expansion (closes unused gap under status)
-- Variable Mapping Mid Row ~55% screen; Voucher Rules ~22% screen
-- Preview stays on the right (single line)
-- New Create/Alter: Report Set + Form Create/Destroy clear draft and fetch vars so old preview/maps do not linger
-
-Fetch: Enter on Language or Alt+F.
+Preview is **on the right** of Variable Mapping again. Build 367 `Height % Screen` on the Mid Row made Tally stack the parts vertically — that Height is removed. Width splits kept for side-by-side. Functions unchanged.

@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
 ;; BUILD: 363-lists-preview-clear
-;; Title must show "(build 367)".
+;; Title must show "(build 368)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -887,7 +887,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 367)"
+    Set as    : "Helixcer Chat — API Settings (build 368)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -957,11 +957,10 @@
              Hxc Vc F Fetch Status Line
 
 ;; Mapping (left) + Message Preview (right) — single-line preview
+;; Mapping LEFT + Preview RIGHT (no Height on Mid Row — Height/% broke Horizontal)
 [Part: Hxc Vc Form Mid Row]
     Parts      : Hxc Vc Form Left Col, Hxc Vc Form Preview Part
     Horizontal : Yes
-    Height     : 55% Screen
-    Scroll     : Vertical
 
 [Part: Hxc Vc Form Left Col]
     Lines  : Hxc Vc F Map Sect, +
@@ -972,9 +971,11 @@
              Hxc Vc F Map9, Hxc Vc F Map10, Hxc Vc F Map11, Hxc Vc F Map12, +
              Hxc Vc F Map13, Hxc Vc F Map14, Hxc Vc F Map15, Hxc Vc F Map16
     Scroll : Vertical
+    Width  : 55% Screen
 
 [Part: Hxc Vc Form Preview Part]
     Lines  : Hxc Vc F Prev Head, Hxc Vc F Prev Body
+    Width  : 45% Screen
 
 ;; Voucher Rules
 [Part: Hxc Vc Form Vch Part]
@@ -982,7 +983,6 @@
     Repeat   : Hxc Vc F Vch Data : HxcVcDraftVchs
     Break On : $$IsEmpty:$HxcVcDraftVchName OR $HxcVcDraftVchName = "End of List" OR $HxcVcDraftVchName = "Not Applicable"
     Scroll   : Vertical
-    Height   : 22% Screen
 
 [Part: Hxc Vc Form Settings Part]
     Lines    : Hxc Vc F Auto Line, Hxc Vc F Confirm Line
@@ -1609,7 +1609,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 367)"
+    Set as    : "Create Voucher Config (build 368)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1682,7 +1682,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 367)"
+    Set as    : "Alter Voucher Config (build 368)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1741,7 +1741,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 367)"
+    Set as    : "Voucher Config List (build 368)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1856,7 +1856,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 367)"
+    Set as    : "Helixcer Chat (build 368)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
