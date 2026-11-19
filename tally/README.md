@@ -1,20 +1,20 @@
-# Helixcer Chat for TallyPrime — build 413
+# Helixcer Chat for TallyPrime — build 414
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 413)**.
+Title must show **(build 414)**.
 
-## Fix in this build
-Fetch showed **"Enter Template Name first"** even when Template Name had a value.
+## New approach: config on Voucher Type
 
-Cause: non-Storage fields used `On Accept : SET … : $Value`, which is empty and wiped `##HxcVcDraftTemplate`. Fetch then only read that empty variable. Commit also referenced old field names (`#HxcVcTemplateNameInput`) that do not exist on this form.
+Stop using Create Config / Config Name / voucher-type lists on Company Aggregate.
 
-- Fetch/Commit sync from live fields `#Hxc Vc F Name` / `#Hxc Vc F Template` / `#Hxc Vc F Lang`
-- Accept handlers use `$$Value` for non-Storage draft/mapping fields
-- Native Storage Aggregate save from build 412 unchanged
+1. Gateway → Alter → **Voucher Type** → pick a type (e.g. Sales)
+2. Set **Alter Helixcer Chat** → **Yes**
+3. Helixcer config form opens for that voucher type (no Config Name, no voucher allocation)
+4. Template → Language Enter (fetch) → mapping → Auto/Confirm → **Ctrl+A**
+5. Config saves onto that **Voucher Type** master (UDFs `HxcVt*`)
 
-## Test
-1. Reload TDL → Create Voucher Config title shows **(build 413)**
-2. Config Name + Template Name + Language `en` → Enter (or Alt+F)
-3. Must fetch (not "Enter Template Name first")
-4. Ctrl+A → config appears in List / Alter
+Also: Helixcer Chat → **Configured Voucher Types** lists types that already have a template.
+
+## Why this shape
+Company Aggregate `INSERT` / procedural save caused `c0000005` or silent non-saves. Voucher Type Storage + Form Accept matches how API Settings already persist on Company.
