@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 386-fix-not-locked
-;; Title must show "(build 386)".
+;; BUILD: 387-clear-before-open
+;; Title must show "(build 387)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -897,7 +897,8 @@
 
 [Function: Hxc Initialize New Config]
     ;; Wipe Company draft UDFs so Create never shows the previous session.
-    01 : SET TARGET
+    ;; Must run BEFORE the form opens (Storage fields load once on create).
+    01 : SET OBJECT : Company : ##SVCurrentCompany
     02 : SET : HxcVcCreateNeedsReset : No
     03 : SET : HxcVcMoveToMapping : No
     04 : SET : HxcVcMoveToConfirm : No
@@ -906,7 +907,14 @@
     07 : CALL : Hxc Vc Clear Draft
     08 : RETURN : Yes
 
+[Function: Hxc Open Create Config]
+    ;; Clear draft first, then open Create — Form Create is too late for Storage paint.
+    01 : CALL : Hxc Initialize New Config
+    02 : Action : Alter : Helixcer Voucher Config Create
+    03 : RETURN : Yes
+
 [Function: Hxc Vc Clear Draft]
+    00 : SET OBJECT : Company : ##SVCurrentCompany
     01 : CALL : Hxc Clear Fetch Vars
     02 : CALL : Hxc Clear Draft Vchs
     03 : CALL : Hxc Seed Draft Vch Row
@@ -1047,7 +1055,7 @@
 
 [Menu: Helixcer Voucher Config Menu]
     Title    : "Voucher Config"
-    Key Item : Create Config : C : Alter : Helixcer Voucher Config Create
+    Key Item : Create Config : C : Call  : Hxc Open Create Config
     Key Item : Alter Config  : A : Alter : Helixcer Voucher Config Alter
     Key Item : List Configs  : L : Alter : Helixcer Voucher Config List
     Key Item : Back          : B : Menu  : Helixcer Chat Menu
@@ -1076,7 +1084,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 386)"
+    Set as    : "Helixcer Chat — API Settings (build 387)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1878,7 +1886,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 386)"
+    Set as    : "Create Voucher Config (build 387)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1953,7 +1961,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 386)"
+    Set as    : "Alter Voucher Config (build 387)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2013,7 +2021,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 386)"
+    Set as    : "Voucher Config List (build 387)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2128,7 +2136,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 386)"
+    Set as    : "Helixcer Chat (build 387)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
