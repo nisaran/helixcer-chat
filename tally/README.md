@@ -1,19 +1,13 @@
-# Helixcer Chat for TallyPrime — build 401
+# Helixcer Chat for TallyPrime — build 402
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 401)**.
+Title must show **(build 402)**.
 
-## Root cause (prefill)
+## Fix
+Fetch said "Enter Template Name first" while Template Name was filled on screen: fields used `Variable` without `Modifies`, so the typed input never landed in `##HxcVcDraftTemplate`. Fetch then read the empty Variable (not the input field).
 
-Create UI was bound to **Company Storage** draft UDFs (`HxcVcDraftName` / `HxcVcDraftTemplate` / `HxcVcDraftLang`) and **Aggregate** `HxcVcDraftVchs`. Those values persist in the company file, so Create kept showing the previous session (Sales / invoice_generated_doc / Service Sales / Inventory Sales). Clearing with `SET VALUE` / Aggregate `DELETE` / `CreateBlank` paint did not reliably reset field buffers — and CreateBlank caused inputs to vanish on Enter.
-
-## Fix (build 401)
-
-Create draft is **session Variables only**:
-
-- Config Name / Template / Language → `##HxcVcDraftName` / `##HxcVcDraftTemplate` / `##HxcVcDraftLang`
-- Voucher types → progressive `##HxcVcVchType1`…`12` (next row appears after you fill the previous; End of List / blank ends)
-- Fetch reads `##HxcVcDraftTemplate` (never Company draft Storage)
-- Report Create + Clear Draft `SET` all draft Variables empty on open
-- Company Storage is only for **saved** `HxcVoucherConfigs` on Commit
+- Name / Template / Language / voucher slots use `Modifies` (same pattern as API Settings)
+- Template Accept locks `HxcVcFetchName` from `$Value`
+- Language Accept does not overwrite FetchName with an empty Variable
+- `Clear Fetch Vars` no longer wipes FetchName / FetchLang (request inputs)

@@ -1,10 +1,11 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 401-session-variable-draft
-;; Title must show "(build 401)".
+;; BUILD: 402-modifies-input-sync
+;; Title must show "(build 402)".
 ;;
 ;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
 ;; Company Storage is used for saved HxcVoucherConfigs on Commit — never for Create UI.
-;; Fetch reads ##HxcVcDraftTemplate after Template Accept SETs it from $Value.
+;; Fetch reads ##HxcVcDraftTemplate after Modifies syncs the input field into the Variable.
+;; Never read Company draft Storage for Create. Clear Fetch Vars does not wipe FetchName.
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -667,8 +668,7 @@
     40 : SET : HxcVcFC14 : ""
     41 : SET : HxcVcFC15 : ""
     42 : SET : HxcVcFC16 : ""
-    43 : SET : HxcVcFetchName : ""
-    44 : SET : HxcVcFetchLang : "en"
+    ;; Keep HxcVcFetchName / HxcVcFetchLang — those are request inputs from the Template/Lang fields
     45 : RETURN : Yes
 
 [Function: Hxc Set Map Slot]
@@ -882,23 +882,29 @@
 
 [Function: Hxc Fetch Template]
     01 : CALL : Hxc Sync From Company
-    02 : CALL : Hxc Clear Fetch Vars
-    03 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
-    04 :    SET : HxcVcFetchStatus : "Save API Settings (Ctrl+A) before fetching a template."
-    05 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    06 :    RETURN : No
-    07 : END IF
-    ;; Session Variables only — never Company draft Storage (that caused stale/prefill fetch)
-    08 : SET : HxcVcFetchName : ##HxcVcDraftTemplate
-    09 : SET : HxcVcFetchLang : ##HxcVcDraftLang
-    10 : IF : $$IsEmpty:##HxcVcFetchLang
-    11 :    SET : HxcVcFetchLang : "en"
-    12 : END IF
-    13 : IF : $$IsEmpty:##HxcVcFetchName
-    14 :    SET : HxcVcFetchStatus : "Enter Template Name first."
-    15 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    16 :    RETURN : No
+    ;; Capture template/lang from session Variables FIRST (Modifies synced them from the input fields)
+    02 : SET : HxcVcFetchName : ##HxcVcDraftTemplate
+    03 : SET : HxcVcFetchLang : ##HxcVcDraftLang
+    04 : IF : $$IsEmpty:##HxcVcFetchLang
+    05 :    SET : HxcVcFetchLang : "en"
+    06 : END IF
+    07 : IF : $$IsEmpty:##HxcVcFetchName
+    08 :    SET : HxcVcFetchStatus : "Enter Template Name first."
+    09 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    10 :    RETURN : No
+    11 : END IF
+    12 : CALL : Hxc Clear Fetch Vars
+    ;; Restore request inputs after clearing prior response state
+    13 : SET : HxcVcFetchName : ##HxcVcDraftTemplate
+    14 : SET : HxcVcFetchLang : ##HxcVcDraftLang
+    15 : IF : $$IsEmpty:##HxcVcFetchLang
+    16 :    SET : HxcVcFetchLang : "en"
     17 : END IF
+    18 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
+    19 :    SET : HxcVcFetchStatus : "Save API Settings (Ctrl+A) before fetching a template."
+    20 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    21 :    RETURN : No
+    22 : END IF
     24 : SET : HxcVcFetchStatus : "Fetching..."
     25 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
     26 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
@@ -1204,6 +1210,8 @@
 
 [Function: Hxc Vc Clear Draft]
     01 : CALL : Hxc Clear Fetch Vars
+    011 : SET : HxcVcFetchName : ""
+    012 : SET : HxcVcFetchLang : "en"
     02 : CALL : Hxc Clear Draft Vchs
     03 : CALL : Hxc Seed Draft Vch Row
     04 : SET : HxcVcDraftName : ""
@@ -1372,7 +1380,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 401)"
+    Set as    : "Helixcer Chat — API Settings (build 402)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1503,8 +1511,8 @@
 [Field: Hxc Vc F Name]
     Skip     : ##HxcVcMoveToConfirm
     Use      : Name Field
-    Variable : HxcVcDraftName
     Set as   : ##HxcVcDraftName
+    Modifies : HxcVcDraftName
     Width    : 40
     Max      : 60
     On       : Accept : Yes : SET : HxcVcDraftName : $Value
@@ -1518,14 +1526,14 @@
 [Field: Hxc Vc F Template]
     Skip     : ##HxcVcMoveToConfirm
     Use      : Name Field
-    Variable : HxcVcDraftTemplate
     Set as   : ##HxcVcDraftTemplate
+    Modifies : HxcVcDraftTemplate
     Width    : 40
     Max      : 80
-    ;; Persist typed name into session Variable before Clear (Clear wipes FetchName)
-    On       : Accept : Yes : SET : HxcVcDraftTemplate : $Value
+    ;; Modifies writes the INPUT field into ##HxcVcDraftTemplate; also lock FetchName from $Value
     On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
-    On       : Accept : Yes : SET : HxcVcFetchName : ##HxcVcDraftTemplate
+    On       : Accept : Yes : SET : HxcVcDraftTemplate : $Value
+    On       : Accept : Yes : SET : HxcVcFetchName : $Value
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Lang Line]
@@ -1536,13 +1544,14 @@
 [Field: Hxc Vc F Lang]
     Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
-    Variable : HxcVcDraftLang
     Set as   : If $$IsEmpty:##HxcVcDraftLang THEN "en" ELSE ##HxcVcDraftLang
+    Modifies : HxcVcDraftLang
     Width    : 16
     Max      : 16
     On       : Accept : Yes : SET : HxcVcDraftLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
-    On       : Accept : Yes : SET : HxcVcFetchName : ##HxcVcDraftTemplate
+    ;; Prefer draft Variable (Modifies from Template input); else keep FetchName set on Template Accept
+    On       : Accept : NOT $$IsEmpty:##HxcVcDraftTemplate : SET : HxcVcFetchName : ##HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
     On       : Accept : ##HxcVcFetched : Field Accept
 
@@ -2086,8 +2095,8 @@
 
 [Field: HxcVcVchType1Input]
     Use        : Name Field
-    Variable   : HxcVcVchType1
     Set as     : ##HxcVcVchType1
+    Modifies   : HxcVcVchType1
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2108,8 +2117,8 @@
 
 [Field: HxcVcVchType2Input]
     Use        : Name Field
-    Variable   : HxcVcVchType2
     Set as     : ##HxcVcVchType2
+    Modifies   : HxcVcVchType2
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2130,8 +2139,8 @@
 
 [Field: HxcVcVchType3Input]
     Use        : Name Field
-    Variable   : HxcVcVchType3
     Set as     : ##HxcVcVchType3
+    Modifies   : HxcVcVchType3
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2152,8 +2161,8 @@
 
 [Field: HxcVcVchType4Input]
     Use        : Name Field
-    Variable   : HxcVcVchType4
     Set as     : ##HxcVcVchType4
+    Modifies   : HxcVcVchType4
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2174,8 +2183,8 @@
 
 [Field: HxcVcVchType5Input]
     Use        : Name Field
-    Variable   : HxcVcVchType5
     Set as     : ##HxcVcVchType5
+    Modifies   : HxcVcVchType5
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2196,8 +2205,8 @@
 
 [Field: HxcVcVchType6Input]
     Use        : Name Field
-    Variable   : HxcVcVchType6
     Set as     : ##HxcVcVchType6
+    Modifies   : HxcVcVchType6
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2218,8 +2227,8 @@
 
 [Field: HxcVcVchType7Input]
     Use        : Name Field
-    Variable   : HxcVcVchType7
     Set as     : ##HxcVcVchType7
+    Modifies   : HxcVcVchType7
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2240,8 +2249,8 @@
 
 [Field: HxcVcVchType8Input]
     Use        : Name Field
-    Variable   : HxcVcVchType8
     Set as     : ##HxcVcVchType8
+    Modifies   : HxcVcVchType8
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2262,8 +2271,8 @@
 
 [Field: HxcVcVchType9Input]
     Use        : Name Field
-    Variable   : HxcVcVchType9
     Set as     : ##HxcVcVchType9
+    Modifies   : HxcVcVchType9
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2284,8 +2293,8 @@
 
 [Field: HxcVcVchType10Input]
     Use        : Name Field
-    Variable   : HxcVcVchType10
     Set as     : ##HxcVcVchType10
+    Modifies   : HxcVcVchType10
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2306,8 +2315,8 @@
 
 [Field: HxcVcVchType11Input]
     Use        : Name Field
-    Variable   : HxcVcVchType11
     Set as     : ##HxcVcVchType11
+    Modifies   : HxcVcVchType11
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2328,8 +2337,8 @@
 
 [Field: HxcVcVchType12Input]
     Use        : Name Field
-    Variable   : HxcVcVchType12
     Set as     : ##HxcVcVchType12
+    Modifies   : HxcVcVchType12
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2447,7 +2456,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 401)"
+    Set as    : "Create Voucher Config (build 402)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2523,7 +2532,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 401)"
+    Set as    : "Alter Voucher Config (build 402)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2583,7 +2592,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 401)"
+    Set as    : "Voucher Config List (build 402)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2698,7 +2707,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 401)"
+    Set as    : "Helixcer Chat (build 402)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
