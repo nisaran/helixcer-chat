@@ -2024,6 +2024,20 @@ async function listExternalWhatsAppTemplates(env, url, principal, requestId) {
   });
 }
 
+function matchWhatsAppTemplateLanguage(items, language) {
+  if (!language) return items;
+  const exact = items.filter(item => item.language.code === language);
+  if (exact.length) return exact;
+  // Tally often sends "en" while Meta stores "en_US" (and the reverse).
+  const soft = items.filter(item => {
+    const code = item.language.code;
+    return code === language
+      || code.startsWith(`${language}_`)
+      || language.startsWith(`${code}_`);
+  });
+  return soft;
+}
+
 async function fetchExternalWhatsAppTemplate(env, url, principal, requestId, templateName) {
   const channelId = cleanId(url.searchParams.get('channelId'), 'Channel ID');
   const name = cleanRequired(templateName, 'Template name', 512);
@@ -2040,11 +2054,13 @@ async function fetchExternalWhatsAppTemplate(env, url, principal, requestId, tem
   const channel = await resolveExternalWhatsAppChannel(env, principal, channelId);
   let items;
   try {
-    items = await listWhatsAppTemplatesByName(env, channel, name);
+    items = await listWhatsAppTemplatesByName(env, channel, name, {
+      forceRefresh: url.searchParams.get('refresh') === '1'
+    });
   } catch (error) {
     throw mapExternalTemplateLookupError(error);
   }
-  if (language) items = items.filter(item => item.language.code === language);
+  items = matchWhatsAppTemplateLanguage(items, language);
   if (!items.length) throw apiError(404, 'template_not_found', 'Template not found for this WhatsApp channel.');
   await auditApiKey(env, principal, 'fetch_template', 'channel', channel.channelId, {
     templateName: name, language, count: items.length
@@ -6740,29 +6756,103 @@ export function whatsAppTemplateCacheRequest(channel, wabaId, version, approvedO
   return new Request(url.toString(), { method: 'GET' });
 }
 
+export function whatsAppTemplateByNameCacheRequest(channel, wabaId, version, name) {
+  const workspaceId = String(channel?.workspaceId || '').slice(0, 100);
+  const channelId = String(channel?.channelId || '').slice(0, 100);
+  const url = new URL('/whatsapp/templates/by-name', WHATSAPP_TEMPLATE_CACHE_ORIGIN);
+  url.searchParams.set('workspace', workspaceId);
+  url.searchParams.set('channel', channelId);
+  url.searchParams.set('waba', String(wabaId || '').slice(0, 40));
+  url.searchParams.set('version', String(version || '').slice(0, 20));
+  url.searchParams.set('name', String(name || '').slice(0, 512));
+  return new Request(url.toString(), { method: 'GET' });
+}
+
+function templatesNamed(items, name) {
+  return (Array.isArray(items) ? items : []).filter(item => item?.name === name);
+}
+
+async function readCachedTemplatesByName(channel, wabaId, version, name) {
+  const byNameCached = await readWhatsAppTemplateCache(
+    whatsAppTemplateByNameCacheRequest(channel, wabaId, version, name), false);
+  if (byNameCached.hit) return byNameCached.value;
+  // Reuse the full-list cache (UI / list API) so Tally does not wait on Meta again.
+  for (const opts of [
+    { approvedOnly: false, includeMetadata: true },
+    { approvedOnly: true, includeMetadata: false }
+  ]) {
+    const cached = await readWhatsAppTemplateCache(
+      whatsAppTemplateCacheRequest(channel, wabaId, version, opts.approvedOnly, opts.includeMetadata),
+      opts.includeMetadata);
+    if (!cached.hit) continue;
+    const all = opts.includeMetadata ? cached.value?.items : cached.value;
+    const items = templatesNamed(all, name);
+    if (items.length) return items;
+  }
+  return null;
+}
+
 function defaultTemplateCache() {
   const cache = globalThis.caches?.default;
   return cache && typeof cache.match === 'function' && typeof cache.put === 'function' ? cache : null;
 }
 
-async function readWhatsAppTemplateCache(request, includeMetadata) {
-  const cache = defaultTemplateCache();
-  if (!cache) return { hit: false, value: null };
-  try {
-    const response = await cache.match(request);
-    if (!response?.ok) return { hit: false, value: null };
-    const payload = safeJsonParse(await response.text(), null);
-    const value = payload?.value;
-    const valid = includeMetadata
-      ? isPlainObject(value) && Array.isArray(value.items) && typeof value.truncated === 'boolean'
-      : Array.isArray(value);
-    return valid ? { hit: true, value } : { hit: false, value: null };
-  } catch {
+// Isolate-local fallback when caches.default is unavailable (tests / some runtimes).
+const memoryTemplateCache = new Map();
+
+function templateCacheKey(request) {
+  return String(request?.url || '');
+}
+
+function isValidTemplateCacheValue(value, includeMetadata) {
+  return includeMetadata
+    ? isPlainObject(value) && Array.isArray(value.items) && typeof value.truncated === 'boolean'
+    : Array.isArray(value);
+}
+
+function readMemoryTemplateCache(request, includeMetadata) {
+  const key = templateCacheKey(request);
+  if (!key) return { hit: false, value: null };
+  const entry = memoryTemplateCache.get(key);
+  if (!entry || entry.expiresAt <= Date.now()) {
+    if (entry) memoryTemplateCache.delete(key);
     return { hit: false, value: null };
   }
+  if (!isValidTemplateCacheValue(entry.value, includeMetadata)) {
+    memoryTemplateCache.delete(key);
+    return { hit: false, value: null };
+  }
+  return { hit: true, value: entry.value };
+}
+
+function writeMemoryTemplateCache(request, value) {
+  const key = templateCacheKey(request);
+  if (!key) return;
+  memoryTemplateCache.set(key, {
+    value,
+    expiresAt: Date.now() + (WHATSAPP_TEMPLATE_CACHE_SECONDS * 1000)
+  });
+}
+
+async function readWhatsAppTemplateCache(request, includeMetadata) {
+  const cache = defaultTemplateCache();
+  if (cache) {
+    try {
+      const response = await cache.match(request);
+      if (response?.ok) {
+        const payload = safeJsonParse(await response.text(), null);
+        const value = payload?.value;
+        if (isValidTemplateCacheValue(value, includeMetadata)) return { hit: true, value };
+      }
+    } catch {
+      // Fall through to isolate memory cache.
+    }
+  }
+  return readMemoryTemplateCache(request, includeMetadata);
 }
 
 async function writeWhatsAppTemplateCache(request, value) {
+  writeMemoryTemplateCache(request, value);
   const cache = defaultTemplateCache();
   if (!cache) return;
   try {
@@ -6777,19 +6867,34 @@ async function writeWhatsAppTemplateCache(request, value) {
   }
 }
 
-async function listWhatsAppTemplatesByName(env, channel, name) {
+async function listWhatsAppTemplatesByName(env, channel, name, { forceRefresh = false } = {}) {
   const wabaId = String(channel.config?.wabaId || '').trim();
   if (!/^\d{5,40}$/.test(wabaId)) throw httpError(409, 'The WhatsApp Business Account ID is not configured.');
+  const version = metaApiVersion(channel.config?.apiVersion);
+  const byNameCacheRequest = whatsAppTemplateByNameCacheRequest(channel, wabaId, version, name);
+  if (!forceRefresh) {
+    const cachedItems = await readCachedTemplatesByName(channel, wabaId, version, name);
+    if (cachedItems) return cachedItems;
+  }
   const credentials = await readChannelCredentials(env, channel);
   if (!credentials.accessToken) throw httpError(409, 'The WhatsApp access token is not configured.');
-  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(metaApiVersion(channel.config?.apiVersion))}/${encodeURIComponent(wabaId)}/message_templates`);
+  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/message_templates`);
   endpoint.searchParams.set('fields', 'id,name,language,status,category,components');
   endpoint.searchParams.set('name', name);
   endpoint.searchParams.set('limit', '100');
+  const metaSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(20000)
+    : undefined;
   let response;
   try {
-    response = await fetch(endpoint, { headers: { Authorization: `Bearer ${credentials.accessToken}` } });
-  } catch {
+    response = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      ...(metaSignal ? { signal: metaSignal } : {})
+    });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw httpError(504, 'Meta timed out loading the WhatsApp template. Try again in a moment.');
+    }
     throw httpError(502, 'Meta could not load the WhatsApp template.');
   }
   const data = safeJsonParse(await response.text(), {});
@@ -6810,6 +6915,7 @@ async function listWhatsAppTemplatesByName(env, channel, name) {
   }
   items.sort((left, right) => left.language.code.localeCompare(right.language.code) ||
     left.status.localeCompare(right.status));
+  await writeWhatsAppTemplateCache(byNameCacheRequest, items);
   return items;
 }
 
