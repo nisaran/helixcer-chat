@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 394-blank-create-storage
-;; Title must show "(build 394)".
+;; BUILD: 395-clear-voucher-types
+;; Title must show "(build 395)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -850,6 +850,12 @@
     32 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
     33 :    RETURN : No
     34 : END IF
+    ;; Fresh Create: never carry prior voucher-type rows into the new config
+    341 : CALL : Hxc Clear Draft Vchs
+    342 : CALL : Hxc Seed Draft Vch Row
+    343 : SET : HxcVcDraftAuto : No
+    344 : SET : HxcVcDraftConfirm : No
+    345 : SET : HxcVcAutoSendEnabled : No
     35 : SET : HxcVcDMFld1 : ""
     35 : SET : HxcVcDMFld2 : ""
     36 : SET : HxcVcDMFld3 : ""
@@ -969,11 +975,14 @@
     11 : RETURN : ##S
 
 [Function: Hxc Clear Draft Vchs]
-    ;; Remove all draft voucher-type rows
+    ;; Blank names first (Repeat Break On empty), then delete objects
     01 : WALK COLLECTION : HxcVcDraftVchs
-    02 :    DELETE OBJECT
+    02 :    SET VALUE : HxcVcDraftVchName : ""
     03 : END WALK
-    04 : RETURN : Yes
+    04 : WALK COLLECTION : HxcVcDraftVchs
+    05 :    DELETE OBJECT
+    06 : END WALK
+    07 : RETURN : Yes
 
 [Function: Hxc Seed Draft Vch Row]
     ;; One blank row so Repeat Aggregate is editable
@@ -1031,8 +1040,13 @@
     01 : SET VALUE : HxcVcDraftName : ""
     02 : SET VALUE : HxcVcDraftTemplate : ""
     03 : SET VALUE : HxcVcDraftLang : "en"
-    04 : SET : HxcVcCreateBlank : No
-    05 : RETURN : Yes
+    04 : CALL : Hxc Clear Draft Vchs
+    05 : CALL : Hxc Seed Draft Vch Row
+    06 : SET : HxcVcDraftAuto : No
+    07 : SET : HxcVcDraftConfirm : No
+    08 : SET : HxcVcAutoSendEnabled : No
+    09 : SET : HxcVcCreateBlank : No
+    10 : RETURN : Yes
 
 [Function: Hxc Vc Clear Draft]
     01 : CALL : Hxc Clear Fetch Vars
@@ -1204,7 +1218,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 394)"
+    Set as    : "Helixcer Chat — API Settings (build 395)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1918,7 +1932,8 @@
 [Field: HxcVcVoucherTypeInput]
     Use        : Name Field
     Storage    : HxcVcDraftVchName
-    Set as     : $HxcVcDraftVchName
+    Set as     : If ##HxcVcCreateBlank THEN "" ELSE $HxcVcDraftVchName
+    Set Always : ##HxcVcCreateBlank
     Table      : Hxc Voucher Type List, End of List
     Show Table : Always
     Width      : 40
@@ -2017,7 +2032,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 394)"
+    Set as    : "Create Voucher Config (build 395)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2093,7 +2108,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 394)"
+    Set as    : "Alter Voucher Config (build 395)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2153,7 +2168,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 394)"
+    Set as    : "Voucher Config List (build 395)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2268,7 +2283,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 394)"
+    Set as    : "Helixcer Chat (build 395)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
