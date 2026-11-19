@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 391-no-bad-value-formula
-;; Title must show "(build 391)".
+;; BUILD: 392-keep-fetch-name
+;; Title must show "(build 392)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -830,29 +830,35 @@
     05 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
     06 :    RETURN : No
     07 : END IF
-    08 : SET : HxcVcFetchName : ##HxcVcDraftTemplate
-    09 : IF : $$IsEmpty:##HxcVcFetchLang
-    10 :    SET : HxcVcFetchLang : ##HxcVcDraftLang
-    11 : END IF
-    12 : IF : $$IsEmpty:##HxcVcFetchLang
-    13 :    SET : HxcVcFetchLang : "en"
-    14 : END IF
-    15 : IF : $$IsEmpty:##HxcVcFetchName
-    16 :    SET : HxcVcFetchStatus : "Enter Template Name first."
-    17 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    18 :    RETURN : No
+    ;; Prefer FetchName already set on Template Accept; only fill from draft if empty.
+    08 : IF : $$IsEmpty:##HxcVcFetchName
+    09 :    SET : HxcVcFetchName : ##HxcVcDraftTemplate
+    10 : END IF
+    11 : IF : $$IsEmpty:##HxcVcDraftTemplate AND NOT $$IsEmpty:##HxcVcFetchName
+    12 :    SET : HxcVcDraftTemplate : ##HxcVcFetchName
+    13 : END IF
+    14 : IF : $$IsEmpty:##HxcVcFetchLang
+    15 :    SET : HxcVcFetchLang : ##HxcVcDraftLang
+    16 : END IF
+    17 : IF : $$IsEmpty:##HxcVcFetchLang
+    18 :    SET : HxcVcFetchLang : "en"
     19 : END IF
-    20 : SET : HxcVcFetchStatus : "Fetching..."
-    21 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
-    22 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
-    23 : End Progress
-    24 : IF : NOT ##HxcVcFetched
-    25 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
-    26 :       SET : HxcVcFetchStatus : "Could not fetch [" + ##HxcVcFetchName + "]. Open Helixcer Chat → Status. If Connected, check the template name on this channel."
-    27 :    END IF
-    28 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    29 :    RETURN : No
-    30 : END IF
+    20 : IF : $$IsEmpty:##HxcVcFetchName
+    21 :    SET : HxcVcFetchStatus : "Enter Template Name first."
+    22 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    23 :    RETURN : No
+    24 : END IF
+    25 : SET : HxcVcFetchStatus : "Fetching..."
+    26 : Start Progress : 1 : "Helixcer Chat" : "Template" : "Fetching template details"
+    27 : HTTP Request : @@HxcTemplateUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Template Response
+    28 : End Progress
+    29 : IF : NOT ##HxcVcFetched
+    30 :    IF : $$IsEmpty:##HxcVcFetchStatus OR ##HxcVcFetchStatus = "Fetching..."
+    31 :       SET : HxcVcFetchStatus : "Could not fetch [" + ##HxcVcFetchName + "]. Open Helixcer Chat → Status. If Connected, check the template name on this channel."
+    32 :    END IF
+    33 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    34 :    RETURN : No
+    35 : END IF
     34 : SET : HxcVcDMFld1 : ""
     35 : SET : HxcVcDMFld2 : ""
     36 : SET : HxcVcDMFld3 : ""
@@ -1198,7 +1204,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 391)"
+    Set as    : "Helixcer Chat — API Settings (build 392)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1348,9 +1354,10 @@
     Set as   : ##HxcVcDraftTemplate
     Width    : 40
     Max      : 80
+    ;; Clear fetch state first, then lock template into both draft + FetchName from $Value
+    On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
     On       : Accept : Yes : SET : HxcVcDraftTemplate : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : $Value
-    On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
     On       : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Lang Line]
@@ -1365,9 +1372,10 @@
     Set as   : If $$IsEmpty:##HxcVcDraftLang THEN "en" ELSE ##HxcVcDraftLang
     Width    : 16
     Max      : 16
+    ;; Do NOT overwrite FetchName with empty DraftTemplate — Template Accept already set it.
     On       : Accept : Yes : SET : HxcVcDraftLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
-    On       : Accept : Yes : SET : HxcVcFetchName : ##HxcVcDraftTemplate
+    On       : Accept : Yes : SET : HxcVcDraftTemplate : If $$IsEmpty:##HxcVcDraftTemplate THEN ##HxcVcFetchName ELSE ##HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
     On       : Accept : ##HxcVcFetched : Field Accept
 
@@ -2012,7 +2020,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 391)"
+    Set as    : "Create Voucher Config (build 392)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2088,7 +2096,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 391)"
+    Set as    : "Alter Voucher Config (build 392)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2148,7 +2156,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 391)"
+    Set as    : "Voucher Config List (build 392)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2263,7 +2271,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 391)"
+    Set as    : "Helixcer Chat (build 392)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
