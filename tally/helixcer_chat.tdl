@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 380-sync-nested-if
-;; Title must show "(build 380)".
+;; BUILD: 381-focusable-body-btn
+;; Title must show "(build 381)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -53,14 +53,6 @@
     ;; Dynamic voucher-type picker
     HxcVcDraftVchs    : Aggregate : 25150
     HxcVcDraftVchName : String    : 25151
-    HxcVcBodyMaps     : Aggregate : 25160
-    HxcVcBodyMapKey   : String    : 25161
-    HxcVcBodyMapSlot  : Number    : 25162
-    HxcVcBodyMapFld   : String    : 25163
-    HxcVcBtnMaps      : Aggregate : 25170
-    HxcVcBtnMapKey    : String    : 25171
-    HxcVcBtnMapSlot   : Number    : 25172
-    HxcVcBtnMapFld    : String    : 25173
 
 ;; ---------------------------------------------------------------------------
 ;; Status mirrors + save flag
@@ -450,7 +442,6 @@
     42 : SET : HxcVcFC16 : ""
     43 : RETURN : Yes
 
-
 [Function: Hxc Set Map Slot]
     Parameter : Idx : Number
     Parameter : Key : String
@@ -526,419 +517,6 @@
     69 :    SET : HxcVcHasBtnMaps : Yes
     70 : END IF
     71 : RETURN : Yes
-
-
-[Function: Hxc Clear Body Map Rows]
-    01 : WALK COLLECTION : HxcVcBodyMaps
-    02 :    DELETE OBJECT
-    03 : END WALK
-    04 : SET : HxcVcHasBodyMaps : No
-    05 : RETURN : Yes
-
-[Function: Hxc Clear Btn Map Rows]
-    01 : WALK COLLECTION : HxcVcBtnMaps
-    02 :    DELETE OBJECT
-    03 : END WALK
-    04 : SET : HxcVcHasBtnMaps : No
-    05 : RETURN : Yes
-
-[Function: Hxc Write Slot Fld]
-    Parameter : Slot : Number
-    Parameter : Val : String
-    01 : IF : ##Slot = 1
-    02 :    SET VALUE : HxcVcDMFld1 : ##Val
-    03 : END IF
-    04 : IF : ##Slot = 2
-    05 :    SET VALUE : HxcVcDMFld2 : ##Val
-    06 : END IF
-    07 : IF : ##Slot = 3
-    08 :    SET VALUE : HxcVcDMFld3 : ##Val
-    09 : END IF
-    10 : IF : ##Slot = 4
-    11 :    SET VALUE : HxcVcDMFld4 : ##Val
-    12 : END IF
-    13 : IF : ##Slot = 5
-    14 :    SET VALUE : HxcVcDMFld5 : ##Val
-    15 : END IF
-    16 : IF : ##Slot = 6
-    17 :    SET VALUE : HxcVcDMFld6 : ##Val
-    18 : END IF
-    19 : IF : ##Slot = 7
-    20 :    SET VALUE : HxcVcDMFld7 : ##Val
-    21 : END IF
-    22 : IF : ##Slot = 8
-    23 :    SET VALUE : HxcVcDMFld8 : ##Val
-    24 : END IF
-    25 : IF : ##Slot = 9
-    26 :    SET VALUE : HxcVcDMFld9 : ##Val
-    27 : END IF
-    28 : IF : ##Slot = 10
-    29 :    SET VALUE : HxcVcDMFld10 : ##Val
-    30 : END IF
-    31 : IF : ##Slot = 11
-    32 :    SET VALUE : HxcVcDMFld11 : ##Val
-    33 : END IF
-    34 : IF : ##Slot = 12
-    35 :    SET VALUE : HxcVcDMFld12 : ##Val
-    36 : END IF
-    37 : IF : ##Slot = 13
-    38 :    SET VALUE : HxcVcDMFld13 : ##Val
-    39 : END IF
-    40 : IF : ##Slot = 14
-    41 :    SET VALUE : HxcVcDMFld14 : ##Val
-    42 : END IF
-    43 : IF : ##Slot = 15
-    44 :    SET VALUE : HxcVcDMFld15 : ##Val
-    45 : END IF
-    46 : IF : ##Slot = 16
-    47 :    SET VALUE : HxcVcDMFld16 : ##Val
-    48 : END IF
-    49 : RETURN : Yes
-
-[Function: Hxc Sync Map Slots 1 To 4]
-    Variable : Fld : String
-    01 : IF : NOT $$IsEmpty:##HxcVcFK1
-    02 :    IF : ##HxcVcFC1 = "body"
-    03 :       SET : Fld : $HxcVcDMFld1
-    04 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    05 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK1
-    06 :       SET VALUE : HxcVcBodyMapSlot : 1
-    07 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    08 :       SET TARGET : ..
-    09 :       SET : HxcVcHasBodyMaps : Yes
-    10 :    END IF
-    11 :    IF : ##HxcVcFC1 = "button"
-    12 :       SET : Fld : $HxcVcDMFld1
-    13 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    14 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK1
-    15 :       SET VALUE : HxcVcBtnMapSlot : 1
-    16 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    17 :       SET TARGET : ..
-    18 :       SET : HxcVcHasBtnMaps : Yes
-    19 :    END IF
-    20 : END IF
-    21 : IF : NOT $$IsEmpty:##HxcVcFK2
-    22 :    IF : ##HxcVcFC2 = "body"
-    23 :       SET : Fld : $HxcVcDMFld2
-    24 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    25 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK2
-    26 :       SET VALUE : HxcVcBodyMapSlot : 2
-    27 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    28 :       SET TARGET : ..
-    29 :       SET : HxcVcHasBodyMaps : Yes
-    30 :    END IF
-    31 :    IF : ##HxcVcFC2 = "button"
-    32 :       SET : Fld : $HxcVcDMFld2
-    33 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    34 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK2
-    35 :       SET VALUE : HxcVcBtnMapSlot : 2
-    36 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    37 :       SET TARGET : ..
-    38 :       SET : HxcVcHasBtnMaps : Yes
-    39 :    END IF
-    40 : END IF
-    41 : IF : NOT $$IsEmpty:##HxcVcFK3
-    42 :    IF : ##HxcVcFC3 = "body"
-    43 :       SET : Fld : $HxcVcDMFld3
-    44 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    45 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK3
-    46 :       SET VALUE : HxcVcBodyMapSlot : 3
-    47 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    48 :       SET TARGET : ..
-    49 :       SET : HxcVcHasBodyMaps : Yes
-    50 :    END IF
-    51 :    IF : ##HxcVcFC3 = "button"
-    52 :       SET : Fld : $HxcVcDMFld3
-    53 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    54 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK3
-    55 :       SET VALUE : HxcVcBtnMapSlot : 3
-    56 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    57 :       SET TARGET : ..
-    58 :       SET : HxcVcHasBtnMaps : Yes
-    59 :    END IF
-    60 : END IF
-    61 : IF : NOT $$IsEmpty:##HxcVcFK4
-    62 :    IF : ##HxcVcFC4 = "body"
-    63 :       SET : Fld : $HxcVcDMFld4
-    64 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    65 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK4
-    66 :       SET VALUE : HxcVcBodyMapSlot : 4
-    67 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    68 :       SET TARGET : ..
-    69 :       SET : HxcVcHasBodyMaps : Yes
-    70 :    END IF
-    71 :    IF : ##HxcVcFC4 = "button"
-    72 :       SET : Fld : $HxcVcDMFld4
-    73 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    74 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK4
-    75 :       SET VALUE : HxcVcBtnMapSlot : 4
-    76 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    77 :       SET TARGET : ..
-    78 :       SET : HxcVcHasBtnMaps : Yes
-    79 :    END IF
-    80 : END IF
-    81 : RETURN : Yes
-
-[Function: Hxc Sync Map Slots 5 To 8]
-    Variable : Fld : String
-    01 : IF : NOT $$IsEmpty:##HxcVcFK5
-    02 :    IF : ##HxcVcFC5 = "body"
-    03 :       SET : Fld : $HxcVcDMFld5
-    04 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    05 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK5
-    06 :       SET VALUE : HxcVcBodyMapSlot : 5
-    07 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    08 :       SET TARGET : ..
-    09 :       SET : HxcVcHasBodyMaps : Yes
-    10 :    END IF
-    11 :    IF : ##HxcVcFC5 = "button"
-    12 :       SET : Fld : $HxcVcDMFld5
-    13 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    14 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK5
-    15 :       SET VALUE : HxcVcBtnMapSlot : 5
-    16 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    17 :       SET TARGET : ..
-    18 :       SET : HxcVcHasBtnMaps : Yes
-    19 :    END IF
-    20 : END IF
-    21 : IF : NOT $$IsEmpty:##HxcVcFK6
-    22 :    IF : ##HxcVcFC6 = "body"
-    23 :       SET : Fld : $HxcVcDMFld6
-    24 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    25 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK6
-    26 :       SET VALUE : HxcVcBodyMapSlot : 6
-    27 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    28 :       SET TARGET : ..
-    29 :       SET : HxcVcHasBodyMaps : Yes
-    30 :    END IF
-    31 :    IF : ##HxcVcFC6 = "button"
-    32 :       SET : Fld : $HxcVcDMFld6
-    33 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    34 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK6
-    35 :       SET VALUE : HxcVcBtnMapSlot : 6
-    36 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    37 :       SET TARGET : ..
-    38 :       SET : HxcVcHasBtnMaps : Yes
-    39 :    END IF
-    40 : END IF
-    41 : IF : NOT $$IsEmpty:##HxcVcFK7
-    42 :    IF : ##HxcVcFC7 = "body"
-    43 :       SET : Fld : $HxcVcDMFld7
-    44 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    45 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK7
-    46 :       SET VALUE : HxcVcBodyMapSlot : 7
-    47 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    48 :       SET TARGET : ..
-    49 :       SET : HxcVcHasBodyMaps : Yes
-    50 :    END IF
-    51 :    IF : ##HxcVcFC7 = "button"
-    52 :       SET : Fld : $HxcVcDMFld7
-    53 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    54 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK7
-    55 :       SET VALUE : HxcVcBtnMapSlot : 7
-    56 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    57 :       SET TARGET : ..
-    58 :       SET : HxcVcHasBtnMaps : Yes
-    59 :    END IF
-    60 : END IF
-    61 : IF : NOT $$IsEmpty:##HxcVcFK8
-    62 :    IF : ##HxcVcFC8 = "body"
-    63 :       SET : Fld : $HxcVcDMFld8
-    64 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    65 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK8
-    66 :       SET VALUE : HxcVcBodyMapSlot : 8
-    67 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    68 :       SET TARGET : ..
-    69 :       SET : HxcVcHasBodyMaps : Yes
-    70 :    END IF
-    71 :    IF : ##HxcVcFC8 = "button"
-    72 :       SET : Fld : $HxcVcDMFld8
-    73 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    74 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK8
-    75 :       SET VALUE : HxcVcBtnMapSlot : 8
-    76 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    77 :       SET TARGET : ..
-    78 :       SET : HxcVcHasBtnMaps : Yes
-    79 :    END IF
-    80 : END IF
-    81 : RETURN : Yes
-
-[Function: Hxc Sync Map Slots 9 To 12]
-    Variable : Fld : String
-    01 : IF : NOT $$IsEmpty:##HxcVcFK9
-    02 :    IF : ##HxcVcFC9 = "body"
-    03 :       SET : Fld : $HxcVcDMFld9
-    04 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    05 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK9
-    06 :       SET VALUE : HxcVcBodyMapSlot : 9
-    07 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    08 :       SET TARGET : ..
-    09 :       SET : HxcVcHasBodyMaps : Yes
-    10 :    END IF
-    11 :    IF : ##HxcVcFC9 = "button"
-    12 :       SET : Fld : $HxcVcDMFld9
-    13 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    14 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK9
-    15 :       SET VALUE : HxcVcBtnMapSlot : 9
-    16 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    17 :       SET TARGET : ..
-    18 :       SET : HxcVcHasBtnMaps : Yes
-    19 :    END IF
-    20 : END IF
-    21 : IF : NOT $$IsEmpty:##HxcVcFK10
-    22 :    IF : ##HxcVcFC10 = "body"
-    23 :       SET : Fld : $HxcVcDMFld10
-    24 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    25 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK10
-    26 :       SET VALUE : HxcVcBodyMapSlot : 10
-    27 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    28 :       SET TARGET : ..
-    29 :       SET : HxcVcHasBodyMaps : Yes
-    30 :    END IF
-    31 :    IF : ##HxcVcFC10 = "button"
-    32 :       SET : Fld : $HxcVcDMFld10
-    33 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    34 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK10
-    35 :       SET VALUE : HxcVcBtnMapSlot : 10
-    36 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    37 :       SET TARGET : ..
-    38 :       SET : HxcVcHasBtnMaps : Yes
-    39 :    END IF
-    40 : END IF
-    41 : IF : NOT $$IsEmpty:##HxcVcFK11
-    42 :    IF : ##HxcVcFC11 = "body"
-    43 :       SET : Fld : $HxcVcDMFld11
-    44 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    45 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK11
-    46 :       SET VALUE : HxcVcBodyMapSlot : 11
-    47 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    48 :       SET TARGET : ..
-    49 :       SET : HxcVcHasBodyMaps : Yes
-    50 :    END IF
-    51 :    IF : ##HxcVcFC11 = "button"
-    52 :       SET : Fld : $HxcVcDMFld11
-    53 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    54 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK11
-    55 :       SET VALUE : HxcVcBtnMapSlot : 11
-    56 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    57 :       SET TARGET : ..
-    58 :       SET : HxcVcHasBtnMaps : Yes
-    59 :    END IF
-    60 : END IF
-    61 : IF : NOT $$IsEmpty:##HxcVcFK12
-    62 :    IF : ##HxcVcFC12 = "body"
-    63 :       SET : Fld : $HxcVcDMFld12
-    64 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    65 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK12
-    66 :       SET VALUE : HxcVcBodyMapSlot : 12
-    67 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    68 :       SET TARGET : ..
-    69 :       SET : HxcVcHasBodyMaps : Yes
-    70 :    END IF
-    71 :    IF : ##HxcVcFC12 = "button"
-    72 :       SET : Fld : $HxcVcDMFld12
-    73 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    74 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK12
-    75 :       SET VALUE : HxcVcBtnMapSlot : 12
-    76 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    77 :       SET TARGET : ..
-    78 :       SET : HxcVcHasBtnMaps : Yes
-    79 :    END IF
-    80 : END IF
-    81 : RETURN : Yes
-
-[Function: Hxc Sync Map Slots 13 To 16]
-    Variable : Fld : String
-    01 : IF : NOT $$IsEmpty:##HxcVcFK13
-    02 :    IF : ##HxcVcFC13 = "body"
-    03 :       SET : Fld : $HxcVcDMFld13
-    04 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    05 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK13
-    06 :       SET VALUE : HxcVcBodyMapSlot : 13
-    07 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    08 :       SET TARGET : ..
-    09 :       SET : HxcVcHasBodyMaps : Yes
-    10 :    END IF
-    11 :    IF : ##HxcVcFC13 = "button"
-    12 :       SET : Fld : $HxcVcDMFld13
-    13 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    14 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK13
-    15 :       SET VALUE : HxcVcBtnMapSlot : 13
-    16 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    17 :       SET TARGET : ..
-    18 :       SET : HxcVcHasBtnMaps : Yes
-    19 :    END IF
-    20 : END IF
-    21 : IF : NOT $$IsEmpty:##HxcVcFK14
-    22 :    IF : ##HxcVcFC14 = "body"
-    23 :       SET : Fld : $HxcVcDMFld14
-    24 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    25 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK14
-    26 :       SET VALUE : HxcVcBodyMapSlot : 14
-    27 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    28 :       SET TARGET : ..
-    29 :       SET : HxcVcHasBodyMaps : Yes
-    30 :    END IF
-    31 :    IF : ##HxcVcFC14 = "button"
-    32 :       SET : Fld : $HxcVcDMFld14
-    33 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    34 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK14
-    35 :       SET VALUE : HxcVcBtnMapSlot : 14
-    36 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    37 :       SET TARGET : ..
-    38 :       SET : HxcVcHasBtnMaps : Yes
-    39 :    END IF
-    40 : END IF
-    41 : IF : NOT $$IsEmpty:##HxcVcFK15
-    42 :    IF : ##HxcVcFC15 = "body"
-    43 :       SET : Fld : $HxcVcDMFld15
-    44 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    45 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK15
-    46 :       SET VALUE : HxcVcBodyMapSlot : 15
-    47 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    48 :       SET TARGET : ..
-    49 :       SET : HxcVcHasBodyMaps : Yes
-    50 :    END IF
-    51 :    IF : ##HxcVcFC15 = "button"
-    52 :       SET : Fld : $HxcVcDMFld15
-    53 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    54 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK15
-    55 :       SET VALUE : HxcVcBtnMapSlot : 15
-    56 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    57 :       SET TARGET : ..
-    58 :       SET : HxcVcHasBtnMaps : Yes
-    59 :    END IF
-    60 : END IF
-    61 : IF : NOT $$IsEmpty:##HxcVcFK16
-    62 :    IF : ##HxcVcFC16 = "body"
-    63 :       SET : Fld : $HxcVcDMFld16
-    64 :       INSERT COLLECTION OBJECT : HxcVcBodyMaps
-    65 :       SET VALUE : HxcVcBodyMapKey : ##HxcVcFK16
-    66 :       SET VALUE : HxcVcBodyMapSlot : 16
-    67 :       SET VALUE : HxcVcBodyMapFld : ##Fld
-    68 :       SET TARGET : ..
-    69 :       SET : HxcVcHasBodyMaps : Yes
-    70 :    END IF
-    71 :    IF : ##HxcVcFC16 = "button"
-    72 :       SET : Fld : $HxcVcDMFld16
-    73 :       INSERT COLLECTION OBJECT : HxcVcBtnMaps
-    74 :       SET VALUE : HxcVcBtnMapKey : ##HxcVcFK16
-    75 :       SET VALUE : HxcVcBtnMapSlot : 16
-    76 :       SET VALUE : HxcVcBtnMapFld : ##Fld
-    77 :       SET TARGET : ..
-    78 :       SET : HxcVcHasBtnMaps : Yes
-    79 :    END IF
-    80 : END IF
-    81 : RETURN : Yes
-
-[Function: Hxc Sync Map Rows From Slots]
-    01 : CALL : Hxc Clear Body Map Rows
-    02 : CALL : Hxc Clear Btn Map Rows
-    03 : CALL : Hxc Sync Map Slots 1 To 4
-    04 : CALL : Hxc Sync Map Slots 5 To 8
-    05 : CALL : Hxc Sync Map Slots 9 To 12
-    06 : CALL : Hxc Sync Map Slots 13 To 16
-    07 : RETURN : Yes
 
 [Function: Hxc Apply Template Response]
     ;; Proven walk (build 347) + header; body/button → FK1..16 via Set Map Slot
@@ -1077,9 +655,8 @@
     55 : ELSE
     56 :    SET VALUE : HxcVcDraftMedia : "None"
     57 : END IF
-    58 : CALL : Hxc Sync Map Rows From Slots
-    59 : Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
-    60 : RETURN : Yes
+    58 : Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    59 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; Pack helpers + commit draft → Aggregate config
@@ -1199,35 +776,33 @@
 
 [Function: Hxc Vc Clear Draft]
     01 : CALL : Hxc Clear Fetch Vars
-    02 : CALL : Hxc Clear Body Map Rows
-    03 : CALL : Hxc Clear Btn Map Rows
-    04 : CALL : Hxc Clear Draft Vchs
-    05 : CALL : Hxc Seed Draft Vch Row
-    06 : SET VALUE : HxcVcDraftName : ""
-    07 : SET VALUE : HxcVcDraftTemplate : ""
-    08 : SET VALUE : HxcVcDraftLang : "en"
-    09 : SET VALUE : HxcVcDraftMedia : "None"
-    10 : SET VALUE : HxcVcDraftAuto : No
-    11 : SET VALUE : HxcVcDraftConfirm : No
-    12 : SET VALUE : HxcVcDraftEditKey : ""
-    13 : SET VALUE : HxcVcDraftHeaderFld : ""
-    14 : SET VALUE : HxcVcDMFld1 : ""
-    15 : SET VALUE : HxcVcDMFld2 : ""
-    16 : SET VALUE : HxcVcDMFld3 : ""
-    17 : SET VALUE : HxcVcDMFld4 : ""
-    18 : SET VALUE : HxcVcDMFld5 : ""
-    19 : SET VALUE : HxcVcDMFld6 : ""
-    20 : SET VALUE : HxcVcDMFld7 : ""
-    21 : SET VALUE : HxcVcDMFld8 : ""
-    22 : SET VALUE : HxcVcDMFld9 : ""
-    23 : SET VALUE : HxcVcDMFld10 : ""
-    24 : SET VALUE : HxcVcDMFld11 : ""
-    25 : SET VALUE : HxcVcDMFld12 : ""
-    26 : SET VALUE : HxcVcDMFld13 : ""
-    27 : SET VALUE : HxcVcDMFld14 : ""
-    28 : SET VALUE : HxcVcDMFld15 : ""
-    29 : SET VALUE : HxcVcDMFld16 : ""
-    30 : RETURN : Yes
+    02 : CALL : Hxc Clear Draft Vchs
+    03 : CALL : Hxc Seed Draft Vch Row
+    04 : SET VALUE : HxcVcDraftName : ""
+    05 : SET VALUE : HxcVcDraftTemplate : ""
+    06 : SET VALUE : HxcVcDraftLang : "en"
+    07 : SET VALUE : HxcVcDraftMedia : "None"
+    08 : SET VALUE : HxcVcDraftAuto : No
+    09 : SET VALUE : HxcVcDraftConfirm : No
+    10 : SET VALUE : HxcVcDraftEditKey : ""
+    11 : SET VALUE : HxcVcDraftHeaderFld : ""
+    12 : SET VALUE : HxcVcDMFld1 : ""
+    13 : SET VALUE : HxcVcDMFld2 : ""
+    14 : SET VALUE : HxcVcDMFld3 : ""
+    15 : SET VALUE : HxcVcDMFld4 : ""
+    16 : SET VALUE : HxcVcDMFld5 : ""
+    17 : SET VALUE : HxcVcDMFld6 : ""
+    18 : SET VALUE : HxcVcDMFld7 : ""
+    19 : SET VALUE : HxcVcDMFld8 : ""
+    20 : SET VALUE : HxcVcDMFld9 : ""
+    21 : SET VALUE : HxcVcDMFld10 : ""
+    22 : SET VALUE : HxcVcDMFld11 : ""
+    23 : SET VALUE : HxcVcDMFld12 : ""
+    24 : SET VALUE : HxcVcDMFld13 : ""
+    25 : SET VALUE : HxcVcDMFld14 : ""
+    26 : SET VALUE : HxcVcDMFld15 : ""
+    27 : SET VALUE : HxcVcDMFld16 : ""
+    28 : RETURN : Yes
 
 
 [Function: Hxc Vc Commit Draft]
@@ -1328,7 +903,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 380)"
+    Set as    : "Helixcer Chat — API Settings (build 381)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1404,23 +979,44 @@
     Horizontal : Yes
 
 [Part: Hxc Vc Form Left Col]
-    Parts  : Hxc Vc Form Map Top Part, Hxc Vc Form Body Maps Part, Hxc Vc Form Btn Maps Part
+    Lines  : Hxc Vc F Map Sect, +
+             Hxc Vc F Hdr Media Line, Hxc Vc F Hdr Text Line, +
+             Hxc Vc F Body Sect, Hxc Vc F Body Col Head, +
+             Hxc Vc F Body1, +
+             Hxc Vc F Body2, +
+             Hxc Vc F Body3, +
+             Hxc Vc F Body4, +
+             Hxc Vc F Body5, +
+             Hxc Vc F Body6, +
+             Hxc Vc F Body7, +
+             Hxc Vc F Body8, +
+             Hxc Vc F Body9, +
+             Hxc Vc F Body10, +
+             Hxc Vc F Body11, +
+             Hxc Vc F Body12, +
+             Hxc Vc F Body13, +
+             Hxc Vc F Body14, +
+             Hxc Vc F Body15, +
+             Hxc Vc F Body16, +
+             Hxc Vc F Btn Sect, Hxc Vc F Btn Col Head, +
+             Hxc Vc F Btn1, +
+             Hxc Vc F Btn2, +
+             Hxc Vc F Btn3, +
+             Hxc Vc F Btn4, +
+             Hxc Vc F Btn5, +
+             Hxc Vc F Btn6, +
+             Hxc Vc F Btn7, +
+             Hxc Vc F Btn8, +
+             Hxc Vc F Btn9, +
+             Hxc Vc F Btn10, +
+             Hxc Vc F Btn11, +
+             Hxc Vc F Btn12, +
+             Hxc Vc F Btn13, +
+             Hxc Vc F Btn14, +
+             Hxc Vc F Btn15, +
+             Hxc Vc F Btn16
     Scroll : Vertical
     Width  : 55% Screen
-
-[Part: Hxc Vc Form Map Top Part]
-    Lines  : Hxc Vc F Map Sect, Hxc Vc F Hdr Media Line, Hxc Vc F Hdr Text Line
-
-;; Repeat only real vars — avoids empty Body3..16 gap before Button
-[Part: Hxc Vc Form Body Maps Part]
-    Lines    : Hxc Vc F Body Sect, Hxc Vc F Body Col Head, Hxc Vc F Body Data
-    Repeat   : Hxc Vc F Body Data : HxcVcBodyMaps
-    Break On : $$IsEmpty:$HxcVcBodyMapKey
-
-[Part: Hxc Vc Form Btn Maps Part]
-    Lines    : Hxc Vc F Btn Sect, Hxc Vc F Btn Col Head, Hxc Vc F Btn Data
-    Repeat   : Hxc Vc F Btn Data : HxcVcBtnMaps
-    Break On : $$IsEmpty:$HxcVcBtnMapKey
 
 [Part: Hxc Vc Form Preview Part]
     Lines  : Hxc Vc F Prev Head, Hxc Vc F Prev Body
@@ -1588,29 +1184,357 @@
     Width     : 28
     Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBodyMaps
 
-[Line: Hxc Vc F Body Data]
-    Fields : Hxc Vc F Body MK, Hxc Vc F Body MF
+[Line: Hxc Vc F Body1]
+    Fields : Hxc Vc F Body1 MK, Hxc Vc F Body1 MF
 
-[Field: Hxc Vc F Body MK]
+[Field: Hxc Vc F Body1 MK]
     Use        : Name Field
-    Set as     : "{" + $HxcVcBodyMapKey + "}"
+    Set as     : "{" + ##HxcVcFK1 + "}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:$HxcVcBodyMapKey
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
 
-[Field: Hxc Vc F Body MF]
+[Field: Hxc Vc F Body1 MF]
     Use        : Name Field
-    Storage    : HxcVcBodyMapFld
-    Set as     : $HxcVcBodyMapFld
+    Storage    : HxcVcDMFld1
+    Set as     : $HxcVcDMFld1
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:$HxcVcBodyMapKey
-    On         : Accept : Yes : CALL : Hxc Write Slot Fld : $HxcVcBodyMapSlot : $Value
-    On         : Accept : Yes : Field Accept
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
+
+[Line: Hxc Vc F Body2]
+    Fields : Hxc Vc F Body2 MK, Hxc Vc F Body2 MF
+
+[Field: Hxc Vc F Body2 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK2 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
+
+[Field: Hxc Vc F Body2 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld2
+    Set as     : $HxcVcDMFld2
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
+
+[Line: Hxc Vc F Body3]
+    Fields : Hxc Vc F Body3 MK, Hxc Vc F Body3 MF
+
+[Field: Hxc Vc F Body3 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK3 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
+
+[Field: Hxc Vc F Body3 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld3
+    Set as     : $HxcVcDMFld3
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
+
+[Line: Hxc Vc F Body4]
+    Fields : Hxc Vc F Body4 MK, Hxc Vc F Body4 MF
+
+[Field: Hxc Vc F Body4 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK4 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
+
+[Field: Hxc Vc F Body4 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld4
+    Set as     : $HxcVcDMFld4
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
+
+[Line: Hxc Vc F Body5]
+    Fields : Hxc Vc F Body5 MK, Hxc Vc F Body5 MF
+
+[Field: Hxc Vc F Body5 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK5 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
+
+[Field: Hxc Vc F Body5 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld5
+    Set as     : $HxcVcDMFld5
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
+
+[Line: Hxc Vc F Body6]
+    Fields : Hxc Vc F Body6 MK, Hxc Vc F Body6 MF
+
+[Field: Hxc Vc F Body6 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK6 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
+
+[Field: Hxc Vc F Body6 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld6
+    Set as     : $HxcVcDMFld6
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
+
+[Line: Hxc Vc F Body7]
+    Fields : Hxc Vc F Body7 MK, Hxc Vc F Body7 MF
+
+[Field: Hxc Vc F Body7 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK7 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
+
+[Field: Hxc Vc F Body7 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld7
+    Set as     : $HxcVcDMFld7
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
+
+[Line: Hxc Vc F Body8]
+    Fields : Hxc Vc F Body8 MK, Hxc Vc F Body8 MF
+
+[Field: Hxc Vc F Body8 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK8 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "body"
+
+[Field: Hxc Vc F Body8 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld8
+    Set as     : $HxcVcDMFld8
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "body"
+
+[Line: Hxc Vc F Body9]
+    Fields : Hxc Vc F Body9 MK, Hxc Vc F Body9 MF
+
+[Field: Hxc Vc F Body9 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK9 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9 OR NOT ##HxcVcFC9 = "body"
+
+[Field: Hxc Vc F Body9 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld9
+    Set as     : $HxcVcDMFld9
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9 OR NOT ##HxcVcFC9 = "body"
+
+[Line: Hxc Vc F Body10]
+    Fields : Hxc Vc F Body10 MK, Hxc Vc F Body10 MF
+
+[Field: Hxc Vc F Body10 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK10 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10 OR NOT ##HxcVcFC10 = "body"
+
+[Field: Hxc Vc F Body10 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld10
+    Set as     : $HxcVcDMFld10
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10 OR NOT ##HxcVcFC10 = "body"
+
+[Line: Hxc Vc F Body11]
+    Fields : Hxc Vc F Body11 MK, Hxc Vc F Body11 MF
+
+[Field: Hxc Vc F Body11 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK11 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11 OR NOT ##HxcVcFC11 = "body"
+
+[Field: Hxc Vc F Body11 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld11
+    Set as     : $HxcVcDMFld11
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11 OR NOT ##HxcVcFC11 = "body"
+
+[Line: Hxc Vc F Body12]
+    Fields : Hxc Vc F Body12 MK, Hxc Vc F Body12 MF
+
+[Field: Hxc Vc F Body12 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK12 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12 OR NOT ##HxcVcFC12 = "body"
+
+[Field: Hxc Vc F Body12 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld12
+    Set as     : $HxcVcDMFld12
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12 OR NOT ##HxcVcFC12 = "body"
+
+[Line: Hxc Vc F Body13]
+    Fields : Hxc Vc F Body13 MK, Hxc Vc F Body13 MF
+
+[Field: Hxc Vc F Body13 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK13 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13 OR NOT ##HxcVcFC13 = "body"
+
+[Field: Hxc Vc F Body13 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld13
+    Set as     : $HxcVcDMFld13
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13 OR NOT ##HxcVcFC13 = "body"
+
+[Line: Hxc Vc F Body14]
+    Fields : Hxc Vc F Body14 MK, Hxc Vc F Body14 MF
+
+[Field: Hxc Vc F Body14 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK14 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14 OR NOT ##HxcVcFC14 = "body"
+
+[Field: Hxc Vc F Body14 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld14
+    Set as     : $HxcVcDMFld14
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14 OR NOT ##HxcVcFC14 = "body"
+
+[Line: Hxc Vc F Body15]
+    Fields : Hxc Vc F Body15 MK, Hxc Vc F Body15 MF
+
+[Field: Hxc Vc F Body15 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK15 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15 OR NOT ##HxcVcFC15 = "body"
+
+[Field: Hxc Vc F Body15 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld15
+    Set as     : $HxcVcDMFld15
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15 OR NOT ##HxcVcFC15 = "body"
+
+[Line: Hxc Vc F Body16]
+    Fields : Hxc Vc F Body16 MK, Hxc Vc F Body16 MF
+
+[Field: Hxc Vc F Body16 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK16 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16 OR NOT ##HxcVcFC16 = "body"
+
+[Field: Hxc Vc F Body16 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld16
+    Set as     : $HxcVcDMFld16
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16 OR NOT ##HxcVcFC16 = "body"
 
 [Line: Hxc Vc F Btn Sect]
     Field : Hxc Vc F Btn Sect Fld
@@ -1643,29 +1567,357 @@
     Width     : 28
     Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBtnMaps
 
-[Line: Hxc Vc F Btn Data]
-    Fields : Hxc Vc F Btn MK, Hxc Vc F Btn MF
+[Line: Hxc Vc F Btn1]
+    Fields : Hxc Vc F Btn1 MK, Hxc Vc F Btn1 MF
 
-[Field: Hxc Vc F Btn MK]
+[Field: Hxc Vc F Btn1 MK]
     Use        : Name Field
-    Set as     : "{" + $HxcVcBtnMapKey + "}"
+    Set as     : "{" + ##HxcVcFK1 + "}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:$HxcVcBtnMapKey
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "button"
 
-[Field: Hxc Vc F Btn MF]
+[Field: Hxc Vc F Btn1 MF]
     Use        : Name Field
-    Storage    : HxcVcBtnMapFld
-    Set as     : $HxcVcBtnMapFld
+    Storage    : HxcVcDMFld1
+    Set as     : $HxcVcDMFld1
     Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
     Color      : Black
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:$HxcVcBtnMapKey
-    On         : Accept : Yes : CALL : Hxc Write Slot Fld : $HxcVcBtnMapSlot : $Value
-    On         : Accept : Yes : Field Accept
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "button"
+
+[Line: Hxc Vc F Btn2]
+    Fields : Hxc Vc F Btn2 MK, Hxc Vc F Btn2 MF
+
+[Field: Hxc Vc F Btn2 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK2 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "button"
+
+[Field: Hxc Vc F Btn2 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld2
+    Set as     : $HxcVcDMFld2
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "button"
+
+[Line: Hxc Vc F Btn3]
+    Fields : Hxc Vc F Btn3 MK, Hxc Vc F Btn3 MF
+
+[Field: Hxc Vc F Btn3 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK3 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "button"
+
+[Field: Hxc Vc F Btn3 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld3
+    Set as     : $HxcVcDMFld3
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "button"
+
+[Line: Hxc Vc F Btn4]
+    Fields : Hxc Vc F Btn4 MK, Hxc Vc F Btn4 MF
+
+[Field: Hxc Vc F Btn4 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK4 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "button"
+
+[Field: Hxc Vc F Btn4 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld4
+    Set as     : $HxcVcDMFld4
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "button"
+
+[Line: Hxc Vc F Btn5]
+    Fields : Hxc Vc F Btn5 MK, Hxc Vc F Btn5 MF
+
+[Field: Hxc Vc F Btn5 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK5 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "button"
+
+[Field: Hxc Vc F Btn5 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld5
+    Set as     : $HxcVcDMFld5
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "button"
+
+[Line: Hxc Vc F Btn6]
+    Fields : Hxc Vc F Btn6 MK, Hxc Vc F Btn6 MF
+
+[Field: Hxc Vc F Btn6 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK6 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "button"
+
+[Field: Hxc Vc F Btn6 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld6
+    Set as     : $HxcVcDMFld6
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "button"
+
+[Line: Hxc Vc F Btn7]
+    Fields : Hxc Vc F Btn7 MK, Hxc Vc F Btn7 MF
+
+[Field: Hxc Vc F Btn7 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK7 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "button"
+
+[Field: Hxc Vc F Btn7 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld7
+    Set as     : $HxcVcDMFld7
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "button"
+
+[Line: Hxc Vc F Btn8]
+    Fields : Hxc Vc F Btn8 MK, Hxc Vc F Btn8 MF
+
+[Field: Hxc Vc F Btn8 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK8 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "button"
+
+[Field: Hxc Vc F Btn8 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld8
+    Set as     : $HxcVcDMFld8
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "button"
+
+[Line: Hxc Vc F Btn9]
+    Fields : Hxc Vc F Btn9 MK, Hxc Vc F Btn9 MF
+
+[Field: Hxc Vc F Btn9 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK9 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9 OR NOT ##HxcVcFC9 = "button"
+
+[Field: Hxc Vc F Btn9 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld9
+    Set as     : $HxcVcDMFld9
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9 OR NOT ##HxcVcFC9 = "button"
+
+[Line: Hxc Vc F Btn10]
+    Fields : Hxc Vc F Btn10 MK, Hxc Vc F Btn10 MF
+
+[Field: Hxc Vc F Btn10 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK10 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10 OR NOT ##HxcVcFC10 = "button"
+
+[Field: Hxc Vc F Btn10 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld10
+    Set as     : $HxcVcDMFld10
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10 OR NOT ##HxcVcFC10 = "button"
+
+[Line: Hxc Vc F Btn11]
+    Fields : Hxc Vc F Btn11 MK, Hxc Vc F Btn11 MF
+
+[Field: Hxc Vc F Btn11 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK11 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11 OR NOT ##HxcVcFC11 = "button"
+
+[Field: Hxc Vc F Btn11 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld11
+    Set as     : $HxcVcDMFld11
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11 OR NOT ##HxcVcFC11 = "button"
+
+[Line: Hxc Vc F Btn12]
+    Fields : Hxc Vc F Btn12 MK, Hxc Vc F Btn12 MF
+
+[Field: Hxc Vc F Btn12 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK12 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12 OR NOT ##HxcVcFC12 = "button"
+
+[Field: Hxc Vc F Btn12 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld12
+    Set as     : $HxcVcDMFld12
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12 OR NOT ##HxcVcFC12 = "button"
+
+[Line: Hxc Vc F Btn13]
+    Fields : Hxc Vc F Btn13 MK, Hxc Vc F Btn13 MF
+
+[Field: Hxc Vc F Btn13 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK13 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13 OR NOT ##HxcVcFC13 = "button"
+
+[Field: Hxc Vc F Btn13 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld13
+    Set as     : $HxcVcDMFld13
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13 OR NOT ##HxcVcFC13 = "button"
+
+[Line: Hxc Vc F Btn14]
+    Fields : Hxc Vc F Btn14 MK, Hxc Vc F Btn14 MF
+
+[Field: Hxc Vc F Btn14 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK14 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14 OR NOT ##HxcVcFC14 = "button"
+
+[Field: Hxc Vc F Btn14 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld14
+    Set as     : $HxcVcDMFld14
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14 OR NOT ##HxcVcFC14 = "button"
+
+[Line: Hxc Vc F Btn15]
+    Fields : Hxc Vc F Btn15 MK, Hxc Vc F Btn15 MF
+
+[Field: Hxc Vc F Btn15 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK15 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15 OR NOT ##HxcVcFC15 = "button"
+
+[Field: Hxc Vc F Btn15 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld15
+    Set as     : $HxcVcDMFld15
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15 OR NOT ##HxcVcFC15 = "button"
+
+[Line: Hxc Vc F Btn16]
+    Fields : Hxc Vc F Btn16 MK, Hxc Vc F Btn16 MF
+
+[Field: Hxc Vc F Btn16 MK]
+    Use        : Name Field
+    Set as     : "{" + ##HxcVcFK16 + "}"
+    Set Always : Yes
+    Skip       : Yes
+    Width      : 28
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16 OR NOT ##HxcVcFC16 = "button"
+
+[Field: Hxc Vc F Btn16 MF]
+    Use        : Name Field
+    Storage    : HxcVcDMFld16
+    Set as     : $HxcVcDMFld16
+    Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
+    Width      : 28
+    Max        : 40
+    Color      : Black
+    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16 OR NOT ##HxcVcFC16 = "button"
 
 
 ;; --- Message Preview ---
@@ -1797,7 +2049,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 380)"
+    Set as    : "Create Voucher Config (build 381)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1870,7 +2122,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 380)"
+    Set as    : "Alter Voucher Config (build 381)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1929,7 +2181,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 380)"
+    Set as    : "Voucher Config List (build 381)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2044,7 +2296,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 380)"
+    Set as    : "Helixcer Chat (build 381)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
