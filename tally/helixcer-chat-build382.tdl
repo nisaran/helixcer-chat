@@ -94,6 +94,9 @@
 [Variable: HxcVcFetched]
     Type : Logical
 
+[Variable: HxcVcMoveToMapping]
+    Type : Logical
+
 [Variable: HxcVcPreviewText]
     Type : String
 
@@ -227,6 +230,7 @@
     HxcVcSaveOk         : No
     HxcVcHasBodyMaps    : No
     HxcVcHasBtnMaps     : No
+    HxcVcMoveToMapping  : No
     HxcVcFetched        : No
     HxcVcPreviewText    : ""
     HxcVcFetchStatus    : ""
@@ -274,7 +278,7 @@
     Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcSysChannelId
     Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
     ;; Same pattern as working build 347 Status/HTTP, but template name in ## var
-    Hxc Template Url   : "https://api.chat.helixcer.com/api/v1/whatsapp/templates/" + ##HxcVcFetchName + "?channelId=" + ##HxcSysChannelId
+    Hxc Template Url   : "https://api.chat.helixcer.com/api/v1/whatsapp/templates/" + ##HxcVcFetchName + "?channelId=" + ##HxcSysChannelId + "&language=" + ##HxcVcFetchLang
 
 ;; ---------------------------------------------------------------------------
 ;; Tables
@@ -398,6 +402,7 @@
     07 : RETURN : Yes
 
 [Function: Hxc Clear Fetch Vars]
+    00 : SET : HxcVcMoveToMapping : No
     01 : SET : HxcVcFetched : No
     02 : SET : HxcVcPreviewText : ""
     03 : SET : HxcVcFetchStatus : ""
@@ -708,7 +713,7 @@
     55 : ELSE
     56 :    SET VALUE : HxcVcDraftMedia : "None"
     57 : END IF
-    58 : Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
+    58 : SET : HxcVcMoveToMapping : Yes
     59 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
@@ -1032,8 +1037,9 @@
     Horizontal : Yes
 
 [Part: Hxc Vc Form Left Col]
+    On : Focus : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     Lines  : Hxc Vc F Map Sect, +
-             Hxc Vc F Hdr Media Line, Hxc Vc F Hdr Text Line, +
+             Hxc Vc F Hdr Media Line, Hxc Vc F Hdr Col Head, Hxc Vc F Hdr Text Line, +
              Hxc Vc F Body Sect, Hxc Vc F Body Col Head, +
              Hxc Vc F Body1, +
              Hxc Vc F Body2, +
@@ -1057,12 +1063,14 @@
 
 ;; Voucher Rules
 [Part: Hxc Vc Form Vch Part]
+    On : Focus : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     Lines    : Hxc Vc F Vch Sect, Hxc Vc F Vch Head, Hxc Vc F Vch Data
     Repeat   : Hxc Vc F Vch Data : HxcVcDraftVchs
     Break On : $$IsEmpty:$HxcVcDraftVchName OR $HxcVcDraftVchName = "End of List" OR $HxcVcDraftVchName = "Not Applicable"
     Scroll   : Vertical
 
 [Part: Hxc Vc Form Settings Part]
+    On : Focus : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     Lines    : Hxc Vc F Auto Line, Hxc Vc F Confirm Line
 
 ;; --- Template fields ---
@@ -1084,6 +1092,7 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Name]
+    Skip     : ##HxcVcMoveToMapping
     Use      : Name Field
     Storage  : HxcVcDraftName
     Set as   : $HxcVcDraftName
@@ -1096,6 +1105,7 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Template]
+    Skip     : ##HxcVcMoveToMapping
     Use      : Name Field
     Storage  : HxcVcDraftTemplate
     Set as   : $HxcVcDraftTemplate
@@ -1111,6 +1121,7 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Lang]
+    Skip     : ##HxcVcMoveToMapping
     Use      : Name Field
     Storage  : HxcVcDraftLang
     Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
@@ -1119,7 +1130,7 @@
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
-    On       : Accept : Yes : Field Accept
+    On       : Accept : ##HxcVcFetched : Field Accept
 
 [Line: Hxc Vc F Fetch Status Line]
     Field : Hxc Vc F Fetch Status
@@ -1162,18 +1173,36 @@
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "media"
 
+[Line: Hxc Vc F Hdr Col Head]
+    Invisible : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
+    Fields    : Hxc Vc F Hdr Col Key, Hxc Vc F Hdr Col Fld
+
+[Field: Hxc Vc F Hdr Col Key]
+    Use    : Name Field
+    Set as : "Header variable"
+    Style  : Bold
+    Color  : Dark Green
+    Skip   : Yes
+    Width  : 28
+
+[Field: Hxc Vc F Hdr Col Fld]
+    Use    : Name Field
+    Set as : "Voucher field"
+    Style  : Bold
+    Color  : Dark Green
+    Skip   : Yes
+    Width  : 28
+
 [Line: Hxc Vc F Hdr Text Line]
-    Fields : Medium Prompt, Hxc Vc F Hdr MK, Hxc Vc F Hdr MF
-    Local  : Field : Medium Prompt : Set as : "Header Variable"
-    Local  : Field : Medium Prompt : Width  : 22
-    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
+    Invisible : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
+    Fields    : Hxc Vc F Hdr MK, Hxc Vc F Hdr MF
 
 [Field: Hxc Vc F Hdr MK]
     Use        : Name Field
     Set as     : If $$IsEmpty:##HxcVcHeaderKey THEN "" ELSE ("{{" + ##HxcVcHeaderKey + "}}")
     Set Always : Yes
     Skip       : Yes
-    Width      : 14
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
 
 [Field: Hxc Vc F Hdr MF]
@@ -1191,7 +1220,7 @@
 
 [Field: Hxc Vc F Body Sect Fld]
     Use       : Name Field
-    Set as    : "Body Variables"
+    Set as    : ""
     Style     : Bold
     Color     : Dark Green
     FullWidth : Yes
@@ -1205,6 +1234,7 @@
     Use       : Name Field
     Set as    : "Body variable"
     Style     : Bold
+    Color     : Dark Green
     Skip      : Yes
     Width     : 28
     Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBodyMaps
@@ -1213,16 +1243,18 @@
     Use       : Name Field
     Set as    : "Voucher field"
     Style     : Bold
+    Color     : Dark Green
     Skip      : Yes
     Width     : 28
     Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBodyMaps
 
 [Line: Hxc Vc F Body1]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
     Fields : Hxc Vc F Body1 MK, Hxc Vc F Body1 MF
 
 [Field: Hxc Vc F Body1 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK1 + "}"
+    Set as     : "{{" + ##HxcVcFK1 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1240,11 +1272,12 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
 
 [Line: Hxc Vc F Body2]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
     Fields : Hxc Vc F Body2 MK, Hxc Vc F Body2 MF
 
 [Field: Hxc Vc F Body2 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK2 + "}"
+    Set as     : "{{" + ##HxcVcFK2 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1262,11 +1295,12 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
 
 [Line: Hxc Vc F Body3]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
     Fields : Hxc Vc F Body3 MK, Hxc Vc F Body3 MF
 
 [Field: Hxc Vc F Body3 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK3 + "}"
+    Set as     : "{{" + ##HxcVcFK3 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1284,11 +1318,12 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
 
 [Line: Hxc Vc F Body4]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
     Fields : Hxc Vc F Body4 MK, Hxc Vc F Body4 MF
 
 [Field: Hxc Vc F Body4 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK4 + "}"
+    Set as     : "{{" + ##HxcVcFK4 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1306,11 +1341,12 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
 
 [Line: Hxc Vc F Body5]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
     Fields : Hxc Vc F Body5 MK, Hxc Vc F Body5 MF
 
 [Field: Hxc Vc F Body5 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK5 + "}"
+    Set as     : "{{" + ##HxcVcFK5 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1328,11 +1364,12 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
 
 [Line: Hxc Vc F Body6]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
     Fields : Hxc Vc F Body6 MK, Hxc Vc F Body6 MF
 
 [Field: Hxc Vc F Body6 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK6 + "}"
+    Set as     : "{{" + ##HxcVcFK6 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1350,11 +1387,12 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
 
 [Line: Hxc Vc F Body7]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
     Fields : Hxc Vc F Body7 MK, Hxc Vc F Body7 MF
 
 [Field: Hxc Vc F Body7 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK7 + "}"
+    Set as     : "{{" + ##HxcVcFK7 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1372,11 +1410,12 @@
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
 
 [Line: Hxc Vc F Body8]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "body"
     Fields : Hxc Vc F Body8 MK, Hxc Vc F Body8 MF
 
 [Field: Hxc Vc F Body8 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK8 + "}"
+    Set as     : "{{" + ##HxcVcFK8 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1398,7 +1437,7 @@
 
 [Field: Hxc Vc F Btn Sect Fld]
     Use       : Name Field
-    Set as    : "Button Variables"
+    Set as    : ""
     Style     : Bold
     Color     : Dark Green
     FullWidth : Yes
@@ -1412,6 +1451,7 @@
     Use       : Name Field
     Set as    : "Button variable"
     Style     : Bold
+    Color     : Dark Green
     Skip      : Yes
     Width     : 28
     Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBtnMaps
@@ -1420,16 +1460,18 @@
     Use       : Name Field
     Set as    : "Voucher field"
     Style     : Bold
+    Color     : Dark Green
     Skip      : Yes
     Width     : 28
     Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasBtnMaps
 
 [Line: Hxc Vc F Btn1]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "button"
     Fields : Hxc Vc F Btn1 MK, Hxc Vc F Btn1 MF
 
 [Field: Hxc Vc F Btn1 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK1 + "}"
+    Set as     : "{{" + ##HxcVcFK1 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1448,11 +1490,12 @@
     On         : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Btn2]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "button"
     Fields : Hxc Vc F Btn2 MK, Hxc Vc F Btn2 MF
 
 [Field: Hxc Vc F Btn2 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK2 + "}"
+    Set as     : "{{" + ##HxcVcFK2 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1471,11 +1514,12 @@
     On         : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Btn3]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "button"
     Fields : Hxc Vc F Btn3 MK, Hxc Vc F Btn3 MF
 
 [Field: Hxc Vc F Btn3 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK3 + "}"
+    Set as     : "{{" + ##HxcVcFK3 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28
@@ -1494,11 +1538,12 @@
     On         : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Btn4]
+    Invisible : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "button"
     Fields : Hxc Vc F Btn4 MK, Hxc Vc F Btn4 MF
 
 [Field: Hxc Vc F Btn4 MK]
     Use        : Name Field
-    Set as     : "{" + ##HxcVcFK4 + "}"
+    Set as     : "{{" + ##HxcVcFK4 + "}}"
     Set Always : Yes
     Skip       : Yes
     Width      : 28

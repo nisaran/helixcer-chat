@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 386-continue-gate
-;; Title must show "(build 386)".
+;; BUILD: 382-body-select-no-gap
+;; Title must show "(build 382)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -92,6 +92,9 @@
     Type : Logical
 
 [Variable: HxcVcFetched]
+    Type : Logical
+
+[Variable: HxcVcMoveToMapping]
     Type : Logical
 
 [Variable: HxcVcPreviewText]
@@ -227,6 +230,7 @@
     HxcVcSaveOk         : No
     HxcVcHasBodyMaps    : No
     HxcVcHasBtnMaps     : No
+    HxcVcMoveToMapping  : No
     HxcVcFetched        : No
     HxcVcPreviewText    : ""
     HxcVcFetchStatus    : ""
@@ -274,7 +278,7 @@
     Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcSysChannelId
     Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
     ;; Same pattern as working build 347 Status/HTTP, but template name in ## var
-    Hxc Template Url   : "https://api.chat.helixcer.com/api/v1/whatsapp/templates/" + ##HxcVcFetchName + "?channelId=" + ##HxcSysChannelId
+    Hxc Template Url   : "https://api.chat.helixcer.com/api/v1/whatsapp/templates/" + ##HxcVcFetchName + "?channelId=" + ##HxcSysChannelId + "&language=" + ##HxcVcFetchLang
 
 ;; ---------------------------------------------------------------------------
 ;; Tables
@@ -398,6 +402,7 @@
     07 : RETURN : Yes
 
 [Function: Hxc Clear Fetch Vars]
+    00 : SET : HxcVcMoveToMapping : No
     01 : SET : HxcVcFetched : No
     02 : SET : HxcVcPreviewText : ""
     03 : SET : HxcVcFetchStatus : ""
@@ -708,33 +713,8 @@
     55 : ELSE
     56 :    SET VALUE : HxcVcDraftMedia : "None"
     57 : END IF
-    58 : CALL : Hxc After Fetch Focus
+    58 : SET : HxcVcMoveToMapping : Yes
     59 : RETURN : Yes
-
-[Function: Hxc After Fetch Focus]
-    ;; Called after fetch and from Name/Template/Lang On Focus when ##HxcVcFetched.
-    ;; Name/Template/Lang are Inactive once fetched so redraw skips them.
-    01 : IF : NOT ##HxcVcFetched
-    02 :    RETURN : No
-    03 : END IF
-    04 : IF : ##HxcVcHeaderKind = "media"
-    05 :    Focus Field : Hxc Vc F Media
-    06 :    RETURN : Yes
-    07 : END IF
-    08 : IF : ##HxcVcHeaderKind = "text"
-    09 :    Focus Field : Hxc Vc F Hdr MF
-    10 :    RETURN : Yes
-    11 : END IF
-    12 : IF : ##HxcVcHasBodyMaps
-    13 :    Focus Field : Hxc Vc F Body1 MF
-    14 :    RETURN : Yes
-    15 : END IF
-    16 : IF : ##HxcVcHasBtnMaps
-    17 :    Focus Field : Hxc Vc F Btn1 MF
-    18 :    RETURN : Yes
-    19 : END IF
-    20 : Focus Field : Hxc Vc F Vch Name
-    21 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; Pack helpers + commit draft → Aggregate config
@@ -981,7 +961,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 386)"
+    Set as    : "Helixcer Chat — API Settings (build 382)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1048,7 +1028,6 @@
 [Part: Hxc Vc Form Template Part]
     Lines  : Hxc Vc F Template Sect, +
              Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
-             Hxc Vc F Cont Line, +
              Hxc Vc F Fetch Status Line
 
 ;; Mapping (left) + Message Preview (right) — single-line preview
@@ -1058,6 +1037,7 @@
     Horizontal : Yes
 
 [Part: Hxc Vc Form Left Col]
+    On : Focus : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     Lines  : Hxc Vc F Map Sect, +
              Hxc Vc F Hdr Media Line, Hxc Vc F Hdr Col Head, Hxc Vc F Hdr Text Line, +
              Hxc Vc F Body Sect, Hxc Vc F Body Col Head, +
@@ -1083,12 +1063,14 @@
 
 ;; Voucher Rules
 [Part: Hxc Vc Form Vch Part]
+    On : Focus : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     Lines    : Hxc Vc F Vch Sect, Hxc Vc F Vch Head, Hxc Vc F Vch Data
     Repeat   : Hxc Vc F Vch Data : HxcVcDraftVchs
     Break On : $$IsEmpty:$HxcVcDraftVchName OR $HxcVcDraftVchName = "End of List" OR $HxcVcDraftVchName = "Not Applicable"
     Scroll   : Vertical
 
 [Part: Hxc Vc Form Settings Part]
+    On : Focus : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     Lines    : Hxc Vc F Auto Line, Hxc Vc F Confirm Line
 
 ;; --- Template fields ---
@@ -1110,13 +1092,12 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Name]
+    Skip     : ##HxcVcMoveToMapping
     Use      : Name Field
     Storage  : HxcVcDraftName
     Set as   : $HxcVcDraftName
     Width    : 40
     Max      : 60
-    Inactive : ##HxcVcFetched
-    On       : Focus : ##HxcVcFetched : CALL : Hxc After Fetch Focus
 
 [Line: Hxc Vc F Template Line]
     Fields : Medium Prompt, Hxc Vc F Template
@@ -1124,16 +1105,15 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Template]
+    Skip     : ##HxcVcMoveToMapping
     Use      : Name Field
     Storage  : HxcVcDraftTemplate
     Set as   : $HxcVcDraftTemplate
     Width    : 40
     Max      : 80
-    Inactive : ##HxcVcFetched
     On       : Accept : Yes : SET : HxcVcFetchName : $Value
     On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
     On       : Accept : Yes : Field Accept
-    On       : Focus : ##HxcVcFetched : CALL : Hxc After Fetch Focus
 
 [Line: Hxc Vc F Lang Line]
     Fields : Medium Prompt, Hxc Vc F Lang
@@ -1141,35 +1121,16 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Lang]
+    Skip     : ##HxcVcMoveToMapping
     Use      : Name Field
     Storage  : HxcVcDraftLang
     Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
     Width    : 16
     Max      : 16
-    Inactive : ##HxcVcFetched
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
-    On       : Accept : ##HxcVcFetched : Focus Field : Hxc Vc F Cont
     On       : Accept : ##HxcVcFetched : Field Accept
-    On       : Focus : ##HxcVcFetched : Focus Field : Hxc Vc F Cont
-
-
-[Line: Hxc Vc F Cont Line]
-    Fields : Medium Prompt, Hxc Vc F Cont
-    Local  : Field : Medium Prompt : Set as : "Continue"
-    Local  : Field : Medium Prompt : Width  : 22
-
-[Field: Hxc Vc F Cont]
-    ;; Always active: Language Field Accept lands here after HTTP (mapping still Invisible).
-    Use        : Name Field
-    Set as     : If ##HxcVcFetched THEN "Enter → mapping" ELSE "Enter Language to fetch"
-    Set Always : Yes
-    Width      : 40
-    Max        : 40
-    Skip       : No
-    On         : Accept : NOT ##HxcVcFetched : CALL : Hxc Fetch Template
-    On         : Accept : ##HxcVcFetched : Field Accept
 
 [Line: Hxc Vc F Fetch Status Line]
     Field : Hxc Vc F Fetch Status
@@ -1730,7 +1691,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 386)"
+    Set as    : "Create Voucher Config (build 382)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1803,7 +1764,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 386)"
+    Set as    : "Alter Voucher Config (build 382)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1862,7 +1823,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 386)"
+    Set as    : "Voucher Config List (build 382)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1977,7 +1938,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 386)"
+    Set as    : "Helixcer Chat (build 382)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
