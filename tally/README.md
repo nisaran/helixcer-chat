@@ -1,10 +1,10 @@
-# Helixcer Chat for TallyPrime — build 393
+# Helixcer Chat for TallyPrime — build 394
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 393)**.
+Title must show **(build 394)**.
 
 ## Fix
-Template Name was bound to a session `Variable`, so Fetch never saw the typed value ("Enter Template Name first").
+Fetch works with Storage; Create was still pre-filled from Company draft UDFs.
 
-Config Name / Template Name / Language are Company `Storage` UDFs again. Fetch reads `$HxcVcDraftTemplate`.
+Create sets `HxcVcCreateBlank` and paints Name/Template/Language empty (`Set Always`). On first focus, `Hxc Release Create Blank` wipes Storage again then allows typing. Fetch still reads `$HxcVcDraftTemplate`.
