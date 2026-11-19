@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 361-fix-line-inactive
-;; Title must show "(build 361)".
+;; BUILD: 362-tally-form-ui
+;; Title must show "(build 362)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -874,7 +874,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 361)"
+    Set as    : "Helixcer Chat — API Settings (build 362)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -933,37 +933,58 @@
     Skip      : Yes
 
 ;; ---------------------------------------------------------------------------
-;; Shared Create/Alter form body (draft fields — single form, not name list)
+;; Shared Create/Alter form body — layout only (functions unchanged)
+;; Mockup-style sections: Template | Mapping+Preview | Voucher Rules | Settings
 ;; ---------------------------------------------------------------------------
 
-[Part: Hxc Vc Form Body]
-    Lines  : Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
-             Hxc Vc F Fetch Status Line, Hxc Vc F Fetch Hint Line, +
-             Hxc Vc F Prev Head, Hxc Vc F Prev Body
+;; Template card
+[Part: Hxc Vc Form Template Part]
+    Lines  : Hxc Vc F Template Sect, +
+             Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
+             Hxc Vc F Fetch Status Line
     Scroll : Vertical
 
-[Part: Hxc Vc Form Header Part]
-    Lines  : Hxc Vc F Hdr Sect, Hxc Vc F Hdr Media Line, Hxc Vc F Hdr Text Line
-    Scroll : Vertical
+;; Mapping (left) + Message Preview (right)
+[Part: Hxc Vc Form Mid Row]
+    Parts      : Hxc Vc Form Left Col, Hxc Vc Form Preview Part
+    Horizontal : Yes
 
-;; Body/button vars — slots 1..16; Inactive when template has no key (dynamic visible count)
-[Part: Hxc Vc Form Maps Part]
-    Lines  : Hxc Vc F Map Head, +
+[Part: Hxc Vc Form Left Col]
+    Lines  : Hxc Vc F Map Sect, +
+             Hxc Vc F Hdr Media Line, Hxc Vc F Hdr Text Line, +
+             Hxc Vc F Map Col Head, +
              Hxc Vc F Map1, Hxc Vc F Map2, Hxc Vc F Map3, Hxc Vc F Map4, +
              Hxc Vc F Map5, Hxc Vc F Map6, Hxc Vc F Map7, Hxc Vc F Map8, +
              Hxc Vc F Map9, Hxc Vc F Map10, Hxc Vc F Map11, Hxc Vc F Map12, +
              Hxc Vc F Map13, Hxc Vc F Map14, Hxc Vc F Map15, Hxc Vc F Map16
     Scroll : Vertical
 
-;; Dynamic voucher types — add as many rows as needed (blank row to stop)
+[Part: Hxc Vc Form Preview Part]
+    Lines  : Hxc Vc F Prev Head, Hxc Vc F Prev Body
+    Scroll : Vertical
+
+;; Voucher Rules
 [Part: Hxc Vc Form Vch Part]
-    Lines    : Hxc Vc F Vch Head, Hxc Vc F Vch Data
+    Lines    : Hxc Vc F Vch Sect, Hxc Vc F Vch Head, Hxc Vc F Vch Data
     Repeat   : Hxc Vc F Vch Data : HxcVcDraftVchs
     Break On : $$IsEmpty:$HxcVcDraftVchName OR $HxcVcDraftVchName = "Not Applicable"
     Scroll   : Vertical
 
 [Part: Hxc Vc Form Settings Part]
     Lines : Hxc Vc F Auto Line, Hxc Vc F Confirm Line
+
+;; --- Template fields ---
+
+[Line: Hxc Vc F Template Sect]
+    Field : Hxc Vc F Template Sect Fld
+
+[Field: Hxc Vc F Template Sect Fld]
+    Use       : Name Field
+    Set as    : "Template"
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
 
 [Line: Hxc Vc F Name Line]
     Fields : Medium Prompt, Hxc Vc F Name
@@ -988,7 +1009,6 @@
     Set as   : $HxcVcDraftTemplate
     Width    : 40
     Max      : 80
-    ;; Field Accept must be LAST or later On Accept actions are skipped
     On       : Accept : Yes : SET : HxcVcFetchName : $Value
     On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
     On       : Accept : Yes : Field Accept
@@ -1004,7 +1024,6 @@
     Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
     Width    : 16
     Max      : 16
-    ;; Enter fetches variables — CALL before Field Accept
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
@@ -1015,54 +1034,25 @@
 
 [Field: Hxc Vc F Fetch Status]
     Use        : Name Field
-    Set as     : If $$IsEmpty:##HxcVcFetchStatus THEN "Status: Enter on Language to fetch template" ELSE ("Status: " + ##HxcVcFetchStatus)
+    Set as     : If $$IsEmpty:##HxcVcFetchStatus THEN "Enter Language, then Fetch Template (Enter / Alt+F)" ELSE ##HxcVcFetchStatus
     Set Always : Yes
+    Color      : Dark Green
     FullWidth  : Yes
     Skip       : Yes
 
-[Line: Hxc Vc F Fetch Hint Line]
-    Field : Hxc Vc F Fetch Hint
+;; --- Mapping + header ---
 
-[Field: Hxc Vc F Fetch Hint]
+[Line: Hxc Vc F Map Sect]
+    Field : Hxc Vc F Map Sect Fld
+
+[Field: Hxc Vc F Map Sect Fld]
     Use       : Name Field
-    Set as    : "Enter on Language to fetch template preview and variable maps."
-    Align     : Centre
-    FullWidth : Yes
-    Skip      : Yes
-    Inactive  : ##HxcVcFetched
-
-[Line: Hxc Vc F Prev Head]
-    Field : Hxc Vc F Prev Head Fld
-
-[Field: Hxc Vc F Prev Head Fld]
-    Use       : Name Field
-    Set as    : "— Template Preview —"
+    Set as    : "Variable Mapping"
     Style     : Bold
+    Color     : Dark Green
     FullWidth : Yes
     Skip      : Yes
     Inactive  : NOT ##HxcVcFetched
-
-[Line: Hxc Vc F Prev Body]
-    Field : Hxc Vc F Prev Body Fld
-
-[Field: Hxc Vc F Prev Body Fld]
-    Use        : Name Field
-    Set as     : ##HxcVcPreviewText
-    Set Always : Yes
-    FullWidth  : Yes
-    Skip       : Yes
-    Inactive   : NOT ##HxcVcFetched
-
-[Line: Hxc Vc F Hdr Sect]
-    Field : Hxc Vc F Hdr Sect Fld
-
-[Field: Hxc Vc F Hdr Sect Fld]
-    Use       : Name Field
-    Set as    : If ##HxcVcHeaderKind = "media" THEN ("— Header (" + ##HxcVcHeaderFormat + " media) —") ELSE ("— Header (text) —")
-    Style     : Bold
-    FullWidth : Yes
-    Skip      : Yes
-    Inactive  : NOT ##HxcVcFetched OR NOT ##HxcVcHasHeader
 
 [Line: Hxc Vc F Hdr Media Line]
     Fields : Medium Prompt, Hxc Vc F Media
@@ -1081,21 +1071,17 @@
     Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "media"
 
 [Line: Hxc Vc F Hdr Text Line]
-    Fields : Hxc Vc F Hdr MP, Hxc Vc F Hdr MK, Hxc Vc F Hdr MF
-
-[Field: Hxc Vc F Hdr MP]
-    Use        : Name Field
-    Set as     : "Header Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
+    Fields : Medium Prompt, Hxc Vc F Hdr MK, Hxc Vc F Hdr MF
+    Local  : Field : Medium Prompt : Set as : "Header Var"
+    Local  : Field : Medium Prompt : Width  : 22
+    Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
 
 [Field: Hxc Vc F Hdr MK]
     Use        : Name Field
-    Set as     : ##HxcVcHeaderKey
+    Set as     : If $$IsEmpty:##HxcVcHeaderKey THEN "" ELSE ("{{" + ##HxcVcHeaderKey + "}}")
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 14
     Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
 
 [Field: Hxc Vc F Hdr MF]
@@ -1104,37 +1090,39 @@
     Set as     : $HxcVcDraftHeaderFld
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR NOT ##HxcVcHeaderKind = "text"
 
-[Line: Hxc Vc F Map Head]
-    Field : Hxc Vc F Map Head Fld
+[Line: Hxc Vc F Map Col Head]
+    Fields : Hxc Vc F Map Col Key, Hxc Vc F Map Col Fld
 
-[Field: Hxc Vc F Map Head Fld]
+[Field: Hxc Vc F Map Col Key]
     Use       : Name Field
-    Set as    : "— Body Variables (from template) —"
+    Set as    : "Template variable"
     Style     : Bold
-    FullWidth : Yes
     Skip      : Yes
+    Width     : 28
+    Inactive  : NOT ##HxcVcFetched
+
+[Field: Hxc Vc F Map Col Fld]
+    Use       : Name Field
+    Set as    : "Voucher field"
+    Style     : Bold
+    Skip      : Yes
+    Width     : 28
     Inactive  : NOT ##HxcVcFetched
 
 [Line: Hxc Vc F Map1]
-    Fields : Hxc Vc F Map1 MP, Hxc Vc F Map1 MK, Hxc Vc F Map1 MF
-
-[Field: Hxc Vc F Map1 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC1 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1
+    Fields : Hxc Vc F Map1 MK, Hxc Vc F Map1 MF
 
 [Field: Hxc Vc F Map1 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK1
+    Set as     : "{" + ##HxcVcFK1 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1
 
 [Field: Hxc Vc F Map1 MF]
@@ -1143,26 +1131,20 @@
     Set as     : $HxcVcDMFld1
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1
 
 [Line: Hxc Vc F Map2]
-    Fields : Hxc Vc F Map2 MP, Hxc Vc F Map2 MK, Hxc Vc F Map2 MF
-
-[Field: Hxc Vc F Map2 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC2 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2
+    Fields : Hxc Vc F Map2 MK, Hxc Vc F Map2 MF
 
 [Field: Hxc Vc F Map2 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK2
+    Set as     : "{" + ##HxcVcFK2 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2
 
 [Field: Hxc Vc F Map2 MF]
@@ -1171,26 +1153,20 @@
     Set as     : $HxcVcDMFld2
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2
 
 [Line: Hxc Vc F Map3]
-    Fields : Hxc Vc F Map3 MP, Hxc Vc F Map3 MK, Hxc Vc F Map3 MF
-
-[Field: Hxc Vc F Map3 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC3 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3
+    Fields : Hxc Vc F Map3 MK, Hxc Vc F Map3 MF
 
 [Field: Hxc Vc F Map3 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK3
+    Set as     : "{" + ##HxcVcFK3 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3
 
 [Field: Hxc Vc F Map3 MF]
@@ -1199,26 +1175,20 @@
     Set as     : $HxcVcDMFld3
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3
 
 [Line: Hxc Vc F Map4]
-    Fields : Hxc Vc F Map4 MP, Hxc Vc F Map4 MK, Hxc Vc F Map4 MF
-
-[Field: Hxc Vc F Map4 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC4 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4
+    Fields : Hxc Vc F Map4 MK, Hxc Vc F Map4 MF
 
 [Field: Hxc Vc F Map4 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK4
+    Set as     : "{" + ##HxcVcFK4 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4
 
 [Field: Hxc Vc F Map4 MF]
@@ -1227,26 +1197,20 @@
     Set as     : $HxcVcDMFld4
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4
 
 [Line: Hxc Vc F Map5]
-    Fields : Hxc Vc F Map5 MP, Hxc Vc F Map5 MK, Hxc Vc F Map5 MF
-
-[Field: Hxc Vc F Map5 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC5 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5
+    Fields : Hxc Vc F Map5 MK, Hxc Vc F Map5 MF
 
 [Field: Hxc Vc F Map5 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK5
+    Set as     : "{" + ##HxcVcFK5 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5
 
 [Field: Hxc Vc F Map5 MF]
@@ -1255,26 +1219,20 @@
     Set as     : $HxcVcDMFld5
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5
 
 [Line: Hxc Vc F Map6]
-    Fields : Hxc Vc F Map6 MP, Hxc Vc F Map6 MK, Hxc Vc F Map6 MF
-
-[Field: Hxc Vc F Map6 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC6 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6
+    Fields : Hxc Vc F Map6 MK, Hxc Vc F Map6 MF
 
 [Field: Hxc Vc F Map6 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK6
+    Set as     : "{" + ##HxcVcFK6 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6
 
 [Field: Hxc Vc F Map6 MF]
@@ -1283,26 +1241,20 @@
     Set as     : $HxcVcDMFld6
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6
 
 [Line: Hxc Vc F Map7]
-    Fields : Hxc Vc F Map7 MP, Hxc Vc F Map7 MK, Hxc Vc F Map7 MF
-
-[Field: Hxc Vc F Map7 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC7 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7
+    Fields : Hxc Vc F Map7 MK, Hxc Vc F Map7 MF
 
 [Field: Hxc Vc F Map7 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK7
+    Set as     : "{" + ##HxcVcFK7 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7
 
 [Field: Hxc Vc F Map7 MF]
@@ -1311,26 +1263,20 @@
     Set as     : $HxcVcDMFld7
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7
 
 [Line: Hxc Vc F Map8]
-    Fields : Hxc Vc F Map8 MP, Hxc Vc F Map8 MK, Hxc Vc F Map8 MF
-
-[Field: Hxc Vc F Map8 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC8 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8
+    Fields : Hxc Vc F Map8 MK, Hxc Vc F Map8 MF
 
 [Field: Hxc Vc F Map8 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK8
+    Set as     : "{" + ##HxcVcFK8 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8
 
 [Field: Hxc Vc F Map8 MF]
@@ -1339,26 +1285,20 @@
     Set as     : $HxcVcDMFld8
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8
 
 [Line: Hxc Vc F Map9]
-    Fields : Hxc Vc F Map9 MP, Hxc Vc F Map9 MK, Hxc Vc F Map9 MF
-
-[Field: Hxc Vc F Map9 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC9 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9
+    Fields : Hxc Vc F Map9 MK, Hxc Vc F Map9 MF
 
 [Field: Hxc Vc F Map9 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK9
+    Set as     : "{" + ##HxcVcFK9 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9
 
 [Field: Hxc Vc F Map9 MF]
@@ -1367,26 +1307,20 @@
     Set as     : $HxcVcDMFld9
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9
 
 [Line: Hxc Vc F Map10]
-    Fields : Hxc Vc F Map10 MP, Hxc Vc F Map10 MK, Hxc Vc F Map10 MF
-
-[Field: Hxc Vc F Map10 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC10 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10
+    Fields : Hxc Vc F Map10 MK, Hxc Vc F Map10 MF
 
 [Field: Hxc Vc F Map10 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK10
+    Set as     : "{" + ##HxcVcFK10 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10
 
 [Field: Hxc Vc F Map10 MF]
@@ -1395,26 +1329,20 @@
     Set as     : $HxcVcDMFld10
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10
 
 [Line: Hxc Vc F Map11]
-    Fields : Hxc Vc F Map11 MP, Hxc Vc F Map11 MK, Hxc Vc F Map11 MF
-
-[Field: Hxc Vc F Map11 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC11 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11
+    Fields : Hxc Vc F Map11 MK, Hxc Vc F Map11 MF
 
 [Field: Hxc Vc F Map11 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK11
+    Set as     : "{" + ##HxcVcFK11 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11
 
 [Field: Hxc Vc F Map11 MF]
@@ -1423,26 +1351,20 @@
     Set as     : $HxcVcDMFld11
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11
 
 [Line: Hxc Vc F Map12]
-    Fields : Hxc Vc F Map12 MP, Hxc Vc F Map12 MK, Hxc Vc F Map12 MF
-
-[Field: Hxc Vc F Map12 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC12 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12
+    Fields : Hxc Vc F Map12 MK, Hxc Vc F Map12 MF
 
 [Field: Hxc Vc F Map12 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK12
+    Set as     : "{" + ##HxcVcFK12 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12
 
 [Field: Hxc Vc F Map12 MF]
@@ -1451,26 +1373,20 @@
     Set as     : $HxcVcDMFld12
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12
 
 [Line: Hxc Vc F Map13]
-    Fields : Hxc Vc F Map13 MP, Hxc Vc F Map13 MK, Hxc Vc F Map13 MF
-
-[Field: Hxc Vc F Map13 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC13 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13
+    Fields : Hxc Vc F Map13 MK, Hxc Vc F Map13 MF
 
 [Field: Hxc Vc F Map13 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK13
+    Set as     : "{" + ##HxcVcFK13 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13
 
 [Field: Hxc Vc F Map13 MF]
@@ -1479,26 +1395,20 @@
     Set as     : $HxcVcDMFld13
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13
 
 [Line: Hxc Vc F Map14]
-    Fields : Hxc Vc F Map14 MP, Hxc Vc F Map14 MK, Hxc Vc F Map14 MF
-
-[Field: Hxc Vc F Map14 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC14 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14
+    Fields : Hxc Vc F Map14 MK, Hxc Vc F Map14 MF
 
 [Field: Hxc Vc F Map14 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK14
+    Set as     : "{" + ##HxcVcFK14 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14
 
 [Field: Hxc Vc F Map14 MF]
@@ -1507,26 +1417,20 @@
     Set as     : $HxcVcDMFld14
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14
 
 [Line: Hxc Vc F Map15]
-    Fields : Hxc Vc F Map15 MP, Hxc Vc F Map15 MK, Hxc Vc F Map15 MF
-
-[Field: Hxc Vc F Map15 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC15 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15
+    Fields : Hxc Vc F Map15 MK, Hxc Vc F Map15 MF
 
 [Field: Hxc Vc F Map15 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK15
+    Set as     : "{" + ##HxcVcFK15 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15
 
 [Field: Hxc Vc F Map15 MF]
@@ -1535,26 +1439,20 @@
     Set as     : $HxcVcDMFld15
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15
 
 [Line: Hxc Vc F Map16]
-    Fields : Hxc Vc F Map16 MP, Hxc Vc F Map16 MK, Hxc Vc F Map16 MF
-
-[Field: Hxc Vc F Map16 MP]
-    Use        : Name Field
-    Set as     : If ##HxcVcFC16 = "button" THEN "Button Var" ELSE "Body Var"
-    Skip       : Yes
-    Width      : 22
-    Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16
+    Fields : Hxc Vc F Map16 MK, Hxc Vc F Map16 MF
 
 [Field: Hxc Vc F Map16 MK]
     Use        : Name Field
-    Set as     : ##HxcVcFK16
+    Set as     : "{" + ##HxcVcFK16 + "}"
     Set Always : Yes
     Skip       : Yes
-    Width      : 8
+    Width      : 28
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16
 
 [Field: Hxc Vc F Map16 MF]
@@ -1563,17 +1461,57 @@
     Set as     : $HxcVcDMFld16
     Set Always : Yes
     Table      : Hxc Voucher Field List, Not Applicable
+    Show Table : Always
     Width      : 28
     Max        : 40
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16
+
+
+;; --- Message Preview ---
+
+[Line: Hxc Vc F Prev Head]
+    Field : Hxc Vc F Prev Head Fld
+
+[Field: Hxc Vc F Prev Head Fld]
+    Use       : Name Field
+    Set as    : "Message Preview"
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
+    Inactive  : NOT ##HxcVcFetched
+
+[Line: Hxc Vc F Prev Body]
+    Field : Hxc Vc F Prev Body Fld
+
+[Field: Hxc Vc F Prev Body Fld]
+    Use        : Name Field
+    Set as     : ##HxcVcPreviewText
+    Set Always : Yes
+    FullWidth  : Yes
+    Skip       : Yes
+    Inactive   : NOT ##HxcVcFetched
+
+;; --- Voucher Rules ---
+
+[Line: Hxc Vc F Vch Sect]
+    Field : Hxc Vc F Vch Sect Fld
+
+[Field: Hxc Vc F Vch Sect Fld]
+    Use       : Name Field
+    Set as    : "Voucher Rules"
+    Style     : Bold
+    Color     : Dark Green
+    FullWidth : Yes
+    Skip      : Yes
+    Inactive  : NOT ##HxcVcFetched
 
 [Line: Hxc Vc F Vch Head]
     Field : Hxc Vc F Vch Head Fld
 
 [Field: Hxc Vc F Vch Head Fld]
     Use       : Name Field
-    Set as    : "— Applicable Voucher Types (add rows; leave blank to end) —"
-    Style     : Bold
+    Set as    : "Applicable Voucher Types  (add rows; leave blank to end)"
     FullWidth : Yes
     Skip      : Yes
     Inactive  : NOT ##HxcVcFetched
@@ -1585,18 +1523,18 @@
     Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
 
 [Field: Hxc Vc F Vch Name]
-    Use      : Name Field
-    Storage  : HxcVcDraftVchName
-    Set as   : $HxcVcDraftVchName
-    Table    : Hxc Voucher Type List
+    Use        : Name Field
+    Storage    : HxcVcDraftVchName
+    Set as     : $HxcVcDraftVchName
+    Table      : Hxc Voucher Type List
     Show Table : Always
-    Width    : 40
-    Max      : 80
+    Width      : 40
+    Max        : 80
     Inactive   : NOT ##HxcVcFetched
 
 [Line: Hxc Vc F Auto Line]
     Fields : Medium Prompt, Hxc Vc F Auto
-    Local  : Field : Medium Prompt : Set as : "Auto Select after save?"
+    Local  : Field : Medium Prompt : Set as : "Auto Select after save"
     Local  : Field : Medium Prompt : Width  : 22
     Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
 
@@ -1609,7 +1547,7 @@
 
 [Line: Hxc Vc F Confirm Line]
     Fields : Medium Prompt, Hxc Vc F Confirm
-    Local  : Field : Medium Prompt : Set as : "Confirm before send?"
+    Local  : Field : Medium Prompt : Set as : "Confirm before send"
     Local  : Field : Medium Prompt : Width  : 22
     Local  : Field : Medium Prompt : Inactive : NOT ##HxcVcFetched
 
@@ -1620,6 +1558,7 @@
     Width    : 8
     Inactive   : NOT ##HxcVcFetched
 
+
 ;; ---------------------------------------------------------------------------
 ;; CREATE — clear draft, show sequential form
 ;; ---------------------------------------------------------------------------
@@ -1628,7 +1567,7 @@
 [Button: Hxc Fetch Template Btn]
     Key    : Alt + F
     Action : Call : Hxc Fetch Template
-    Title  : "Fetch"
+    Title  : "Fetch Template"
 
 [Report: Helixcer Voucher Config Create]
     Form   : Helixcer Voucher Config Create
@@ -1636,7 +1575,7 @@
     Object : Company
 
 [Form: Helixcer Voucher Config Create]
-    Part   : Hxc Vc Cr Title Part, Hxc Vc Form Body, Hxc Vc Form Header Part, Hxc Vc Form Maps Part, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Cr Hint Part
+    Part   : Hxc Vc Cr Title Part, Hxc Vc Form Template Part, Hxc Vc Form Mid Row, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Cr Hint Part
     Button : Hxc Fetch Template Btn, Form Accept, Form Cancel
     On     : Form Create : Yes : CALL : Hxc Vc Clear Draft
     On     : Form Accept : Yes : CALL : Hxc Vc Commit Draft
@@ -1650,7 +1589,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 361)"
+    Set as    : "Create Voucher Config (build 362)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1664,7 +1603,7 @@
 
 [Field: Hxc Vc Cr Hint]
     Use       : Name Field
-    Set as    : "Name → Template → Language Enter (or Alt+F) → header/maps → vouchers → Ctrl+A."
+    Set as    : "Fetch Template: Enter on Language or Alt+F.  Save Config: Ctrl+A."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -1703,7 +1642,7 @@
     Object : Company
 
 [Form: Helixcer Voucher Config Alter]
-    Part   : Hxc Vc Al Title Part, Hxc Vc Al Pick Part, Hxc Vc Form Body, Hxc Vc Form Header Part, Hxc Vc Form Maps Part, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Al Hint Part
+    Part   : Hxc Vc Al Title Part, Hxc Vc Al Pick Part, Hxc Vc Form Template Part, Hxc Vc Form Mid Row, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Al Hint Part
     Button : Hxc Fetch Template Btn, Form Accept, Form Cancel
     On     : Form Accept : Yes : CALL : Hxc Vc Commit Draft
     On     : Form Accept : ##HxcVcSaveOk : Form Accept
@@ -1716,7 +1655,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 361)"
+    Set as    : "Alter Voucher Config (build 362)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1775,7 +1714,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 361)"
+    Set as    : "Voucher Config List (build 362)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1890,7 +1829,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 361)"
+    Set as    : "Helixcer Chat (build 362)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
