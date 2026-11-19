@@ -1,20 +1,14 @@
-# Helixcer Chat for TallyPrime — build 362
+# Helixcer Chat for TallyPrime — build 363
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-minimal-storage-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 362)**.
+Title must show **(build 363)**.
 
-## Tally UI (layout only)
+## UI updates (functions unchanged)
 
-Create/Alter form sections match the product layout:
+- **Variable Mapping** voucher-field table: Tally voucher/party labels + native lists (`Ledger`, `Stock Item`, `Godown`, `Cost Centre`, `Currency`, `Unit`) + End of List / Not Applicable
+- **Voucher Types**: `End of List` to finish adding rows
+- **New Create**: Form Create/Destroy clears draft so old mapping/preview does not linger
+- **Message Preview**: multiline (12 lines) for paragraph templates
 
-1. **Template** — Config Name, Template Name, Language, status  
-2. **Variable Mapping** + **Message Preview** (side by side)  
-3. **Voucher Rules** — applicable voucher types  
-4. Settings + Ctrl+A  
-
-Fetch process/functions are unchanged: Enter on Language or **Alt+F** (Fetch Template).
-
-## Web companion (optional)
-
-`tally/ui/` — browser mockup of the same flow.
+Fetch still: Enter on Language or Alt+F.
