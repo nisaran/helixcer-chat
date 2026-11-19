@@ -1,13 +1,15 @@
-# Helixcer Chat for TallyPrime — build 407
+# Helixcer Chat for TallyPrime — build 408
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 407)**.
+Title must show **(build 408)**.
 
-## Alter Config
-Removed the old Alter form. New Alter loads the Company `HxcVoucherConfigs` row saved by Create:
+## Fix — saved configs not showing in List/Alter
+Procedural `INSERT COLLECTION OBJECT` only creates in-memory Aggregate rows. Persist with the proven shell pattern:
 
-1. Select Config (table of saved names) → Enter
-2. Loads name/template/lang/maps/customs/voucher types/settings from company DB
-3. Fetches that template and restores field mappings from `HxcVcVarMapsText`
-4. Edit + Ctrl+A updates the same Aggregate row
+1. `NEW OBJECT : Company : ##SVCurrentCompany`
+2. `INSERT COLLECTION OBJECT : HxcVoucherConfigs` (+ SET VALUE)
+3. `SET TARGET : ..`
+4. `ALTER TARGET`
+
+List/Alter read `Hxc Voucher Config Names` (`Belongs To : Yes`).
