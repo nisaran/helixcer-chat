@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 374-header-body-button-ui
-;; Title must show "(build 374)".
+;; BUILD: 375-btn-after-body
+;; Title must show "(build 375)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -887,7 +887,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 374)"
+    Set as    : "Helixcer Chat — API Settings (build 375)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1170,6 +1170,7 @@
 
 [Line: Hxc Vc F Body1]
     Fields : Hxc Vc F Body1 MK, Hxc Vc F Body1 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "body"
 
 [Field: Hxc Vc F Body1 MK]
     Use        : Name Field
@@ -1192,6 +1193,7 @@
 
 [Line: Hxc Vc F Body2]
     Fields : Hxc Vc F Body2 MK, Hxc Vc F Body2 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "body"
 
 [Field: Hxc Vc F Body2 MK]
     Use        : Name Field
@@ -1214,6 +1216,7 @@
 
 [Line: Hxc Vc F Body3]
     Fields : Hxc Vc F Body3 MK, Hxc Vc F Body3 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "body"
 
 [Field: Hxc Vc F Body3 MK]
     Use        : Name Field
@@ -1236,6 +1239,7 @@
 
 [Line: Hxc Vc F Body4]
     Fields : Hxc Vc F Body4 MK, Hxc Vc F Body4 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "body"
 
 [Field: Hxc Vc F Body4 MK]
     Use        : Name Field
@@ -1258,6 +1262,7 @@
 
 [Line: Hxc Vc F Body5]
     Fields : Hxc Vc F Body5 MK, Hxc Vc F Body5 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "body"
 
 [Field: Hxc Vc F Body5 MK]
     Use        : Name Field
@@ -1280,6 +1285,7 @@
 
 [Line: Hxc Vc F Body6]
     Fields : Hxc Vc F Body6 MK, Hxc Vc F Body6 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "body"
 
 [Field: Hxc Vc F Body6 MK]
     Use        : Name Field
@@ -1302,6 +1308,7 @@
 
 [Line: Hxc Vc F Body7]
     Fields : Hxc Vc F Body7 MK, Hxc Vc F Body7 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "body"
 
 [Field: Hxc Vc F Body7 MK]
     Use        : Name Field
@@ -1324,6 +1331,7 @@
 
 [Line: Hxc Vc F Body8]
     Fields : Hxc Vc F Body8 MK, Hxc Vc F Body8 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "body"
 
 [Field: Hxc Vc F Body8 MK]
     Use        : Name Field
@@ -1346,6 +1354,7 @@
 
 [Line: Hxc Vc F Body9]
     Fields : Hxc Vc F Body9 MK, Hxc Vc F Body9 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9 OR NOT ##HxcVcFC9 = "body"
 
 [Field: Hxc Vc F Body9 MK]
     Use        : Name Field
@@ -1368,6 +1377,7 @@
 
 [Line: Hxc Vc F Body10]
     Fields : Hxc Vc F Body10 MK, Hxc Vc F Body10 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10 OR NOT ##HxcVcFC10 = "body"
 
 [Field: Hxc Vc F Body10 MK]
     Use        : Name Field
@@ -1390,6 +1400,7 @@
 
 [Line: Hxc Vc F Body11]
     Fields : Hxc Vc F Body11 MK, Hxc Vc F Body11 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11 OR NOT ##HxcVcFC11 = "body"
 
 [Field: Hxc Vc F Body11 MK]
     Use        : Name Field
@@ -1412,6 +1423,7 @@
 
 [Line: Hxc Vc F Body12]
     Fields : Hxc Vc F Body12 MK, Hxc Vc F Body12 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12 OR NOT ##HxcVcFC12 = "body"
 
 [Field: Hxc Vc F Body12 MK]
     Use        : Name Field
@@ -1434,6 +1446,7 @@
 
 [Line: Hxc Vc F Body13]
     Fields : Hxc Vc F Body13 MK, Hxc Vc F Body13 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13 OR NOT ##HxcVcFC13 = "body"
 
 [Field: Hxc Vc F Body13 MK]
     Use        : Name Field
@@ -1456,6 +1469,7 @@
 
 [Line: Hxc Vc F Body14]
     Fields : Hxc Vc F Body14 MK, Hxc Vc F Body14 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14 OR NOT ##HxcVcFC14 = "body"
 
 [Field: Hxc Vc F Body14 MK]
     Use        : Name Field
@@ -1478,6 +1492,7 @@
 
 [Line: Hxc Vc F Body15]
     Fields : Hxc Vc F Body15 MK, Hxc Vc F Body15 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15 OR NOT ##HxcVcFC15 = "body"
 
 [Field: Hxc Vc F Body15 MK]
     Use        : Name Field
@@ -1500,6 +1515,7 @@
 
 [Line: Hxc Vc F Body16]
     Fields : Hxc Vc F Body16 MK, Hxc Vc F Body16 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16 OR NOT ##HxcVcFC16 = "body"
 
 [Field: Hxc Vc F Body16 MK]
     Use        : Name Field
@@ -1553,6 +1569,7 @@
 
 [Line: Hxc Vc F Btn1]
     Fields : Hxc Vc F Btn1 MK, Hxc Vc F Btn1 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1 OR NOT ##HxcVcFC1 = "button"
 
 [Field: Hxc Vc F Btn1 MK]
     Use        : Name Field
@@ -1575,6 +1592,7 @@
 
 [Line: Hxc Vc F Btn2]
     Fields : Hxc Vc F Btn2 MK, Hxc Vc F Btn2 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2 OR NOT ##HxcVcFC2 = "button"
 
 [Field: Hxc Vc F Btn2 MK]
     Use        : Name Field
@@ -1597,6 +1615,7 @@
 
 [Line: Hxc Vc F Btn3]
     Fields : Hxc Vc F Btn3 MK, Hxc Vc F Btn3 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3 OR NOT ##HxcVcFC3 = "button"
 
 [Field: Hxc Vc F Btn3 MK]
     Use        : Name Field
@@ -1619,6 +1638,7 @@
 
 [Line: Hxc Vc F Btn4]
     Fields : Hxc Vc F Btn4 MK, Hxc Vc F Btn4 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4 OR NOT ##HxcVcFC4 = "button"
 
 [Field: Hxc Vc F Btn4 MK]
     Use        : Name Field
@@ -1641,6 +1661,7 @@
 
 [Line: Hxc Vc F Btn5]
     Fields : Hxc Vc F Btn5 MK, Hxc Vc F Btn5 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5 OR NOT ##HxcVcFC5 = "button"
 
 [Field: Hxc Vc F Btn5 MK]
     Use        : Name Field
@@ -1663,6 +1684,7 @@
 
 [Line: Hxc Vc F Btn6]
     Fields : Hxc Vc F Btn6 MK, Hxc Vc F Btn6 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6 OR NOT ##HxcVcFC6 = "button"
 
 [Field: Hxc Vc F Btn6 MK]
     Use        : Name Field
@@ -1685,6 +1707,7 @@
 
 [Line: Hxc Vc F Btn7]
     Fields : Hxc Vc F Btn7 MK, Hxc Vc F Btn7 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7 OR NOT ##HxcVcFC7 = "button"
 
 [Field: Hxc Vc F Btn7 MK]
     Use        : Name Field
@@ -1707,6 +1730,7 @@
 
 [Line: Hxc Vc F Btn8]
     Fields : Hxc Vc F Btn8 MK, Hxc Vc F Btn8 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8 OR NOT ##HxcVcFC8 = "button"
 
 [Field: Hxc Vc F Btn8 MK]
     Use        : Name Field
@@ -1729,6 +1753,7 @@
 
 [Line: Hxc Vc F Btn9]
     Fields : Hxc Vc F Btn9 MK, Hxc Vc F Btn9 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9 OR NOT ##HxcVcFC9 = "button"
 
 [Field: Hxc Vc F Btn9 MK]
     Use        : Name Field
@@ -1751,6 +1776,7 @@
 
 [Line: Hxc Vc F Btn10]
     Fields : Hxc Vc F Btn10 MK, Hxc Vc F Btn10 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10 OR NOT ##HxcVcFC10 = "button"
 
 [Field: Hxc Vc F Btn10 MK]
     Use        : Name Field
@@ -1773,6 +1799,7 @@
 
 [Line: Hxc Vc F Btn11]
     Fields : Hxc Vc F Btn11 MK, Hxc Vc F Btn11 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11 OR NOT ##HxcVcFC11 = "button"
 
 [Field: Hxc Vc F Btn11 MK]
     Use        : Name Field
@@ -1795,6 +1822,7 @@
 
 [Line: Hxc Vc F Btn12]
     Fields : Hxc Vc F Btn12 MK, Hxc Vc F Btn12 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12 OR NOT ##HxcVcFC12 = "button"
 
 [Field: Hxc Vc F Btn12 MK]
     Use        : Name Field
@@ -1817,6 +1845,7 @@
 
 [Line: Hxc Vc F Btn13]
     Fields : Hxc Vc F Btn13 MK, Hxc Vc F Btn13 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13 OR NOT ##HxcVcFC13 = "button"
 
 [Field: Hxc Vc F Btn13 MK]
     Use        : Name Field
@@ -1839,6 +1868,7 @@
 
 [Line: Hxc Vc F Btn14]
     Fields : Hxc Vc F Btn14 MK, Hxc Vc F Btn14 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14 OR NOT ##HxcVcFC14 = "button"
 
 [Field: Hxc Vc F Btn14 MK]
     Use        : Name Field
@@ -1861,6 +1891,7 @@
 
 [Line: Hxc Vc F Btn15]
     Fields : Hxc Vc F Btn15 MK, Hxc Vc F Btn15 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15 OR NOT ##HxcVcFC15 = "button"
 
 [Field: Hxc Vc F Btn15 MK]
     Use        : Name Field
@@ -1883,6 +1914,7 @@
 
 [Line: Hxc Vc F Btn16]
     Fields : Hxc Vc F Btn16 MK, Hxc Vc F Btn16 MF
+    Inactive : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16 OR NOT ##HxcVcFC16 = "button"
 
 [Field: Hxc Vc F Btn16 MK]
     Use        : Name Field
@@ -2033,7 +2065,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 374)"
+    Set as    : "Create Voucher Config (build 375)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2106,7 +2138,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 374)"
+    Set as    : "Alter Voucher Config (build 375)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2165,7 +2197,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 374)"
+    Set as    : "Voucher Config List (build 375)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2280,7 +2312,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 374)"
+    Set as    : "Helixcer Chat (build 375)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
