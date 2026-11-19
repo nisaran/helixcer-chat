@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 370-dynamic-body-btn
-;; Title must show "(build 370)".
+;; BUILD: 371-fetch-gate
+;; Title must show "(build 371)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -1301,7 +1301,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 370)"
+    Set as    : "Helixcer Chat — API Settings (build 371)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1368,7 +1368,7 @@
 [Part: Hxc Vc Form Template Part]
     Lines  : Hxc Vc F Template Sect, +
              Hxc Vc F Name Line, Hxc Vc F Template Line, Hxc Vc F Lang Line, +
-             Hxc Vc F Fetch Status Line
+             Hxc Vc F Fetch Status Line, Hxc Vc F Fetch Gate Line
 
 ;; Mapping (left) + Message Preview (right) — single-line preview
 ;; Mapping LEFT + Preview RIGHT (no Height on Mid Row — Height/% broke Horizontal)
@@ -1475,6 +1475,20 @@
     Color      : Dark Green
     FullWidth  : Yes
     Skip       : Yes
+
+[Line: Hxc Vc F Fetch Gate Line]
+    Fields : Medium Prompt, Hxc Vc F Fetch Gate
+    Local  : Field : Medium Prompt : Set as : "Fetch"
+    Local  : Field : Medium Prompt : Width  : 22
+
+[Field: Hxc Vc F Fetch Gate]
+    Use        : Name Field
+    Set as     : If ##HxcVcFetched THEN "OK — mapping below. Alt+F to re-fetch." ELSE "Enter on Language or press Alt+F = Fetch Template"
+    Set Always : Yes
+    Width      : 60
+    Skip       : No
+    On         : Accept : Yes : CALL : Hxc Fetch Template
+    On         : Accept : Yes : Field Accept
 
 ;; --- Mapping + header ---
 
@@ -1769,7 +1783,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 370)"
+    Set as    : "Create Voucher Config (build 371)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1783,7 +1797,7 @@
 
 [Field: Hxc Vc Cr Hint]
     Use       : Name Field
-    Set as    : "Fetch Template: Enter on Language or Alt+F.  Save Config: Ctrl+A."
+    Set as    : "Fetch Template: Enter on Language, or Alt+F, or Enter on Fetch.  Save: Ctrl+A."
     Align     : Centre
     FullWidth : Yes
     Skip      : Yes
@@ -1842,7 +1856,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 370)"
+    Set as    : "Alter Voucher Config (build 371)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1901,7 +1915,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 370)"
+    Set as    : "Voucher Config List (build 371)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2016,7 +2030,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 370)"
+    Set as    : "Helixcer Chat (build 371)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
