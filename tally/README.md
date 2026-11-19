@@ -1,10 +1,10 @@
-# Helixcer Chat for TallyPrime — build 395
+# Helixcer Chat for TallyPrime — build 396
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 395)**.
+Title must show **(build 396)**.
 
 ## Fix
-Applicable Voucher Types still showed prior rows (Service Sales / Inventory Sales).
+Applicable Voucher Types still showed Service Sales / Inventory Sales because Company aggregate `HxcVcDraftVchs` would not clear.
 
-Clear + reseed `HxcVcDraftVchs` on Create blank-release and again after a successful template fetch.
+Voucher types now use session Variables `HxcVcVchType1..6` (blank on Create / after clear). Alter still loads saved CSV into those slots.
