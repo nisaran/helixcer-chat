@@ -1,5 +1,5 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 384-focus-after-fetch
+;; BUILD: 384-voucher-end-of-list
 ;; Title must show "(build 384)".
 ;;
 ;; Create Config flow:
@@ -92,6 +92,9 @@
     Type : Logical
 
 [Variable: HxcVcFetched]
+    Type : Logical
+
+[Variable: HxcVcMoveToMapping]
     Type : Logical
 
 [Variable: HxcVcPreviewText]
@@ -227,6 +230,7 @@
     HxcVcSaveOk         : No
     HxcVcHasBodyMaps    : No
     HxcVcHasBtnMaps     : No
+    HxcVcMoveToMapping  : No
     HxcVcFetched        : No
     HxcVcPreviewText    : ""
     HxcVcFetchStatus    : ""
@@ -274,7 +278,7 @@
     Hxc Connection Url : "https://api.chat.helixcer.com/api/v1/connection?channelId=" + ##HxcSysChannelId
     Hxc Sys Summary    : "WS=[" + ##HxcSysWorkspaceId + "] CH=[" + ##HxcSysChannelId + "] KeyChars=" + $$StringLength:##HxcSysApiKey
     ;; Same pattern as working build 347 Status/HTTP, but template name in ## var
-    Hxc Template Url   : "https://api.chat.helixcer.com/api/v1/whatsapp/templates/" + ##HxcVcFetchName + "?channelId=" + ##HxcSysChannelId
+    Hxc Template Url   : "https://api.chat.helixcer.com/api/v1/whatsapp/templates/" + ##HxcVcFetchName + "?channelId=" + ##HxcSysChannelId + "&language=" + ##HxcVcFetchLang
 
 ;; ---------------------------------------------------------------------------
 ;; Tables
@@ -398,6 +402,7 @@
     07 : RETURN : Yes
 
 [Function: Hxc Clear Fetch Vars]
+    00 : SET : HxcVcMoveToMapping : No
     01 : SET : HxcVcFetched : No
     02 : SET : HxcVcPreviewText : ""
     03 : SET : HxcVcFetchStatus : ""
@@ -708,32 +713,8 @@
     55 : ELSE
     56 :    SET VALUE : HxcVcDraftMedia : "None"
     57 : END IF
-    58 : CALL : Hxc After Fetch Focus
+    58 : SET : HxcVcMoveToMapping : Yes
     59 : RETURN : Yes
-
-[Function: Hxc After Fetch Focus]
-    ;; After HTTP fetch the form refreshes; without this, focus returns to Config Name.
-    01 : IF : NOT ##HxcVcFetched
-    02 :    RETURN : No
-    03 : END IF
-    04 : IF : ##HxcVcHeaderKind = "media"
-    05 :    Focus Field : Hxc Vc F Media
-    06 :    RETURN : Yes
-    07 : END IF
-    08 : IF : ##HxcVcHeaderKind = "text"
-    09 :    Focus Field : Hxc Vc F Hdr MF
-    10 :    RETURN : Yes
-    11 : END IF
-    12 : IF : ##HxcVcHasBodyMaps
-    13 :    Focus Field : Hxc Vc F Body1 MF
-    14 :    RETURN : Yes
-    15 : END IF
-    16 : IF : ##HxcVcHasBtnMaps
-    17 :    Focus Field : Hxc Vc F Btn1 MF
-    18 :    RETURN : Yes
-    19 : END IF
-    20 : Focus Field : Hxc Vc F Vch Name
-    21 : RETURN : Yes
 
 ;; ---------------------------------------------------------------------------
 ;; Pack helpers + commit draft → Aggregate config
@@ -799,10 +780,14 @@
     01 : SET : S : ""
     02 : WALK COLLECTION : HxcVcDraftVchs
     03 :    IF : NOT $$IsEmpty:$HxcVcDraftVchName
-    04 :       SET : S : ##S + $HxcVcDraftVchName + ","
-    05 :    END IF
-    06 : END WALK
-    07 : RETURN : ##S
+    04 :       IF : NOT $HxcVcDraftVchName = "End of List"
+    05 :          IF : NOT $HxcVcDraftVchName = "Not Applicable"
+    06 :             SET : S : ##S + $HxcVcDraftVchName + ","
+    07 :          END IF
+    08 :       END IF
+    09 :    END IF
+    10 : END WALK
+    11 : RETURN : ##S
 
 [Function: Hxc Clear Draft Vchs]
     ;; Remove all draft voucher-type rows
@@ -1056,6 +1041,7 @@
     Horizontal : Yes
 
 [Part: Hxc Vc Form Left Col]
+    On : Focus : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     Lines  : Hxc Vc F Map Sect, +
              Hxc Vc F Hdr Media Line, Hxc Vc F Hdr Col Head, Hxc Vc F Hdr Text Line, +
              Hxc Vc F Body Sect, Hxc Vc F Body Col Head, +
@@ -1081,12 +1067,14 @@
 
 ;; Voucher Rules
 [Part: Hxc Vc Form Vch Part]
+    On : Focus : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     Lines    : Hxc Vc F Vch Sect, Hxc Vc F Vch Head, Hxc Vc F Vch Data
     Repeat   : Hxc Vc F Vch Data : HxcVcDraftVchs
     Break On : $$IsEmpty:$HxcVcDraftVchName OR $HxcVcDraftVchName = "End of List" OR $HxcVcDraftVchName = "Not Applicable"
     Scroll   : Vertical
 
 [Part: Hxc Vc Form Settings Part]
+    On : Focus : ##HxcVcMoveToMapping : SET : HxcVcMoveToMapping : No
     Lines    : Hxc Vc F Auto Line, Hxc Vc F Confirm Line
 
 ;; --- Template fields ---
@@ -1108,6 +1096,7 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Name]
+    Skip     : ##HxcVcMoveToMapping
     Use      : Name Field
     Storage  : HxcVcDraftName
     Set as   : $HxcVcDraftName
@@ -1120,6 +1109,7 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Template]
+    Skip     : ##HxcVcMoveToMapping
     Use      : Name Field
     Storage  : HxcVcDraftTemplate
     Set as   : $HxcVcDraftTemplate
@@ -1135,6 +1125,7 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Lang]
+    Skip     : ##HxcVcMoveToMapping
     Use      : Name Field
     Storage  : HxcVcDraftLang
     Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
@@ -1143,6 +1134,7 @@
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
+    On       : Accept : ##HxcVcFetched : Field Accept
 
 [Line: Hxc Vc F Fetch Status Line]
     Field : Hxc Vc F Fetch Status
@@ -1639,6 +1631,9 @@
     Width      : 40
     Max        : 80
     Inactive   : NOT ##HxcVcFetched
+    ;; End of List must end the list (not store as a voucher type)
+    On         : Accept : $Value = "End of List" OR $Value = "Not Applicable" OR $$IsSysName:$Value:EndOfList : SET VALUE : HxcVcDraftVchName : ""
+    On         : Accept : Yes : Field Accept
 
 [Line: Hxc Vc F Auto Line]
     Fields : Medium Prompt, Hxc Vc F Auto
