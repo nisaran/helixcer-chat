@@ -1,14 +1,18 @@
-# Helixcer Chat for TallyPrime — build 410
+# Helixcer Chat for TallyPrime — build 411
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 410)**.
+Title must show **(build 411)**.
 
-## Fix — Software Exception c0000005 on save
-Build 409 crashed with `c0000005` using `NEW OBJECT` + `SAVE TARGET` + `Form Reject` on Form Accept.
+## Fix — c0000005 while saving
+Procedural save (`NEW OBJECT` / `SAVE TARGET` / `ACCEPT ALTER`) on Form Accept crashes Tally (`c0000005`).
 
-Safe path:
-- Function `Object : Company : ##SVCurrentCompany`
-- `INSERT` / update Aggregate + `ACCEPT ALTER`
-- Create/Alter form has no `Object : Company`
-- Close with `Form Accept` (UI only)
+**Crash-free path (same as API Settings / build 345):**
+- Create/Alter: `Alter` + `Object : Company` + `Storage` on Aggregate
+- Config Name line → **Detail SubForm** (fetch + mapping + voucher types + settings)
+- **Ctrl+A** on detail, then **Ctrl+A** on the name list (default Form Accept — no custom object code)
+
+## Flow
+1. Create Config → type name on blank line → detail opens
+2. Template + Language → Enter/Alt+F fetch → map fields
+3. Ctrl+A (detail) → Ctrl+A (list) → List Configs shows the row
