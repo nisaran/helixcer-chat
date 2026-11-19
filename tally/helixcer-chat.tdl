@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
 ;; BUILD: 363-lists-preview-clear
-;; Title must show "(build 364)".
+;; Title must show "(build 365)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -279,18 +279,22 @@
     Type   : Voucher Type
     Format : $Name, 40
 
-;; Common Tally voucher / party data labels for mapping (plus native Tables on fields)
+;; Dynamic voucher / party / company data labels for mapping (list only)
 [Collection: Hxc Voucher Field List]
-    List : "Party Ledger Name", "Party Name", "Mailing Name", "Address", "Address 1", "Address 2", "Address 3", +
-           "State Name", "Country of Residence", "Pincode", "GSTIN/UIN", "Buyer Name", "Consignee Name", +
+    Title  : "Voucher Dynamic Data"
+    List : "Not Applicable", +
+           "Party Ledger Name", "Party Name", "Party Mailing Name", "Party Address", +
+           "Party Address 1", "Party Address 2", "Party Address 3", +
+           "Party State Name", "Party Country", "Party Pincode", "Party GSTIN/UIN", +
+           "Party Mobile", "Party Email", +
+           "Buyer Name", "Consignee Name", +
+           "Company Name", "Company Mailing Name", "Company GSTIN", "Company State Name", +
+           "Voucher Number", "Voucher Date", "Reference", "Narration", "Amount", +
            "Basic Buyer Name", "Basic Buyer Address", "Basic Order Ref", "Basic Order Terms", +
            "Basic Ship Delivery Date", "Basic Due Date", "Basic Base Value", +
-           "Voucher Number", "Voucher Date", "Reference", "Narration", "Amount", +
-           "Company Name", "Company GSTIN", "Company State Name", "Guid", "Master ID", +
-           "Party Mobile", "Party Email", "Party State Name", "Party Country", "Party Pincode", +
-           "Ledger Name", "Stock Item Name", "Godown Name", "Cost Centre", "Currency", "Unit Name", +
            "Sales Person", "Terms of Payment", "Terms of Delivery", "Dispatch Through", +
-           "Destination", "Carrier Name", "Bill of Lading", "Eway Bill Number", "IRN"
+           "Destination", "Carrier Name", "Bill of Lading", "Eway Bill Number", "IRN", +
+           "Guid", "Master ID"
 
 [Collection: Hxc Voucher Config Names]
     Type     : HxcVoucherConfigs : Company
@@ -883,7 +887,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 364)"
+    Set as    : "Helixcer Chat — API Settings (build 365)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -943,7 +947,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Shared Create/Alter form body — layout only (functions unchanged)
-;; Mockup-style sections: Template | Mapping+Preview | Voucher Rules | Settings
+;; Sections: Template | Message Preview | Variable Mapping | Voucher Rules | Settings
 ;; ---------------------------------------------------------------------------
 
 ;; Template card
@@ -953,10 +957,10 @@
              Hxc Vc F Fetch Status Line
     Scroll : Vertical
 
-;; Mapping (left) + Message Preview (right)
-[Part: Hxc Vc Form Mid Row]
-    Parts      : Hxc Vc Form Left Col, Hxc Vc Form Preview Part
-    Horizontal : Yes
+;; Preview then Mapping stacked (avoids Horizontal Mid Row unused gaps)
+[Part: Hxc Vc Form Preview Part]
+    Lines  : Hxc Vc F Prev Head, Hxc Vc F Prev Body
+    Scroll : Vertical
 
 [Part: Hxc Vc Form Left Col]
     Lines  : Hxc Vc F Map Sect, +
@@ -966,10 +970,6 @@
              Hxc Vc F Map5, Hxc Vc F Map6, Hxc Vc F Map7, Hxc Vc F Map8, +
              Hxc Vc F Map9, Hxc Vc F Map10, Hxc Vc F Map11, Hxc Vc F Map12, +
              Hxc Vc F Map13, Hxc Vc F Map14, Hxc Vc F Map15, Hxc Vc F Map16
-    Scroll : Vertical
-
-[Part: Hxc Vc Form Preview Part]
-    Lines  : Hxc Vc F Prev Head, Hxc Vc F Prev Body
     Scroll : Vertical
 
 ;; Voucher Rules
@@ -1097,8 +1097,7 @@
     Use        : Name Field
     Storage    : HxcVcDraftHeaderFld
     Set as     : $HxcVcDraftHeaderFld
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
@@ -1138,11 +1137,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld1
     Set as     : $HxcVcDMFld1
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK1
 
 [Line: Hxc Vc F Map2]
@@ -1160,11 +1159,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld2
     Set as     : $HxcVcDMFld2
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK2
 
 [Line: Hxc Vc F Map3]
@@ -1182,11 +1181,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld3
     Set as     : $HxcVcDMFld3
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK3
 
 [Line: Hxc Vc F Map4]
@@ -1204,11 +1203,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld4
     Set as     : $HxcVcDMFld4
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK4
 
 [Line: Hxc Vc F Map5]
@@ -1226,11 +1225,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld5
     Set as     : $HxcVcDMFld5
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK5
 
 [Line: Hxc Vc F Map6]
@@ -1248,11 +1247,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld6
     Set as     : $HxcVcDMFld6
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK6
 
 [Line: Hxc Vc F Map7]
@@ -1270,11 +1269,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld7
     Set as     : $HxcVcDMFld7
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK7
 
 [Line: Hxc Vc F Map8]
@@ -1292,11 +1291,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld8
     Set as     : $HxcVcDMFld8
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK8
 
 [Line: Hxc Vc F Map9]
@@ -1314,11 +1313,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld9
     Set as     : $HxcVcDMFld9
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK9
 
 [Line: Hxc Vc F Map10]
@@ -1336,11 +1335,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld10
     Set as     : $HxcVcDMFld10
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK10
 
 [Line: Hxc Vc F Map11]
@@ -1358,11 +1357,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld11
     Set as     : $HxcVcDMFld11
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK11
 
 [Line: Hxc Vc F Map12]
@@ -1380,11 +1379,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld12
     Set as     : $HxcVcDMFld12
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK12
 
 [Line: Hxc Vc F Map13]
@@ -1402,11 +1401,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld13
     Set as     : $HxcVcDMFld13
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK13
 
 [Line: Hxc Vc F Map14]
@@ -1424,11 +1423,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld14
     Set as     : $HxcVcDMFld14
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK14
 
 [Line: Hxc Vc F Map15]
@@ -1446,11 +1445,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld15
     Set as     : $HxcVcDMFld15
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK15
 
 [Line: Hxc Vc F Map16]
@@ -1468,11 +1467,11 @@
     Use        : Name Field
     Storage    : HxcVcDMFld16
     Set as     : $HxcVcDMFld16
-    Set Always : Yes
-    Table      : Hxc Voucher Field List, Ledger, Stock Item, Godown, Cost Centre, Currency, Unit, End of List, Not Applicable
+    Table      : Hxc Voucher Field List, Not Applicable
     Show Table : Always
     Width      : 28
     Max        : 40
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched OR $$IsEmpty:##HxcVcFK16
 
 
@@ -1498,9 +1497,9 @@
     Set as     : ##HxcVcPreviewText
     Set Always : Yes
     FullWidth  : Yes
-    Lines      : 12
-    Multi Line : Yes
+    Lines      : 4
     Skip       : Yes
+    Color      : Black
     Inactive   : NOT ##HxcVcFetched
 
 ;; --- Voucher Rules ---
@@ -1586,7 +1585,7 @@
     Object : Company
 
 [Form: Helixcer Voucher Config Create]
-    Part   : Hxc Vc Cr Title Part, Hxc Vc Form Template Part, Hxc Vc Form Mid Row, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Cr Hint Part
+    Part   : Hxc Vc Cr Title Part, Hxc Vc Form Template Part, Hxc Vc Form Preview Part, Hxc Vc Form Left Col, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Cr Hint Part
     Button : Hxc Fetch Template Btn, Form Accept, Form Cancel
     On     : Form Create  : Yes : CALL : Hxc Vc Clear Draft
     On     : Form Destroy : Yes : CALL : Hxc Vc Clear Draft
@@ -1601,7 +1600,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 364)"
+    Set as    : "Create Voucher Config (build 365)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1654,7 +1653,7 @@
     Object : Company
 
 [Form: Helixcer Voucher Config Alter]
-    Part   : Hxc Vc Al Title Part, Hxc Vc Al Pick Part, Hxc Vc Form Template Part, Hxc Vc Form Mid Row, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Al Hint Part
+    Part   : Hxc Vc Al Title Part, Hxc Vc Al Pick Part, Hxc Vc Form Template Part, Hxc Vc Form Preview Part, Hxc Vc Form Left Col, Hxc Vc Form Vch Part, Hxc Vc Form Settings Part, Hxc Vc Al Hint Part
     Button : Hxc Fetch Template Btn, Form Accept, Form Cancel
     On     : Form Create  : Yes : CALL : Hxc Vc Clear Draft
     On     : Form Destroy : Yes : CALL : Hxc Vc Clear Draft
@@ -1669,7 +1668,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 364)"
+    Set as    : "Alter Voucher Config (build 365)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1728,7 +1727,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 364)"
+    Set as    : "Voucher Config List (build 365)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1843,7 +1842,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 364)"
+    Set as    : "Helixcer Chat (build 365)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
