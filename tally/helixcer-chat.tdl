@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 384-focus-after-fetch
-;; Title must show "(build 384)".
+;; BUILD: 385-skip-template-when-fetched
+;; Title must show "(build 385)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -712,7 +712,8 @@
     59 : RETURN : Yes
 
 [Function: Hxc After Fetch Focus]
-    ;; After HTTP fetch the form refreshes; without this, focus returns to Config Name.
+    ;; Called after fetch and from Name/Template/Lang On Focus when ##HxcVcFetched.
+    ;; Name/Template/Lang are Inactive once fetched so redraw skips them.
     01 : IF : NOT ##HxcVcFetched
     02 :    RETURN : No
     03 : END IF
@@ -980,7 +981,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 384)"
+    Set as    : "Helixcer Chat — API Settings (build 385)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1113,6 +1114,8 @@
     Set as   : $HxcVcDraftName
     Width    : 40
     Max      : 60
+    Inactive : ##HxcVcFetched
+    On       : Focus : ##HxcVcFetched : CALL : Hxc After Fetch Focus
 
 [Line: Hxc Vc F Template Line]
     Fields : Medium Prompt, Hxc Vc F Template
@@ -1125,9 +1128,11 @@
     Set as   : $HxcVcDraftTemplate
     Width    : 40
     Max      : 80
+    Inactive : ##HxcVcFetched
     On       : Accept : Yes : SET : HxcVcFetchName : $Value
     On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
     On       : Accept : Yes : Field Accept
+    On       : Focus : ##HxcVcFetched : CALL : Hxc After Fetch Focus
 
 [Line: Hxc Vc F Lang Line]
     Fields : Medium Prompt, Hxc Vc F Lang
@@ -1140,9 +1145,12 @@
     Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
     Width    : 16
     Max      : 16
+    Inactive : ##HxcVcFetched
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
+    On       : Accept : ##HxcVcFetched : Field Accept
+    On       : Focus : ##HxcVcFetched : CALL : Hxc After Fetch Focus
 
 [Line: Hxc Vc F Fetch Status Line]
     Field : Hxc Vc F Fetch Status
@@ -1703,7 +1711,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 384)"
+    Set as    : "Create Voucher Config (build 385)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1776,7 +1784,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 384)"
+    Set as    : "Alter Voucher Config (build 385)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1835,7 +1843,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 384)"
+    Set as    : "Voucher Config List (build 385)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1950,7 +1958,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 384)"
+    Set as    : "Helixcer Chat (build 385)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
