@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 398-dynamic-vouchers
-;; Title must show "(build 398)".
+;; BUILD: 399-no-stale-template-fetch
+;; Title must show "(build 399)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -610,7 +610,9 @@
     40 : SET : HxcVcFC14 : ""
     41 : SET : HxcVcFC15 : ""
     42 : SET : HxcVcFC16 : ""
-    43 : RETURN : Yes
+    43 : SET : HxcVcFetchName : ""
+    44 : SET : HxcVcFetchLang : "en"
+    45 : RETURN : Yes
 
 [Function: Hxc Set Map Slot]
     Parameter : Idx : Number
@@ -829,7 +831,11 @@
     05 :    Msg Box : "Helixcer Template" : ##HxcVcFetchStatus
     06 :    RETURN : No
     07 : END IF
-    ;; Always take template/lang from Company Storage draft UDFs
+    ;; CreateBlank paints Template empty while Storage may still hold the previous name —
+    ;; wipe that before reading, so a blank UI cannot fetch a stale template.
+    071 : IF : ##HxcVcCreateBlank
+    072 :    CALL : Hxc Release Create Blank
+    073 : END IF
     08 : SET : HxcVcFetchName : $HxcVcDraftTemplate
     09 : IF : $$IsEmpty:##HxcVcFetchName
     10 :    SET : HxcVcFetchName : $HxcVcDraftTemplate:Company:##SVCurrentCompany
@@ -1068,17 +1074,20 @@
     08 : RETURN : Yes
 
 [Function: Hxc Release Create Blank]
-    ;; Storage may still hold prior values in field buffers; wipe again then allow typing.
-    01 : SET VALUE : HxcVcDraftName : ""
-    02 : SET VALUE : HxcVcDraftTemplate : ""
-    03 : SET VALUE : HxcVcDraftLang : "en"
-    04 : CALL : Hxc Clear Draft Vchs
-    05 : CALL : Hxc Seed Draft Vch Row
-    06 : SET : HxcVcDraftAuto : No
-    07 : SET : HxcVcDraftConfirm : No
-    08 : SET : HxcVcAutoSendEnabled : No
-    09 : SET : HxcVcCreateBlank : No
-    10 : RETURN : Yes
+    ;; Wipe hidden Storage that CreateBlank was masking in the UI.
+    01 : IF : NOT ##HxcVcCreateBlank
+    02 :    RETURN : Yes
+    03 : END IF
+    04 : SET VALUE : HxcVcDraftName : ""
+    05 : SET VALUE : HxcVcDraftTemplate : ""
+    06 : SET VALUE : HxcVcDraftLang : "en"
+    07 : CALL : Hxc Clear Draft Vchs
+    08 : CALL : Hxc Seed Draft Vch Row
+    09 : SET : HxcVcDraftAuto : No
+    10 : SET : HxcVcDraftConfirm : No
+    11 : SET : HxcVcAutoSendEnabled : No
+    12 : SET : HxcVcCreateBlank : No
+    13 : RETURN : Yes
 
 [Function: Hxc Vc Clear Draft]
     01 : CALL : Hxc Clear Fetch Vars
@@ -1250,7 +1259,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 398)"
+    Set as    : "Helixcer Chat — API Settings (build 399)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1401,6 +1410,7 @@
     Set Always : ##HxcVcCreateBlank
     Width    : 40
     Max      : 80
+    On       : Focus : ##HxcVcCreateBlank : CALL : Hxc Release Create Blank
     ;; Storage updates on Accept; then copy into FetchName for the HTTP call
     On       : Accept : Yes : CALL : Hxc Clear Fetch Vars
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
@@ -1419,6 +1429,7 @@
     Set Always : ##HxcVcCreateBlank
     Width    : 16
     Max      : 16
+    On       : Focus : ##HxcVcCreateBlank : CALL : Hxc Release Create Blank
     On       : Accept : Yes : SET : HxcVcFetchLang : $Value
     On       : Accept : Yes : SET : HxcVcFetchName : $HxcVcDraftTemplate
     On       : Accept : Yes : CALL : Hxc Fetch Template
@@ -2066,7 +2077,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 398)"
+    Set as    : "Create Voucher Config (build 399)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2142,7 +2153,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 398)"
+    Set as    : "Alter Voucher Config (build 399)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2202,7 +2213,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 398)"
+    Set as    : "Voucher Config List (build 399)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2317,7 +2328,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 398)"
+    Set as    : "Helixcer Chat (build 399)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
