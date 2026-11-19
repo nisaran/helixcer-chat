@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 385-fresh-create-form
-;; Title must show "(build 385)".
+;; BUILD: 386-fix-not-locked
+;; Title must show "(build 386)".
 ;;
 ;; Create Config flow:
 ;;   Config Name → Template → Language Enter (fetch) →
@@ -897,12 +897,14 @@
 
 [Function: Hxc Initialize New Config]
     ;; Wipe Company draft UDFs so Create never shows the previous session.
-    01 : SET : HxcVcCreateNeedsReset : No
-    02 : SET : HxcVcMoveToMapping : No
-    03 : SET : HxcVcMoveToConfirm : No
-    04 : SET : HxcVcAutoSendEnabled : No
-    05 : CALL : Hxc Vc Clear Draft
-    06 : RETURN : Yes
+    01 : SET TARGET
+    02 : SET : HxcVcCreateNeedsReset : No
+    03 : SET : HxcVcMoveToMapping : No
+    04 : SET : HxcVcMoveToConfirm : No
+    05 : SET : HxcVcAutoSendEnabled : No
+    06 : SET : HxcVcFetched : No
+    07 : CALL : Hxc Vc Clear Draft
+    08 : RETURN : Yes
 
 [Function: Hxc Vc Clear Draft]
     01 : CALL : Hxc Clear Fetch Vars
@@ -1074,7 +1076,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 385)"
+    Set as    : "Helixcer Chat — API Settings (build 386)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1203,7 +1205,7 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Name]
-    Skip     : ##HxcVcMoveToConfirm OR (##HxcVcMoveToMapping)
+    Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
     Storage  : HxcVcDraftName
     Set as   : $HxcVcDraftName
@@ -1216,7 +1218,7 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Template]
-    Skip     : ##HxcVcMoveToConfirm OR (##HxcVcMoveToMapping)
+    Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
     Storage  : HxcVcDraftTemplate
     Set as   : $HxcVcDraftTemplate
@@ -1232,7 +1234,7 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc F Lang]
-    Skip     : ##HxcVcMoveToConfirm OR (##HxcVcMoveToMapping)
+    Skip     : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use      : Name Field
     Storage  : HxcVcDraftLang
     Set as   : If $$IsEmpty:$HxcVcDraftLang THEN "en" ELSE $HxcVcDraftLang
@@ -1853,6 +1855,8 @@
     Title  : "Create Voucher Config"
     Object : Company
     Set    : HxcVcFetched : No
+    Set    : HxcVcMoveToMapping : No
+    Set    : HxcVcMoveToConfirm : No
     Set    : HxcVcPreviewText : ""
     Set    : HxcVcFetchStatus : ""
     Set    : HxcVcCreateNeedsReset : Yes
@@ -1874,7 +1878,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 385)"
+    Set as    : "Create Voucher Config (build 386)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1949,7 +1953,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 385)"
+    Set as    : "Alter Voucher Config (build 386)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1964,7 +1968,7 @@
     Local  : Field : Medium Prompt : Width  : 22
 
 [Field: Hxc Vc Al Pick]
-    Skip : ##HxcVcMoveToConfirm OR ##HxcVcMoveToMapping
+    Skip : ##HxcVcMoveToConfirm OR (##HxcVcFetched AND ##HxcVcMoveToMapping)
     Use        : Name Field
     Storage    : HxcVcDraftEditKey
     Set as     : $HxcVcDraftEditKey
@@ -2009,7 +2013,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 385)"
+    Set as    : "Voucher Config List (build 386)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -2124,7 +2128,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 385)"
+    Set as    : "Helixcer Chat (build 386)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes

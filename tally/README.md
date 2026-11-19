@@ -1,10 +1,10 @@
-# Helixcer Chat for TallyPrime — build 385
+# Helixcer Chat for TallyPrime — build 386
 
 https://raw.githubusercontent.com/nisaran/helixcer-chat/cursor/tally-gap-clear-draft-b545/tally/helixcer-chat.tdl
 
-Title must show **(build 385)**.
-
-Based on your attached build 384 (custom value, End of List, MoveToMapping).
+Title must show **(build 386)**.
 
 ## Fix
-Create Config now clears all Company draft UDFs on **Form Create** (`Hxc Initialize New Config`), so Config Name / Template Name / mappings / options are empty every open. Fetch still clears mapping slots; Restore Custom Mappings only runs when Alter has an EditKey.
+Create Config was fully unclickable when `HxcVcMoveToMapping` stayed Yes while the template was not fetched — Config Name / Template / Language were all `Skip`.
+
+Skip those fields only when **fetched and** moving to mapping. Report/Initialize also force MoveToMapping/MoveToConfirm off on open.
