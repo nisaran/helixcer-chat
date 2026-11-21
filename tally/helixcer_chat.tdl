@@ -1,6 +1,6 @@
 ﻿;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 415-vt-click-persist
-;; Title must show "(build 415)".
+;; BUILD: 416-vt-subform-open
+;; Title must show "(build 416)".
 ;;
 ;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
 ;; Company Storage is used for saved HxcVoucherConfigs on Commit — never for Create UI.
@@ -1604,7 +1604,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 415)"
+    Set as    : "Helixcer Chat — API Settings (build 416)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3021,7 +3021,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 415)"
+    Set as    : "Create Voucher Config (build 416)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3098,7 +3098,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 415)"
+    Set as    : "Alter Voucher Config (build 416)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3158,7 +3158,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 415)"
+    Set as    : "Voucher Config List (build 416)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3273,7 +3273,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 415)"
+    Set as    : "Helixcer Chat (build 416)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3706,9 +3706,9 @@
     Skip     : NOT $HxcVtEnabled
     Read Only : NOT $HxcVtEnabled
     Option   : Hxc Vt Disabled Menu Style : NOT $HxcVtEnabled
-    ;; Do not call Load/Begin in the Sub Form condition — Tally re-evaluates it on click/focus and jumps the cursor.
-    On : Accept : $HxcVtEnabled AND $$Value : CALL : Hxc Begin Voucher Type Settings : @@HxcVtCurrentMasterName
-    Sub Form : Hxc Voucher Type Settings : $HxcVtEnabled AND $$Value
+    ;; Same pattern as Provide Party Details: Sub Form on $$Value only (no On Accept CALL — that blocked the form).
+    ;; Load runs from Report On Load, not from the Sub Form condition (condition re-eval caused cursor jumps).
+    Sub Form : Hxc Voucher Type Settings : $$Value
 
 [!Field: Hxc Vt Disabled Menu Style]
     Read Only : Yes
@@ -3719,7 +3719,7 @@
     Form : Hxc Voucher Type Settings
     Title : "Helixcer Chat WhatsApp Settings"
     Auto : Yes
-    On : Load : NOT ##HxcVtEditing : CALL : Hxc Vt Load Settings : @@HxcVtCurrentMasterName
+    On : Load : Yes : CALL : Hxc Begin Voucher Type Settings : @@HxcVtCurrentMasterName
 
 [Form: Hxc Voucher Type Settings]
     Height : 100% Screen
@@ -3985,13 +3985,21 @@
 [Function: Hxc Begin Voucher Type Settings]
     Parameter : SelectedMaster : String
     Returns : Logical
-    01 : IF : $$IsEmpty:##SelectedMaster
-    02 :    RETURN : No
-    03 : END IF
-    04 : IF : NOT ##HxcVtEditing OR NOT (##HxcVtMasterName = ##SelectedMaster)
-    05 :    CALL : Hxc Vt Load Settings : ##SelectedMaster
-    06 : END IF
-    07 : RETURN : Yes
+    Variable : Master : String
+    01 : SET : Master : ##SelectedMaster
+    02 : IF : $$IsEmpty:##Master
+    03 :    SET : Master : @@HxcVtCurrentMasterName
+    04 : END IF
+    05 : IF : $$IsEmpty:##Master
+    06 :    SET : Master : $$Owner:$Name
+    07 : END IF
+    08 : IF : $$IsEmpty:##Master
+    09 :    RETURN : No
+    10 : END IF
+    11 : IF : NOT ##HxcVtEditing OR NOT (##HxcVtMasterName = ##Master)
+    12 :    CALL : Hxc Vt Load Settings : ##Master
+    13 : END IF
+    14 : RETURN : Yes
 
 [Function: Hxc Vt Load Settings]
     Parameter : SelectedMaster : String
