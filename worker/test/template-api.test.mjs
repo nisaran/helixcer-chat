@@ -887,6 +887,14 @@ test('external WhatsApp API lists and fetches templates by channel', async () =>
         }
       ] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
+    if (url.pathname.endsWith('/message_templates') && url.searchParams.get('name') === 'invoice') {
+      return new Response(JSON.stringify({ data: [
+        {
+          id: 'tmpl-invoice-en', name: 'invoice', language: 'en_US', status: 'APPROVED', category: 'UTILITY',
+          components: [{ type: 'BODY', text: 'Invoice {{1}} for {{2}}' }]
+        }
+      ] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (url.pathname.endsWith('/message_templates') && url.searchParams.get('name') === 'missing_template') {
       return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
@@ -920,6 +928,18 @@ test('external WhatsApp API lists and fetches templates by channel', async () =>
     assert.equal(fetched.items.length, 1);
     assert.equal(fetched.items[0].templateId, 'tmpl-order-en');
     assert.equal(fetched.items[0].status, 'APPROVED');
+
+    // Base language "en" must match WhatsApp regional "en_US" (Tally users often type en).
+    const invoiceEn = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/v1/whatsapp/templates/invoice?channelId=wa-sales&language=en',
+      { headers: { Authorization: `Bearer ${token}`, 'X-Workspace-Id': 'ws_default' } }
+    ), env);
+    assert.equal(invoiceEn.status, 200);
+    const invoiceBody = await invoiceEn.json();
+    assert.equal(invoiceBody.status, true);
+    assert.equal(invoiceBody.name, 'invoice');
+    assert.equal(invoiceBody.items.length, 1);
+    assert.equal(invoiceBody.items[0].language.code, 'en_US');
 
     const missing = await handleRequest(new Request(
       'https://api.chat.helixcer.com/api/v1/whatsapp/templates/missing_template?channelId=wa-sales',

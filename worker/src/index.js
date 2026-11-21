@@ -1999,6 +1999,26 @@ function externalTemplateView(template) {
   };
 }
 
+/** Match WhatsApp language codes: exact, or base-only request (en) to regional (en_US). */
+function whatsAppLanguageCodesMatch(requested, actual) {
+  const want = String(requested || '').trim().toLowerCase();
+  const have = String(actual || '').trim().toLowerCase();
+  if (!want || !have) return !want;
+  if (want === have) return true;
+  const wantBase = want.split('_')[0];
+  const haveBase = have.split('_')[0];
+  // Requesting "en" should accept en_US / en_GB; requesting en_US stays exact-only above.
+  if (!want.includes('_') && wantBase === haveBase) return true;
+  return false;
+}
+
+function filterWhatsAppTemplatesByLanguage(items, language) {
+  if (!language) return items;
+  const matched = items.filter(item => whatsAppLanguageCodesMatch(language, item?.language?.code));
+  const exact = matched.filter(item => String(item?.language?.code || '').toLowerCase() === String(language).toLowerCase());
+  return exact.length ? exact : matched;
+}
+
 async function listExternalWhatsAppTemplates(env, url, principal, requestId) {
   const channelId = cleanId(url.searchParams.get('channelId'), 'Channel ID');
   const channel = await resolveExternalWhatsAppChannel(env, principal, channelId);
@@ -2044,7 +2064,7 @@ async function fetchExternalWhatsAppTemplate(env, url, principal, requestId, tem
   } catch (error) {
     throw mapExternalTemplateLookupError(error);
   }
-  if (language) items = items.filter(item => item.language.code === language);
+  if (language) items = filterWhatsAppTemplatesByLanguage(items, language);
   if (!items.length) throw apiError(404, 'template_not_found', 'Template not found for this WhatsApp channel.');
   await auditApiKey(env, principal, 'fetch_template', 'channel', channel.channelId, {
     templateName: name, language, count: items.length
@@ -6815,7 +6835,12 @@ async function listWhatsAppTemplatesByName(env, channel, name) {
 
 async function findWhatsAppChannelTemplate(env, channel, name, languageCode) {
   const items = await listWhatsAppTemplatesByName(env, channel, name);
-  return items.find(template => template.status === 'APPROVED' && template.language.code === languageCode) || null;
+  const matched = filterWhatsAppTemplatesByLanguage(items, languageCode)
+    .filter(template => template.status === 'APPROVED');
+  if (!matched.length) return null;
+  const exact = matched.find(template =>
+    String(template.language.code || '').toLowerCase() === String(languageCode || '').toLowerCase());
+  return exact || matched[0];
 }
 
 const WHATSAPP_TEMPLATE_CREATE_CATEGORIES = new Set(['MARKETING', 'UTILITY']);
