@@ -41,6 +41,7 @@ import {
   buildMetaWhatsAppTemplateUpdatePayload,
   buildMetaComponentsFromHelixcerVariables,
   providerError,
+  encodeMetaUploadSessionToken,
   metaResumableUploadSessionPath,
   metaResumableUploadSessionUrl,
   metaResumableUploadSessionIdFromResponse,
@@ -860,31 +861,44 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
 test('Meta resumable upload keeps the upload: colon and sanitizes sample filenames', () => {
   const token = 'MTphdHRhY2htZW50OjQ1ZmNiMDBjLTI3YjctNDAzMi05NjAwLTc5N2E3N2FiMDQ5Ng==';
   const sessionId = `upload:${token}`;
-  assert.equal(metaResumableUploadSessionPath(sessionId), `upload:${encodeURIComponent(token)}`);
-  assert.equal(metaResumableUploadSessionPath(token), `upload:${encodeURIComponent(token)}`);
+  // Match Meta Postman: keep base64 "=" padding literal (not %3D) in the path.
+  assert.equal(encodeMetaUploadSessionToken(token), token);
+  assert.equal(metaResumableUploadSessionPath(sessionId), `upload:${token}`);
+  assert.equal(metaResumableUploadSessionPath(token), `upload:${token}`);
   assert.notEqual(metaResumableUploadSessionPath(sessionId), encodeURIComponent(sessionId));
   assert.match(metaResumableUploadSessionPath(sessionId), /^upload:/);
   assert.doesNotMatch(metaResumableUploadSessionPath(sessionId), /upload%3A/i);
-  assert.match(metaResumableUploadSessionPath(sessionId), /%3D%3D$/);
+  assert.match(metaResumableUploadSessionPath(sessionId), /==$/);
+  assert.doesNotMatch(metaResumableUploadSessionPath(sessionId), /%3D/);
   // Dotted / multi-colon opaque tokens from newer Graph responses must not be rejected.
+  // Slash still encodes so it cannot create extra path segments.
   assert.equal(
     metaResumableUploadSessionPath('upload:abc.def:ghi+jkl/mno='),
-    `upload:${encodeURIComponent('abc.def:ghi+jkl/mno=')}`
+    'upload:abc.def:ghi+jkl%2Fmno='
   );
   assert.equal(
     metaResumableUploadSessionPath('upload%3A' + encodeURIComponent(token)),
-    `upload:${encodeURIComponent(token)}`
+    `upload:${token}`
   );
   // Meta includes ?sig= on session ids — keep it as a query param, not a rejected character.
   const signed = `upload:${token}?sig=ARZqkGCA_uQMxC8nHKI`;
   assert.equal(
     metaResumableUploadSessionPath(signed),
-    `upload:${encodeURIComponent(token)}?sig=ARZqkGCA_uQMxC8nHKI`
+    `upload:${token}?sig=ARZqkGCA_uQMxC8nHKI`
   );
   const signedUrl = metaResumableUploadSessionUrl('v26.0', signed);
-  assert.match(signedUrl, /^https:\/\/graph\.facebook\.com\/v26\.0\/upload:/);
-  assert.match(signedUrl, /\?sig=ARZqkGCA_uQMxC8nHKI$/);
+  assert.equal(
+    signedUrl,
+    `https://graph.facebook.com/v26.0/upload:${token}?sig=ARZqkGCA_uQMxC8nHKI`
+  );
   assert.doesNotMatch(signedUrl, /upload%3A/i);
+  assert.doesNotMatch(signedUrl, /%3D/);
+  // Preserve pre-encoded sig values without re-encoding via URLSearchParams.
+  const preencodedSig = `upload:${token}?sig=ARZqkGCA%2BuQMxC8nHKI%3D`;
+  assert.equal(
+    metaResumableUploadSessionUrl('v26.0', preencodedSig),
+    `https://graph.facebook.com/v26.0/upload:${token}?sig=ARZqkGCA%2BuQMxC8nHKI%3D`
+  );
   assert.equal(
     metaResumableUploadSessionIdFromResponse({ id: sessionId }),
     sessionId

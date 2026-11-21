@@ -116,7 +116,7 @@ import {
   validateWhatsAppTemplateMappingsUpsert
 } from './template-mappings.js';
 
-const API_VERSION = '2026-11-17-map-templates';
+const API_VERSION = '2026-11-21-template-sample-upload';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -7177,6 +7177,13 @@ async function resolveMetaAppIdForWhatsAppToken(credentials, apiVersion) {
   return appId;
 }
 
+export function encodeMetaUploadSessionToken(token) {
+  // Meta Postman examples keep base64 padding (=) and + literal in the path.
+  // encodeURIComponent() turns = into %3D and can make step-2 upload return HTTP 400.
+  // Still percent-encode characters that would split the path (/, ?, #, %, whitespace).
+  return String(token || '').replace(/[^A-Za-z0-9._~!$&'()*+,;=:@-]/g, (ch) => encodeURIComponent(ch));
+}
+
 export function metaResumableUploadSessionParts(sessionId) {
   let id = String(sessionId || '').trim();
   if (!id) throw httpError(502, 'Meta did not return an upload session id.');
@@ -7201,22 +7208,16 @@ export function metaResumableUploadSessionParts(sessionId) {
 
 export function metaResumableUploadSessionPath(sessionId) {
   const { token, query } = metaResumableUploadSessionParts(sessionId);
-  return query
-    ? `upload:${encodeURIComponent(token)}?${query}`
-    : `upload:${encodeURIComponent(token)}`;
+  const encoded = encodeMetaUploadSessionToken(token);
+  return query ? `upload:${encoded}?${query}` : `upload:${encoded}`;
 }
 
 export function metaResumableUploadSessionUrl(apiVersion, sessionId) {
   const version = metaApiVersion(apiVersion);
   const { token, query } = metaResumableUploadSessionParts(sessionId);
-  const url = new URL(`https://graph.facebook.com/${version}/upload:${encodeURIComponent(token)}`);
-  if (query) {
-    const params = new URLSearchParams(query);
-    for (const [key, value] of params.entries()) {
-      if (key) url.searchParams.set(key, value);
-    }
-  }
-  return url.toString();
+  // Build as a string so we do not re-encode Meta's ?sig= through URLSearchParams.
+  const base = `https://graph.facebook.com/${version}/upload:${encodeMetaUploadSessionToken(token)}`;
+  return query ? `${base}?${query}` : base;
 }
 
 export function metaResumableUploadSessionIdFromResponse(payload) {
@@ -7302,27 +7303,37 @@ async function uploadMetaResumableTemplateSample(credentials, apiVersion, appId,
     ? AbortSignal.timeout(90000)
     : undefined;
   let uploadResponse;
+  let uploadText = '';
   try {
+    // Meta's resumable upload step expects raw bytes (--data-binary), not a typed
+    // Blob/Content-Type. Sending application/pdf here has produced HTTP 400 with an empty body.
     uploadResponse = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
         Authorization: `OAuth ${credentials.accessToken}`,
-        file_offset: '0',
-        'Content-Type': mimeType
+        file_offset: '0'
       },
-      body: new Blob([bytes], { type: mimeType }),
+      body: bytes,
       signal: uploadSignal
     });
+    uploadText = await uploadResponse.text();
   } catch (error) {
     if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
       throw httpError(504, 'Meta timed out while storing the template sample media. Try a smaller sample file, then submit again.');
     }
     throw httpError(502, 'Meta could not accept the template sample media upload.');
   }
-  const uploadData = safeJsonParse(await uploadResponse.text(), {});
+  const uploadData = safeJsonParse(uploadText, {});
   const headerHandle = String(uploadData?.h || '').trim();
   if (!uploadResponse.ok || !headerHandle) {
-    const detail = redactProviderSecret(providerError(uploadData, uploadResponse.status), credentials.accessToken);
+    let detail = redactProviderSecret(providerError(uploadData, uploadResponse.status), credentials.accessToken);
+    if (!detail || /^HTTP \d+$/i.test(detail)) {
+      const snippet = String(uploadText || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 160);
+      detail = snippet
+        ? `HTTP ${uploadResponse.status} — ${snippet}`
+        : `HTTP ${uploadResponse.status}`;
+      detail = redactProviderSecret(detail, credentials.accessToken);
+    }
     throw httpError(422, `Meta could not store the template sample media: ${detail}`);
   }
   return headerHandle;
