@@ -116,7 +116,7 @@ import {
   validateWhatsAppTemplateMappingsUpsert
 } from './template-mappings.js';
 
-const API_VERSION = '2026-11-21-template-sample-upload';
+const API_VERSION = '2026-11-22-bulk-message-status';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -137,6 +137,7 @@ const WHATSAPP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 const EXTERNAL_API_OPERATION = 'whatsapp.template.send';
 const EXTERNAL_API_IDEMPOTENCY_DAYS = 7;
+const EXTERNAL_API_MAX_MESSAGE_STATUS_IDS = 100;
 const EXTERNAL_API_DEFAULT_SCOPES = Object.freeze([
   'whatsapp:template:send',
   'messages:read',
@@ -1273,6 +1274,12 @@ async function handleExternalApi(request, env, ctx, url) {
       response.headers.set('X-Request-Id', requestId);
       return response;
     }
+    if (url.pathname === '/api/v1/messages/status' && request.method === 'POST') {
+      requireApiScope(apiPrincipal, 'messages:read');
+      const response = await getExternalMessageStatuses(request, env, apiPrincipal, requestId, url);
+      response.headers.set('X-Request-Id', requestId);
+      return response;
+    }
     const statusMatch = url.pathname.match(/^\/api\/v1\/messages\/([^/]+)$/);
     if (statusMatch && request.method === 'GET') {
       requireApiScope(apiPrincipal, 'messages:read');
@@ -1595,14 +1602,7 @@ async function findExternalRequest(env, apiKeyId, idempotencyHash) {
     .bind(apiKeyId, EXTERNAL_API_OPERATION, idempotencyHash, new Date().toISOString()).first();
 }
 
-async function getExternalMessageStatus(env, principal, messageId, url) {
-  const id = cleanId(messageId, 'Message ID');
-  const row = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.contact_id,m.channel_id,m.status,
-      m.provider_message_id,m.error,m.timestamp,r.client_reference
-    FROM external_api_requests r JOIN messages m ON m.message_id=r.message_id AND m.workspace_id=r.workspace_id
-    WHERE r.api_key_id=?1 AND r.workspace_id=?2 AND r.message_id=?3 LIMIT 1`)
-    .bind(principal.apiKeyId, principal.workspaceId, id).first();
-  if (!row) throw apiError(404, 'message_not_found', 'Message not found.');
+function externalMessageStatusView(row, url) {
   return {
     messageId: row.message_id,
     conversationId: row.conversation_id,
@@ -1615,6 +1615,68 @@ async function getExternalMessageStatus(env, principal, messageId, url) {
     createdAt: row.timestamp,
     statusUrl: new URL(`/api/v1/messages/${encodeURIComponent(row.message_id)}`, url.origin).toString()
   };
+}
+
+function cleanExternalMessageId(value) {
+  try {
+    return cleanId(value, 'Message ID');
+  } catch (error) {
+    throw apiError(400, 'invalid_message_id', cleanError(error));
+  }
+}
+
+async function getExternalMessageStatus(env, principal, messageId, url) {
+  const id = cleanExternalMessageId(messageId);
+  const row = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.contact_id,m.channel_id,m.status,
+      m.provider_message_id,m.error,m.timestamp,r.client_reference
+    FROM external_api_requests r JOIN messages m ON m.message_id=r.message_id AND m.workspace_id=r.workspace_id
+    WHERE r.api_key_id=?1 AND r.workspace_id=?2 AND r.message_id=?3 LIMIT 1`)
+    .bind(principal.apiKeyId, principal.workspaceId, id).first();
+  if (!row) throw apiError(404, 'message_not_found', 'Message not found.');
+  return externalMessageStatusView(row, url);
+}
+
+async function getExternalMessageStatuses(request, env, principal, requestId, url) {
+  const payload = await readExternalJson(request);
+  if (!isPlainObject(payload)) throw apiError(400, 'invalid_request', 'Request body must be a JSON object.');
+  try {
+    rejectUnknownKeys(payload, new Set(['messageIds']), 'request');
+  } catch (error) {
+    throw apiError(400, 'invalid_request', cleanError(error));
+  }
+  if (!Array.isArray(payload.messageIds)) {
+    throw apiError(400, 'invalid_request', 'messageIds must be an array of message IDs.');
+  }
+  if (!payload.messageIds.length) {
+    throw apiError(400, 'invalid_request', 'messageIds must include at least one message ID.');
+  }
+  if (payload.messageIds.length > EXTERNAL_API_MAX_MESSAGE_STATUS_IDS) {
+    throw apiError(400, 'invalid_request',
+      `messageIds may include at most ${EXTERNAL_API_MAX_MESSAGE_STATUS_IDS} IDs per request.`);
+  }
+  const orderedIds = [];
+  const seen = new Set();
+  for (const value of payload.messageIds) {
+    const id = cleanExternalMessageId(value);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    orderedIds.push(id);
+  }
+  const placeholders = orderedIds.map((_, index) => `?${index + 3}`).join(',');
+  const result = await env.DB.prepare(`SELECT m.message_id,m.conversation_id,m.contact_id,m.channel_id,m.status,
+      m.provider_message_id,m.error,m.timestamp,r.client_reference
+    FROM external_api_requests r JOIN messages m ON m.message_id=r.message_id AND m.workspace_id=r.workspace_id
+    WHERE r.api_key_id=?1 AND r.workspace_id=?2 AND r.message_id IN (${placeholders})`)
+    .bind(principal.apiKeyId, principal.workspaceId, ...orderedIds).all();
+  const byId = new Map((result.results || []).map(row => [row.message_id, externalMessageStatusView(row, url)]));
+  const items = [];
+  const missingMessageIds = [];
+  for (const id of orderedIds) {
+    const item = byId.get(id);
+    if (item) items.push(item);
+    else missingMessageIds.push(id);
+  }
+  return json({ status: true, items, missingMessageIds, requestId });
 }
 
 function externalMessageResponse(item, requestId, replayed, includeReplayHeader) {

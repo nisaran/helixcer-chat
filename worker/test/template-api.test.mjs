@@ -143,6 +143,19 @@ function postTemplate(token, idempotencyKey, body, headers = {}, pathname = '/ap
   });
 }
 
+function postMessageStatus(token, body, headers = {}) {
+  return new Request('https://api.chat.helixcer.com/api/v1/messages/status', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Workspace-Id': 'ws_default',
+      'Content-Type': 'application/json',
+      ...headers
+    },
+    body: JSON.stringify(body)
+  });
+}
+
 test('template inbox preview renders approved copy, runtime values, footer, and actions', () => {
   const rendered = renderWhatsAppTemplatePreview({
     components: [
@@ -727,6 +740,26 @@ test('external template API persists once, dispatches, replays safely, and scope
     assert.equal(statusBody.messageStatus, 'delivered');
     assert.equal(Object.hasOwn(statusBody, 'ok'), false);
 
+    const missingId = '00000000-0000-4000-8000-000000000099';
+    const bulk = await handleRequest(postMessageStatus(token, {
+      messageIds: [accepted.messageId, missingId, accepted.messageId]
+    }), env);
+    assert.equal(bulk.status, 200);
+    const bulkBody = await bulk.json();
+    assert.equal(bulkBody.status, true);
+    assert.equal(Object.hasOwn(bulkBody, 'ok'), false);
+    assert.equal(bulkBody.items.length, 1);
+    assert.equal(bulkBody.items[0].messageId, accepted.messageId);
+    assert.equal(bulkBody.items[0].messageStatus, 'delivered');
+    assert.equal(bulkBody.items[0].channelMessageId, 'wamid.template-1');
+    assert.equal(bulkBody.items[0].statusUrl, statusUrl);
+    assert.deepEqual(bulkBody.missingMessageIds, [missingId]);
+    assert.match(String(bulkBody.requestId || ''), /^[a-f0-9-]{36}$/i);
+
+    const emptyBulk = await handleRequest(postMessageStatus(token, { messageIds: [] }), env);
+    assert.equal(emptyBulk.status, 400);
+    assert.equal((await emptyBulk.json()).error.code, 'invalid_request');
+
     const otherToken = `hxc_live_otherkey1.${'t'.repeat(43)}`;
     await insertKey(database, otherToken, 'key-two', 'hxc_live_otherkey1');
     const hidden = await handleRequest(new Request(statusUrl, {
@@ -736,6 +769,15 @@ test('external template API persists once, dispatches, replays safely, and scope
     const hiddenBody = await hidden.json();
     assert.equal(hiddenBody.status, false);
     assert.equal(Object.hasOwn(hiddenBody, 'ok'), false);
+
+    const hiddenBulk = await handleRequest(postMessageStatus(otherToken, {
+      messageIds: [accepted.messageId]
+    }), env);
+    assert.equal(hiddenBulk.status, 200);
+    const hiddenBulkBody = await hiddenBulk.json();
+    assert.equal(hiddenBulkBody.status, true);
+    assert.deepEqual(hiddenBulkBody.items, []);
+    assert.deepEqual(hiddenBulkBody.missingMessageIds, [accepted.messageId]);
 
     const browser = await handleRequest(postTemplate(token, 'order-1002-send', body, {
       Origin: 'https://chat.helixcer.com'
@@ -747,6 +789,34 @@ test('external template API persists once, dispatches, replays safely, and scope
     assert.equal(browserBody.error.code, 'server_to_server_only');
   } finally {
     globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('bulk message status rejects oversized or invalid ID lists', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_bulkstat1.${'b'.repeat(43)}`;
+  await insertKey(database, token, 'key-bulk-status', 'hxc_live_bulkstat1');
+  try {
+    const tooMany = await handleRequest(postMessageStatus(token, {
+      messageIds: Array.from({ length: 101 }, (_, index) => `msg-${String(index).padStart(3, '0')}`)
+    }), env);
+    assert.equal(tooMany.status, 400);
+    assert.equal((await tooMany.json()).error.code, 'invalid_request');
+
+    const invalid = await handleRequest(postMessageStatus(token, {
+      messageIds: ['not valid id!']
+    }), env);
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).error.code, 'invalid_message_id');
+
+    const literalStatusPath = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/v1/messages/status', {
+        headers: { Authorization: `Bearer ${token}`, 'X-Workspace-Id': 'ws_default' }
+      }), env);
+    assert.equal(literalStatusPath.status, 404);
+    assert.equal((await literalStatusPath.json()).error.code, 'message_not_found');
+  } finally {
     database.close();
   }
 });
