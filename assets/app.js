@@ -7877,7 +7877,7 @@
   }
 
   const CREATE_TEMPLATE_LANGUAGES = [
-    ["en_US", "English (US)"], ["en", "English"], ["en_GB", "English (UK)"],
+    ["en", "English"], ["en_US", "English (US)"], ["en_GB", "English (UK)"],
     ["hi", "Hindi"], ["ml", "Malayalam"], ["ta", "Tamil"], ["te", "Telugu"],
     ["kn", "Kannada"], ["mr", "Marathi"], ["gu", "Gujarati"], ["bn", "Bengali"],
     ["ar", "Arabic"], ["es", "Spanish"], ["pt_BR", "Portuguese (BR)"], ["fr", "French"],
@@ -7963,6 +7963,7 @@
     CREATE_TEMPLATE_LANGUAGES.forEach(([code, label]) => {
       languageSelect.append(new Option(`${label} · ${code}`, code));
     });
+    languageSelect.value = "en";
     $("createTemplateButtons")?.replaceChildren();
     if ($("createTemplateHeaderFormat")) $("createTemplateHeaderFormat").value = "NONE";
     if ($("createTemplateParameterFormat")) $("createTemplateParameterFormat").value = "positional";
