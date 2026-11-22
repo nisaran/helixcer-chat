@@ -2292,6 +2292,35 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 }
 
 .settings-surface { margin-top: 0; }
+.integration-surface { display: grid; gap: 22px; max-width: 760px; padding: 22px; }
+.integration-hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; }
+.integration-logo {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: #fff8d6;
+  border: 1px solid #f0dfa0;
+  overflow: hidden;
+}
+.integration-logo img { width: 36px; height: 36px; object-fit: contain; }
+.integration-copy { display: grid; gap: 8px; }
+.integration-copy strong { font-size: 16px; letter-spacing: -.2px; }
+.integration-copy p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.integration-points {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.integration-points li + li { margin-top: 4px; }
+.integration-actions { display: grid; gap: 8px; justify-items: start; }
+.integration-actions .primary-button { text-decoration: none; }
+@media (max-width: 640px) {
+  .integration-hero { grid-template-columns: 1fr; }
+}
 .support-surface { display: grid; gap: 0; max-width: 720px; overflow: hidden; }
 .support-contact-row + .support-contact-row { border-top: 1px solid var(--line); }
 .support-contact-link {
