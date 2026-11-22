@@ -109,7 +109,7 @@ test("single workspace profile stores organisation, address, and GST details", (
   assert.match(app, /if \(data\.workspace\)[\s\S]*?state\.workspaceProfileLoaded = true/);
   assert.match(app, /const editable = editablePermission && state\.workspaceProfileLoaded/);
   assert.match(html, /Only workspace owners and admins can edit these details/);
-  assert.match(app, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
+  assert.match(app, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
   assert.match(styles, /\.workspace-form-grid \{[^}]*grid-template-columns: repeat\(2/);
   assert.match(styles, /\.workspace-profile-form \.text-field\[readonly\]/);
   assert.doesNotMatch(`${html}\n${app}`, /createWorkspace|deleteWorkspace|workspaceSwitcher/i);
@@ -174,7 +174,7 @@ test("channel management supports multiple provider accounts without hardcoded c
 });
 
 test("Channel navigation is collapsed by default and nests the WhatsApp template library", () => {
-  const channelNav = html.match(/<div class="nav-group" id="channelNavGroup"[\s\S]*?<div class="nav-group" id="integrationNavGroup"/)?.[0] || "";
+  const channelNav = html.match(/<div class="nav-group" id="channelNavGroup"[\s\S]*?<button class="nav-button" type="button" data-route="integrations"/)?.[0] || "";
   assert.match(channelNav, /data-route="channels" data-permission="channels\.manage"/);
   assert.match(channelNav, /data-route="whatsapp-templates" data-permission="channels\.templates"/);
   assert.match(channelNav, /data-route="import-chat" data-permission="channels\.import"/);
@@ -200,21 +200,27 @@ test("Channel navigation is collapsed by default and nests the WhatsApp template
   assert.match(styles, /\.nav-submenu/);
 });
 
-test("Integration navigation nests TallyPrime with a brief and connector download", () => {
-  const integrationNav = html.match(/<div class="nav-group" id="integrationNavGroup"[\s\S]*?<button class="nav-button" type="button" data-route="developer"/)?.[0] || "";
-  assert.match(integrationNav, />Integration<\/span>/);
-  assert.match(integrationNav, /id="integrationNavToggle"[^>]*aria-expanded="false"/);
-  assert.match(integrationNav, /id="integrationNavChildren" hidden/);
-  assert.match(integrationNav, /data-route="integration-tallyprime"/);
-  assert.match(integrationNav, /integration-tallyprime\.svg/);
-  assert.match(integrationNav, />TallyPrime<\/span>/);
+test("Integration opens a grid page; TallyPrime card shows logo, detail, and connector download", () => {
+  assert.match(html, /data-route="integrations"/);
+  assert.doesNotMatch(html, /id="integrationNavGroup"/);
+  assert.doesNotMatch(html, /toggle-integration-nav/);
+  assert.match(html, /id="integrationsRoute" data-route-panel="integrations"/);
+  assert.match(html, /class="integrations-grid"/);
+  assert.match(html, /class="integration-card"[^>]*data-route="integration-tallyprime"/);
+  assert.match(html, /integration-tallyprime\.png/);
+  assert.doesNotMatch(html, /integration-tallyprime\.svg/);
   assert.match(html, /id="integrationTallyPrimeRoute" data-route-panel="integration-tallyprime"/);
+  assert.match(html, /class="integration-back"[^>]*data-route="integrations"/);
   assert.match(html, /Download Helixcer TallyPrime connector/);
   assert.match(html, /pub-7774d089f73f47098e03aef161fe43b1\.r2\.dev\/integrations\/tallyprime\/Helixcer-TallyPrime-Connector\.zip/);
   assert.match(html, /sale vouchers, receipt confirmations, outstanding reminders/);
+  assert.match(app, /integrations: "Integration"/);
   assert.match(app, /"integration-tallyprime": "TallyPrime"/);
-  assert.match(app, /toggle-integration-nav/);
-  assert.match(app, /integrationNavToggle/);
+  assert.match(app, /"integrations", "integration-tallyprime"/);
+  assert.match(app, /route === "integrations" \|\| route === "integration-tallyprime"/);
+  assert.doesNotMatch(app, /integrationNavToggle/);
+  assert.match(styles, /\.integrations-grid/);
+  assert.match(styles, /\.integration-card/);
   assert.match(styles, /\.integration-surface/);
   assert.match(styles, /\.integration-logo/);
 });
@@ -1252,9 +1258,9 @@ test("Automation menu configures greeting and out of office replies", () => {
 
 test("roles hash survives reload and stays aligned with setRoute", () => {
   const parseHash = app.slice(app.indexOf("function parseAppHash"), app.indexOf("async function openPendingConversation"));
-  assert.match(parseHash, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
+  assert.match(parseHash, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
   const setRouteFn = app.slice(app.indexOf("function setRoute"), app.indexOf("function whatsappImportChannels"));
-  assert.match(setRouteFn, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
+  assert.match(setRouteFn, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
   assert.match(setRouteFn, /if \(!hasPermission\("roles\.manage"\) && route === "roles"\) route = "inbox"/);
 });
 

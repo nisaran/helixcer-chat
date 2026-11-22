@@ -15,6 +15,6 @@ These marks remain trademarks of their respective owners. Review the linked bran
 
 | Local file | Notes |
 | --- | --- |
-| `assets/integration-tallyprime.svg` | Helixcer-made yellow “T” tile for the Integration → TallyPrime nav item. Not an official Tally brand asset. |
+| `assets/integration-tallyprime.png` | TallyPrime mark used on the Integration grid card and detail page. Tally / TallyPrime remain trademarks of their respective owners. |
 
-Tally / TallyPrime remain trademarks of their respective owners.
+Review the provider’s brand guidance before changing this mark’s color, shape, clear space, or context.

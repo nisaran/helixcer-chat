@@ -11755,7 +11755,7 @@
     const raw = String(value || "").replace(/^#/, "");
     const separator = raw.indexOf("/");
     const requestedRoute = separator >= 0 ? raw.slice(0, separator) : raw;
-    const allowedRoutes = ["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "automation", "settings", "support"];
+    const allowedRoutes = ["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"];
     const route = allowedRoutes.includes(requestedRoute) ? requestedRoute : "inbox";
     if (route !== "inbox" || separator < 0) return { route, conversationId: "" };
     let conversationId = "";
@@ -11804,7 +11804,7 @@
   function setRoute(route, { preserveLocation = false } = {}) {
     closeContactRouteMenu();
     closeContactPlatformMenu();
-    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"].includes(route)) route = "inbox";
     // Permission demotions require an authenticated principal. Before /api/me
     // resolves, hasPermission is false for everything and would collapse every
     // deep link to Settings via the inbox fallback.
@@ -11838,8 +11838,11 @@
       panel.hidden = !active;
       panel.classList.toggle("is-active", active);
     });
+    const integrationSectionActive = route === "integrations" || route === "integration-tallyprime";
     document.querySelectorAll("[data-route]").forEach((button) => {
-      const active = button.dataset.route === route;
+      const buttonRoute = button.dataset.route;
+      const active = buttonRoute === route
+        || (buttonRoute === "integrations" && integrationSectionActive && button.classList.contains("nav-button"));
       button.classList.toggle("is-active", active);
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
@@ -11855,18 +11858,10 @@
       $("channelDataNavToggle").setAttribute("aria-expanded", "true");
       $("channelDataNavChildren").hidden = false;
     }
-    const integrationSectionActive = route === "integration-tallyprime";
-    if ($("integrationNavToggle")) {
-      $("integrationNavToggle").classList.toggle("is-active", integrationSectionActive);
-      if (integrationSectionActive) {
-        $("integrationNavToggle").setAttribute("aria-expanded", "true");
-        if ($("integrationNavChildren")) $("integrationNavChildren").hidden = false;
-        $("integrationNavGroup")?.classList.add("is-open");
-      }
-    }
     const labels = {
       inbox: "Inbox", contacts: "Contacts", campaigns: "Campaign", channels: "Channels",
       "whatsapp-templates": "WhatsApp Templates", "import-chat": "Import Chat",
+      integrations: "Integration",
       "integration-tallyprime": "TallyPrime",
       developer: "Developer API", team: "Team", roles: "Roles", workspace: "Workspace", automation: "Automation",
       settings: "Settings", support: "Support",
@@ -16320,10 +16315,6 @@
         }
         if (actionButton.dataset.action === "toggle-channel-nav") {
           toggleSidebarNavigation("channelNavToggle", "channelNavChildren", "channelNavGroup");
-          return;
-        }
-        if (actionButton.dataset.action === "toggle-integration-nav") {
-          toggleSidebarNavigation("integrationNavToggle", "integrationNavChildren", "integrationNavGroup");
           return;
         }
         if (actionButton.dataset.action === "toggle-channel-data-nav") {
