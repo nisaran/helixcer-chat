@@ -1349,6 +1349,11 @@ test("Developer API documentation is channel-organized and keeps the send contra
   assert.match(apiDocs, /"status": false/);
   assert.match(apiDocs, /status<\/code> reports whether the API request succeeded/);
   assert.doesNotMatch(apiDocs, /"ok": (?:true|false)/);
+  const bulkStatusSection = apiDocs.match(/<section id="bulk-status">[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(bulkStatusSection, /<h2>Read many message states at once<\/h2>/);
+  assert.match(bulkStatusSection, /POST<\/span><code>https:\/\/api\.chat\.helixcer\.com\/api\/v1\/messages\/status<\/code>/);
+  assert.match(bulkStatusSection, /"missingMessageIds"/);
+  assert.match(bulkStatusSection, /"messageIds"/);
 });
 
 test("WhatsApp credential guidance distinguishes the three Meta secrets", () => {

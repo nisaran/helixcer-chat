@@ -24,6 +24,7 @@ Send approved WhatsApp templates from your server while keeping every outbound m
 | List templates | `GET /api/v1/whatsapp/templates?channelId=...` |
 | Fetch template | `GET /api/v1/whatsapp/templates/{templateName}?channelId=...` |
 | Read message status | `GET /api/v1/messages/{messageId}` |
+| Read message status (bulk) | `POST /api/v1/messages/status` |
 | Authentication | `Authorization: Bearer hxc_live_...` |
 | Workspace | `X-Workspace-Id: YOUR_WORKSPACE_ID` |
 | Request format | `application/json` |
@@ -813,6 +814,52 @@ Typical `messageStatus` progression is:
 
 A message can move to `failed` instead. Status progression is not guaranteed to be synchronous, and some recipients or devices may not produce every intermediate status.
 
+## Read message status in bulk
+
+```http
+POST https://api.chat.helixcer.com/api/v1/messages/status
+Authorization: Bearer hxc_live_REPLACE_WITH_YOUR_KEY
+X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
+Content-Type: application/json
+```
+
+```json
+{
+  "messageIds": [
+    "594798db-1c00-481f-adab-137d1c80b2d8",
+    "7c2f0b1a-9d44-4e11-8f3a-21b0c9d4e5f6"
+  ]
+}
+```
+
+`messageIds` is required. Send 1 to 100 IDs. Duplicate IDs are ignored. The key can read only messages it created.
+
+```json
+{
+  "status": true,
+  "items": [
+    {
+      "messageId": "594798db-1c00-481f-adab-137d1c80b2d8",
+      "conversationId": "9e9411e9-c1a7-4a66-a46f-e6e31d9577da",
+      "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
+      "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+      "messageStatus": "delivered",
+      "channelMessageId": "wamid.HBgMOTE5OTk5OTk5OTk5FQIAERgS...",
+      "error": "",
+      "clientReference": "order-1001",
+      "createdAt": "2026-10-25T10:30:12.442Z",
+      "statusUrl": "https://api.chat.helixcer.com/api/v1/messages/594798db-1c00-481f-adab-137d1c80b2d8"
+    }
+  ],
+  "missingMessageIds": [
+    "7c2f0b1a-9d44-4e11-8f3a-21b0c9d4e5f6"
+  ],
+  "requestId": "f2baa47a-97e6-47c8-a200-7a235cad5d92"
+}
+```
+
+`items` contains the same fields as the single-message status response, in request order for the IDs that were found. Unknown or inaccessible IDs appear in `missingMessageIds` instead of failing the whole request.
+
 ## Chatbox and webhooks
 
 Helixcer records the outbound message in the chatbox before or as it submits the message to Meta. It resolves the contact by WhatsApp identity, creates an open conversation when necessary, and associates the record with `channelId`, `clientReference`, and Meta's message ID.
@@ -826,7 +873,7 @@ Poll the status endpoint for machine-to-machine updates today. When Helixcer out
 - deduplicate events by event ID;
 - expect retries and out-of-order status events;
 - deduplicate repeated events; and
-- fetch the message with `GET /api/v1/messages/{messageId}` when reconciliation is needed.
+- fetch messages with `GET /api/v1/messages/{messageId}` or `POST /api/v1/messages/status` when reconciliation is needed.
 
 The exact outbound webhook management and signature contract will be documented when that feature is enabled. Until then, poll the status endpoint or use the chatbox.
 

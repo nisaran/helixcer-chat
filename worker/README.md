@@ -215,6 +215,7 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `GET /api/realtime` (WebSocket)
 - `POST /api/v1/whatsapp/template-messages` (server-to-server API key)
 - `GET /api/v1/messages/:messageId` (server-to-server API key)
+- `POST /api/v1/messages/status` (server-to-server API key; bulk status for up to 100 message IDs)
 - `GET|POST /webhooks/whatsapp/:channelId`
 - `POST /webhooks/telegram/:channelId`
 - `GET|POST /webhooks/instagram/:channelId`

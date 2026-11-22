@@ -82,7 +82,7 @@
         <p class="nav-channel">WhatsApp Helixcer</p>
         <ul class="nav-list nav-sublist"><li><a href="#helixcer-send">Template messages</a></li><li><a href="#helixcer-format">Helixcer format</a></li><li><a href="#helixcer-examples">Format examples</a></li></ul>
         <p class="nav-label">Operations</p>
-        <ul class="nav-list"><li><a href="#responses">Responses</a></li><li><a href="#status">Message status</a></li><li><a href="#webhooks">Chatbox &amp; webhooks</a></li><li><a href="#errors">Errors</a></li><li><a href="#security">Security checklist</a></li></ul>
+        <ul class="nav-list"><li><a href="#responses">Responses</a></li><li><a href="#status">Message status</a></li><li><a href="#bulk-status">Bulk message status</a></li><li><a href="#webhooks">Chatbox &amp; webhooks</a></li><li><a href="#errors">Errors</a></li><li><a href="#security">Security checklist</a></li></ul>
       </nav>
       <div class="sidebar-card"><strong>Helixcer Messaging API</strong>Available now: WhatsApp template sends that appear beside agent messages, inbound replies, and delivery updates.</div>
     </aside>
@@ -705,6 +705,39 @@ Content-Type: application/json</code></pre></div>
 }</code></pre></div>
       </section>
 
+      <section id="bulk-status">
+        <p class="eyebrow">Status API</p><h2>Read many message states at once</h2>
+        <div class="endpoint"><span class="method post">POST</span><code>https://api.chat.helixcer.com/api/v1/messages/status</code><button class="copy" type="button" aria-label="Copy endpoint">Copy</button></div>
+        <p class="intro">Use the same Bearer key and <code class="plain">X-Workspace-Id</code> header. Send 1 to 100 message IDs in one request. The key can read only messages it created. Duplicate IDs are ignored. Unknown or inaccessible IDs are listed in <code class="plain">missingMessageIds</code> instead of failing the whole call.</p>
+        <div class="code-card" style="margin-top:22px"><div class="code-head"><span>Request body</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "messageIds": [
+    "594798db-1c00-481f-adab-137d1c80b2d8",
+    "7c2f0b1a-9d44-4e11-8f3a-21b0c9d4e5f6"
+  ]
+}</code></pre></div>
+        <div class="code-card" style="margin-top:22px"><div class="code-head"><span>200 · bulk status</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  "status": true,
+  "items": [
+    {
+      "messageId": "594798db-1c00-481f-adab-137d1c80b2d8",
+      "conversationId": "9e9411e9-c1a7-4a66-a46f-e6e31d9577da",
+      "contactId": "af4d6756-e658-4b5f-8593-f1daef0998b7",
+      "channelId": "66d66f0c-0ca2-4c79-96b9-d182d5a481b4",
+      "messageStatus": "delivered",
+      "channelMessageId": "wamid.HBgMOTE5OTk5OTk5OTk5FQIAERgS...",
+      "error": "",
+      "clientReference": "order-1001",
+      "createdAt": "2026-10-25T10:30:12.442Z",
+      "statusUrl": "https://api.chat.helixcer.com/api/v1/messages/594798db-1c00-481f-adab-137d1c80b2d8"
+    }
+  ],
+  "missingMessageIds": [
+    "7c2f0b1a-9d44-4e11-8f3a-21b0c9d4e5f6"
+  ],
+  "requestId": "f2baa47a-97e6-47c8-a200-7a235cad5d92"
+}</code></pre></div>
+      </section>
+
       <section id="webhooks">
         <p class="eyebrow">Unified inbox</p><h2>External sends stay in the conversation</h2>
         <p class="intro">Helixcer resolves the WhatsApp identity, creates a contact and open conversation when needed, and records the outbound template before provider delivery runs.</p>
@@ -715,7 +748,7 @@ Content-Type: application/json</code></pre></div>
           <div class="flow-node"><strong>Customer</strong><small>message &amp; reply</small></div>
         </div>
         <p>Meta sends asynchronous status webhooks to the connected channel. Helixcer applies <code class="plain">sent</code>, <code class="plain">delivered</code>, <code class="plain">read</code>, or <code class="plain">failed</code> to the same item. Replies join the same contact and conversation, so agents see the complete thread.</p>
-        <div class="callout"><strong>Machine-to-machine status:</strong> poll the GET endpoint or use the chatbox today. When Helixcer outbound status webhooks are enabled, consumers should verify signatures, acknowledge quickly, deduplicate event IDs, expect retries and out-of-order events, and reconcile through GET.</div>
+        <div class="callout"><strong>Machine-to-machine status:</strong> poll <code class="plain">GET /api/v1/messages/{messageId}</code>, <code class="plain">POST /api/v1/messages/status</code>, or use the chatbox today. When Helixcer outbound status webhooks are enabled, consumers should verify signatures, acknowledge quickly, deduplicate event IDs, expect retries and out-of-order events, and reconcile through those status endpoints.</div>
       </section>
 
       <section id="errors">
