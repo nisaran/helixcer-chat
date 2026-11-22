@@ -1,6 +1,6 @@
 ﻿;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 416-vt-subform-open
-;; Title must show "(build 416)".
+;; BUILD: 417-quiet-pdf-export
+;; Title must show "(build 417)".
 ;;
 ;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
 ;; Company Storage is used for saved HxcVoucherConfigs on Commit — never for Create UI.
@@ -122,6 +122,9 @@
 [Variable: HxcChannelName]
     Type       : String
     Persistent : Yes
+
+[Variable: HxcChannelPlatform]
+    Type : String
 
 [Variable: HxcConnectionStatus]
     Type       : String
@@ -528,6 +531,7 @@
     HxcSysApiKey        : ""
     HxcWorkspaceName    : ""
     HxcChannelName      : ""
+    HxcChannelPlatform   : ""
     HxcConnectionStatus : ""
     HxcVtEditing : No
     HxcVtWhatsAppOn : No
@@ -535,6 +539,7 @@
     HxcVtSavedRowsReady : No
     HxcVtSavedSlot : 0
     HxcVtMasterName : ""
+    HxcVtStoredWhatsAppEnabled : ""
     HxcVtStoredTemplate : ""
     HxcVtStoredLanguage : ""
     HxcVtStoredMedia : ""
@@ -732,6 +737,7 @@
     Variable : Platform : String
     01 : SET : HxcWorkspaceName : ""
     02 : SET : HxcChannelName : ""
+    021 : SET : HxcChannelPlatform : ""
     03 : SET : HxcConnectionStatus : "Could not fetch. Check IDs and API Key."
     04 : WALK COLLECTION : Parameter Collection
     05 :    IF : NOT $$IsEmpty:$workspaceName
@@ -743,7 +749,8 @@
     11 :          SET : Platform : "Channel"
     12 :       END IF
     13 :       SET : HxcWorkspaceName : $workspaceName
-    14 :       SET : HxcChannelName : $channelName + " (" + ##Platform + ")"
+    14 :       SET : HxcChannelName : $channelName
+    141 :      SET : HxcChannelPlatform : ##Platform
     15 :       SET : HxcConnectionStatus : "Connected"
     16 :    END IF
     17 : END WALK
@@ -762,13 +769,14 @@
     10 : RETURN : Yes
 
 [Function: Hxc Fetch Connection]
+    001 : SET : HxcWorkspaceName : ""
+    002 : SET : HxcChannelName : ""
+    003 : SET : HxcChannelPlatform : ""
     01 : CALL : Hxc Sync From Company
     02 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
     03 :    SET : HxcConnectionStatus : "Not ready. " + @@HxcSysSummary + "  Accept API Settings with Ctrl+A first."
     04 :    RETURN : No
     05 : END IF
-    06 : SET : HxcWorkspaceName : ""
-    07 : SET : HxcChannelName : ""
     08 : SET : HxcConnectionStatus : "Checking..."
     09 : Start Progress : 1 : "Helixcer Chat" : "Connection status" : "Fetching workspace and channel"
     10 : HTTP Request : @@HxcConnectionUrl : GET : JSON : UTF8 : Hxc Connection Request : Hxc Apply Connection Response
@@ -781,12 +789,13 @@
     17 : RETURN : Yes
 
 [Function: Hxc Show Status]
+    Variable : StatusDetails : String
     01 : CALL : Hxc Fetch Connection
-    02 : Msg Box : "Helixcer Connection Status" : ##HxcConnectionStatus
-    03 : IF : NOT $$IsEmpty:##HxcWorkspaceName
-    04 :    Msg Box : "Workspace" : ##HxcWorkspaceName
-    05 :    Msg Box : "Channel" : ##HxcChannelName
-    06 : END IF
+    02 : SET : StatusDetails : "Status: " + ##HxcConnectionStatus
+    03 : SET : StatusDetails : ##StatusDetails + $$NewLine + "Workspace: " + (If $$IsEmpty:##HxcWorkspaceName Then "-" Else ##HxcWorkspaceName)
+    04 : SET : StatusDetails : ##StatusDetails + $$NewLine + "Channel: " + (If $$IsEmpty:##HxcChannelName Then "-" Else ##HxcChannelName)
+    05 : SET : StatusDetails : ##StatusDetails + $$NewLine + "Platform: " + (If $$IsEmpty:##HxcChannelPlatform Then "-" Else ##HxcChannelPlatform)
+    06 : MSG BOX : "Helixcer Connection Status" : ##StatusDetails
     07 : RETURN : Yes
 
 [Function: Hxc Clear Fetch Vars]
@@ -1481,16 +1490,16 @@
     Key Item : General Settings : G : Alter : Hxc General Settings
     Key Item : Status         : T : Call  : Hxc Show Status
     Key Item : WhatsApp Templates : W : Menu : Hxc WhatsApp Templates
-    Key Item : Message History : V : Display : Hxc Voucher Message History
+    Key Item : Message History : V : CALL : Hxc Open Voucher Message History
     Key Item : About          : A : Display : Helixcer Chat About
-    Key Item : Back           : B : Menu  : Gateway of Tally
+    Key Item : Back           : B
 
 [Menu: Helixcer Voucher Config Menu]
     Title    : "Voucher Config"
     Key Item : Create Config : C : Alter : Helixcer Voucher Config Create
     Key Item : Alter Config  : A : Alter : Helixcer Voucher Config Alter
     Key Item : List Configs  : L : Alter : Helixcer Voucher Config List
-    Key Item : Back          : B : Menu  : Helixcer Chat Menu
+    Key Item : Back          : B
 
 ;; ---------------------------------------------------------------------------
 ;; API Settings
@@ -1604,7 +1613,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 416)"
+    Set as    : "Helixcer Chat — API Settings (build 417)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -1778,7 +1787,7 @@
     Modifies : HxcVcDraftLang
     Width    : 16
     Max      : 16
-    On       : Accept : Yes : SET : HxcVcDraftLang : If $$IsEmpty:$$Value Then "en" Else $$Trim:$$Value
+    On       : Accept : Yes : SET : HxcVcDraftLang : If $$IsEmpty:$$Value Then "en" Else If ##HxcReminderEditing Then $$Value Else $$Trim:$$Value
     On       : Accept : Yes : SET : HxcVcFetchLang : ##HxcVcDraftLang
     ;; Prefer draft Variable (Modifies from Template input); else keep FetchName set on Template Accept
     On       : Accept : NOT $$IsEmpty:##HxcVcDraftTemplate : SET : HxcVcFetchName : ##HxcVcDraftTemplate
@@ -3021,7 +3030,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 416)"
+    Set as    : "Create Voucher Config (build 417)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3098,7 +3107,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 416)"
+    Set as    : "Alter Voucher Config (build 417)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3158,7 +3167,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 416)"
+    Set as    : "Voucher Config List (build 417)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3273,7 +3282,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 416)"
+    Set as    : "Helixcer Chat (build 417)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3693,22 +3702,35 @@
 
 [Line: Hxc Vt Settings Line]
     Indent : 2
-    Fields : Medium Prompt, Hxc Vt Open Settings
-    Local  : Field : Medium Prompt : Set as : "Alter Helixcer Chat WhatsApp"
-    Local  : Field : Medium Prompt : Width  : 32
-    Local  : Field : Medium Prompt : Option : Hxc Vt Disabled Menu Style : NOT $HxcVtEnabled
+    Fields : Hxc Vt Open Prompt, Hxc Vt Open Prompt Disabled, Hxc Vt Open Settings
+
+[Field: Hxc Vt Open Prompt]
+    Use       : Medium Prompt
+    Set as    : "Alter Helixcer Chat WhatApp"
+    Set Always : Yes
+    Width     : 32
+    Color     : Black
+    Skip      : Yes
+    Invisible : NOT @@HxcVtSetupEnabled
+
+[Field: Hxc Vt Open Prompt Disabled]
+    Use       : Medium Prompt
+    Set as    : "Alter Helixcer Chat WhatApp"
+    Set Always : Yes
+    Width     : 32
+    Color     : Hxc Confirm Grey
+    Skip      : Yes
+    Invisible : @@HxcVtSetupEnabled
 
 [Field: Hxc Vt Open Settings]
     Use      : Logical Field
     Set as   : No
+    Skip Forward : No
     Width    : 8
     Color    : Black
-    Skip     : NOT $HxcVtEnabled
-    Read Only : NOT $HxcVtEnabled
-    Option   : Hxc Vt Disabled Menu Style : NOT $HxcVtEnabled
-    ;; Same pattern as Provide Party Details: Sub Form on $$Value only (no On Accept CALL — that blocked the form).
-    ;; Load runs from Report On Load, not from the Sub Form condition (condition re-eval caused cursor jumps).
-    Sub Form : Hxc Voucher Type Settings : $$Value
+    Skip     : NOT @@HxcVtSetupEnabled
+    Option   : Hxc Vt Disabled Menu Style : NOT @@HxcVtSetupEnabled
+    Sub Form : Hxc Voucher Type Settings : @@HxcVtSetupEnabled AND $$Value AND $$HxcPrepareVoucherTypeSettings:@@HxcVtCurrentMasterName
 
 [!Field: Hxc Vt Disabled Menu Style]
     Read Only : Yes
@@ -3719,7 +3741,7 @@
     Form : Hxc Voucher Type Settings
     Title : "Helixcer Chat WhatsApp Settings"
     Auto : Yes
-    On : Load : Yes : CALL : Hxc Begin Voucher Type Settings : @@HxcVtCurrentMasterName
+    On : Load : NOT ##HxcVtEditing : CALL : Hxc Vt Load Settings : @@HxcVtCurrentMasterName
 
 [Form: Hxc Voucher Type Settings]
     Height : 100% Screen
@@ -3771,24 +3793,21 @@
     Storage    : HxcVtWhatsAppEnabled
     Set as     : If @@HxcVtOnSelectedMaster THEN (If ##HxcVtWhatsAppOn THEN "Yes" ELSE "No") ELSE $HxcVtWhatsAppEnabled
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Header Kind]
     Use        : Name Field
     Storage    : HxcVtHeaderKind
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND (##HxcVcFetched OR ##HxcVtSavedRowsReady) THEN ##HxcVcHeaderKind ELSE $HxcVtHeaderKind
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN ##HxcVcHeaderKind ELSE $HxcVtHeaderKind
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Preview]
     Use        : Name Field
     Storage    : HxcVtPreview
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND (##HxcVcFetched OR ##HxcVtSavedRowsReady) THEN ##HxcVcPreviewText ELSE $HxcVtPreview
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN ##HxcVcPreviewText ELSE $HxcVtPreview
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
     Max        : 4096
 
 [Field: Hxc Vt Store Template]
@@ -3796,210 +3815,181 @@
     Storage    : HxcVtTemplate
     Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (##HxcVcDraftTemplate) ELSE $HxcVtTemplate
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Language]
     Use        : Name Field
     Storage    : HxcVtLanguage
     Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (##HxcVcDraftLang) ELSE $HxcVtLanguage
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Media]
     Use        : Name Field
     Storage    : HxcVtMedia
     Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (##HxcVcDraftMedia) ELSE $HxcVtMedia
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Auto]
     Use        : Logical Field
     Storage    : HxcVtAuto
     Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (##HxcVcDraftAuto) ELSE $HxcVtAuto
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Confirm]
     Use        : Logical Field
     Storage    : HxcVtConfirm
     Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN ((##HxcVcDraftAuto AND ##HxcVcDraftConfirm)) ELSE $HxcVtConfirm
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Maps]
     Use        : Name Field
     Storage    : HxcVtMaps
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN ($$HxcPackMaps) ELSE $HxcVtMaps
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN ($$HxcPackMaps) ELSE $HxcVtMaps
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom0]
     Use        : Name Field
     Storage    : HxcVtCustom0
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcDraftHeaderFld = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom0 ELSE "") ELSE $HxcVtCustom0
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcDraftHeaderFld = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom0 ELSE "") ELSE $HxcVtCustom0
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom1]
     Use        : Name Field
     Storage    : HxcVtCustom1
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If @@HxcVcMappingField1 = @@HxcCustomValueLabel THEN @@HxcVcMappingCustom1 ELSE "") ELSE $HxcVtCustom1
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If @@HxcVcMappingField1 = @@HxcCustomValueLabel THEN @@HxcVcMappingCustom1 ELSE "") ELSE $HxcVtCustom1
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom2]
     Use        : Name Field
     Storage    : HxcVtCustom2
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If @@HxcVcMappingField2 = @@HxcCustomValueLabel THEN @@HxcVcMappingCustom2 ELSE "") ELSE $HxcVtCustom2
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If @@HxcVcMappingField2 = @@HxcCustomValueLabel THEN @@HxcVcMappingCustom2 ELSE "") ELSE $HxcVtCustom2
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom3]
     Use        : Name Field
     Storage    : HxcVtCustom3
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If @@HxcVcMappingField3 = @@HxcCustomValueLabel THEN @@HxcVcMappingCustom3 ELSE "") ELSE $HxcVtCustom3
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If @@HxcVcMappingField3 = @@HxcCustomValueLabel THEN @@HxcVcMappingCustom3 ELSE "") ELSE $HxcVtCustom3
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom4]
     Use        : Name Field
     Storage    : HxcVtCustom4
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If @@HxcVcMappingField4 = @@HxcCustomValueLabel THEN @@HxcVcMappingCustom4 ELSE "") ELSE $HxcVtCustom4
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If @@HxcVcMappingField4 = @@HxcCustomValueLabel THEN @@HxcVcMappingCustom4 ELSE "") ELSE $HxcVtCustom4
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom5]
     Use        : Name Field
     Storage    : HxcVtCustom5
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcDMFld5 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom5 ELSE "") ELSE $HxcVtCustom5
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcDMFld5 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom5 ELSE "") ELSE $HxcVtCustom5
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom6]
     Use        : Name Field
     Storage    : HxcVtCustom6
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcDMFld6 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom6 ELSE "") ELSE $HxcVtCustom6
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcDMFld6 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom6 ELSE "") ELSE $HxcVtCustom6
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom7]
     Use        : Name Field
     Storage    : HxcVtCustom7
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcDMFld7 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom7 ELSE "") ELSE $HxcVtCustom7
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcDMFld7 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom7 ELSE "") ELSE $HxcVtCustom7
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom9]
     Use        : Name Field
     Storage    : HxcVtCustom9
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcFC9 = "button" AND ##HxcVcDMFld9 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom9 ELSE "") ELSE $HxcVtCustom9
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcFC9 = "button" AND ##HxcVcDMFld9 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom9 ELSE "") ELSE $HxcVtCustom9
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom10]
     Use        : Name Field
     Storage    : HxcVtCustom10
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcFC10 = "button" AND ##HxcVcDMFld10 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom10 ELSE "") ELSE $HxcVtCustom10
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcFC10 = "button" AND ##HxcVcDMFld10 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom10 ELSE "") ELSE $HxcVtCustom10
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom11]
     Use        : Name Field
     Storage    : HxcVtCustom11
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcFC11 = "button" AND ##HxcVcDMFld11 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom11 ELSE "") ELSE $HxcVtCustom11
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcFC11 = "button" AND ##HxcVcDMFld11 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom11 ELSE "") ELSE $HxcVtCustom11
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom12]
     Use        : Name Field
     Storage    : HxcVtCustom12
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcFC12 = "button" AND ##HxcVcDMFld12 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom12 ELSE "") ELSE $HxcVtCustom12
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcFC12 = "button" AND ##HxcVcDMFld12 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom12 ELSE "") ELSE $HxcVtCustom12
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom13]
     Use        : Name Field
     Storage    : HxcVtCustom13
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcFC13 = "button" AND ##HxcVcDMFld13 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom13 ELSE "") ELSE $HxcVtCustom13
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcFC13 = "button" AND ##HxcVcDMFld13 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom13 ELSE "") ELSE $HxcVtCustom13
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom14]
     Use        : Name Field
     Storage    : HxcVtCustom14
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcFC14 = "button" AND ##HxcVcDMFld14 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom14 ELSE "") ELSE $HxcVtCustom14
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcFC14 = "button" AND ##HxcVcDMFld14 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom14 ELSE "") ELSE $HxcVtCustom14
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom15]
     Use        : Name Field
     Storage    : HxcVtCustom15
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcFC15 = "button" AND ##HxcVcDMFld15 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom15 ELSE "") ELSE $HxcVtCustom15
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcFC15 = "button" AND ##HxcVcDMFld15 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom15 ELSE "") ELSE $HxcVtCustom15
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom16]
     Use        : Name Field
     Storage    : HxcVtCustom16
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcFC16 = "button" AND ##HxcVcDMFld16 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom16 ELSE "") ELSE $HxcVtCustom16
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcFC16 = "button" AND ##HxcVcDMFld16 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom16 ELSE "") ELSE $HxcVtCustom16
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [Field: Hxc Vt Store Custom8]
     Use        : Name Field
     Storage    : HxcVtCustom8
-    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn THEN (If ##HxcVcDMFld8 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom8 ELSE "") ELSE $HxcVtCustom8
+    Set as     : If @@HxcVtOnSelectedMaster AND ##HxcVtWhatsAppOn AND ##HxcVcFetched THEN (If ##HxcVcDMFld8 = @@HxcCustomValueLabel THEN ##HxcVcDraftCustom8 ELSE "") ELSE $HxcVtCustom8
     Set Always : Yes
-    Skip       : Yes
-    Width      : 1
+    Invisible  : Yes
 
 [System: Formula]
+    HxcVtSetupEnabled : If $$IsEmpty:#HxcVtEnableInput Then $HxcVtEnabled Else #HxcVtEnableInput
     HxcVtCurrentMasterName : If NOT $$IsEmpty:$Name Then $Name Else If NOT $$IsEmpty:($$ReportObject:$Name) Then $$ReportObject:$Name Else $$Owner:$Name
     HxcVtOnSelectedMaster : ##HxcVtEditing AND NOT $$IsEmpty:##HxcVtMasterName AND @@HxcVtCurrentMasterName = ##HxcVtMasterName
     HxcVtWrongMaster : "Reopen Helixcer Chat from the Voucher Type you want to edit."
     HxcVtFetchRequired : "Fetch the template before accepting Helixcer Chat settings."
     HxcVtCustomRequired : "Enter a value for each variable mapped to Custom Value."
 
-[Function: Hxc Begin Voucher Type Settings]
+;; Prepare the draft before the subform evaluates its Invisible attributes.
+[Function: Hxc Prepare Voucher Type Settings]
     Parameter : SelectedMaster : String
     Returns : Logical
-    Variable : Master : String
-    01 : SET : Master : ##SelectedMaster
-    02 : IF : $$IsEmpty:##Master
-    03 :    SET : Master : @@HxcVtCurrentMasterName
-    04 : END IF
-    05 : IF : $$IsEmpty:##Master
-    06 :    SET : Master : $$Owner:$Name
-    07 : END IF
-    08 : IF : $$IsEmpty:##Master
-    09 :    RETURN : No
-    10 : END IF
-    11 : IF : NOT ##HxcVtEditing OR NOT (##HxcVtMasterName = ##Master)
-    12 :    CALL : Hxc Vt Load Settings : ##Master
-    13 : END IF
-    14 : RETURN : Yes
+    01 : IF : $$IsEmpty:##SelectedMaster
+    02 :    RETURN : No
+    03 : END IF
+    04 : IF : NOT ##HxcVtEditing OR NOT (##HxcVtMasterName = ##SelectedMaster)
+    05 :    CALL : Hxc Vt Load Settings : ##SelectedMaster
+    06 : END IF
+    07 : RETURN : Yes
 
 [Function: Hxc Vt Load Settings]
     Parameter : SelectedMaster : String
@@ -4008,19 +3998,6 @@
     01 : CALL : Hxc Vc Clear Draft
     02 : SET : HxcVtEditing : Yes
     03 : CALL : Hxc Vt Read Selected Settings
-    0301 : IF : $$IsEmpty:##HxcVtStoredWhatsAppEnabled
-    0302 :    SET : HxcVtStoredWhatsAppEnabled : $HxcVtWhatsAppEnabled:VoucherType:##HxcVtMasterName
-    0303 : END IF
-    0304 : IF : $$IsEmpty:##HxcVtStoredTemplate
-    0305 :    SET : HxcVtStoredTemplate : $HxcVtTemplate:VoucherType:##HxcVtMasterName
-    0306 :    SET : HxcVtStoredLanguage : $HxcVtLanguage:VoucherType:##HxcVtMasterName
-    0307 : END IF
-    034 : IF : $$IsEmpty:##HxcVcPreviewText
-    035 :    SET : HxcVcPreviewText : $HxcVtPreview
-    036 : END IF
-    031 : IF : $$IsEmpty:##HxcVcSavedMaps
-    032 :    SET : HxcVcSavedMaps : $HxcVtMaps
-    033 : END IF
     04 : SET : HxcVcDraftTemplate : ##HxcVtStoredTemplate
     041 : SET : HxcVtWhatsAppOn : ##HxcVtStoredWhatsAppEnabled = "Yes" OR ($$IsEmpty:##HxcVtStoredWhatsAppEnabled AND NOT $$IsEmpty:##HxcVtStoredTemplate)
     05 : SET : HxcVcDraftLang : If $$IsEmpty:##HxcVtStoredLanguage THEN "en" ELSE ##HxcVtStoredLanguage
@@ -4040,9 +4017,6 @@
     21 :    CALL : Hxc Vt Restore Mappings
     22 :    SET : HxcVtReadingSavedRows : No
     23 :    SET : HxcVtSavedRowsReady : Yes
-    ;; Mark fetched so mapping fields stay editable after restart (ShowingSavedRows skips them when NOT Fetched).
-    231 :   SET : HxcVcFetched : Yes
-    232 :   SET : HxcVcFetchStatus : "Saved mappings loaded."
     24 : END IF
     25 : RETURN : Yes
 
@@ -4051,68 +4025,38 @@
     Fetch  : Name, HxcVtWhatsAppEnabled, HxcVtTemplate, HxcVtLanguage, HxcVtMedia, HxcVtAuto, HxcVtConfirm, HxcVtMaps, HxcVtPreview, HxcVtHeaderKind, +
              HxcVtCustom0, HxcVtCustom1, HxcVtCustom2, HxcVtCustom3, HxcVtCustom4, HxcVtCustom5, HxcVtCustom6, HxcVtCustom7, HxcVtCustom8, +
                HxcVtCustom9, HxcVtCustom10, HxcVtCustom11, HxcVtCustom12, HxcVtCustom13, HxcVtCustom14, HxcVtCustom15, HxcVtCustom16
-    Filter : HxcVtMatchesSelectedName
 
 [System: Formula]
-    HxcVtMatchesSelectedName : $Name = ##HxcVtMasterName
     HxcVtShowMappings : ##HxcVcFetched OR ((##HxcVtEditing OR ##HxcReminderEditing) AND ##HxcVtSavedRowsReady)
     HxcVtShowingSavedRows : ##HxcVtEditing AND ##HxcVtSavedRowsReady AND NOT ##HxcVcFetched
 
 [Function: Hxc Vt Read Selected Settings]
-    01 : SET : HxcVcSavedMaps : ""
-    011 : SET : HxcVtStoredWhatsAppEnabled : ""
-    2 : SET : HxcVtStoredTemplate : ""
-    3 : SET : HxcVtStoredLanguage : ""
-    4 : SET : HxcVtStoredMedia : ""
-    401 : SET : HxcVtStoredHeaderKind : ""
-    5 : SET : HxcVtStoredAuto : No
-    6 : SET : HxcVtStoredConfirm : No
-    7 : SET : HxcVtStoredCustom0 : ""
-    8 : SET : HxcVtStoredCustom1 : ""
-    9 : SET : HxcVtStoredCustom2 : ""
-    10 : SET : HxcVtStoredCustom3 : ""
-    11 : SET : HxcVtStoredCustom4 : ""
-    12 : SET : HxcVtStoredCustom5 : ""
-    13 : SET : HxcVtStoredCustom6 : ""
-    14 : SET : HxcVtStoredCustom7 : ""
-    15 : SET : HxcVtStoredCustom8 : ""
-    609 : SET : HxcVtStoredCustom9 : ""
-    610 : SET : HxcVtStoredCustom10 : ""
-    611 : SET : HxcVtStoredCustom11 : ""
-    612 : SET : HxcVtStoredCustom12 : ""
-    613 : SET : HxcVtStoredCustom13 : ""
-    614 : SET : HxcVtStoredCustom14 : ""
-    615 : SET : HxcVtStoredCustom15 : ""
-    616 : SET : HxcVtStoredCustom16 : ""
-    16 : WALK COLLECTION : Hxc Vt Selected Settings
-    17 :    SET : HxcVcSavedMaps : $HxcVtMaps
-    171 :    SET : HxcVcPreviewText : $HxcVtPreview
-    172 :    SET : HxcVtStoredWhatsAppEnabled : $HxcVtWhatsAppEnabled
-    18 :    SET : HxcVtStoredTemplate : $HxcVtTemplate
-    19 :    SET : HxcVtStoredLanguage : $HxcVtLanguage
-    20 :    SET : HxcVtStoredMedia : $HxcVtMedia
-    201 :    SET : HxcVtStoredHeaderKind : $HxcVtHeaderKind
-    21 :    SET : HxcVtStoredAuto : $HxcVtAuto
-    22 :    SET : HxcVtStoredConfirm : $HxcVtConfirm
-    23 :    SET : HxcVtStoredCustom0 : $HxcVtCustom0
-    24 :    SET : HxcVtStoredCustom1 : $HxcVtCustom1
-    25 :    SET : HxcVtStoredCustom2 : $HxcVtCustom2
-    26 :    SET : HxcVtStoredCustom3 : $HxcVtCustom3
-    27 :    SET : HxcVtStoredCustom4 : $HxcVtCustom4
-    28 :    SET : HxcVtStoredCustom5 : $HxcVtCustom5
-    29 :    SET : HxcVtStoredCustom6 : $HxcVtCustom6
-    30 :    SET : HxcVtStoredCustom7 : $HxcVtCustom7
-    31 :    SET : HxcVtStoredCustom8 : $HxcVtCustom8
-    709 :    SET : HxcVtStoredCustom9 : $HxcVtCustom9
-    710 :    SET : HxcVtStoredCustom10 : $HxcVtCustom10
-    711 :    SET : HxcVtStoredCustom11 : $HxcVtCustom11
-    712 :    SET : HxcVtStoredCustom12 : $HxcVtCustom12
-    713 :    SET : HxcVtStoredCustom13 : $HxcVtCustom13
-    714 :    SET : HxcVtStoredCustom14 : $HxcVtCustom14
-    715 :    SET : HxcVtStoredCustom15 : $HxcVtCustom15
-    716 :    SET : HxcVtStoredCustom16 : $HxcVtCustom16
-    32 : END WALK
-    33 : RETURN : Yes
+    01 : SET : HxcVcSavedMaps : $HxcVtMaps:VoucherType:##HxcVtMasterName
+    02 : SET : HxcVcPreviewText : $HxcVtPreview:VoucherType:##HxcVtMasterName
+    03 : SET : HxcVtStoredWhatsAppEnabled : $HxcVtWhatsAppEnabled:VoucherType:##HxcVtMasterName
+    04 : SET : HxcVtStoredTemplate : $HxcVtTemplate:VoucherType:##HxcVtMasterName
+    05 : SET : HxcVtStoredLanguage : $HxcVtLanguage:VoucherType:##HxcVtMasterName
+    06 : SET : HxcVtStoredMedia : $HxcVtMedia:VoucherType:##HxcVtMasterName
+    07 : SET : HxcVtStoredHeaderKind : $HxcVtHeaderKind:VoucherType:##HxcVtMasterName
+    08 : SET : HxcVtStoredAuto : $HxcVtAuto:VoucherType:##HxcVtMasterName
+    09 : SET : HxcVtStoredConfirm : $HxcVtConfirm:VoucherType:##HxcVtMasterName
+    10 : SET : HxcVtStoredCustom0 : $HxcVtCustom0:VoucherType:##HxcVtMasterName
+    11 : SET : HxcVtStoredCustom1 : $HxcVtCustom1:VoucherType:##HxcVtMasterName
+    12 : SET : HxcVtStoredCustom2 : $HxcVtCustom2:VoucherType:##HxcVtMasterName
+    13 : SET : HxcVtStoredCustom3 : $HxcVtCustom3:VoucherType:##HxcVtMasterName
+    14 : SET : HxcVtStoredCustom4 : $HxcVtCustom4:VoucherType:##HxcVtMasterName
+    15 : SET : HxcVtStoredCustom5 : $HxcVtCustom5:VoucherType:##HxcVtMasterName
+    16 : SET : HxcVtStoredCustom6 : $HxcVtCustom6:VoucherType:##HxcVtMasterName
+    17 : SET : HxcVtStoredCustom7 : $HxcVtCustom7:VoucherType:##HxcVtMasterName
+    18 : SET : HxcVtStoredCustom8 : $HxcVtCustom8:VoucherType:##HxcVtMasterName
+    19 : SET : HxcVtStoredCustom9 : $HxcVtCustom9:VoucherType:##HxcVtMasterName
+    20 : SET : HxcVtStoredCustom10 : $HxcVtCustom10:VoucherType:##HxcVtMasterName
+    21 : SET : HxcVtStoredCustom11 : $HxcVtCustom11:VoucherType:##HxcVtMasterName
+    22 : SET : HxcVtStoredCustom12 : $HxcVtCustom12:VoucherType:##HxcVtMasterName
+    23 : SET : HxcVtStoredCustom13 : $HxcVtCustom13:VoucherType:##HxcVtMasterName
+    24 : SET : HxcVtStoredCustom14 : $HxcVtCustom14:VoucherType:##HxcVtMasterName
+    25 : SET : HxcVtStoredCustom15 : $HxcVtCustom15:VoucherType:##HxcVtMasterName
+    26 : SET : HxcVtStoredCustom16 : $HxcVtCustom16:VoucherType:##HxcVtMasterName
 
 [Function: Hxc Vt Close Settings]
     00 : SET : HxcVtMasterName : ""
@@ -4548,6 +4492,9 @@
     01 : RETURN : NOT $$IsEmpty:##LedgerName AND ($$IsLedOfGrp:##LedgerName:$$GroupSundryDebtors OR $$IsLedOfGrp:##LedgerName:$$GroupSundryCreditors)
 
 
+[Variable: HxcInvoiceAddressPending]
+    Type : Logical
+
 [Variable: HxcInvoiceBuyerInput]
     Type : String
 
@@ -4555,28 +4502,74 @@
     Type : String
 
 [System: Variable]
+    HxcInvoiceAddressPending : No
     HxcInvoiceBuyerInput : ""
     HxcInvoiceAddressInput : ""
 
 [#Field: EI PartyLedger]
-    Add : On : At Beginning : Accept : @@HxcInvoiceContactVisible AND NOT ($$Value = @@HxcVoucherBuyerLedgerName) : SET : HxcInvoiceAddressInput : ""
-    Add : On : At Beginning : Accept : @@HxcInvoiceContactVisible : SET : HxcInvoiceBuyerInput : $$Value
-
-[#Field: EI PartyAddressType]
-    Add : On : At Beginning : Accept : @@HxcInvoiceContactVisible : SET : HxcInvoiceAddressInput : $$Value
-    Add : On : At Beginning : Accept : @@HxcVoucherClearMissingAddressContact : CALL : Hxc Clear Recipient Draft
-    Add : On : At Beginning : Accept : @@HxcVoucherClearMissingAddressContact : Set Object Values : HxcVoucherContactName : ""
-    Add : On : At Beginning : Accept : @@HxcVoucherClearMissingAddressContact : Set Object Values : HxcVoucherContactCountry : @@HxcCompanyDefaultCountryCode
-    Add : On : At Beginning : Accept : @@HxcVoucherClearMissingAddressContact : Set Object Values : HxcVoucherContactMobile : ""
-    Add : On : At Beginning : Accept : @@HxcVoucherClearMissingAddressContact : Set Object Values : HxcVoucherContactEmail : ""
+    Add : On : At Beginning : Accept : @@HxcInvoiceBuyerChanged : Set Object Values : HxcVoucherContactName : ""
+    Add : On : At Beginning : Accept : @@HxcInvoiceBuyerChanged : Set Object Values : HxcVoucherContactCountry : ""
+    Add : On : At Beginning : Accept : @@HxcInvoiceBuyerChanged : Set Object Values : HxcVoucherContactMobile : ""
+    Add : On : At Beginning : Accept : @@HxcInvoiceBuyerChanged : Set Object Values : HxcVoucherContactEmail : ""
+    Add : On : At Beginning : Accept : @@HxcInvoiceBuyerChanged : Set Object Values : HxcVoucherContactKey : ""
+    Add : On : At Beginning : Accept : @@HxcInvoiceBuyerChanged : Set Object Values : HxcVoucherContactScope : ""
+    Add : On : At Beginning : Accept : @@HxcInvoiceBuyerChanged : CALL : Hxc Clear Invoice Buyer Contact : $$Value
+    Add : On : At End : Accept : @@HxcInvoiceContactVisible : SET : HxcInvoiceBuyerInput : $$Value
     Add : On : At End : Accept : Yes : Field Accept
 
+[#Field: EI PartyAddressType]
+    Add : On : At Beginning : Accept : @@HxcInvoiceContactVisible : CALL : Hxc Load Invoice Address Contact : $$Value
+    Add : On : At End : Accept : Yes : Field Accept
+
+[Function: Hxc Clear Invoice Buyer Contact]
+    Parameter : SelectedBuyer : String
+    01 : CALL : Hxc Clear Recipient Draft
+    02 : SET : HxcInvoiceBuyerInput : ##SelectedBuyer
+    03 : SET : HxcInvoiceAddressInput : ""
+    031 : SET : HxcInvoiceAddressPending : Yes
+    04 : SET : HxcRecipientDraftName : $$SysName:NotApplicable
+    05 : SET : HxcRecipientDraftLedger : @@HxcVoucherRecipientScope
+
+[Function: Hxc Load Invoice Address Contact]
+    Parameter : SelectedAddress : String
+    01 : SET : HxcInvoiceAddressInput : ##SelectedAddress
+    011 : SET : HxcInvoiceAddressPending : No
+    02 : CALL : Hxc Clear Recipient Draft
+    03 : SET : HxcRecipientDraftName : @@HxcVoucherDefaultName
+    04 : SET : HxcRecipientDraftMobile : @@HxcVoucherDefaultMobile
+    05 : SET : HxcRecipientDraftEmail : @@HxcVoucherDefaultEmail
+    06 : IF : NOT $$IsEmpty:##HxcRecipientDraftMobile
+    07 :    SET : HxcRecipientDraftCountry : @@HxcVoucherDefaultCountry
+    08 : END IF
+    09 : IF : $$IsSysNameEqual:NotApplicable:##HxcRecipientDraftName
+    10 :    SET : HxcRecipientDraftName : ""
+    11 : END IF
+    12 : SET : HxcRecipientDraftLedger : @@HxcVoucherRecipientScope
+    13 : SET OBJECT VALUES : HxcVoucherContactName : ##HxcRecipientDraftName
+    14 : SET OBJECT VALUES : HxcVoucherContactMobile : ##HxcRecipientDraftMobile
+    15 : SET OBJECT VALUES : HxcVoucherContactCountry : ##HxcRecipientDraftCountry
+    16 : SET OBJECT VALUES : HxcVoucherContactEmail : ##HxcRecipientDraftEmail
+    17 : SET OBJECT VALUES : HxcVoucherContactKey : ""
+    18 : SET OBJECT VALUES : HxcVoucherContactScope : If $$IsEmpty:##HxcRecipientDraftMobile Then "" Else ##HxcRecipientDraftLedger
+
+[Function: Hxc Clear Unconfirmed Invoice Contact]
+    01 : CALL : Hxc Clear Recipient Draft
+    02 : SET OBJECT VALUES : HxcVoucherContactName : ""
+    03 : SET OBJECT VALUES : HxcVoucherContactMobile : ""
+    04 : SET OBJECT VALUES : HxcVoucherContactCountry : ""
+    05 : SET OBJECT VALUES : HxcVoucherContactEmail : ""
+    06 : SET OBJECT VALUES : HxcVoucherContactKey : ""
+    07 : SET OBJECT VALUES : HxcVoucherContactScope : ""
+
 [#Form: VchSuppl PartyDetails]
+    Add : On : At Beginning : Form Accept : @@HxcInvoiceContactVisible AND $$IsEmpty:##HxcInvoiceAddressInput : CALL : Hxc Clear Unconfirmed Invoice Contact
+    Add : On : At End : Form Accept : Yes : Form Accept
     Add : Part : At End : Hxc Voucher Recipient
     Local : Part : Hxc Voucher Recipient : Invisible : NOT @@HxcInvoiceContactVisible
     Add : On : At End : Form Destroy : Yes : SET : HxcRecipientDraftLedger : ""
     Add : On : At End : Form Destroy : Yes : SET : HxcInvoiceBuyerInput : ""
     Add : On : At End : Form Destroy : Yes : SET : HxcInvoiceAddressInput : ""
+    Add : On : At End : Form Destroy : Yes : SET : HxcInvoiceAddressPending : No
 
 [Variable: HxcRecipientDraftLedger]
     Type : String
@@ -4607,8 +4600,7 @@
     Color : Hxc Recipient Dark Orange
     Use : Name Field
     Storage : HxcVoucherContactName
-    Set as : If $$IsEmpty:@@HxcVoucherRecipientDisplayName Then $$SysName:NotApplicable Else @@HxcVoucherRecipientDisplayName
-    Modifies : HxcRecipientDraftName : Yes
+    Set as : If @@HxcInvoiceContactVisible AND $$IsEmpty:@@HxcVoucherRecipientDisplayName Then "" Else If $$IsEmpty:@@HxcVoucherRecipientDisplayName Then $$SysName:NotApplicable Else @@HxcVoucherRecipientDisplayName
     Set Always : Yes
     Table : Hxc Voucher Contact Table, Not Applicable
     Show Table : Always
@@ -4618,7 +4610,6 @@
     On : Focus : NOT @@HxcVoucherRecipientDraftMatches : CALL : Hxc Populate Recipient Draft
     On : Focus : Yes : Refresh Data
     On : Focus : Yes : Refresh
-    On : Accept : @@HxcVoucherRecipientNotApplicable : SET : HxcRecipientDraftName : $$SysName:NotApplicable
     On : Accept : @@HxcVoucherRecipientChanged : SET : HxcRecipientDraftEmail : $$CurrentTableObj:$HxcRecipientEmail
     On : Accept : @@HxcVoucherRecipientChanged AND NOT @@HxcVoucherRecipientNotApplicable : SET : HxcRecipientDraftMobile : $$CurrentTableObj:$HxcRecipientMobile
     On : Accept : @@HxcVoucherRecipientCountryUpdate AND NOT @@HxcVoucherRecipientNotApplicable : SET : HxcRecipientDraftCountry : $$CurrentTableObj:$HxcRecipientCountry
@@ -4626,6 +4617,7 @@
     On : Accept : @@HxcVoucherRecipientChanged AND NOT @@HxcVoucherRecipientNotApplicable : Set Object Values : HxcVoucherContactMobile : ##HxcRecipientDraftMobile
     On : Accept : @@HxcVoucherRecipientChanged : Set Object Values : HxcVoucherContactEmail : ##HxcRecipientDraftEmail
     On : Accept : @@HxcVoucherRecipientChanged : Set Object Values : HxcVoucherContactKey : @@HxcVoucherRecipientInputKey
+    On : Accept : Yes : SET : HxcRecipientDraftName : If @@HxcVoucherRecipientNotApplicable Then $$SysName:NotApplicable Else $$Value
     On : Accept : Yes : Set Object Values : HxcVoucherContactScope : @@HxcVoucherRecipientScope
     On : Accept : Yes : Refresh Data
     On : Accept : Yes : Refresh
@@ -4639,13 +4631,12 @@
 
 [Field: Hxc Voucher Recipient Country]
     Color : Hxc Recipient Dark Orange
-    Use : MobileCountryCode
-    Show Table : Always
-    Delete : Set By Condition
+    Use : Name Field
+    Validate : $$IsEmpty:$$Value OR $$HxcValidDialingCode:$$Value
     Skip Forward : No
     Storage : HxcVoucherContactCountry
-    Set as : If @@HxcVoucherAddressHasNoContact AND $$IsEmpty:@@HxcVoucherRecipientCountryValue Then @@HxcCompanyDefaultCountryCode Else @@HxcVoucherRecipientCountryValue
-    Modifies : HxcRecipientDraftCountry : Yes
+    Set as : If @@HxcInvoiceContactVisible AND ##HxcInvoiceAddressPending Then @@HxcCompanyDefaultCountryCode Else If $$IsEmpty:@@HxcVoucherRecipientCountryValue AND (If @@HxcInvoiceContactVisible Then @@HxcInvoiceRecipientHasNoNumber Else @@HxcVoucherAddressHasNoContact) Then @@HxcCompanyDefaultCountryCode Else @@HxcVoucherRecipientCountryValue
+    On : Accept : Yes : SET : HxcRecipientDraftCountry : $$Value
     On : Accept : Yes : Set Object Values : HxcVoucherContactScope : @@HxcVoucherRecipientScope
     On : Accept : Yes : Field Accept
     Set Always : Yes
@@ -4655,7 +4646,7 @@
     Color : Hxc Recipient Dark Orange
     Use : Name Field
     Storage : HxcVoucherContactMobile
-    Set as : If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftMobile Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactMobile Else @@HxcVoucherDefaultMobile
+    Set as : If @@HxcInvoiceContactVisible AND ##HxcInvoiceAddressPending Then "" Else If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftMobile Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactMobile Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultMobile
     Modifies : HxcRecipientDraftMobile : Yes
     On : Accept : Yes : Set Object Values : HxcVoucherContactScope : @@HxcVoucherRecipientScope
     On : Accept : Yes : Field Accept
@@ -4672,7 +4663,7 @@
     Color : Hxc Recipient Dark Orange
     Use : Name Field
     Storage : HxcVoucherContactEmail
-    Set as : If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftEmail Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactEmail Else @@HxcVoucherDefaultEmail
+    Set as : If @@HxcInvoiceContactVisible AND ##HxcInvoiceAddressPending Then "" Else If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftEmail Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactEmail Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultEmail
     Modifies : HxcRecipientDraftEmail : Yes
     On : Accept : Yes : Set Object Values : HxcVoucherContactScope : @@HxcVoucherRecipientScope
     On : Accept : Yes : Field Accept
@@ -4697,7 +4688,7 @@
     Source Collection : Hxc Voucher Buyer Ledger
     By : HxcRecipientPrimaryLedger : $Name
     Compute : HxcRecipientName : $LedgerContact
-    Compute : HxcRecipientCountry : If NOT $$IsEmpty:$AddrTypeMobileCountryCode Then $AddrTypeMobileCountryCode Else If NOT $$IsEmpty:$CountryISDCode Then $CountryISDCode Else If NOT $$IsEmpty:$LedgercountryISDcode Then $LedgercountryISDcode Else If NOT $$IsEmpty:$MobileCountryCode Then $MobileCountryCode Else If NOT $$IsEmpty:$LedgerMobileCountryCode Then $LedgerMobileCountryCode Else If NOT $$IsEmpty:$MobileISDCode Then $MobileISDCode Else If NOT $$IsEmpty:$ISDCode Then $ISDCode Else If NOT $$IsEmpty:$CountryCode Then $CountryCode Else If $CountryName = "India" Then "+91" Else ""
+    Compute : HxcRecipientCountry : If NOT $$IsEmpty:$LedgercountryISDcode Then $LedgercountryISDcode Else If NOT $$IsEmpty:$AddrTypeMobileCountryCode Then $AddrTypeMobileCountryCode Else If NOT $$IsEmpty:$CountryISDCode Then $CountryISDCode Else If NOT $$IsEmpty:$MobileCountryCode Then $MobileCountryCode Else If NOT $$IsEmpty:$LedgerMobileCountryCode Then $LedgerMobileCountryCode Else If NOT $$IsEmpty:$MobileISDCode Then $MobileISDCode Else If NOT $$IsEmpty:$ISDCode Then $ISDCode Else If NOT $$IsEmpty:$CountryCode Then $CountryCode Else If $CountryName = "India" Then "+91" Else ""
     Compute : HxcRecipientMobile : $LedgerMobile
     Compute : HxcRecipientEmail : $Email
     Compute : HxcRecipientAddress : "Primary"
@@ -4720,9 +4711,10 @@
     Filter : Hxc Voucher Contact Available
 
 [System: Formula]
-    Hxc Voucher Buyer Ledger Name : If @@HxcSettlementVoucher Then @@HxcSettlementSavedParty Else If NOT $$IsEmpty:##HxcInvoiceBuyerInput Then ##HxcInvoiceBuyerInput Else If NOT $$IsEmpty:$BasicBuyerName Then $BasicBuyerName Else If NOT $$IsEmpty:$$Owner:$BasicBuyerName Then $$Owner:$BasicBuyerName Else If NOT $$IsEmpty:$PartyLedgerName Then $PartyLedgerName Else $$Owner:$PartyLedgerName
+    Hxc Voucher Buyer Ledger Name : If @@HxcSettlementVoucher Then @@HxcSettlementSavedParty Else @@HxcVoucherStoredBuyerLedger
+    Hxc Invoice Buyer Changed : @@HxcInvoiceContactVisible AND NOT $$IsEmpty:$$Value AND NOT ($$Value = @@HxcVoucherStoredBuyerLedger)
+    Hxc Voucher Stored Buyer Ledger : If NOT $$IsEmpty:##HxcInvoiceBuyerInput Then ##HxcInvoiceBuyerInput Else If NOT $$IsEmpty:$BasicBuyerName Then $BasicBuyerName Else If NOT $$IsEmpty:$$Owner:$BasicBuyerName Then $$Owner:$BasicBuyerName Else If NOT $$IsEmpty:$PartyLedgerName Then $PartyLedgerName Else $$Owner:$PartyLedgerName
     Hxc Voucher Recipient Draft Matches : NOT $$IsEmpty:##HxcRecipientDraftLedger AND ##HxcRecipientDraftLedger = @@HxcVoucherRecipientScope
-    Hxc Voucher Clear Missing Address Contact : @@HxcInvoiceContactVisible AND NOT $$IsEmpty:@@HxcVoucherBuyerLedgerName AND NOT $$IsEmpty:$$Value AND NOT ($$Value = "Primary" OR $$StringPart:$$Value:2:7 = "Primary") AND NOT ($HxcVoucherContactScope = (@@HxcVoucherBuyerLedgerName + "|" + $$Value) AND (NOT $$IsEmpty:$HxcVoucherContactMobile OR NOT $$IsEmpty:$HxcVoucherContactEmail)) AND $$IsEmpty:($$HxcVoucherAddressRecipient:@@HxcVoucherBuyerLedgerName:$$Value:"Mobile") AND $$IsEmpty:($$HxcVoucherAddressRecipient:@@HxcVoucherBuyerLedgerName:$$Value:"Email")
     Hxc Voucher Buyer Address Raw : If @@HxcSettlementVoucher Then $HxcSettlementAddress Else If NOT $$IsEmpty:##HxcInvoiceAddressInput Then ##HxcInvoiceAddressInput Else If $$IsEmpty:$PartyAddressType Then $$Owner:$PartyAddressType Else $PartyAddressType
     Hxc Voucher Buyer Address : If $$IsEmpty:@@HxcVoucherBuyerAddressRaw OR @@HxcVoucherBuyerAddressRaw = "Primary" OR $$StringPart:@@HxcVoucherBuyerAddressRaw:2:7 = "Primary" Then "Primary" Else @@HxcVoucherBuyerAddressRaw
     Hxc Voucher Recipient Scope : (If @@HxcSettlementVoucher Then "Settlement|" Else "") + @@HxcVoucherBuyerLedgerName + "|" + @@HxcVoucherBuyerAddress
@@ -4732,16 +4724,17 @@
     Hxc Voucher Saved Contact Matches : @@HxcVoucherSavedRecipientHasDetails AND (If NOT $$IsEmpty:$HxcVoucherContactScope Then $HxcVoucherContactScope = @@HxcVoucherRecipientScope Else NOT $$IsEmpty:$HxcVoucherContactKey AND (If @@HxcVoucherBuyerAddress = "Primary" Then ($$StringPart:$HxcVoucherContactKey:0:($$StringLength:@@HxcVoucherLegacyPrimaryPrefix)) = @@HxcVoucherLegacyPrimaryPrefix Else ($$StringPart:$HxcVoucherContactKey:0:($$StringLength:@@HxcVoucherLegacyAddressPrefix)) = @@HxcVoucherLegacyAddressPrefix))
     Hxc Voucher Default Name : If @@HxcVoucherBuyerAddress <> "Primary" AND $$IsEmpty:@@HxcVoucherDefaultMobile AND $$IsEmpty:@@HxcVoucherDefaultEmail Then $$SysName:NotApplicable Else (If @@HxcVoucherBuyerAddress = "Primary" Then $LedgerContact:Ledger:@@HxcVoucherBuyerLedgerName Else $$HxcVoucherAddressRecipient:@@HxcVoucherBuyerLedgerName:@@HxcVoucherBuyerAddress:"Name")
     Hxc Voucher Address Has No Contact : $$IsEmpty:@@HxcVoucherDefaultMobile AND $$IsEmpty:@@HxcVoucherDefaultEmail
-    Hxc Voucher Recipient Country Value : If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftCountry Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactCountry Else @@HxcVoucherDefaultCountry
+    Hxc Voucher Recipient Country Value : If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftCountry Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactCountry Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultCountry
+    Hxc Invoice Recipient Has No Number : If @@HxcVoucherRecipientDraftMatches Then $$IsEmpty:##HxcRecipientDraftMobile Else NOT @@HxcVoucherSavedContactMatches OR $$IsEmpty:$HxcVoucherContactMobile
     Hxc Company Default Country Code : If $$HxcValidDialingCode:($HxcDefaultCountryCode:Company:##SVCurrentCompany) Then $HxcDefaultCountryCode:Company:##SVCurrentCompany Else ""
-    Hxc Voucher Default Country : If @@HxcVoucherAddressHasNoContact Then @@HxcCompanyDefaultCountryCode Else (If @@HxcVoucherBuyerAddress = "Primary" Then (If NOT $$IsEmpty:($AddrTypeMobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $AddrTypeMobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($CountryISDCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $CountryISDCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($LedgercountryISDcode:Ledger:@@HxcVoucherBuyerLedgerName) Then $LedgercountryISDcode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($MobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $MobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($LedgerMobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $LedgerMobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($MobileISDCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $MobileISDCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($ISDCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $ISDCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($CountryCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $CountryCode:Ledger:@@HxcVoucherBuyerLedgerName Else If $CountryName:Ledger:@@HxcVoucherBuyerLedgerName = "India" Then "+91" Else "") Else $$HxcVoucherAddressRecipient:@@HxcVoucherBuyerLedgerName:@@HxcVoucherBuyerAddress:"Country")
+    Hxc Voucher Default Country : If @@HxcVoucherAddressHasNoContact Then @@HxcCompanyDefaultCountryCode Else (If @@HxcVoucherBuyerAddress = "Primary" Then (If NOT $$IsEmpty:($LedgercountryISDcode:Ledger:@@HxcVoucherBuyerLedgerName) Then $LedgercountryISDcode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($AddrTypeMobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $AddrTypeMobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($CountryISDCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $CountryISDCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($MobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $MobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($LedgerMobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $LedgerMobileCountryCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($MobileISDCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $MobileISDCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($ISDCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $ISDCode:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($CountryCode:Ledger:@@HxcVoucherBuyerLedgerName) Then $CountryCode:Ledger:@@HxcVoucherBuyerLedgerName Else If $CountryName:Ledger:@@HxcVoucherBuyerLedgerName = "India" Then "+91" Else "") Else $$HxcVoucherAddressRecipient:@@HxcVoucherBuyerLedgerName:@@HxcVoucherBuyerAddress:"Country")
     Hxc Voucher Default Mobile : If @@HxcVoucherBuyerAddress = "Primary" Then (If NOT $$IsEmpty:($LedgerMobile:Ledger:@@HxcVoucherBuyerLedgerName) Then $LedgerMobile:Ledger:@@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:($MobileNumber:Ledger:@@HxcVoucherBuyerLedgerName) Then $MobileNumber:Ledger:@@HxcVoucherBuyerLedgerName Else $AddrTypeMobileNumber:Ledger:@@HxcVoucherBuyerLedgerName) Else $$HxcVoucherAddressRecipient:@@HxcVoucherBuyerLedgerName:@@HxcVoucherBuyerAddress:"Mobile"
     Hxc Voucher Default Email : If @@HxcVoucherBuyerAddress = "Primary" Then (If NOT $$IsEmpty:($Email:Ledger:@@HxcVoucherBuyerLedgerName) Then $Email:Ledger:@@HxcVoucherBuyerLedgerName Else $AddrTypeEMail:Ledger:@@HxcVoucherBuyerLedgerName) Else $$HxcVoucherAddressRecipient:@@HxcVoucherBuyerLedgerName:@@HxcVoucherBuyerAddress:"Email"
     Hxc Voucher Buyer Ledger Match : NOT $$IsEmpty:##HxcContactPartyName AND $Name = ##HxcContactPartyName
     Hxc Voucher Contact Available : NOT $$IsEmpty:$HxcRecipientName
     Hxc Voucher Recipient Input Key : If $$IsEmpty:$$CurrentTableObj:$HxcRecipientKey Then @@HxcVoucherBuyerLedgerName + "|Manual|" + $$Value Else $$CurrentTableObj:$HxcRecipientKey
     Hxc Voucher Recipient Country Update : @@HxcVoucherRecipientChanged OR ($$IsEmpty:$HxcVoucherContactCountry AND NOT $$IsEmpty:$$CurrentTableObj:$HxcRecipientCountry)
-    Hxc Voucher Recipient Display Name : If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftName Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactName Else @@HxcVoucherDefaultName
+    Hxc Voucher Recipient Display Name : If @@HxcInvoiceContactVisible AND ##HxcInvoiceAddressPending Then $$SysName:NotApplicable Else If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftName Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactName Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultName
     Hxc Voucher Recipient Not Applicable : $$IsSysNameEqual:NotApplicable:$$Value OR $$Value = "Not Applicable"
     Hxc Voucher Recipient Changed : @@HxcVoucherRecipientNotApplicable OR NOT (@@HxcVoucherRecipientInputKey = $HxcVoucherContactKey) OR ($$IsEmpty:$HxcVoucherContactMobile AND NOT $$IsEmpty:$$CurrentTableObj:$HxcRecipientMobile)
 
@@ -4771,10 +4764,10 @@
     50 : RETURN : ""
 
 [Function: Hxc Populate Recipient Draft]
-    01 : SET : HxcRecipientDraftName : If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactName Else @@HxcVoucherDefaultName
-    02 : SET : HxcRecipientDraftCountry : If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactCountry Else @@HxcVoucherDefaultCountry
-    03 : SET : HxcRecipientDraftMobile : If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactMobile Else @@HxcVoucherDefaultMobile
-    04 : SET : HxcRecipientDraftEmail : If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactEmail Else @@HxcVoucherDefaultEmail
+    01 : SET : HxcRecipientDraftName : If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactName Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultName
+    02 : SET : HxcRecipientDraftCountry : If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactCountry Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultCountry
+    03 : SET : HxcRecipientDraftMobile : If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactMobile Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultMobile
+    04 : SET : HxcRecipientDraftEmail : If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactEmail Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultEmail
     05 : SET : HxcRecipientDraftLedger : @@HxcVoucherRecipientScope
 
 [Function: Hxc Clear Recipient Draft]
@@ -4864,28 +4857,33 @@
     01 : SET : OriginalExportFormat : ##SVExportFormat
     02 : SET : OriginalPrintFileName : ##SVPrintFileName
     03 : SET : PdfPath : ##PdfFolder + "\" + ##PdfName
-    04 : SET : SVExportFormat : ##ExportFormat
-    05 : SET : SVPrintFileName : ##PdfPath
-    051 : SET : OriginalOpenAfterExport : ##SVOpenFileAfterExport
-    06 : SET : SVOpenFileAfterExport : No
-    07 : SET : SVPrintLog : No
-    08 : SET : SVExportLocation : ##PdfFolder
-    081 : SET : HxcQuietVoucherPDFExport : Yes
-    09 : EXPORT REPORT : Printed Invoice : Yes
-    0901 : SET : HxcQuietVoucherPDFExport : No
-    091 : SET : SVOpenFileAfterExport : ##OriginalOpenAfterExport
-    10 : SET : SVPrintFileName : ##OriginalPrintFileName
-    11 : SET : SVExportFormat : ##OriginalExportFormat
-    12 : RETURN : ##PdfPath
+    04 : SET : OriginalOpenAfterExport : ##SVOpenFileAfterExport
+    ;; Force quiet export before touching format/path — do not redeclare SVOpenFileAfterExport locally (that shadows and reopens the PDF).
+    05 : SET : SVOpenFileAfterExport : No
+    06 : SET : HxcQuietVoucherPDFExport : Yes
+    07 : SET : SVExportFormat : ##ExportFormat
+    08 : SET : SVPrintFileName : ##PdfPath
+    09 : SET : SVPrintLog : No
+    10 : SET : SVExportLocation : ##PdfFolder
+    11 : EXPORT REPORT : Printed Invoice : Yes
+    12 : SET : HxcQuietVoucherPDFExport : No
+    13 : SET : SVOpenFileAfterExport : ##OriginalOpenAfterExport
+    14 : SET : SVPrintFileName : ##OriginalPrintFileName
+    15 : SET : SVExportFormat : ##OriginalExportFormat
+    16 : RETURN : ##PdfPath
 
 [#Report: Printed Invoice]
     Option : Hxc Quiet Voucher PDF Export : ##HxcQuietVoucherPDFExport
 
 [!Report: Hxc Quiet Voucher PDF Export]
     Local : Form : Printed Invoice : Open After Export : No
-    Local : Form : Printed Invoice : Set Always : SVOpenFileAfterExport : No
-    Variable : SVOpenFileAfterExport
     Set : SVOpenFileAfterExport : No
+
+[#Form: Printed Invoice]
+    Option : Hxc Quiet Printed Invoice Form : ##HxcQuietVoucherPDFExport
+
+[!Form: Hxc Quiet Printed Invoice Form]
+    Open After Export : No
 
 [Variable: HxcQuietVoucherPDFExport]
     Type : Logical
@@ -4914,11 +4912,9 @@
     004 : IF : $$IsEmpty:##HxcVtMasterName OR NOT ($HxcVtEnabled:VoucherType:##HxcVtMasterName) OR NOT ($HxcVtWhatsAppEnabled:VoucherType:##HxcVtMasterName = "Yes")
     005 :    RETURN
     006 : END IF
-    007 : WALK COLLECTION : Hxc Vt Selected Settings
-    008 :    SET : AutoSendAfterSave : $HxcVtAuto
-    009 :    SET : HxcSendConfirmOnSave : $HxcVtConfirm
-    010 : END WALK
-    00 : SET : HxcSendAlterVoucher : $$InAlterMode AND ##HxcSendConfirmOnSave
+    007 : SET : AutoSendAfterSave : $HxcVtAuto:VoucherType:##HxcVtMasterName
+    008 : SET : HxcSendConfirmOnSave : $HxcVtConfirm:VoucherType:##HxcVtMasterName
+    00 : SET : HxcSendAlterVoucher : $$InAlterMode
     01 : SET : HxcSendNewVoucher : ($$InCreateMode OR ##HxcSendAlterVoucher) AND ##AutoSendAfterSave
     02 : IF : ##HxcSendNewVoucher
     03 :    SET : HxcSendSaveToken : If $$InCreateMode AND NOT $$IsEmpty:#HxcVoucherSaveIdentity Then #HxcVoucherSaveIdentity Else $$MakeUniqueID
@@ -4961,7 +4957,7 @@
 
 [Collection: Hxc Newly Saved Voucher]
     Type : Voucher
-    Fetch : MasterID, GUID, Date, VoucherNumber, VoucherTypeName, IsCancelled, IsOptional, HxcVoucherSendSaveToken, HxcProvidePartyDetails, HxcSettlementPartyLedger, HxcSettlementAddress, HxcVoucherContactName, HxcVoucherContactScope, HxcVoucherContactMobile, HxcVoucherContactCountry, HxcVoucherContactEmail, PartyLedgerName, PartyMailingName, Narration, Amount, AllLedgerEntries.LedgerName, AllLedgerEntries.Amount
+    Fetch : MasterID, GUID, Date, VoucherNumber, VoucherTypeName, IsCancelled, IsOptional, HxcVoucherSendSaveToken, HxcProvidePartyDetails, HxcSettlementPartyLedger, HxcSettlementAddress, HxcVoucherContactName, HxcVoucherContactScope, HxcVoucherContactMobile, HxcVoucherContactCountry, HxcVoucherContactEmail, PartyLedgerName, BasicBuyerName, PartyAddressType, PartyMailingName, Narration, Amount, AllLedgerEntries.LedgerName, AllLedgerEntries.Amount
     Filter : Hxc Send Save Token Matches
 
 [System: Formula]
@@ -5017,7 +5013,7 @@
 
 [Collection: Hxc Saved Voucher For Manual Send]
     Type : Voucher
-    Fetch : GUID, MasterID, Date, VoucherNumber, VoucherTypeName, IsCancelled, IsOptional, HxcProvidePartyDetails, HxcSettlementPartyLedger, HxcSettlementAddress, HxcVoucherContactName, HxcVoucherContactScope, HxcVoucherContactMobile, HxcVoucherContactCountry, HxcVoucherContactEmail, PartyLedgerName, PartyMailingName, Narration, Amount, AllLedgerEntries.LedgerName, AllLedgerEntries.Amount
+    Fetch : GUID, MasterID, Date, VoucherNumber, VoucherTypeName, IsCancelled, IsOptional, HxcProvidePartyDetails, HxcSettlementPartyLedger, HxcSettlementAddress, HxcVoucherContactName, HxcVoucherContactScope, HxcVoucherContactMobile, HxcVoucherContactCountry, HxcVoucherContactEmail, PartyLedgerName, BasicBuyerName, PartyAddressType, PartyMailingName, Narration, Amount, AllLedgerEntries.LedgerName, AllLedgerEntries.Amount
     Filter : Hxc Send Lookup Guid Matches
 
 [System: Formula]
@@ -5031,14 +5027,16 @@
 
 [Function: Hxc Read Voucher Send Template]
     Parameter : VoucherTypeName : String
-    Variable : HxcVtMasterName : String
-    01 : SET : HxcVtMasterName : ##VoucherTypeName
+    01 : SET : HxcSendPreviewText : $HxcVtPreview:VoucherType:##VoucherTypeName
     02 : SET : HxcSendTemplate : $HxcVtTemplate:VoucherType:##VoucherTypeName
     03 : SET : HxcSendLanguage : $HxcVtLanguage:VoucherType:##VoucherTypeName
     04 : IF : $$IsEmpty:##HxcSendTemplate OR $$IsEmpty:##HxcSendLanguage
     05 :    WALK COLLECTION : Hxc Vt Selected Settings
+    051 :    IF : $Name = ##VoucherTypeName
     06 :       SET : HxcSendTemplate : $HxcVtTemplate
     07 :       SET : HxcSendLanguage : $HxcVtLanguage
+    071 :      BREAK
+    072 :   END IF
     08 :    END WALK
     09 : END IF
     10 : IF : NOT $$IsEmpty:##HxcSendTemplate AND $$IsEmpty:##HxcSendLanguage
@@ -5054,6 +5052,9 @@
     Variable : HeaderKind : String
     Variable : ErrorText : String
     Variable : PreviewAccepted : Logical
+    Variable : NeedsConfirmation : Logical
+    Variable : SavedMaps : String
+    Variable : Unresolved : String
     02 : IF : NOT @@HxcVoucherSendEnabled OR $IsCancelled OR $IsOptional
     021 :    IF : NOT ##Automatic
     022 :       MSG BOX : "Helixcer WhatsApp" : "WhatsApp is available for enabled vouchers that are neither cancelled nor optional."
@@ -5064,13 +5065,17 @@
     06 :    RETURN
     07 : END IF
     08 : SET : VchType : $VoucherTypeName
+    081 : SET : NeedsConfirmation : NOT ##Automatic OR $HxcVtConfirm:VoucherType:##VchType
     09 : IF : ##Automatic AND NOT $HxcVtAuto:VoucherType:##VchType
     10 :    RETURN
     11 : END IF
+    111 : SET : RawMobile : $HxcVoucherContactMobile
+    112 : IF : $$IsEmpty:##RawMobile
+    113 :    RETURN
+    114 : END IF
     12 : CALL : Hxc Sync From Company
     13 : CALL : Hxc Read Voucher Send Template : ##VchType
     15 : SET : HeaderKind : $HxcVtHeaderKind:VoucherType:##VchType
-    17 : SET : RawMobile : $HxcVoucherContactMobile
     18 : SET : Code : If $$IsEmpty:$HxcVoucherContactCountry Then @@HxcCompanyDefaultCountryCode Else $HxcVoucherContactCountry
     19 : SET : HxcSendTo : If $$StringPart:##RawMobile:0:1 = "+" Then $$HxcDialingDigits:##RawMobile Else ($$HxcDialingDigits:##Code + $$HxcDialingDigits:##RawMobile)
     20 : SET : HxcSendReference : ##VoucherGuid
@@ -5087,10 +5092,10 @@
     2254 : IF : $$IsEmpty:##ErrorText AND @@HxcSettlementVoucher AND NOT $$IsEmpty:$HxcSettlementPartyLedger AND $$IsEmpty:@@HxcSettlementSavedParty AND NOT $$IsSysNameEqual:NotApplicable:$HxcSettlementPartyLedger
     2255 :    SET : ErrorText : "The saved Party Ledger is unavailable. Select the recipient ledger in Party Details."
     2256 : END IF
-    2257 : IF : $$IsEmpty:##ErrorText AND @@HxcSettlementVoucher AND ##Automatic AND NOT ##HxcSendConfirmOnSave AND $$IsEmpty:$HxcVoucherContactScope
+    2257 : IF : $$IsEmpty:##ErrorText AND @@HxcSettlementVoucher AND ##Automatic AND NOT ##NeedsConfirmation AND $$IsEmpty:$HxcVoucherContactScope
     2258 :    RETURN
     2259 : END IF
-    22591 : IF : $$IsEmpty:##ErrorText AND NOT $$IsEmpty:$HxcVoucherContactScope AND NOT ($HxcVoucherContactScope = @@HxcVoucherRecipientScope) AND NOT (@@HxcSettlementVoucher AND (NOT $$IsEmpty:@@HxcSettlementSavedParty) AND $HxcVoucherContactScope = (@@HxcSettlementSavedParty + "|" + @@HxcVoucherBuyerAddress))
+    22591 : IF : $$IsEmpty:##ErrorText AND @@HxcSettlementVoucher AND NOT $$IsEmpty:$HxcVoucherContactScope AND NOT ($HxcVoucherContactScope = @@HxcVoucherRecipientScope) AND NOT (@@HxcSettlementVoucher AND (NOT $$IsEmpty:@@HxcSettlementSavedParty) AND $HxcVoucherContactScope = (@@HxcSettlementSavedParty + "|" + @@HxcVoucherBuyerAddress))
     22592 :    SET : ErrorText : "The saved contact belongs to a different party or address. Confirm the recipient in Party Details."
     22593 : END IF
     226 : IF : $$IsEmpty:##ErrorText AND ($$IsEmpty:($$HxcDialingDigits:##RawMobile) OR ($$StringPart:##RawMobile:0:1 <> "+" AND $$IsEmpty:($$HxcDialingDigits:##Code)) OR $$StringLength:##HxcSendTo < 7 OR $$StringLength:##HxcSendTo > 15 OR $$StringPart:##HxcSendTo:0:1 = "0")
@@ -5109,43 +5114,60 @@
     338 : END IF
     340 : SET : HxcSendDocument : ##HeaderKind = "media"
     341 : SET : HxcSendMappingError : "A saved template mapping is invalid or ambiguous."
-    35 : CALL : Hxc Prepare Send Mappings : ##VchType : $HxcVtMaps:VoucherType:##VchType : No
+    342 : SET : SavedMaps : $HxcVtMaps:VoucherType:##VchType
+    343 : IF : $IsEmpty:##SavedMaps
+    344 :    WALK COLLECTION : Hxc Vt Selected Settings
+    3441 :      IF : $Name = ##VchType
+    3442 :         SET : SavedMaps : $HxcVtMaps
+    3443 :         BREAK
+    3444 :      END IF
+    3445 :   END WALK
+    345 : END IF
+    35 : CALL : Hxc Prepare Send Mappings : ##VchType : ##SavedMaps : No
     36 : IF : NOT $$LastResult
     37 :    MSG BOX : "Helixcer WhatsApp" : ##HxcSendMappingError
     38 :    RETURN
     39 : END IF
-    40 : IF : NOT ##Automatic OR ##HxcSendConfirmOnSave
-    401 :    SET : HxcSendPreviewText : $HxcVtPreview:VoucherType:##VchType
-    402 :    IF : $$IsEmpty:##HxcSendPreviewText
+    401 : IF : $$IsEmpty:##HxcSendPreviewText
+    4011 :    SET : HxcSendPreviewText : $HxcVtPreview:VoucherType:##VchType
+    4012 : END IF
+    402 : IF : $$IsEmpty:##HxcSendPreviewText
     403 :       HTTP Request : @@HxcSendPreviewURL : GET : JSON : UTF8 : Hxc Connection Request : Hxc Read Send Preview Template
-    404 :    END IF
-    405 :    IF : $$IsEmpty:##HxcSendPreviewText
+    404 : END IF
+    405 : IF : $$IsEmpty:##HxcSendPreviewText
     406 :       MSG BOX : "Helixcer WhatsApp" : "No message preview is available. Fetch and save the template before sending."
     407 :       RETURN
-    408 :    END IF
-    4081 :    SET : HxcSendPreviewFilename : ""
-    4082 :    IF : ##HxcSendDocument
+    408 : END IF
+    4081 : SET : HxcSendPreviewFilename : ""
+    4082 : IF : ##HxcSendDocument
     4083 :       SET : HxcSendPreviewFilename : $$HxcPreviewPDFName:($HxcVtPdfFileName:VoucherType:##VchType):$VoucherNumber
-    4084 :    END IF
-    409 :    SET : HxcSendPreviewOpen : Yes
-    410 :    CALL : Hxc Populate Send Preview
+    4084 : END IF
+    409 : SET : HxcSendPreviewOpen : Yes
+    410 : CALL : Hxc Populate Send Preview
+    41001 : SET : Unresolved : $$LastResult
+    41002 : IF : NOT $$IsEmpty:##Unresolved
+    41003 :    SET : HxcSendPreviewOpen : No
+    41004 :    SET : HxcSendPreviewText : ""
+    41005 :    MSG BOX : "Helixcer WhatsApp" : ("Missing mapping for " + ##Unresolved + " in " + ##VchType + ". Open Alter Helixcer Chat WhatsApp and save the mapping.")
+    41006 :    RETURN
+    41007 : END IF
+    41008 : SET : PreviewAccepted : Yes
+    41009 : IF : ##NeedsConfirmation
     4101 :    SET : HxcSendPreviewContact : If $$IsEmpty:$HxcVoucherContactName OR $$IsSysNameEqual:NotApplicable:$HxcVoucherContactName OR $HxcVoucherContactName = "Not Applicable" Then "" Else " (" + $HxcVoucherContactName + ")"
     411 :    EXECUTE : Hxc WhatsApp Send Preview
     412 :    SET : PreviewAccepted : $$LastResult
-    413 :    SET : HxcSendPreviewOpen : No
-    414 :    SET : HxcSendPreviewText : ""
-    4141 :    SET : HxcSendPreviewContact : ""
-    4142 :    SET : HxcSendPreviewFilename : ""
-    42 :    IF : NOT ##PreviewAccepted
+    4121 : END IF
+    413 : SET : HxcSendPreviewOpen : No
+    414 : SET : HxcSendPreviewText : ""
+    4141 : SET : HxcSendPreviewContact : ""
+    4142 : SET : HxcSendPreviewFilename : ""
+    42 : IF : NOT ##PreviewAccepted
     43 :       RETURN
-    44 :    END IF
-    45 : END IF
+    44 : END IF
     46 : CALL : Hxc Queue Voucher WhatsApp Send : $VoucherNumber
     47 : IF : $$LastResult
     48 :    SET : HxcSendLastAttempt : ##VoucherGuid
-    49 :    IF : NOT ##Automatic OR ##HxcSendConfirmOnSave
-    50 :       MSG BOX : "Helixcer WhatsApp" : ("Done" + $$NewLine + "WhatsApp Trigged")
-    51 :    END IF
+    50 :    MSG BOX : "Helixcer WhatsApp" : ("Done" + $$NewLine + "WhatsApp Trigged")
     52 : END IF
 
 [Function: Hxc Dialing Digits]
@@ -5769,6 +5791,8 @@
     34 : RETURN : Yes
 
 [Function: Hxc Populate Send Preview]
+    Returns : String
+    Variable : MissingMapping : String
     Variable : SourceText : String
     Variable : OutputText : String
     Variable : Component : String
@@ -5776,6 +5800,8 @@
     Variable : CopyFrom : Number
     Variable : LiteralEnd : Number
     Variable : Ending : Number
+    Variable : KeyStart : Number
+    Variable : KeyLength : Number
     Variable : Size : Number
     Variable : StartOfLine : Logical
     Variable : KeyText : String
@@ -5784,55 +5810,61 @@
     02 : SET : Component : "body"
     03 : SET : StartOfLine : Yes
     04 : SET : Size : $$StringLength:##SourceText
-    041 : SET : CopyFrom : 0
-    05 : WHILE : ##Offset < ##Size
-    06 :    IF : ##StartOfLine
-    07 :       IF : $$StringPart:##SourceText:##Offset:9 = "[Header] "
-    08 :          SET : Component : "header"
-    09 :       ELSE
-    10 :          IF : $$StringPart:##SourceText:##Offset:9 = "[Button] " OR $$StringPart:##SourceText:##Offset:6 = "[URL] "
-    11 :             SET : Component : "button"
-    12 :          ELSE
-    13 :             SET : Component : "body"
-    14 :          END IF
-    15 :       END IF
-    16 :    END IF
-    17 :    SET : Resolved : ""
-    18 :    IF : $$StringPart:##SourceText:##Offset:2 = "{{"
-    19 :       SET : Ending : ##Offset + 2
-    20 :       WHILE : ##Ending + 1 < ##Size
-    21 :          IF : $$StringPart:##SourceText:##Ending:2 = "}}"
-    22 :             SET : KeyText : $$StringPart:##SourceText:(##Offset + 2):(##Ending - ##Offset - 2)
-    23 :             SET : Resolved : $$ListValue:HxcSendPreviewValues:(##Component + "|" + ##KeyText)
-    24 :             BREAK
-    25 :          END IF
-    26 :          IF : $$StringPart:##SourceText:##Ending:1 = $$NewLine
-    27 :             BREAK
-    28 :          END IF
-    29 :          INCREMENT : Ending
-    30 :       END WHILE
-    31 :    END IF
-    32 :    IF : $$IsEmpty:##Resolved
-    33 :       SET : StartOfLine : $$StringPart:##SourceText:##Offset:1 = $$NewLine
-    35 :       INCREMENT : Offset
-    36 :    ELSE
-    361 :       IF : ##Offset > ##CopyFrom AND $$StringPart:##SourceText:(##Offset - 1):3 = " {{"
-    362 :          SET : Resolved : "_ " + ##Resolved
-    363 :          SET : LiteralEnd : ##Offset - 1
-    364 :       ELSE
-    365 :          SET : LiteralEnd : ##Offset
-    366 :       END IF
-    367 :       IF : ##LiteralEnd < ##Offset
-    368 :          SET : OutputText : ##OutputText + ($$StringPart:##SourceText:##CopyFrom:(##LiteralEnd - ##CopyFrom)) + ($$StringPart:##Resolved:1:($$StringLength:##Resolved - 1))
-    369 :       ELSE
-    370 :          SET : OutputText : ##OutputText + ($$StringPart:##SourceText:##CopyFrom:(##LiteralEnd - ##CopyFrom)) + ##Resolved
-    373 :       END IF
-    38 :       SET : Offset : ##Ending + 2
-    381 :       SET : CopyFrom : ##Offset
-    39 :       SET : StartOfLine : No
-    40 :    END IF
-    41 : END WHILE
-    42 : SET : HxcSendPreviewText : ##OutputText + ($$StringPart:##SourceText:##CopyFrom:(##Size - ##CopyFrom))
+    05 : SET : CopyFrom : 0
+    06 : WHILE : ##Offset < ##Size
+    07 :    IF : ##StartOfLine
+    08 :       IF : $$StringPart:##SourceText:##Offset:9 = "[Header] "
+    09 :          SET : Component : "header"
+    10 :       ELSE
+    11 :          IF : $$StringPart:##SourceText:##Offset:9 = "[Button] " OR $$StringPart:##SourceText:##Offset:6 = "[URL] "
+    12 :             SET : Component : "button"
+    13 :          ELSE
+    14 :             SET : Component : "body"
+    15 :          END IF
+    16 :       END IF
+    17 :    END IF
+    18 :    SET : Resolved : ""
+    19 :    IF : ##Offset + 1 < ##Size AND $$StringLength:($$StringFindAndReplace:($$StringPart:##SourceText:##Offset:2):"{{":"") = 0
+    20 :       SET : KeyStart : ##Offset + 2
+    21 :      SET : Ending : ##KeyStart
+    22 :       WHILE : ##Ending + 1 < ##Size
+    23 :          IF : $$StringLength:($$StringFindAndReplace:($$StringPart:##SourceText:##Ending:2):"}}":"") = 0
+    24 :             SET : KeyLength : ##Ending - ##KeyStart
+    25 :            SET : KeyText : If ##KeyLength > 0 Then ($$StringPart:##SourceText:##KeyStart:##KeyLength) Else ""
+    26 :             SET : Resolved : $$ListValue:HxcSendPreviewValues:(##Component + "|" + ##KeyText)
+    27 :            IF : $$IsEmpty:##Resolved AND $$IsEmpty:##MissingMapping
+    28 :               SET : MissingMapping : If $$IsEmpty:##KeyText Then ("an empty " + ##Component + " placeholder") Else (##Component + " {{" + ##KeyText + "}}")
+    29 :            END IF
+    30 :             BREAK
+    31 :          END IF
+    32 :          IF : $$StringPart:##SourceText:##Ending:1 = $$NewLine
+    33 :             BREAK
+    34 :          END IF
+    35 :          INCREMENT : Ending
+    36 :       END WHILE
+    37 :    END IF
+    38 :    IF : $$IsEmpty:##Resolved
+    39 :       SET : StartOfLine : $$StringPart:##SourceText:##Offset:1 = $$NewLine
+    40 :       INCREMENT : Offset
+    41 :    ELSE
+    42 :       IF : ##Offset > ##CopyFrom AND $$StringLength:($$StringFindAndReplace:($$StringPart:##SourceText:(##Offset - 1):3):" {{":"") = 0
+    43 :          SET : Resolved : "_ " + ##Resolved
+    44 :          SET : LiteralEnd : ##Offset - 1
+    45 :       ELSE
+    46 :          SET : LiteralEnd : ##Offset
+    47 :       END IF
+    48 :       IF : ##LiteralEnd < ##Offset
+    49 :          SET : OutputText : ##OutputText + ($$StringPart:##SourceText:##CopyFrom:(##LiteralEnd - ##CopyFrom)) + ($$StringPart:##Resolved:1:($$StringLength:##Resolved - 1))
+    50 :       ELSE
+    51 :          SET : OutputText : ##OutputText + ($$StringPart:##SourceText:##CopyFrom:(##LiteralEnd - ##CopyFrom)) + ##Resolved
+    52 :       END IF
+    53 :       SET : Offset : ##Ending + 2
+    54 :       SET : CopyFrom : ##Offset
+    55 :       SET : StartOfLine : No
+    56 :    END IF
+    57 : END WHILE
+    58 : SET : HxcSendPreviewText : ##OutputText + ($$StringPart:##SourceText:##CopyFrom:(##Size - ##CopyFrom))
+    59 : RETURN : ##MissingMapping
 
 [Report: Hxc WhatsApp Send Preview]
     Form : Hxc WhatsApp Send Preview
@@ -6094,15 +6126,58 @@
     24 : CLOSE TARGET FILE
     25 : BrowseURL Ex : @@HxcVoucherSenderExe : (##HxcSysWorkspaceId + " " + @@HxcVoucherArgumentQuote + ##ReceiptPath + @@HxcVoucherArgumentQuote + " record")
 
+[Variable: HxcHistoryInitialFromDate]
+    Type : Date
+
+[Variable: HxcHistoryInitialToDate]
+    Type : Date
+
+[System: Variable]
+    HxcHistoryInitialFromDate : 0
+    HxcHistoryInitialToDate : 0
+
+[Function: Hxc Open Voucher Message History]
+    01 : SET : HxcHistoryInitialFromDate : If $$IsEmpty:##SVFromDate Then $StartingFrom:Company:##SVCurrentCompany Else ##SVFromDate
+    02 : SET : HxcHistoryInitialToDate : If $$IsEmpty:##SVToDate Then ##SVCurrentDate Else ##SVToDate
+    03 : DISPLAY : Hxc Voucher Message History
+
 [Report: Hxc Voucher Message History]
     Title : "Message History"
     Form : Hxc Voucher Message History
+    Variable : SVFromDate, SVToDate
+    Set : SVFromDate : ##HxcHistoryInitialFromDate
+    Set : SVToDate : ##HxcHistoryInitialToDate
 
 [Form: Hxc Voucher Message History]
     Width : 100% Screen
     Height : 100% Screen
     Background : Hxc Vt Page
-    Parts : Hxc Voucher History Heading, Hxc Voucher History Rows
+    Parts : Hxc Voucher History Period, Hxc Voucher History Heading, Hxc Voucher History Rows
+    Buttons : Hxc Change History Period, Hxc Clear History Period
+
+[Button: Hxc Change History Period]
+    Title : "Period"
+    Key : Alt + F2
+    Action : Modify Variables : Change Period
+
+[Button: Hxc Clear History Period]
+    Title : "Clear History"
+    Key : Alt + Delete
+    Action Ex : ClearPeriod : CALL : Hxc Clear Voucher History
+    Action Ex : ReloadHistory : Refresh Data
+    Action Ex : RedrawHistory : Refresh
+
+[Part: Hxc Voucher History Period]
+    Line : Hxc Voucher History Period
+
+[Line: Hxc Voucher History Period]
+    Field : Hxc Voucher History Period
+
+[Field: Hxc Voucher History Period]
+    Use : Name Field
+    Set as : "Period: " + ($$String:##SVFromDate) + " to " + ($$String:##SVToDate)
+    Full Width : Yes
+    Skip : Yes
 
 [Part: Hxc Voucher History Heading]
     Line : Hxc Voucher History Heading
@@ -6119,13 +6194,88 @@
 
 [Field: Hxc Voucher History Empty]
     Use : Name Field
-    Set as : "No voucher messages recorded for this workspace on this computer."
+    Set as : "No message history for the selected period."
     Full Width : Yes
     Skip : Yes
 
-[Collection: Hxc Voucher History Entries]
+[Collection: Hxc Voucher History File]
     Data Source : File XML : @@HxcVoucherHistoryPath : Unicode
     XML Object Path : Object : 1 : Collection
+    Client Only : Yes
+
+[Collection: Hxc Voucher History Entries]
+    Source Collection : Hxc Voucher History File
+    Fetch : SentAt, VoucherNo, Recipient, TemplateName, TemplateLanguage, Attachment, Status, MessageId, Details
+    Filter : Hxc History Entry Within Period
+    Client Only : Yes
+
+[Function: Hxc History Entry In Period]
+    Parameter : Timestamp : String
+    Parameter : FromDate : Date
+    Parameter : ToDate : Date
+    Returns : Logical
+    Variable : SentDate : Date
+    01 : SET : SentDate : $$Date:(($$StringPart:##Timestamp:8:2) + "-" + ($$StringPart:##Timestamp:5:2) + "-" + ($$StringPart:##Timestamp:0:4))
+    02 : RETURN : NOT $$IsEmpty:##SentDate AND ##SentDate >= ##FromDate AND ##SentDate <= ##ToDate
+
+[Variable: HxcHistoryClearResultPath]
+    Type : String
+
+[System: Variable]
+    HxcHistoryClearResultPath : ""
+
+[Collection: Hxc History Clear Result]
+    Data Source : File XML : ##HxcHistoryClearResultPath : Unicode
+    XML Object Path : Object : 1 : Collection
+    Client Only : Yes
+
+[Function: Hxc Clear Voucher History]
+    Variable : Workspace : String
+    Variable : RequestPath : String
+    Variable : Waited : Number
+    Variable : ResultMessage : String
+    01 : SET : Workspace : $HxcWorkspaceIdUDF:Company:##SVCurrentCompany
+    02 : IF : $$IsEmpty:##Workspace OR $$FileSize:@@HxcVoucherSenderExe <= 0
+    03 :    MSG BOX : "Message History" : "The workspace and Windows sender must be configured to clear history."
+    04 :    RETURN
+    05 : END IF
+    06 : IF : $$IsEmpty:##SVFromDate OR $$IsEmpty:##SVToDate OR ##SVFromDate > ##SVToDate
+    07 :    MSG BOX : "Message History" : "Select a valid history period first."
+    08 :    RETURN
+    09 : END IF
+    10 : QUERY BOX : ("Clear local message history from " + ($$String:##SVFromDate) + " to " + ($$String:##SVToDate) + " inclusive?") : Yes : No
+    11 : IF : NOT $$LastResult
+    12 :    RETURN
+    13 : END IF
+    14 : SET : RequestPath : "C:/Users/NISAR/AppData/Local/Helixcer/VoucherUpload/" + $$MakeUniqueID + ".clear-history"
+    15 : OPEN FILE : ##RequestPath : Text : Write
+    16 : IF : NOT $$LastResult
+    17 :    MSG BOX : "Message History" : "Could not create the clear-history request."
+    18 :    RETURN
+    19 : END IF
+    20 : WRITE FILE LINE : $$String:##SVFromDate
+    21 : WRITE FILE LINE : $$String:##SVToDate
+    22 : CLOSE TARGET FILE
+    23 : SET : HxcHistoryClearResultPath : ##RequestPath + ".xml"
+    24 : BrowseURL Ex : @@HxcVoucherSenderExe : (##Workspace + " " + @@HxcVoucherArgumentQuote + ##RequestPath + @@HxcVoucherArgumentQuote + " clear-history")
+    25 : WHILE : ##Waited < 5 AND $$FileSize:##HxcHistoryClearResultPath <= 0
+    26 :    SLEEP : 1
+    27 :    INCREMENT : Waited
+    28 : END WHILE
+    29 : IF : $$FileSize:##HxcHistoryClearResultPath > 0
+    30 :    WALK COLLECTION : Hxc History Clear Result
+    31 :       SET : ResultMessage : $ClearResult
+    32 :       BREAK
+    33 :    END WALK
+    34 : END IF
+    35 : SET : HxcHistoryClearResultPath : ""
+    36 : IF : $$IsEmpty:##ResultMessage
+    37 :    SET : ResultMessage : "The sender did not confirm the clear. Reopen Message History to check the result."
+    38 : END IF
+    39 : MSG BOX : "Message History" : ##ResultMessage
+
+[System: Formula]
+    Hxc History Entry Within Period : $$HxcHistoryEntryInPeriod:$SentAt:##SVFromDate:##SVToDate
 
 [System: Formula]
     Hxc Voucher Sender Exe : "C:/Users/NISAR/AppData/Local/Helixcer/VoucherUpload/HelixcerVoucherSender.exe"
@@ -6282,7 +6432,7 @@
 [Menu: Hxc WhatsApp Templates]
     Title : "WhatsApp Templates"
     Key Item : Outstanding Reminder : O : Alter : Hxc Outstanding Template
-    Key Item : Back : B : Menu : Helixcer Chat Menu
+    Key Item : Back : B
 
 [Report: Hxc Outstanding Template]
     Form : Hxc Outstanding Template
@@ -6344,7 +6494,7 @@
 [Field: Hxc Reminder Store Language]
     Use : Name Field
     Storage : HxcReminderLanguage
-    Set as : ##HxcVcDraftLang
+    Set as : If NOT $$IsEmpty:##HxcVcDraftLang Then ##HxcVcDraftLang Else If NOT $$IsEmpty:##HxcVcFetchLang Then ##HxcVcFetchLang Else "en"
     Set Always : Yes
     Invisible : Yes
     Max : 4096
@@ -6398,7 +6548,7 @@
     02 : CALL : Hxc Vc Clear Draft
 
 [Function: Hxc Restore Reminder Mappings]
-    01 : IF : ##HxcVcFetchName = $HxcReminderTemplate:Company:##SVCurrentCompany AND ##HxcVcFetchLang = $HxcReminderLanguage:Company:##SVCurrentCompany
+    01 : IF : ##HxcVcFetchName = $HxcReminderTemplate:Company:##SVCurrentCompany AND ##HxcVcFetchLang = (If $$IsEmpty:($HxcReminderLanguage:Company:##SVCurrentCompany) Then "en" Else $HxcReminderLanguage:Company:##SVCurrentCompany)
     02 :    SET : HxcVcSavedMaps : $HxcReminderMaps:Company:##SVCurrentCompany
     03 :    CALL : Hxc Apply Saved Maps
     04 : END IF
@@ -6413,73 +6563,227 @@
 
 [Collection: Hxc Selected Outstanding Ledgers]
     Data Source : Report : Selected Lines
-    Fetch : Name, LedgerName
+    Fetch : Name, LedgerName, PartyLedgerName
+    Client Only : Yes
+
+[Variable: HxcReminderSelectedRows]
+    Type : String
+
+[Variable: HxcReminderSelectedCount]
+    Type : Number
+
+[System: Variable]
+    HxcReminderSelectedRows : ""
+    HxcReminderSelectedCount : 0
+
+[System: Formula]
+    Hxc Reminder Selected Ledger Name : If NOT $$IsEmpty:($Name:Ledger:$LedgerName) Then $LedgerName Else If NOT $$IsEmpty:($Name:Ledger:$PartyLedgerName) Then $PartyLedgerName Else $Name
+    Hxc Reminder Ledger On Row : $$HxcReminderLedgerAt:$$Line
+    Hxc Reminder No Display Rows : "No selected ledger rows are available."
+
+[Function: Hxc Reminder Ledger At]
+    Parameter : WantedRow : Number
+    Returns : String
+    Variable : SelectedRow : Number
+    01 : SET : SelectedRow : 0
+    02 : FOR TOKEN : LedgerToken : ##HxcReminderSelectedRows : $$NewLine
+    03 :    INCREMENT : SelectedRow
+    04 :    IF : ##SelectedRow = ##WantedRow
+    05 :       RETURN : ##LedgerToken
+    06 :    END IF
+    07 : END FOR
+    08 : RETURN : ""
+
+[Report: Hxc Confirm Outstanding Reminders]
+    Form : Hxc Confirm Outstanding Reminders
+    Title : "Send WhatsApp Reminder"
+
+[Form: Hxc Confirm Outstanding Reminders]
+    Width : 65% Screen
+    Height : 48% Screen
+    Background : Hxc Vt Page
+    Parts : Hxc Reminder Confirmation Heading, Hxc Reminder Confirmation Rows
+    Bottom Part : Hxc Send Preview Actions
+    Control : Hxc Reminder No Display Rows : ##HxcReminderSelectedCount = 0
+
+[Part: Hxc Reminder Confirmation Heading]
+    Lines : Hxc Reminder Confirmation Template, Hxc Reminder Confirmation Columns
+    Background : Hxc Vt Section Band
+
+[Line: Hxc Reminder Confirmation Template]
+    Field : Hxc Reminder Confirmation Template
+
+[Field: Hxc Reminder Confirmation Template]
+    Use : Name Field
+    Set as : "Template : " + ($HxcReminderTemplate:Company:##SVCurrentCompany)
+    Full Width : Yes
+    Style : Normal
+    Skip : Yes
+
+[Part: Hxc Reminder Confirmation Rows]
+    Line : Hxc Reminder Confirmation Row
+    Repeat : Hxc Reminder Confirmation Row
+    Set : ##HxcReminderSelectedCount
+    Scroll : Vertical
+
+[Line: Hxc Reminder Confirmation Row]
+    Fields : Hxc Reminder Row Ledger, Hxc Reminder Row Name, Hxc Reminder Row Mobile, Hxc Reminder Row Balance
+
+[Line: Hxc Reminder Confirmation Columns]
+    Use : Hxc Reminder Confirmation Row
+    Local : Field : Hxc Reminder Row Ledger : Set as : "Party Ledger"
+    Local : Field : Hxc Reminder Row Name : Set as : "Primary Contact Name"
+    Local : Field : Hxc Reminder Row Mobile : Set as : "Contact No."
+    Local : Field : Hxc Reminder Row Balance : Set as : "Closing Balance"
+
+[Field: Hxc Reminder Row Ledger]
+    Use : Name Field
+    Set as : @@HxcReminderLedgerOnRow
+    Width : 23% Screen
+    Style : Normal
+    Skip : Yes
+
+[Field: Hxc Reminder Row Name]
+    Use : Name Field
+    Set as : $LedgerContact:Ledger:@@HxcReminderLedgerOnRow
+    Width : 17% Screen
+    Style : Normal
+    Skip : Yes
+
+[Field: Hxc Reminder Row Mobile]
+    Use : Name Field
+    Set as : $$HxcReminderMobile:@@HxcReminderLedgerOnRow
+    Width : 11% Screen
+    Style : Normal
+    Skip : Yes
+
+[Field: Hxc Reminder Row Balance]
+    Use : Name Field
+    Set as : $$HxcReminderClosingBalance:@@HxcReminderLedgerOnRow
+    Width : 10% Screen
+    Align : Right
+    Style : Normal
+    Skip : Yes
+
+[Function: Hxc Reminder Mobile]
+    Parameter : SelectedLedger : String
+    Object : Ledger : ##SelectedLedger
+    Returns : String
+    Variable : Mobile : String
+    Variable : Country : String
+    01 : SET : Mobile : If NOT $$IsEmpty:$LedgerMobile Then $LedgerMobile Else If NOT $$IsEmpty:$MobileNumber Then $MobileNumber Else $AddrTypeMobileNumber
+    02 : IF : $$IsEmpty:($$HxcDialingDigits:##Mobile)
+    03 :    RETURN : ""
+    04 : END IF
+    05 : IF : $$StringPart:##Mobile:0:1 = "+"
+    06 :    RETURN : "+" + $$HxcDialingDigits:##Mobile
+    07 : END IF
+    08 : SET : Country : If NOT $$IsEmpty:$LedgercountryISDcode Then $LedgercountryISDcode Else If NOT $$IsEmpty:$AddrTypeMobileCountryCode Then $AddrTypeMobileCountryCode Else If NOT $$IsEmpty:$CountryISDCode Then $CountryISDCode Else If $CountryName = "India" Then "+91" Else @@HxcCompanyDefaultCountryCode
+    09 : RETURN : If $$IsEmpty:($$HxcDialingDigits:##Country) Then ##Mobile Else ("+" + $$HxcDialingDigits:##Country + $$HxcDialingDigits:##Mobile)
+
+[Function: Hxc Reminder Closing Balance]
+    Parameter : SelectedLedger : String
+    Object : Ledger : ##SelectedLedger
+    Returns : String
+    01 : RETURN : If $$Abs:$ClosingBalance = 0 Then "0" Else (($$StringFindAndReplace:($$String:$ClosingBalance):"(-)":"") + (If $$IsDr:$ClosingBalance Then " Dr" Else " Cr"))
 
 [Function: Hxc Review Selected Reminder Ledgers]
     Variable : LedgerName : String
-    Variable : Found : Logical
+    Variable : Queued : Number
+    Variable : Skipped : Number
+    Variable : Failure : String
+    Variable : FirstFailure : String
     List Variable : HxcReviewedReminderLedgers : String
-    01 : CALL : Hxc Sync From Company
-    02 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
-    03 :    MSG BOX : "Outstanding Reminder" : "Save Helixcer API Settings before sending."
-    04 :    RETURN
-    05 : END IF
-    06 : IF : $$IsEmpty:($HxcReminderTemplate:Company:##SVCurrentCompany) OR $$IsEmpty:($HxcReminderPreview:Company:##SVCurrentCompany)
-    07 :    MSG BOX : "Outstanding Reminder" : "Save an Outstanding Reminder template in Helixcer Chat first."
-    08 :    RETURN
-    09 : END IF
-    10 : IF : $$FileSize:@@HxcVoucherSenderExe <= 0
-    11 :    MSG BOX : "Outstanding Reminder" : "Run Helixcer for TallyPrime Setup to install the Windows sender."
-    12 :    RETURN
-    13 : END IF
-    14 : WALK COLLECTION : Hxc Selected Outstanding Ledgers
-    15 :    SET : LedgerName : If $$IsEmpty:$LedgerName Then $Name Else $LedgerName
-    16 :    IF : NOT $$IsEmpty:##LedgerName AND NOT $$IsEmpty:($Name:Ledger:##LedgerName) AND $$IsEmpty:($$ListValue:HxcReviewedReminderLedgers:##LedgerName)
-    17 :       LIST ADD : HxcReviewedReminderLedgers : ##LedgerName : "Yes"
-    18 :       SET : Found : Yes
-    19 :       CALL : Hxc Preview Ledger Reminder : ##LedgerName
-    20 :    END IF
-    21 : END WALK
-    22 : IF : NOT ##Found
-    23 :    MSG BOX : "Outstanding Reminder" : "Use Ledger-wise view and press Space to select one or more ledger rows."
-    24 : END IF
+    01 : SET : HxcReminderSelectedRows : ""
+    011 : SET : HxcReminderSelectedCount : 0
+    02 : WALK COLLECTION : Hxc Selected Outstanding Ledgers
+    03 :    SET : LedgerName : @@HxcReminderSelectedLedgerName
+    04 :    IF : NOT $$IsEmpty:##LedgerName AND NOT $$IsEmpty:($Name:Ledger:##LedgerName) AND $$IsEmpty:($$ListValue:HxcReviewedReminderLedgers:##LedgerName)
+    05 :       LIST ADD : HxcReviewedReminderLedgers : ##LedgerName : ##LedgerName
+    051 :      INCREMENT : HxcReminderSelectedCount
+    052 :      SET : HxcReminderSelectedRows : If ##HxcReminderSelectedCount = 1 Then ##LedgerName Else (##HxcReminderSelectedRows + $$NewLine + ##LedgerName)
+    06 :    END IF
+    07 : END WALK
+    08 : IF : ##HxcReminderSelectedCount = 0
+    09 :    MSG BOX : "Outstanding Reminder" : "Press Space to select at least one ledger before sending a WhatsApp reminder."
+    10 :    RETURN
+    11 : END IF
+    12 : IF : $$IsEmpty:($HxcReminderTemplate:Company:##SVCurrentCompany) OR $$IsEmpty:($HxcReminderPreview:Company:##SVCurrentCompany)
+    13 :    MSG BOX : "Outstanding Reminder" : "Save an Outstanding Reminder template in Helixcer Chat first."
+    14 :    RETURN
+    15 : END IF
+    16 : EXECUTE : Hxc Confirm Outstanding Reminders
+    17 : IF : NOT $$LastResult
+    18 :    SET : HxcReminderSelectedRows : ""
+    181 :   SET : HxcReminderSelectedCount : 0
+    19 :    RETURN
+    20 : END IF
+    21 : CALL : Hxc Sync From Company
+    22 : IF : $$IsEmpty:##HxcSysWorkspaceId OR $$IsEmpty:##HxcSysChannelId OR $$IsEmpty:##HxcSysApiKey
+    23 :    MSG BOX : "Outstanding Reminder" : "Save Helixcer API Settings before sending."
+    24 :    RETURN
+    25 : END IF
+    26 : IF : $$FileSize:@@HxcVoucherSenderExe <= 0
+    27 :    MSG BOX : "Outstanding Reminder" : "Run Helixcer for TallyPrime Setup to install the Windows sender."
+    28 :    RETURN
+    29 : END IF
+    30 : FOR TOKEN : SelectedLedger : ##HxcReminderSelectedRows : $$NewLine
+    31 :    CALL : Hxc Queue Ledger Reminder : ##SelectedLedger
+    32 :    SET : Failure : $$LastResult
+    33 :    IF : $$IsEmpty:##Failure
+    34 :       INCREMENT : Queued
+    35 :    ELSE
+    36 :       INCREMENT : Skipped
+    37 :       IF : $$IsEmpty:##FirstFailure
+    38 :          SET : FirstFailure : ##Failure
+    39 :       END IF
+    40 :    END IF
+    41 : END FOR
+    42 : SET : HxcReminderSelectedRows : ""
+    421 : SET : HxcReminderSelectedCount : 0
+    43 : IF : ##Skipped > 0
+    44 :    MSG BOX : "Outstanding Reminder" : (($$String:##Queued) + " queued. " + ($$String:##Skipped) + " skipped." + $$NewLine + ##FirstFailure)
+    45 : ELSE
+    46 :    MSG BOX : "Outstanding Reminder" : (($$String:##Queued) + " reminders queued.")
+    47 : END IF
 
-[Function: Hxc Preview Ledger Reminder]
+[Function: Hxc Queue Ledger Reminder]
     Parameter : ReminderLedger : String
     Object : Ledger : ##ReminderLedger
+    Returns : String
     Variable : Mobile : String
-    Variable : Country : String
-    Variable : Accepted : Logical
-    01 : SET : Mobile : $LedgerMobile
-    02 : SET : Country : If NOT $$IsEmpty:$AddrTypeMobileCountryCode Then $AddrTypeMobileCountryCode Else If NOT $$IsEmpty:$CountryISDCode Then $CountryISDCode Else If NOT $$IsEmpty:$LedgercountryISDcode Then $LedgercountryISDcode Else If $CountryName = "India" Then "+91" Else @@HxcCompanyDefaultCountryCode
-    03 : SET : HxcSendTo : If $$StringPart:##Mobile:0:1 = "+" Then $$HxcDialingDigits:##Mobile Else ($$HxcDialingDigits:##Country + $$HxcDialingDigits:##Mobile)
-    04 : IF : $$IsEmpty:($$HxcDialingDigits:##Mobile) OR ($$StringPart:##Mobile:0:1 <> "+" AND $$IsEmpty:($$HxcDialingDigits:##Country)) OR $$StringLength:##HxcSendTo < 7 OR $$StringLength:##HxcSendTo > 15 OR $$StringPart:##HxcSendTo:0:1 = "0"
-    05 :    MSG BOX : "Outstanding Reminder" : (##ReminderLedger + " has no valid international mobile number.")
-    06 :    RETURN
-    07 : END IF
-    08 : SET : HxcSendTemplate : $HxcReminderTemplate:Company:##SVCurrentCompany
-    09 : SET : HxcSendLanguage : $HxcReminderLanguage:Company:##SVCurrentCompany
-    10 : SET : HxcSendDocument : No
-    11 : SET : HxcSendReference : $$MakeUniqueID
-    12 : SET : HxcSendMappingError : "A ledger template mapping is missing or invalid."
-    13 : CALL : Hxc Prepare Send Mappings : "" : $HxcReminderMaps:Company:##SVCurrentCompany : Yes
-    14 : IF : NOT $$LastResult
-    15 :    MSG BOX : "Outstanding Reminder" : (##ReminderLedger + ": " + ##HxcSendMappingError)
-    16 :    RETURN
-    17 : END IF
-    18 : SET : HxcSendPreviewFilename : ""
-    19 : SET : HxcSendPreviewContact : " (" + ##ReminderLedger + ")"
-    20 : SET : HxcSendPreviewText : $HxcReminderPreview:Company:##SVCurrentCompany
-    21 : SET : HxcSendPreviewOpen : Yes
-    22 : CALL : Hxc Populate Send Preview
-    23 : EXECUTE : Hxc WhatsApp Send Preview
-    24 : SET : Accepted : $$LastResult
-    25 : SET : HxcSendPreviewOpen : No
-    26 : SET : HxcSendPreviewContact : ""
-    27 : SET : HxcSendPreviewText : ""
-    28 : IF : ##Accepted
-    29 :    CALL : Hxc Queue Voucher WhatsApp Send : ##ReminderLedger
-    30 : END IF
+    Variable : MissingMapping : String
+    Variable : ReminderMaps : String
+    Variable : MappingsPrepared : Logical
+    01 : SET : Mobile : $$HxcReminderMobile:##ReminderLedger
+    02 : SET : HxcSendTo : $$HxcDialingDigits:##Mobile
+    03 : IF : $$StringPart:##Mobile:0:1 <> "+" OR $$StringLength:##HxcSendTo < 7 OR $$StringLength:##HxcSendTo > 15 OR $$StringPart:##HxcSendTo:0:1 = "0"
+    04 :    RETURN : ##ReminderLedger + " has no valid international mobile number."
+    05 : END IF
+    06 : SET : HxcSendTemplate : $HxcReminderTemplate:Company:##SVCurrentCompany
+    07 : SET : HxcSendLanguage : If $$IsEmpty:($HxcReminderLanguage:Company:##SVCurrentCompany) Then "en" Else $HxcReminderLanguage:Company:##SVCurrentCompany
+    08 : SET : HxcSendDocument : No
+    09 : SET : HxcSendReference : $$MakeUniqueID
+    10 : SET : HxcSendMappingError : "A ledger template mapping is missing or invalid."
+    11 : SET : ReminderMaps : $HxcReminderMaps:Company:##SVCurrentCompany
+    111 : SET : MappingsPrepared : $$HxcPrepareSendMappings:"":##ReminderMaps:Yes
+    12 : IF : NOT ##MappingsPrepared
+    13 :    RETURN : ##ReminderLedger + ": " + ##HxcSendMappingError
+    14 : END IF
+    15 : SET : HxcSendPreviewText : $HxcReminderPreview:Company:##SVCurrentCompany
+    16 : SET : HxcSendPreviewOpen : Yes
+    17 : CALL : Hxc Populate Send Preview
+    18 : SET : MissingMapping : $$LastResult
+    19 : SET : HxcSendPreviewOpen : No
+    20 : SET : HxcSendPreviewText : ""
+    21 : IF : NOT $$IsEmpty:##MissingMapping
+    22 :    RETURN : ##ReminderLedger + ": missing mapping for " + ##MissingMapping
+    23 : END IF
+    24 : CALL : Hxc Queue Voucher WhatsApp Send : ##ReminderLedger
+    25 : IF : NOT $$LastResult
+    26 :    RETURN : ##ReminderLedger + ": could not queue the reminder."
+    27 : END IF
+    28 : RETURN : ""
 
 [Function: Hxc Resolve Reminder Ledger Value]
     Parameter : Label : String
@@ -6503,7 +6807,7 @@
     17 :    RETURN : If $$Abs:$OpeningBalance = 0 Then "Nil" Else If $$IsDr:$OpeningBalance Then "Debit" Else "Credit"
     18 : END IF
     19 : IF : ##Label = "Closing Balance" OR ##Label = "Amount"
-    20 :    RETURN : If $$Abs:$ClosingBalance = 0 Then "0" Else $$String:($$Abs:$ClosingBalance)
+    20 :    RETURN : If $$Abs:$ClosingBalance = 0 Then "0" Else ($$StringFindAndReplace:($$String:$ClosingBalance):"(-)":"")
     21 : END IF
     22 : IF : ##Label = "Closing Balance Type" OR ##Label = "Balance Type"
     23 :    RETURN : If $$Abs:$ClosingBalance = 0 Then "Nil" Else If $$IsDr:$ClosingBalance Then "Debit" Else "Credit"
@@ -6581,4 +6885,3 @@
     95 :    RETURN : $GUID
     96 : END IF
     97 : RETURN : ""
-
