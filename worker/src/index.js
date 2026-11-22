@@ -362,6 +362,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     return new Response(null, { status: 204, headers: cors });
   }
   try {
+    if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname.startsWith('/downloads/')) {
+      return await servePublicDownload(request, env, url.pathname.slice('/downloads/'.length));
+    }
     if (request.method === 'GET' && url.pathname === '/health') {
       return withCors(json({ ok: true, service: 'helixcer-chat-api', version: API_VERSION }), cors);
     }
@@ -11721,6 +11724,47 @@ function cookieHeaderForSession(token, maxAge) {
 async function cleanupExpiredExternalRequests(env) {
   await env.DB.prepare('DELETE FROM external_api_requests WHERE expires_at<=?1')
     .bind(new Date().toISOString()).run();
+}
+
+async function servePublicDownload(request, env, rawKey) {
+  if (!env.PUBLIC_DOWNLOADS) return json({ ok: false, error: 'Downloads are unavailable.' }, 503);
+  let objectKey = '';
+  try { objectKey = decodeURIComponent(String(rawKey || '')); }
+  catch { return json({ ok: false, error: 'Not found.' }, 404); }
+  objectKey = objectKey.replace(/^\/+/, '').replace(/\/+/g, '/');
+  if (!objectKey
+    || objectKey.includes('\\')
+    || objectKey.split('/').some((part) => !part || part === '.' || part === '..')
+    || !/^[A-Za-z0-9._/-]+$/.test(objectKey)
+    || objectKey.length > 500) {
+    return json({ ok: false, error: 'Not found.' }, 404);
+  }
+  const object = request.method === 'HEAD'
+    ? await env.PUBLIC_DOWNLOADS.head(objectKey)
+    : await env.PUBLIC_DOWNLOADS.get(objectKey, {
+      onlyIf: request.headers,
+      range: request.headers
+    });
+  if (object === null) return json({ ok: false, error: 'Not found.' }, 404);
+  const headers = new Headers();
+  object.writeHttpMetadata?.(headers);
+  if (object.httpEtag) headers.set('etag', object.httpEtag);
+  if (Number.isFinite(object.size)) headers.set('Content-Length', String(object.size));
+  const filename = safeAttachmentFilename(objectKey.split('/').pop() || 'download');
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/octet-stream');
+  headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+  headers.set('Cache-Control', 'public, max-age=3600');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  if (object.range) {
+    const { offset, length } = object.range;
+    if (Number.isFinite(offset) && Number.isFinite(length) && Number.isFinite(object.size)) {
+      headers.set('Content-Range', `bytes ${offset}-${offset + length - 1}/${object.size}`);
+    }
+    headers.set('Accept-Ranges', 'bytes');
+  }
+  if (request.method === 'HEAD') return new Response(null, { status: 200, headers });
+  if (!('body' in object)) return new Response(undefined, { status: 412, headers });
+  return new Response(object.body, { status: object.range ? 206 : 200, headers });
 }
 
 function withCors(response, headers) {

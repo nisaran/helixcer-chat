@@ -21,6 +21,10 @@ EXTERNAL_API_RATE_LIMIT_PER_WORKSPACE = "300"
 VAPID_PUBLIC_KEY = "BETUPEI3m52cSFPKhXwudMNafx5YSTCSlaw-UnFeGabbvEKsQKRaFAVM55GqvbvCsLuENI_o1fRc7SlZpk4t4fQ"
 VAPID_SUBJECT = "mailto:nisaran@helixcer.com"
 
+[[r2_buckets]]
+binding = "PUBLIC_DOWNLOADS"
+bucket_name = "helixcer-public-downloads"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "helixcer-chat-db"

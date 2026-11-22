@@ -212,7 +212,8 @@ test("Integration opens a grid page; TallyPrime card shows logo, detail, and con
   assert.match(html, /id="integrationTallyPrimeRoute" data-route-panel="integration-tallyprime"/);
   assert.match(html, /class="integration-back"[^>]*data-route="integrations"/);
   assert.match(html, /Download Helixcer TallyPrime connector/);
-  assert.match(html, /pub-7774d089f73f47098e03aef161fe43b1\.r2\.dev\/integrations\/tallyprime\/Helixcer-TallyPrime-Connector\.zip/);
+  assert.match(html, /api\.chat\.helixcer\.com\/downloads\/integrations\/tallyprime\/Helixcer-TallyPrime-Connector\.zip/);
+  assert.doesNotMatch(html, /r2\.dev\/integrations\/tallyprime/);
   assert.match(html, /sale vouchers, receipt confirmations, outstanding reminders/);
   assert.match(app, /integrations: "Integration"/);
   assert.match(app, /"integration-tallyprime": "TallyPrime"/);

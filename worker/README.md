@@ -34,6 +34,7 @@ Public Worker variables in `wrangler.toml`:
 - `OAUTH_RATE_LIMIT_WINDOW_SECONDS`, `OAUTH_RATE_LIMIT_PER_CLIENT`, and `OAUTH_RATE_LIMIT_GLOBAL`: bound anonymous login starts in the existing Durable Object before D1 is written.
 - `EXTERNAL_API_RATE_LIMIT_WINDOW_SECONDS`, `EXTERNAL_API_RATE_LIMIT_PER_KEY`, and `EXTERNAL_API_RATE_LIMIT_PER_WORKSPACE`: bound server-to-server API traffic in the workspace Durable Object. The checked-in defaults are 60 requests/minute/key and 300 requests/minute/workspace.
 - `VAPID_PUBLIC_KEY` and `VAPID_SUBJECT`: the public half of one stable P-256 VAPID key pair and a `mailto:` or HTTPS contact URI. The public key is returned only to authenticated dashboard sessions.
+- `PUBLIC_DOWNLOADS`: R2 binding to the `helixcer-public-downloads` bucket. Public installer packages are served from `GET /downloads/*` on `api.chat.helixcer.com` (for example the TallyPrime connector).
 
 Configure these as Worker secrets/environment variables; never commit real values:
 
