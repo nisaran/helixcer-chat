@@ -11804,7 +11804,7 @@
   function setRoute(route, { preserveLocation = false } = {}) {
     closeContactRouteMenu();
     closeContactPlatformMenu();
-    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "developer", "team", "roles", "workspace", "automation", "settings", "support"].includes(route)) route = "inbox";
+    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"].includes(route)) route = "inbox";
     // Permission demotions require an authenticated principal. Before /api/me
     // resolves, hasPermission is false for everything and would collapse every
     // deep link to Settings via the inbox fallback.
@@ -11855,9 +11855,19 @@
       $("channelDataNavToggle").setAttribute("aria-expanded", "true");
       $("channelDataNavChildren").hidden = false;
     }
+    const integrationSectionActive = route === "integration-tallyprime";
+    if ($("integrationNavToggle")) {
+      $("integrationNavToggle").classList.toggle("is-active", integrationSectionActive);
+      if (integrationSectionActive) {
+        $("integrationNavToggle").setAttribute("aria-expanded", "true");
+        if ($("integrationNavChildren")) $("integrationNavChildren").hidden = false;
+        $("integrationNavGroup")?.classList.add("is-open");
+      }
+    }
     const labels = {
       inbox: "Inbox", contacts: "Contacts", campaigns: "Campaign", channels: "Channels",
       "whatsapp-templates": "WhatsApp Templates", "import-chat": "Import Chat",
+      "integration-tallyprime": "TallyPrime",
       developer: "Developer API", team: "Team", roles: "Roles", workspace: "Workspace", automation: "Automation",
       settings: "Settings", support: "Support",
     };
@@ -16310,6 +16320,10 @@
         }
         if (actionButton.dataset.action === "toggle-channel-nav") {
           toggleSidebarNavigation("channelNavToggle", "channelNavChildren", "channelNavGroup");
+          return;
+        }
+        if (actionButton.dataset.action === "toggle-integration-nav") {
+          toggleSidebarNavigation("integrationNavToggle", "integrationNavChildren", "integrationNavGroup");
           return;
         }
         if (actionButton.dataset.action === "toggle-channel-data-nav") {

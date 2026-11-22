@@ -10,3 +10,11 @@ The provider glyphs in `assets/` are unmodified files from each provider's offic
 | `assets/provider-facebook.svg` | [Meta Brand Resource Center](https://about.meta.com/brand/resources/facebookapp/logo/) | Compact Facebook “f” glyph used to identify Messenger Page connections |
 
 These marks remain trademarks of their respective owners. Review the linked brand guidance before changing their color, shape, clear space, or context.
+
+## Integration marks
+
+| Local file | Notes |
+| --- | --- |
+| `assets/integration-tallyprime.svg` | Helixcer-made yellow “T” tile for the Integration → TallyPrime nav item. Not an official Tally brand asset. |
+
+Tally / TallyPrime remain trademarks of their respective owners.

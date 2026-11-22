@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261118-template-create-errors">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261122-integration-tallyprime">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261122-create-template-default-en" defer></script>
+  <script src="./assets/app.js?v=20261122-integration-tallyprime" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -130,6 +130,21 @@
                 <span>Import Chat</span>
               </button>
             </div>
+          </div>
+        </div>
+        <div class="nav-group" id="integrationNavGroup">
+          <button class="nav-button nav-group-toggle" id="integrationNavToggle" type="button" data-action="toggle-integration-nav" aria-expanded="false" aria-controls="integrationNavChildren">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M8 7h3v3H8zm5 0h3v3h-3zM8 12h3v3H8zm5 0h3v3h-3z"/><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z"/></svg>
+            </span>
+            <span>Integration</span>
+            <svg class="nav-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+          </button>
+          <div class="nav-submenu" id="integrationNavChildren" hidden>
+            <button class="nav-button nav-subitem" type="button" data-route="integration-tallyprime">
+              <span class="nav-icon nav-provider-icon" aria-hidden="true"><img src="./assets/integration-tallyprime.svg?v=20261122-integration" alt=""></span>
+              <span>TallyPrime</span>
+            </button>
           </div>
         </div>
         <button class="nav-button" type="button" data-route="developer" data-permission="developer.manage">
@@ -1179,6 +1194,34 @@
             <button class="primary-button" id="automationSaveButton" type="submit">Save automation</button>
           </div>
         </form>
+      </section>
+
+      <section class="route content-route integration-route" id="integrationTallyPrimeRoute" data-route-panel="integration-tallyprime" aria-labelledby="integrationTallyPrimeTitle" hidden>
+        <div class="route-heading">
+          <div>
+            <p class="eyebrow">Integration</p>
+            <h2 id="integrationTallyPrimeTitle">TallyPrime</h2>
+            <p>Connect TallyPrime to Helixcer Chat and send WhatsApp messages for sales, receipts, and outstanding reminders in a few clicks.</p>
+          </div>
+        </div>
+        <section class="surface settings-surface integration-surface" aria-label="TallyPrime integration">
+          <div class="integration-hero">
+            <span class="integration-logo" aria-hidden="true"><img src="./assets/integration-tallyprime.svg?v=20261122-integration" alt=""></span>
+            <div class="integration-copy">
+              <strong>Helixcer TallyPrime connector</strong>
+              <p>Use the connector inside TallyPrime to send WhatsApp messages for sale vouchers, receipt confirmations, outstanding reminders, and similar day-to-day accounts messages—quickly, without leaving Tally.</p>
+              <ul class="integration-points">
+                <li>Sale and invoice updates to customers on WhatsApp</li>
+                <li>Receipt acknowledgements as payments come in</li>
+                <li>Outstanding / payment reminder nudges</li>
+              </ul>
+            </div>
+          </div>
+          <div class="integration-actions">
+            <a class="primary-button" id="tallyPrimeConnectorDownload" href="https://pub-7774d089f73f47098e03aef161fe43b1.r2.dev/integrations/tallyprime/Helixcer-TallyPrime-Connector.zip" target="_blank" rel="noopener noreferrer">Download Helixcer TallyPrime connector</a>
+            <p class="field-help">Installer package hosted on Cloudflare R2. After download, follow the connector setup in TallyPrime.</p>
+          </div>
+        </section>
       </section>
 
       <section class="route content-route" id="supportRoute" data-route-panel="support" aria-labelledby="supportTitle" hidden>

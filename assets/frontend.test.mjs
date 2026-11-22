@@ -174,7 +174,7 @@ test("channel management supports multiple provider accounts without hardcoded c
 });
 
 test("Channel navigation is collapsed by default and nests the WhatsApp template library", () => {
-  const channelNav = html.match(/<div class="nav-group" id="channelNavGroup"[\s\S]*?<button class="nav-button" type="button" data-route="developer"/)?.[0] || "";
+  const channelNav = html.match(/<div class="nav-group" id="channelNavGroup"[\s\S]*?<div class="nav-group" id="integrationNavGroup"/)?.[0] || "";
   assert.match(channelNav, /data-route="channels" data-permission="channels\.manage"/);
   assert.match(channelNav, /data-route="whatsapp-templates" data-permission="channels\.templates"/);
   assert.match(channelNav, /data-route="import-chat" data-permission="channels\.import"/);
@@ -198,6 +198,25 @@ test("Channel navigation is collapsed by default and nests the WhatsApp template
   assert.match(app, /if \(channelSectionActive\)[\s\S]*?channelNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
   assert.match(app, /if \(route === "whatsapp-templates" \|\| route === "import-chat"\)[\s\S]*?channelDataNavToggle"\)\.setAttribute\("aria-expanded", "true"\)/);
   assert.match(styles, /\.nav-submenu/);
+});
+
+test("Integration navigation nests TallyPrime with a brief and connector download", () => {
+  const integrationNav = html.match(/<div class="nav-group" id="integrationNavGroup"[\s\S]*?<button class="nav-button" type="button" data-route="developer"/)?.[0] || "";
+  assert.match(integrationNav, />Integration<\/span>/);
+  assert.match(integrationNav, /id="integrationNavToggle"[^>]*aria-expanded="false"/);
+  assert.match(integrationNav, /id="integrationNavChildren" hidden/);
+  assert.match(integrationNav, /data-route="integration-tallyprime"/);
+  assert.match(integrationNav, /integration-tallyprime\.svg/);
+  assert.match(integrationNav, />TallyPrime<\/span>/);
+  assert.match(html, /id="integrationTallyPrimeRoute" data-route-panel="integration-tallyprime"/);
+  assert.match(html, /Download Helixcer TallyPrime connector/);
+  assert.match(html, /pub-7774d089f73f47098e03aef161fe43b1\.r2\.dev\/integrations\/tallyprime\/Helixcer-TallyPrime-Connector\.zip/);
+  assert.match(html, /sale vouchers, receipt confirmations, outstanding reminders/);
+  assert.match(app, /"integration-tallyprime": "TallyPrime"/);
+  assert.match(app, /toggle-integration-nav/);
+  assert.match(app, /integrationNavToggle/);
+  assert.match(styles, /\.integration-surface/);
+  assert.match(styles, /\.integration-logo/);
 });
 
 test("WhatsApp template library aggregates, previews, searches, and multi-filters every account", () => {
