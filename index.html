@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261122-integration-tallyprime">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261122-integrations-grid">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261122-integration-tallyprime" defer></script>
+  <script src="./assets/app.js?v=20261122-integrations-grid" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -132,21 +132,12 @@
             </div>
           </div>
         </div>
-        <div class="nav-group" id="integrationNavGroup">
-          <button class="nav-button nav-group-toggle" id="integrationNavToggle" type="button" data-action="toggle-integration-nav" aria-expanded="false" aria-controls="integrationNavChildren">
-            <span class="nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M8 7h3v3H8zm5 0h3v3h-3zM8 12h3v3H8zm5 0h3v3h-3z"/><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z"/></svg>
-            </span>
-            <span>Integration</span>
-            <svg class="nav-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
-          </button>
-          <div class="nav-submenu" id="integrationNavChildren" hidden>
-            <button class="nav-button nav-subitem" type="button" data-route="integration-tallyprime">
-              <span class="nav-icon nav-provider-icon" aria-hidden="true"><img src="./assets/integration-tallyprime.svg?v=20261122-integration" alt=""></span>
-              <span>TallyPrime</span>
-            </button>
-          </div>
-        </div>
+        <button class="nav-button" type="button" data-route="integrations">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M8 7h3v3H8zm5 0h3v3h-3zM8 12h3v3H8zm5 0h3v3h-3z"/><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z"/></svg>
+          </span>
+          <span>Integration</span>
+        </button>
         <button class="nav-button" type="button" data-route="developer" data-permission="developer.manage">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="m8 5-6 7 6 7m8-14 6 7-6 7M14 3l-4 18"/></svg>
@@ -1196,9 +1187,31 @@
         </form>
       </section>
 
+      <section class="route content-route integration-route" id="integrationsRoute" data-route-panel="integrations" aria-labelledby="integrationsTitle" hidden>
+        <div class="route-heading">
+          <div>
+            <p class="eyebrow">Connect your tools</p>
+            <h2 id="integrationsTitle">Integration</h2>
+            <p>Choose an integration to connect accounts software and other systems to Helixcer Chat.</p>
+          </div>
+        </div>
+        <section class="surface settings-surface integrations-surface" aria-label="Available integrations">
+          <div class="integrations-grid">
+            <button class="integration-card" type="button" data-route="integration-tallyprime" aria-label="Open TallyPrime integration">
+              <span class="integration-card-logo" aria-hidden="true"><img src="./assets/integration-tallyprime.png?v=20261122-integrations-grid" alt=""></span>
+              <span class="integration-card-body">
+                <strong>TallyPrime</strong>
+                <span>Send WhatsApp messages for sales, receipts, and outstanding reminders from Tally.</span>
+              </span>
+            </button>
+          </div>
+        </section>
+      </section>
+
       <section class="route content-route integration-route" id="integrationTallyPrimeRoute" data-route-panel="integration-tallyprime" aria-labelledby="integrationTallyPrimeTitle" hidden>
         <div class="route-heading">
           <div>
+            <button class="integration-back" type="button" data-route="integrations">← All integrations</button>
             <p class="eyebrow">Integration</p>
             <h2 id="integrationTallyPrimeTitle">TallyPrime</h2>
             <p>Connect TallyPrime to Helixcer Chat and send WhatsApp messages for sales, receipts, and outstanding reminders in a few clicks.</p>
@@ -1206,7 +1219,7 @@
         </div>
         <section class="surface settings-surface integration-surface" aria-label="TallyPrime integration">
           <div class="integration-hero">
-            <span class="integration-logo" aria-hidden="true"><img src="./assets/integration-tallyprime.svg?v=20261122-integration" alt=""></span>
+            <span class="integration-logo is-tally" aria-hidden="true"><img src="./assets/integration-tallyprime.png?v=20261122-integrations-grid" alt=""></span>
             <div class="integration-copy">
               <strong>Helixcer TallyPrime connector</strong>
               <p>Use the connector inside TallyPrime to send WhatsApp messages for sale vouchers, receipt confirmations, outstanding reminders, and similar day-to-day accounts messages—quickly, without leaving Tally.</p>
