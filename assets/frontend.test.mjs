@@ -230,6 +230,12 @@ test("WhatsApp template library aggregates, previews, searches, and multi-filter
   assert.match(styles, /\.template-filter:nth-child\(even\) \.template-filter-menu/);
 });
 
+test("create WhatsApp template dialog defaults language to English en", () => {
+  assert.match(app, /\["en", "English"\], \["en_US", "English \(US\)"\]/);
+  assert.match(app, /languageSelect\.value = "en";/);
+  assert.match(html, /id="createTemplateLanguage"/);
+});
+
 test("channel secrets are masked, optional on edit, and never prefilled", () => {
   assert.match(html, /name="whatsappAccessToken" type="password"/);
   assert.match(html, /name="whatsappAppSecret" type="password"/);
