@@ -1,6 +1,6 @@
 ﻿;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 417-quiet-pdf-export
-;; Title must show "(build 417)".
+;; BUILD: 418-quiet-pdf-export
+;; Title must show "(build 418)".
 ;;
 ;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
 ;; Company Storage is used for saved HxcVoucherConfigs on Commit — never for Create UI.
@@ -1613,7 +1613,7 @@
 
 [Field: Hxc Api Settings Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat — API Settings (build 417)"
+    Set as    : "Helixcer Chat — API Settings (build 418)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3030,7 +3030,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 417)"
+    Set as    : "Create Voucher Config (build 418)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3107,7 +3107,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 417)"
+    Set as    : "Alter Voucher Config (build 418)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3167,7 +3167,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 417)"
+    Set as    : "Voucher Config List (build 418)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3282,7 +3282,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 417)"
+    Set as    : "Helixcer Chat (build 418)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -4876,14 +4876,8 @@
     Option : Hxc Quiet Voucher PDF Export : ##HxcQuietVoucherPDFExport
 
 [!Report: Hxc Quiet Voucher PDF Export]
-    Local : Form : Printed Invoice : Open After Export : No
+    ;; Open After Export is not a Form attribute (T0014). Suppress open via system variable only.
     Set : SVOpenFileAfterExport : No
-
-[#Form: Printed Invoice]
-    Option : Hxc Quiet Printed Invoice Form : ##HxcQuietVoucherPDFExport
-
-[!Form: Hxc Quiet Printed Invoice Form]
-    Open After Export : No
 
 [Variable: HxcQuietVoucherPDFExport]
     Type : Logical
