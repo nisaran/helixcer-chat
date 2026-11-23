@@ -210,6 +210,21 @@
           <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh data">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9a7 7 0 0 1 11.6-2.6L20 9M4 15l2.3 2.6A7 7 0 0 0 18 15"/></svg>
           </button>
+          <div class="notification-bell-wrap">
+            <button class="icon-button notification-bell-button" id="notificationBellButton" type="button" data-action="toggle-notifications" aria-label="Notifications" aria-expanded="false" aria-controls="notificationPanel">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.2 2.2 0 0 0 2.1-1.5H9.9A2.2 2.2 0 0 0 12 22Zm7-5.5V11a7 7 0 1 0-14 0v5.5L3 18v1h18v-1l-2-1.5Z"/></svg>
+              <span class="notification-bell-badge" id="notificationBellBadge" hidden>0</span>
+            </button>
+            <div class="notification-panel" id="notificationPanel" hidden>
+              <div class="notification-panel-head">
+                <strong>Notifications</strong>
+                <button type="button" class="notification-mark-all" data-action="mark-all-notifications-read">Mark all read</button>
+              </div>
+              <div class="notification-panel-list" id="notificationPanelList">
+                <p class="notification-empty" id="notificationEmpty">No notifications yet.</p>
+              </div>
+            </div>
+          </div>
           <div class="user-menu-wrap">
             <button class="user-menu-button" id="userMenuButton" type="button" data-action="toggle-user-menu" aria-label="Open account menu" aria-expanded="false">
               <span class="avatar avatar-button" id="currentUserAvatar"><span id="currentUserInitials">—</span><img id="currentUserAvatarImage" alt="" hidden></span>

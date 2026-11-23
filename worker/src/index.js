@@ -80,6 +80,15 @@ import {
   updateWorkspaceMember
 } from './platform.js';
 import {
+  createPlatformNotification,
+  deletePlatformNotification,
+  listMyNotifications,
+  listPlatformNotifications,
+  markAllMyNotificationsRead,
+  markMyNotificationRead,
+  sendPlatformNotification
+} from './platform-notifications.js';
+import {
   INTERAKT_SOURCE,
   extractInteraktCustomer,
   mapInteraktMessage,
@@ -539,7 +548,36 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       if (adminMatch && request.method === 'DELETE') {
         return withCors(json(await removePlatformAdmin(env, principal, decodeURIComponent(adminMatch[1]))), cors);
       }
+      if (url.pathname === '/api/platform/notifications') {
+        if (request.method === 'GET') return withCors(json(await listPlatformNotifications(env)), cors);
+        if (request.method === 'POST') {
+          const payload = await readJson(request);
+          return withCors(json(await createPlatformNotification(env, principal, payload, {
+            send: Boolean(payload?.send),
+            broadcast
+          }), 201), cors);
+        }
+      }
+      const notificationSendMatch = url.pathname.match(/^\/api\/platform\/notifications\/([^/]+)\/send$/);
+      if (notificationSendMatch && request.method === 'POST') {
+        const notificationId = decodeURIComponent(notificationSendMatch[1]);
+        return withCors(json(await sendPlatformNotification(env, notificationId, { broadcast })), cors);
+      }
+      const notificationMatch = url.pathname.match(/^\/api\/platform\/notifications\/([^/]+)$/);
+      if (notificationMatch && request.method === 'DELETE') {
+        return withCors(json(await deletePlatformNotification(env, decodeURIComponent(notificationMatch[1]))), cors);
+      }
       return withCors(json({ ok: false, error: 'API route not found.' }, 404), cors);
+    }
+    if (url.pathname === '/api/notifications' && request.method === 'GET') {
+      return withCors(json(await listMyNotifications(env, principal, url)), cors);
+    }
+    if (url.pathname === '/api/notifications/read-all' && request.method === 'POST') {
+      return withCors(json(await markAllMyNotificationsRead(env, principal)), cors);
+    }
+    const myNotificationMatch = url.pathname.match(/^\/api\/notifications\/([^/]+)\/read$/);
+    if (myNotificationMatch && request.method === 'POST') {
+      return withCors(json(await markMyNotificationRead(env, principal, decodeURIComponent(myNotificationMatch[1]))), cors);
     }
     if (url.pathname === '/api/me' && request.method === 'GET') {
       return withCors(json(principalView(principal)), cors);

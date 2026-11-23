@@ -250,6 +250,17 @@ textarea.input { resize: vertical; }
 .inline-form .input { flex: 1 1 220px; }
 .inline-form .select { flex: 0 0 130px; }
 
+.notification-form {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.notification-form .textarea { min-height: 96px; }
+.audience-grid { align-items: end; }
+.notification-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.chip.is-muted { background: #f2f4f7; color: #667085; }
+
 .invite-box { padding: 14px 18px; border-bottom: 1px solid var(--line); background: #fbfaff; }
 .copy-row { display: flex; gap: 8px; margin-top: 8px; }
 .copy-row .input { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
