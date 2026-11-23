@@ -21,6 +21,14 @@ EXTERNAL_API_RATE_LIMIT_PER_WORKSPACE = "300"
 VAPID_PUBLIC_KEY = "BETUPEI3m52cSFPKhXwudMNafx5YSTCSlaw-UnFeGabbvEKsQKRaFAVM55GqvbvCsLuENI_o1fRc7SlZpk4t4fQ"
 VAPID_SUBJECT = "mailto:nisaran@helixcer.com"
 
+[[r2_buckets]]
+binding = "TALLYPRIME_MEDIA"
+bucket_name = "helixcer-tallyprime-media"
+
+[[r2_buckets]]
+binding = "VOUCHER_MEDIA"
+bucket_name = "helixcer-voucher-media"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "helixcer-chat-db"
