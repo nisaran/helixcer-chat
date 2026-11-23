@@ -11751,12 +11751,42 @@
     if (location.hash !== hash) history.replaceState(null, "", hash);
   }
 
+  const APP_ROUTES = ["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "developer", "team", "roles", "workspace", "automation", "settings", "support"];
+  const INTEGRATION_DETAILS = {
+    tallyprime: { label: "TallyPrime" },
+  };
+
+  function integrationRoute(slug) {
+    return `integration/${slug}`;
+  }
+
+  function integrationSlugFromRoute(route) {
+    const match = String(route || "").match(/^integration\/([a-z0-9-]+)$/i);
+    return match ? match[1].toLowerCase() : "";
+  }
+
+  function isAppRoute(route) {
+    if (APP_ROUTES.includes(route)) return true;
+    const slug = integrationSlugFromRoute(route);
+    return Boolean(slug && INTEGRATION_DETAILS[slug]);
+  }
+
   function parseAppHash(value = location.hash) {
     const raw = String(value || "").replace(/^#/, "");
+    const legacyIntegration = raw.match(/^integration-([a-z0-9-]+)$/i);
+    if (legacyIntegration) {
+      const slug = legacyIntegration[1].toLowerCase();
+      if (INTEGRATION_DETAILS[slug]) return { route: integrationRoute(slug), conversationId: "" };
+    }
+    const integrationMatch = raw.match(/^integration\/([a-z0-9-]+)(?:\/.*)?$/i);
+    if (integrationMatch) {
+      const slug = integrationMatch[1].toLowerCase();
+      if (INTEGRATION_DETAILS[slug]) return { route: integrationRoute(slug), conversationId: "" };
+      return { route: "integrations", conversationId: "" };
+    }
     const separator = raw.indexOf("/");
     const requestedRoute = separator >= 0 ? raw.slice(0, separator) : raw;
-    const allowedRoutes = ["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"];
-    const route = allowedRoutes.includes(requestedRoute) ? requestedRoute : "inbox";
+    const route = APP_ROUTES.includes(requestedRoute) ? requestedRoute : "inbox";
     if (route !== "inbox" || separator < 0) return { route, conversationId: "" };
     let conversationId = "";
     try { conversationId = decodeURIComponent(raw.slice(separator + 1)); }
@@ -11785,6 +11815,10 @@
     const target = parseAppHash();
     state.pendingConversationId = target.conversationId || null;
     setRoute(target.route, { preserveLocation: true });
+    if (target.route !== "inbox") {
+      const canonical = `#${target.route}`;
+      if (location.hash !== canonical) replaceAppHash(canonical);
+    }
     if (!openConversation || target.route !== "inbox" || state.authStatus !== "authenticated") return;
     if (target.conversationId) {
       enterDeepLinkedConversationList(target.conversationId);
@@ -11804,7 +11838,7 @@
   function setRoute(route, { preserveLocation = false } = {}) {
     closeContactRouteMenu();
     closeContactPlatformMenu();
-    if (!["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"].includes(route)) route = "inbox";
+    if (!isAppRoute(route)) route = "inbox";
     // Permission demotions require an authenticated principal. Before /api/me
     // resolves, hasPermission is false for everything and would collapse every
     // deep link to Settings via the inbox fallback.
@@ -11838,7 +11872,7 @@
       panel.hidden = !active;
       panel.classList.toggle("is-active", active);
     });
-    const integrationSectionActive = route === "integrations" || route === "integration-tallyprime";
+    const integrationSectionActive = route === "integrations" || Boolean(integrationSlugFromRoute(route));
     document.querySelectorAll("[data-route]").forEach((button) => {
       const buttonRoute = button.dataset.route;
       const active = buttonRoute === route
@@ -11858,16 +11892,17 @@
       $("channelDataNavToggle").setAttribute("aria-expanded", "true");
       $("channelDataNavChildren").hidden = false;
     }
+    const integrationSlug = integrationSlugFromRoute(route);
     const labels = {
       inbox: "Inbox", contacts: "Contacts", campaigns: "Campaign", channels: "Channels",
       "whatsapp-templates": "WhatsApp Templates", "import-chat": "Import Chat",
       integrations: "Integration",
-      "integration-tallyprime": "TallyPrime",
       developer: "Developer API", team: "Team", roles: "Roles", workspace: "Workspace", automation: "Automation",
       settings: "Settings", support: "Support",
     };
-    $("pageTitle").textContent = labels[route];
-    updateBrowserTitle(labels[route]);
+    const pageLabel = labels[route] || INTEGRATION_DETAILS[integrationSlug]?.label || "Helixcer Chat";
+    $("pageTitle").textContent = pageLabel;
+    updateBrowserTitle(pageLabel);
     if (route === "settings") renderNotificationSetting();
     if (route === "workspace") loadWorkspaceProfile().catch(() => {});
     if (route === "automation") loadAutomationSettings().catch(() => {});

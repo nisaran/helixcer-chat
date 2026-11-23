@@ -109,7 +109,7 @@ test("single workspace profile stores organisation, address, and GST details", (
   assert.match(app, /if \(data\.workspace\)[\s\S]*?state\.workspaceProfileLoaded = true/);
   assert.match(app, /const editable = editablePermission && state\.workspaceProfileLoaded/);
   assert.match(html, /Only workspace owners and admins can edit these details/);
-  assert.match(app, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
+  assert.match(app, /const APP_ROUTES = \["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
   assert.match(styles, /\.workspace-form-grid \{[^}]*grid-template-columns: repeat\(2/);
   assert.match(styles, /\.workspace-profile-form \.text-field\[readonly\]/);
   assert.doesNotMatch(`${html}\n${app}`, /createWorkspace|deleteWorkspace|workspaceSwitcher/i);
@@ -206,19 +206,20 @@ test("Integration opens a grid page; TallyPrime card shows logo, detail, and con
   assert.doesNotMatch(html, /toggle-integration-nav/);
   assert.match(html, /id="integrationsRoute" data-route-panel="integrations"/);
   assert.match(html, /class="integrations-grid"/);
-  assert.match(html, /class="integration-card"[^>]*data-route="integration-tallyprime"/);
+  assert.match(html, /class="integration-card"[^>]*data-route="integration\/tallyprime"/);
   assert.match(html, /integration-tallyprime\.png/);
   assert.doesNotMatch(html, /integration-tallyprime\.svg/);
-  assert.match(html, /id="integrationTallyPrimeRoute" data-route-panel="integration-tallyprime"/);
+  assert.match(html, /id="integrationTallyPrimeRoute" data-route-panel="integration\/tallyprime"/);
   assert.match(html, /class="integration-back"[^>]*data-route="integrations"/);
   assert.match(html, /Download Helixcer TallyPrime connector/);
   assert.match(html, /api\.chat\.helixcer\.com\/downloads\/integrations\/tallyprime\/Helixcer-TallyPrime-Connector\.zip/);
   assert.doesNotMatch(html, /r2\.dev\/integrations\/tallyprime/);
   assert.match(html, /sale vouchers, receipt confirmations, outstanding reminders/);
   assert.match(app, /integrations: "Integration"/);
-  assert.match(app, /"integration-tallyprime": "TallyPrime"/);
-  assert.match(app, /"integrations", "integration-tallyprime"/);
-  assert.match(app, /route === "integrations" \|\| route === "integration-tallyprime"/);
+  assert.match(app, /tallyprime:\s*\{\s*label:\s*"TallyPrime"/);
+  assert.match(app, /integrationRoute\(slug\)/);
+  assert.match(app, /route === "integrations" \|\| Boolean\(integrationSlugFromRoute\(route\)\)/);
+  assert.match(app, /#integration\/\$\{slug\}|integration\/\$\{slug\}/);
   assert.doesNotMatch(app, /integrationNavToggle/);
   assert.match(styles, /\.integrations-grid/);
   assert.match(styles, /\.integration-card/);
@@ -1259,10 +1260,24 @@ test("Automation menu configures greeting and out of office replies", () => {
 
 test("roles hash survives reload and stays aligned with setRoute", () => {
   const parseHash = app.slice(app.indexOf("function parseAppHash"), app.indexOf("async function openPendingConversation"));
-  assert.match(parseHash, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
+  assert.match(parseHash, /APP_ROUTES\.includes\(requestedRoute\)/);
+  assert.match(parseHash, /integration\\\/\(\[a-z0-9-\]\+\)/);
+  assert.match(parseHash, /integration-\(\[a-z0-9-\]\+\)/);
   const setRouteFn = app.slice(app.indexOf("function setRoute"), app.indexOf("function whatsappImportChannels"));
-  assert.match(setRouteFn, /\["inbox", "contacts", "campaigns", "channels", "whatsapp-templates", "import-chat", "integrations", "integration-tallyprime", "developer", "team", "roles", "workspace", "automation", "settings", "support"\]/);
+  assert.match(setRouteFn, /if \(!isAppRoute\(route\)\) route = "inbox"/);
   assert.match(setRouteFn, /if \(!hasPermission\("roles\.manage"\) && route === "roles"\) route = "inbox"/);
+});
+
+test("integration detail hashes use #integration/<slug> and keep legacy #integration-<slug>", () => {
+  const parseHash = app.slice(app.indexOf("function parseAppHash"), app.indexOf("async function openPendingConversation"));
+  assert.match(parseHash, /INTEGRATION_DETAILS\[slug\]/);
+  assert.match(parseHash, /integrationRoute\(slug\)/);
+  assert.match(app, /tallyprime:\s*\{\s*label:\s*"TallyPrime"/);
+  assert.match(html, /data-route="integration\/tallyprime"/);
+  assert.match(html, /data-route-panel="integration\/tallyprime"/);
+  const applyRoute = app.slice(app.indexOf("async function applyLocationRoute"), app.indexOf("function setRoute"));
+  assert.match(applyRoute, /target\.route !== "inbox"/);
+  assert.match(applyRoute, /replaceAppHash\(canonical\)/);
 });
 
 test("session restore applies the hash route before revealing the shell", () => {
