@@ -614,14 +614,16 @@ Content-Type: application/json</code></pre></div>
             </div>
           </details>
           <details>
-            <summary>Named body variables <span class="tag">Named</span></summary>
-            <div class="detail"><p>Use the approved parameter names as object keys.</p>
+            <summary>Named header, body, and button variables <span class="tag">Named</span></summary>
+            <div class="detail"><p>Use the approved parameter names as object keys for header, body, and dynamic URL buttons.</p>
               <div class="code-card"><div class="code-head"><span>variables</span><button class="copy" type="button">Copy</button></div><pre><code>"variables": [
+  { "component": "header", "order_id": "1234" },
   {
     "component": "body",
     "customer_name": "Asha",
     "order_number": "ORD-1001"
-  }
+  },
+  { "component": "button", "index": 0, "order_id": "track-abc" }
 ]</code></pre></div>
             </div>
           </details>

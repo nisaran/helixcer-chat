@@ -658,6 +658,44 @@ test('maps Helixcer variables into Meta components for numbered and named placeh
   assert.throws(() => buildMetaComponentsFromHelixcerVariables([
     { component: 'body', '2': 'missing-one' }
   ]), /consecutive starting at 1/);
+
+  const namedHeaderButton = {
+    variables: [
+      { component: 'header', key: 'order_id', kind: 'text', parameterIndex: 0 },
+      { component: 'body', key: 'name', kind: 'text', parameterIndex: 0 },
+      { component: 'body', key: 'order', kind: 'text', parameterIndex: 1 },
+      { component: 'button', buttonIndex: 0, key: 'order_id', kind: 'url', parameterIndex: 0 }
+    ]
+  };
+  assert.deepEqual(buildMetaComponentsFromHelixcerVariables([
+    { component: 'header', order_id: '1234' },
+    { component: 'body', name: 'nisar', order: '2' },
+    { component: 'button', index: 0, order_id: '123' }
+  ], namedHeaderButton), [
+    { type: 'header', parameters: [{ type: 'text', text: '1234', parameter_name: 'order_id' }] },
+    {
+      type: 'body',
+      parameters: [
+        { type: 'text', text: 'nisar', parameter_name: 'name' },
+        { type: 'text', text: '2', parameter_name: 'order' }
+      ]
+    },
+    {
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [{ type: 'text', text: '123', parameter_name: 'order_id' }]
+    }
+  ]);
+
+  // Named Helixcer keys must not attach parameter_name onto a positional {{1}} URL slot.
+  assert.deepEqual(buildMetaComponentsFromHelixcerVariables([
+    { component: 'button', index: 0, order_id: 'track-abc' }
+  ], {
+    variables: [{ component: 'button', buttonIndex: 0, key: '1', kind: 'url', parameterIndex: 0 }]
+  }), [
+    { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'track-abc' }] }
+  ]);
 });
 
 test('infers Helixcer media and button parameter types from the approved template', () => {
@@ -766,6 +804,33 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
     { param_name: 'store_name', example: 'Helixcer' }
   ]);
   assert.equal(buildMetaWhatsAppTemplateCreatePayload(named).parameter_format, 'named');
+
+  const namedHeaderButton = validateWhatsAppTemplateCreateRequest({
+    channelId: 'wa-sales',
+    name: 'named_order_track',
+    language: 'en',
+    category: 'UTILITY',
+    parameterFormat: 'named',
+    header: { format: 'TEXT', text: 'Order {{order_id}}', example: { order_id: '1234' } },
+    body: {
+      text: 'Hi {{name}}, your order {{order}} is ready.',
+      examples: { name: 'nisar', order: '2' }
+    },
+    buttons: [
+      { type: 'URL', text: 'Track', url: 'https://example.com/orders/{{order_id}}', example: '123' }
+    ]
+  });
+  const namedHeaderButtonPayload = buildMetaWhatsAppTemplateCreatePayload(namedHeaderButton);
+  assert.deepEqual(namedHeaderButtonPayload.components[0].example.header_text_named_params, [
+    { param_name: 'order_id', example: '1234' }
+  ]);
+  assert.equal(namedHeaderButtonPayload.components[0].example.header_text, undefined);
+  assert.deepEqual(namedHeaderButtonPayload.components[1].example.body_text_named_params, [
+    { param_name: 'name', example: 'nisar' },
+    { param_name: 'order', example: '2' }
+  ]);
+  assert.equal(namedHeaderButtonPayload.components[2].buttons[0].url, 'https://example.com/orders/{{order_id}}');
+  assert.equal(namedHeaderButtonPayload.components[2].buttons[0].example[0], '123');
 
   assert.throws(() => validateWhatsAppTemplateCreateRequest({
     channelId: 'wa-sales', name: 'Bad Name', language: 'en_US', category: 'UTILITY',
@@ -941,6 +1006,36 @@ test('sanitizes Meta template definitions while retaining positional, named, med
   assert.equal('ignored_secret' in template, false);
   assert.equal('extra' in template.components[2].buttons[0], false);
   assert.equal(sanitizeWhatsAppTemplateDefinition({ name: 'Bad Name', language: 'en_US', status: 'APPROVED' }), null);
+
+  const namedHeader = sanitizeWhatsAppTemplateDefinition({
+    id: '987654321', name: 'named_order_track', language: 'en', status: 'APPROVED', category: 'UTILITY',
+    components: [
+      {
+        type: 'HEADER', format: 'TEXT', text: 'Order {{order_id}}',
+        example: { header_text_named_params: [{ param_name: 'order_id', example: '1234', ignored: 'no' }] }
+      },
+      {
+        type: 'BODY', text: 'Hi {{name}}, order {{order}}.',
+        example: {
+          body_text_named_params: [
+            { param_name: 'name', example: 'nisar' },
+            { param_name: 'order', example: '2' }
+          ]
+        }
+      },
+      {
+        type: 'BUTTONS',
+        buttons: [{ type: 'URL', text: 'Track', url: 'https://shop.example/orders/{{order_id}}', example: ['123'] }]
+      }
+    ]
+  });
+  assert.equal(namedHeader.components[0].example.header_text_named_params[0].param_name, 'order_id');
+  assert.deepEqual(namedHeader.variables.map(item => [item.component, item.key, item.kind, item.example]), [
+    ['header', 'order_id', 'text', '1234'],
+    ['body', 'name', 'text', 'nisar'],
+    ['body', 'order', 'text', '2'],
+    ['button', 'order_id', 'url', '123']
+  ]);
 });
 
 test('encrypts outbound template payloads with workspace and message binding', async () => {

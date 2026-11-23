@@ -1969,7 +1969,23 @@ function helixcerFindTemplateSlot(slots, entry, key, valueIndex) {
     slot = matches.find(item => Number(item?.parameterIndex) === Number(key) - 1)
       || matches[valueIndex];
   }
+  // Named caller keys can still fill a single positional {{1}} URL/text slot by position.
+  if (!slot && !/^\d+$/.test(key) && matches.length === 1 && /^\d+$/.test(String(matches[0]?.key || ''))) {
+    slot = matches[0];
+  }
+  if (!slot && !/^\d+$/.test(key) && matches.length) {
+    slot = matches[valueIndex] || null;
+  }
   return slot || null;
+}
+
+function helixcerNamedParameterName(slot, itemKey) {
+  const slotKey = slot?.key === undefined || slot?.key === null ? '' : String(slot.key);
+  // Never attach parameter_name onto a positional {{1}} slot — Meta counts that as missing (#132000).
+  if (slotKey && /^\d+$/.test(slotKey)) return null;
+  if (slotKey && slotKey !== 'media' && !/^\d+$/.test(slotKey)) return slotKey;
+  if (!/^\d+$/.test(itemKey) && itemKey !== 'media') return itemKey;
+  return null;
 }
 
 function helixcerParameterFromTemplateSlot(entry, item, valueIndex, slots, entryIndex) {
@@ -1981,11 +1997,8 @@ function helixcerParameterFromTemplateSlot(entry, item, valueIndex, slots, entry
   }
   if (kind === 'url' || kind === 'text' || !slot) {
     const parameter = { type: 'text', text: item.value.slice(0, 1024) };
-    if (slot?.key && !/^\d+$/.test(String(slot.key)) && String(slot.key) !== 'media') {
-      parameter.parameter_name = String(slot.key);
-    } else if (!/^\d+$/.test(item.key) && item.key !== 'media') {
-      parameter.parameter_name = item.key;
-    }
+    const parameterName = helixcerNamedParameterName(slot, item.key);
+    if (parameterName) parameter.parameter_name = parameterName;
     return parameter;
   }
   if (kind === 'quick_reply' || entry.subType === 'quick_reply') {
@@ -6996,7 +7009,7 @@ function parseWhatsAppTemplateWriteRequest(payload, { requireTemplateId = false,
       const examples = normalizeTemplateCreateExamples(
         payload.header.example === undefined ? payload.header.examples : payload.header.example,
         headerKeys, 'Header');
-      header = { format: 'TEXT', text, examples };
+      header = { format: 'TEXT', text, examples, keys: headerKeys };
     } else if (WHATSAPP_TEMPLATE_CREATE_MEDIA_HEADER_FORMATS.has(format)) {
       const rawHandle = payload.header.headerHandle ?? payload.header.header_handle
         ?? (isPlainObject(payload.header.example) ? payload.header.example.header_handle : null)
@@ -7186,7 +7199,17 @@ export function buildMetaWhatsAppTemplateComponents(input) {
   const components = [];
   if (input.header?.format === 'TEXT') {
     const component = { type: 'HEADER', format: 'TEXT', text: input.header.text };
-    if (input.header.examples?.length) component.example = { header_text: input.header.examples };
+    const headerKeys = Array.isArray(input.header.keys) ? input.header.keys : [];
+    if (headerKeys.length && input.header.examples?.length) {
+      component.example = input.parameterFormat === 'named'
+        ? {
+          header_text_named_params: headerKeys.map((key, index) => ({
+            param_name: key,
+            example: input.header.examples[index]
+          }))
+        }
+        : { header_text: input.header.examples };
+    }
     components.push(component);
   } else if (WHATSAPP_TEMPLATE_CREATE_MEDIA_HEADER_FORMATS.has(input.header?.format)) {
     const component = { type: 'HEADER', format: input.header.format };
@@ -7859,14 +7882,31 @@ function sanitizeWhatsAppTemplateComponent(value, componentIndex) {
   const examples = type === 'header'
     ? (example.header_text || [])
     : (Array.isArray(example.body_text?.[0]) ? example.body_text[0] : []);
+  const namedExampleParams = type === 'header'
+    ? example.header_text_named_params
+    : type === 'body'
+      ? example.body_text_named_params
+      : null;
   for (const [parameterIndex, key] of templatePlaceholders(text).entries()) {
+    let exampleValue = examples[parameterIndex] || '';
+    if (!exampleValue && Array.isArray(namedExampleParams)) {
+      const named = namedExampleParams.find(item => item?.param_name === key);
+      if (named?.example) exampleValue = named.example;
+    }
     variables.push({ component: type, componentIndex, parameterIndex, key,
-      kind: 'text', example: examples[parameterIndex] || '' });
+      kind: 'text', example: exampleValue });
   }
   if (type === 'body' && Array.isArray(example.body_text_named_params)) {
     for (const named of example.body_text_named_params) {
       if (variables.some(variable => variable.key === named.param_name)) continue;
       variables.push({ component: 'body', componentIndex, parameterIndex: variables.length,
+        key: named.param_name, kind: 'text', example: named.example });
+    }
+  }
+  if (type === 'header' && Array.isArray(example.header_text_named_params)) {
+    for (const named of example.header_text_named_params) {
+      if (variables.some(variable => variable.key === named.param_name)) continue;
+      variables.push({ component: 'header', componentIndex, parameterIndex: variables.length,
         key: named.param_name, kind: 'text', example: named.example });
     }
   }
@@ -7906,6 +7946,16 @@ function sanitizeWhatsAppTemplateButton(value) {
   return button;
 }
 
+function sanitizeWhatsAppTemplateNamedParams(value, maximum = 50) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, maximum).flatMap(item => {
+    if (!isPlainObject(item)) return [];
+    const paramName = providerIdentifier(item.param_name, 100);
+    if (!paramName) return [];
+    return [{ param_name: paramName, example: providerText(item.example, 1024) }];
+  });
+}
+
 function sanitizeWhatsAppTemplateExample(value) {
   if (!isPlainObject(value)) return {};
   const result = {};
@@ -7917,14 +7967,10 @@ function sanitizeWhatsAppTemplateExample(value) {
       ? row.slice(0, 50).map(item => providerText(item, 1024))
       : []);
   }
-  if (Array.isArray(value.body_text_named_params)) {
-    result.body_text_named_params = value.body_text_named_params.slice(0, 50).flatMap(item => {
-      if (!isPlainObject(item)) return [];
-      const paramName = providerIdentifier(item.param_name, 100);
-      if (!paramName) return [];
-      return [{ param_name: paramName, example: providerText(item.example, 1024) }];
-    });
-  }
+  const headerNamed = sanitizeWhatsAppTemplateNamedParams(value.header_text_named_params, 20);
+  if (headerNamed.length) result.header_text_named_params = headerNamed;
+  const bodyNamed = sanitizeWhatsAppTemplateNamedParams(value.body_text_named_params, 50);
+  if (bodyNamed.length) result.body_text_named_params = bodyNamed;
   return result;
 }
 
