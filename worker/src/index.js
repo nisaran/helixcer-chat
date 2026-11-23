@@ -1,3 +1,4 @@
+import { downloadVoucherMedia, uploadVoucherMedia, voucherMediaPath } from './voucher-media.js';
 import { applyCampaignActions, campaignDispatchState } from './campaign-controls.js';
 import {
   acceptInvitationWithPassword,
@@ -1247,9 +1248,20 @@ async function handleExternalApi(request, env, ctx, url) {
     if (request.headers.get('Origin')) {
       throw apiError(403, 'server_to_server_only', 'This API is for server-to-server requests and does not accept browser Origin headers.');
     }
+    if (request.method === 'GET' && url.pathname === voucherMediaPath + '/download') {
+      return await downloadVoucherMedia(env, url);
+    }
     const apiPrincipal = await authenticateApiKey(request, env);
     const rateLimited = await enforceExternalApiRateLimit(env, apiPrincipal, requestId);
     if (rateLimited) return rateLimited;
+
+    if (request.method === 'POST' && url.pathname === voucherMediaPath) {
+      requireApiScope(apiPrincipal, 'whatsapp:template:send');
+      const result = await uploadVoucherMedia(request, env, url, apiPrincipal.workspaceId, apiError);
+      const response = json({ status: true, ...result, requestId }, 201);
+      response.headers.set('X-Request-Id', requestId);
+      return response;
+    }
 
     if (url.pathname === '/api/v1/whatsapp/template-messages' && request.method === 'POST') {
       requireApiScope(apiPrincipal, 'whatsapp:template:send');
