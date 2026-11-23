@@ -71,7 +71,7 @@ export async function downloadVoucherMedia(env, url) {
   const valid = await crypto.subtle.verify('HMAC', key, Uint8Array.from(atob(signature), char => char.charCodeAt(0)),
     encoder.encode(expires + '\n' + objectKey));
   if (!valid) return new Response(null, { status: 404 });
-  const object = (await env.TALLYPRIME_MEDIA.get(objectKey)) ?? (await env.VOUCHER_MEDIA?.get(objectKey));
+  const object = await env.TALLYPRIME_MEDIA.get(objectKey);
   if (!object) return new Response(null, { status: 404 });
   return new Response(object.body, { headers: {
     'Content-Type': 'application/pdf',
