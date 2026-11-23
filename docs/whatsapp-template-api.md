@@ -316,15 +316,17 @@ Each array item names a component and supplies Meta placeholder values as `"1":"
 ]
 ```
 
-Named templates use the approved parameter name as the key:
+Named templates use the approved parameter name as the key for header, body, and URL button slots:
 
 ```json
 "variables": [
+  { "component": "header", "order_id": "1234" },
   {
     "component": "body",
     "customer_name": "Asha",
     "order_number": "ORD-1001"
-  }
+  },
+  { "component": "button", "index": 0, "order_id": "track-abc" }
 ]
 ```
 
@@ -442,7 +444,7 @@ Do not mix named and positional parameters in one component. Use the parameter s
 
 ### Text header
 
-Use a `header` component when the approved header contains a text variable.
+Use a `header` component when the approved header contains a text variable. For named templates, include `parameter_name` on the header value as well.
 
 ```json
 {
@@ -467,6 +469,21 @@ Use a `header` component when the approved header contains a text variable.
       }
     ]
   }
+}
+```
+
+Named header example:
+
+```json
+{
+  "type": "header",
+  "parameters": [
+    {
+      "type": "text",
+      "parameter_name": "order_id",
+      "text": "ORD-1001"
+    }
+  ]
 }
 ```
 
@@ -636,6 +653,23 @@ For a URL ending in an approved variable, send only the variable value. `index` 
 ```
 
 If the approved URL is `https://example.com/orders/{{1}}`, the final URL becomes `https://example.com/orders/ORD-1001`. Do not send the complete URL as the parameter unless that is how the approved template is defined.
+
+For named URL variables such as `https://example.com/orders/{{order_id}}`, include `parameter_name`:
+
+```json
+{
+  "type": "button",
+  "sub_type": "url",
+  "index": "0",
+  "parameters": [
+    {
+      "type": "text",
+      "parameter_name": "order_id",
+      "text": "ORD-1001"
+    }
+  ]
+}
+```
 
 ### Quick-reply button
 

@@ -180,6 +180,39 @@ test('template inbox preview renders approved copy, runtime values, footer, and 
     'Thank you',
     'Actions: View invoice, Need help'
   ].join('\n'));
+
+  const namedRendered = renderWhatsAppTemplatePreview({
+    components: [
+      { type: 'header', format: 'text', text: 'Order {{order_id}}' },
+      { type: 'body', text: 'Hi {{name}}, your order {{order}} is ready.' },
+      {
+        type: 'buttons',
+        buttons: [{ type: 'url', text: 'Track', url: 'https://example.com/orders/{{order_id}}' }]
+      }
+    ]
+  }, {
+    components: [
+      { type: 'header', parameters: [{ type: 'text', parameter_name: 'order_id', text: '1234' }] },
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', parameter_name: 'name', text: 'nisar' },
+          { type: 'text', parameter_name: 'order', text: '2' }
+        ]
+      },
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: '0',
+        parameters: [{ type: 'text', parameter_name: 'order_id', text: '123' }]
+      }
+    ]
+  });
+  assert.equal(namedRendered, [
+    'Order 1234',
+    'Hi nisar, your order 2 is ready.',
+    'Actions: Track'
+  ].join('\n'));
 });
 
 test('public Developer API preflight and rate-limit errors use the status envelope', async () => {
