@@ -7,8 +7,8 @@
   <meta name="helixcer-api-base" content="https://api.chat.helixcer.com">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.chat.helixcer.com; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
   <title>Helixcer Admin</title>
-  <link rel="stylesheet" href="./admin.css?v=20261105-logo">
-  <script src="./admin.js" defer></script>
+  <link rel="stylesheet" href="./admin.css?v=20261123-notifications">
+  <script src="./admin.js?v=20261123-notifications" defer></script>
   <link rel="icon" href="../assets/helixcer-chat-32.png?v=20261105-logo" type="image/png">
 </head>
 <body>
@@ -37,6 +37,7 @@
       <button class="tab is-active" type="button" data-tab="clients">Clients</button>
       <button class="tab" type="button" data-tab="overview">Overview</button>
       <button class="tab" type="button" data-tab="admins">Platform admins</button>
+      <button class="tab" type="button" data-tab="notifications">Notifications</button>
     </nav>
 
     <main class="main">
@@ -71,6 +72,52 @@
             </table>
           </div>
           <p class="empty" id="clientsEmpty" hidden>No client companies yet. Create the first one.</p>
+        </section>
+      </section>
+
+      <section data-panel="notifications" hidden>
+        <section class="surface">
+          <div class="surface-head">
+            <div>
+              <h2>Notifications</h2>
+              <p class="copy">Create announcements and push them to logged-in users. They appear under the bell icon in Helixcer Chat.</p>
+            </div>
+          </div>
+          <form class="notification-form" id="notificationForm" autocomplete="off">
+            <div class="form-grid">
+              <label class="field">Title<input class="input" name="title" required maxlength="160" placeholder="Maintenance window tonight"></label>
+              <label class="field">Optional link<input class="input" name="linkUrl" maxlength="500" placeholder="#integrations or https://…"></label>
+            </div>
+            <label class="field">Message<textarea class="input textarea" name="body" required maxlength="4000" rows="4" placeholder="Write the notification users should see."></textarea></label>
+            <div class="form-grid audience-grid">
+              <label class="field">Audience
+                <select class="input select" name="audience" id="notificationAudience">
+                  <option value="all">All active users</option>
+                  <option value="workspace">One workspace</option>
+                  <option value="email">One login email</option>
+                </select>
+              </label>
+              <label class="field" id="notificationWorkspaceField" hidden>Workspace
+                <select class="input select" name="workspaceId" id="notificationWorkspace">
+                  <option value="">Select workspace</option>
+                </select>
+              </label>
+              <label class="field" id="notificationEmailField" hidden>Login email
+                <input class="input" name="targetEmail" id="notificationEmail" type="email" maxlength="254" placeholder="user@company.com">
+              </label>
+            </div>
+            <div class="notification-actions">
+              <button class="button button-secondary" type="submit" name="intent" value="draft">Save draft</button>
+              <button class="button button-primary" type="submit" name="intent" value="send">Push now</button>
+            </div>
+          </form>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Title</th><th>Audience</th><th>Status</th><th class="num">Recipients</th><th>Created</th><th></th></tr></thead>
+              <tbody id="notificationRows"></tbody>
+            </table>
+          </div>
+          <p class="empty" id="notificationsEmpty" hidden>No notifications yet.</p>
         </section>
       </section>
 

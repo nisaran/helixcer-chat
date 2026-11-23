@@ -1,7 +1,7 @@
 'use strict';
 
 const API_BASE = (document.querySelector('meta[name="helixcer-api-base"]')?.content || '').replace(/\/$/, '');
-const state = { me: null, clients: [], detail: null, tab: 'clients' };
+const state = { me: null, clients: [], detail: null, tab: 'clients', notifications: [], notificationWorkspaces: [] };
 const $ = id => document.getElementById(id);
 
 function showGate(message) {
@@ -111,6 +111,7 @@ function setTab(tab) {
   if (tab === 'overview') loadOverview();
   if (tab === 'admins') loadAdmins();
   if (tab === 'clients') loadClients();
+  if (tab === 'notifications') loadNotifications();
 }
 
 /* Overview */
@@ -484,6 +485,160 @@ $('deleteClient').addEventListener('click', async () => {
       state.detail = null;
       toast('Workspace permanently deleted.');
       await Promise.all([loadClients(), loadOverview()]);
+    } catch (error) {
+      handleError(error);
+    }
+  });
+});
+
+/* Notifications */
+function audienceLabel(item) {
+  if (item.audience === 'workspace') return `Workspace · ${item.workspaceId || '—'}`;
+  if (item.audience === 'email') {
+    return item.workspaceId
+      ? `Email · ${item.targetEmail} · ${item.workspaceId}`
+      : `Email · ${item.targetEmail || '—'}`;
+  }
+  return 'All active users';
+}
+
+function syncNotificationAudienceFields() {
+  const audience = $('notificationAudience')?.value || 'all';
+  const workspaceField = $('notificationWorkspaceField');
+  const emailField = $('notificationEmailField');
+  if (workspaceField) workspaceField.hidden = audience === 'all';
+  if (emailField) emailField.hidden = audience !== 'email';
+  const workspace = $('notificationWorkspace');
+  if (workspace) workspace.required = audience === 'workspace';
+  const email = $('notificationEmail');
+  if (email) email.required = audience === 'email';
+}
+
+async function ensureNotificationWorkspaces() {
+  if (state.notificationWorkspaces.length) return state.notificationWorkspaces;
+  const data = await api('/api/platform/clients');
+  state.notificationWorkspaces = data.items || [];
+  const select = $('notificationWorkspace');
+  if (!select) return state.notificationWorkspaces;
+  select.replaceChildren();
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = 'Select workspace';
+  select.append(blank);
+  state.notificationWorkspaces.forEach(item => {
+    const option = document.createElement('option');
+    option.value = item.workspaceId;
+    option.textContent = `${item.name} (${item.slug})`;
+    select.append(option);
+  });
+  return state.notificationWorkspaces;
+}
+
+async function loadNotifications() {
+  try {
+    await ensureNotificationWorkspaces();
+    syncNotificationAudienceFields();
+    const data = await api('/api/platform/notifications');
+    state.notifications = data.items || [];
+    const rows = $('notificationRows');
+    rows.replaceChildren();
+    $('notificationsEmpty').hidden = state.notifications.length > 0;
+    state.notifications.forEach(item => {
+      const row = document.createElement('tr');
+      const title = cell(item.title, 'name');
+      const preview = document.createElement('span');
+      preview.className = 'sub';
+      preview.textContent = item.body;
+      title.append(preview);
+      row.append(title);
+      row.append(cell(audienceLabel(item)));
+      const status = document.createElement('td');
+      const chip = document.createElement('span');
+      chip.className = `chip${item.status === 'sent' ? '' : ' is-muted'}`;
+      chip.textContent = item.status;
+      status.append(chip);
+      row.append(status);
+      row.append(cell(String(item.recipientCount || 0), 'num'));
+      row.append(cell(when(item.sentAt || item.createdAt)));
+      const actions = document.createElement('td');
+      actions.className = 'row-actions';
+      if (item.status !== 'sent') {
+        const push = document.createElement('button');
+        push.type = 'button';
+        push.className = 'button button-primary mini';
+        push.textContent = 'Push';
+        push.addEventListener('click', () => pushNotification(item));
+        actions.append(push);
+      }
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'button button-quiet mini';
+      remove.textContent = 'Delete';
+      remove.addEventListener('click', () => deleteNotification(item));
+      actions.append(remove);
+      row.append(actions);
+      rows.append(row);
+    });
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+async function pushNotification(item) {
+  if (!confirm(`Push “${item.title}” to matching users now?`)) return;
+  try {
+    const result = await api(`/api/platform/notifications/${encodeURIComponent(item.notificationId)}/send`, {
+      method: 'POST', body: {}
+    });
+    toast(`Pushed to ${result.recipientCount || 0} recipient(s).`);
+    await loadNotifications();
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+async function deleteNotification(item) {
+  if (!confirm(`Delete notification “${item.title}”?`)) return;
+  try {
+    await api(`/api/platform/notifications/${encodeURIComponent(item.notificationId)}`, { method: 'DELETE' });
+    toast('Notification deleted.');
+    await loadNotifications();
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+$('notificationAudience')?.addEventListener('change', syncNotificationAudienceFields);
+
+$('notificationForm')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submitter = event.submitter;
+  const intent = submitter?.value || 'draft';
+  const values = Object.fromEntries(new FormData(form).entries());
+  const payload = {
+    title: values.title,
+    body: values.body,
+    linkUrl: values.linkUrl || '',
+    audience: values.audience || 'all',
+    workspaceId: values.workspaceId || '',
+    targetEmail: values.targetEmail || '',
+    send: intent === 'send'
+  };
+  if (payload.audience === 'all') {
+    payload.workspaceId = '';
+    payload.targetEmail = '';
+  }
+  if (payload.audience === 'workspace') payload.targetEmail = '';
+  await withBusy(submitter, async () => {
+    try {
+      const result = await api('/api/platform/notifications', { method: 'POST', body: payload });
+      toast(result.item?.status === 'sent'
+        ? `Notification pushed to ${result.recipientCount || result.item?.recipientCount || 0} recipient(s).`
+        : 'Draft saved.');
+      form.reset();
+      syncNotificationAudienceFields();
+      await loadNotifications();
     } catch (error) {
       handleError(error);
     }

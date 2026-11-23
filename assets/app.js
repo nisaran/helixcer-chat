@@ -197,6 +197,10 @@
     pushPaused: false,
     pushConfigError: false,
     lastNotificationAt: new Map(),
+    platformNotifications: [],
+    platformNotificationUnread: 0,
+    platformNotificationsOpen: false,
+    platformNotificationsLoading: false,
     confirmationResolve: null,
     loading: true,
   };
@@ -1829,6 +1833,23 @@
       return this.isDemo ? this.demo.me() : this.request("/api/me");
     }
 
+    listPlatformNotifications() {
+      if (this.isDemo) {
+        return Promise.resolve({ ok: true, unreadCount: 0, items: state.platformNotifications || [] });
+      }
+      return this.request("/api/notifications");
+    }
+
+    markPlatformNotificationRead(notificationId) {
+      if (this.isDemo) return Promise.resolve({ ok: true, updated: true });
+      return this.request(`/api/notifications/${encodeURIComponent(notificationId)}/read`, { method: "POST" });
+    }
+
+    markAllPlatformNotificationsRead() {
+      if (this.isDemo) return Promise.resolve({ ok: true, updated: 0 });
+      return this.request("/api/notifications/read-all", { method: "POST" });
+    }
+
     updateProfile(payload) {
       return this.isDemo
         ? this.demo.updateProfile(payload)
@@ -2812,6 +2833,7 @@
     renderCurrentUser();
     applyPermissions();
     startRealtime();
+    loadPlatformNotifications().catch(() => {});
   }
 
   function renderCurrentUser() {
@@ -11333,6 +11355,35 @@
       }
       return;
     }
+    if (type === "platform.notification") {
+      const membershipId = String(state.currentUser?.membershipId || "");
+      const targets = Array.isArray(event.membershipIds) ? event.membershipIds.map(String) : [];
+      if (targets.length && membershipId && !targets.includes(membershipId)) return;
+      const note = event.notification || {};
+      const notificationId = String(note.notificationId || "");
+      if (!notificationId) {
+        await loadPlatformNotifications();
+        return;
+      }
+      const existing = state.platformNotifications.find((item) => item.notificationId === notificationId);
+      if (!existing) {
+        state.platformNotifications.unshift({
+          notificationId,
+          title: note.title || "Notification",
+          body: note.body || "",
+          linkUrl: note.linkUrl || "",
+          deliveredAt: note.createdAt || new Date().toISOString(),
+          sentAt: note.createdAt || new Date().toISOString(),
+          readAt: "",
+          unread: true
+        });
+        state.platformNotificationUnread += 1;
+        renderPlatformNotifications();
+      } else {
+        await loadPlatformNotifications();
+      }
+      return;
+    }
     if (type === "workspace.updated") {
       const workspace = event.workspace || event.item || event.data;
       if (workspace && typeof workspace === "object") {
@@ -15049,6 +15100,118 @@
     const shouldOpen = typeof force === "boolean" ? force : menu.hidden;
     menu.hidden = !shouldOpen;
     $("userMenuButton").setAttribute("aria-expanded", String(shouldOpen));
+    if (shouldOpen) closeNotificationPanel();
+  }
+
+  function closeNotificationPanel() {
+    const panel = $("notificationPanel");
+    const button = $("notificationBellButton");
+    if (panel) panel.hidden = true;
+    if (button) button.setAttribute("aria-expanded", "false");
+    state.platformNotificationsOpen = false;
+  }
+
+  function toggleNotificationPanel(force) {
+    const panel = $("notificationPanel");
+    if (!panel) return;
+    const shouldOpen = typeof force === "boolean" ? force : panel.hidden;
+    panel.hidden = !shouldOpen;
+    $("notificationBellButton")?.setAttribute("aria-expanded", String(shouldOpen));
+    state.platformNotificationsOpen = shouldOpen;
+    if (shouldOpen) {
+      toggleUserMenu(false);
+      loadPlatformNotifications().catch(() => {});
+    }
+  }
+
+  function renderPlatformNotifications() {
+    const badge = $("notificationBellBadge");
+    const list = $("notificationPanelList");
+    if (!badge || !list) return;
+    const unread = Number(state.platformNotificationUnread || 0);
+    if (unread > 0) {
+      badge.hidden = false;
+      badge.textContent = unread > 99 ? "99+" : String(unread);
+    } else {
+      badge.hidden = true;
+      badge.textContent = "0";
+    }
+    const items = state.platformNotifications || [];
+    if (!items.length) {
+      list.replaceChildren(element("p", "notification-empty", "No notifications yet."));
+      return;
+    }
+    list.replaceChildren(...items.map((item) => {
+      const button = element("button", `notification-item${item.unread || !item.readAt ? " is-unread" : ""}`);
+      button.type = "button";
+      button.dataset.action = "open-platform-notification";
+      button.dataset.notificationId = item.notificationId;
+      if (item.linkUrl) button.dataset.linkUrl = item.linkUrl;
+      button.append(
+        element("strong", "", item.title || "Notification"),
+        element("span", "", item.body || ""),
+        element("em", "", relativeTime(item.sentAt || item.deliveredAt || ""))
+      );
+      return button;
+    }));
+  }
+
+  async function loadPlatformNotifications() {
+    if (!state.api || state.authStatus !== "authenticated" || state.platformNotificationsLoading) return;
+    state.platformNotificationsLoading = true;
+    try {
+      const data = await state.api.listPlatformNotifications();
+      state.platformNotifications = Array.isArray(data?.items) ? data.items : [];
+      state.platformNotificationUnread = Number(data?.unreadCount || 0);
+      renderPlatformNotifications();
+    } catch {
+      /* keep last known list */
+    } finally {
+      state.platformNotificationsLoading = false;
+    }
+  }
+
+  async function markPlatformNotificationRead(notificationId) {
+    if (!notificationId) return;
+    try {
+      await state.api.markPlatformNotificationRead(notificationId);
+      state.platformNotifications = state.platformNotifications.map((item) => (
+        item.notificationId === notificationId ? { ...item, readAt: new Date().toISOString(), unread: false } : item
+      ));
+      state.platformNotificationUnread = state.platformNotifications.filter((item) => item.unread || !item.readAt).length;
+      renderPlatformNotifications();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function markAllPlatformNotificationsRead() {
+    try {
+      await state.api.markAllPlatformNotificationsRead();
+      const now = new Date().toISOString();
+      state.platformNotifications = state.platformNotifications.map((item) => ({ ...item, readAt: item.readAt || now, unread: false }));
+      state.platformNotificationUnread = 0;
+      renderPlatformNotifications();
+    } catch (error) {
+      showToast("Could not update notifications", error.message, true);
+    }
+  }
+
+  async function openPlatformNotification(notificationId, linkUrl) {
+    await markPlatformNotificationRead(notificationId);
+    closeNotificationPanel();
+    const target = String(linkUrl || "").trim();
+    if (!target) return;
+    if (target.startsWith("#")) {
+      location.hash = target;
+      await applyLocationRoute();
+      return;
+    }
+    if (target.startsWith("/")) {
+      location.assign(target);
+      return;
+    }
+    if (/^https?:\/\//i.test(target)) window.open(target, "_blank", "noopener,noreferrer");
   }
 
   function setProfileFormBusy(busy) {
@@ -16336,6 +16499,10 @@
       if (!event.target.closest(".conversation-filter-desktop")) closeConversationFilterMenu();
       if (!event.target.closest(".conversation-menu-wrap")) closeConversationActionMenu();
       if (!event.target.closest(".composer-route-wrap")) closeComposerRouteMenu();
+      if (!event.target.closest(".notification-bell-wrap") && !event.target.closest("[data-action='toggle-notifications']")) {
+        closeNotificationPanel();
+      }
+      if (!event.target.closest(".user-menu-wrap")) toggleUserMenu(false);
       const routeButton = event.target.closest("[data-route]");
       if (routeButton) { setRoute(routeButton.dataset.route); return; }
       const actionButton = event.target.closest("[data-action]");
@@ -16686,6 +16853,11 @@
         const actions = {
           "toggle-composer-route-menu": toggleComposerRouteMenu,
           "toggle-user-menu": () => toggleUserMenu(),
+          "toggle-notifications": () => toggleNotificationPanel(),
+          "mark-all-notifications-read": () => { markAllPlatformNotificationsRead().catch(() => {}); },
+          "open-platform-notification": () => {
+            openPlatformNotification(actionButton.dataset.notificationId, actionButton.dataset.linkUrl).catch(() => {});
+          },
           "open-profile": openProfileDialog,
           "close-profile": () => $("profileDialog").close(),
           "show-forgot-password": () => {
