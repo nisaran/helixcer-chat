@@ -71,10 +71,10 @@ Content-Type: application/json
 
 | Field | Required | Description |
 |---|---:|---|
-| `name` | Yes | Display name. Alias: `displayName`. Max 120 characters. |
-| `company` | No | Max 160 characters. |
-| `tags` | No | Array of up to 20 tags, each up to 40 characters. |
-| `platformIds` | Yes | Object with at least one of `whatsapp`, `telegram`, `instagram`, `facebook`, `email`. WhatsApp values are normalized to digits (`^[1-9]\d{7,14}$`). Email is lowercased. |
+| `name` | Yes | Display name. Alias: `displayName`. See [Contact fields](#contact-fields). |
+| `company` | No | Optional. See [Contact fields](#contact-fields). |
+| `tags` | No | Optional. See [Contact fields](#contact-fields). |
+| `platformIds` | Yes | At least one platform ID. See [Contact fields](#contact-fields) for keys. |
 
 ### Accepted response · `201 Created`
 
@@ -96,6 +96,44 @@ Content-Type: application/json
       "email": "asha@example.com"
     }
   }
+}
+```
+
+## Contact fields
+
+Use only these parameter names. Unknown keys are rejected. The same profile fields apply on [Add a contact](#contacts--add-a-contact) and on the optional `contact` object for WhatsApp template sends.
+
+### Profile fields
+
+| Parameter | Type | Where | Description |
+|---|---|---|---|
+| `name` | string | Create · Template `contact` | Contact display name. Max 120 characters. Alias: `displayName`. When both `name` and `displayName` are sent they must match. Required on create; optional on template sends. |
+| `displayName` | string | Create · Template `contact` | Same value as `name`. Prefer one; do not send conflicting values. |
+| `company` | string | Create · Template `contact` | Company or organization. Max 160 characters. Optional. |
+| `tags` | string[] | Create · Template `contact` | Up to 20 tags, each up to 40 characters. On template sends, a supplied array replaces the contact's current tags. |
+
+### Platform IDs · create only
+
+Required on `POST /api/v1/contacts`. Include at least one non-empty ID. Not accepted inside the template-send `contact` object (the recipient is `to`).
+
+| Parameter | Type | Description |
+|---|---|---|
+| `platformIds` | object | Map of platform → ID. Allowed keys only: |
+| `platformIds.whatsapp` | string | International digits only, for example `919999999999` (`^[1-9]\d{7,14}$`). |
+| `platformIds.telegram` | string | Telegram user or chat ID. |
+| `platformIds.instagram` | string | Instagram-scoped user ID. |
+| `platformIds.facebook` | string | Facebook Page-scoped user ID (Messenger). |
+| `platformIds.email` | string | Email address (stored lowercased). |
+
+### Omit vs clear on template sends
+
+On template endpoints, include only the `contact` fields you want to change. **Omitted** fields keep their existing values. Send `""` or `null` (or `[]` / `null` for tags) to clear a field on an existing contact, or to store it empty on a new contact. Example: `"company":""`.
+
+```json
+"contact": {
+  "name": "Asha",
+  "company": "Acme Retail",
+  "tags": ["VIP", "Orders"]
 }
 ```
 
@@ -145,10 +183,10 @@ Content-Type: application/json
 |---|---:|---|
 | `channelId` | Yes | Helixcer ID of the saved WhatsApp channel that sends the message. |
 | `to` | Yes | Recipient's WhatsApp number in international format, using digits only. Example: `919999999999`. |
-| `contact` | No | Optional contact fields to save or update on the recipient. Include only the fields you want to change. Omitted fields keep their existing values. Send `""` or `null` (or `[]` / `null` for tags) to clear a field on an existing contact, or to store it empty on a new contact. |
-| `contact.name` | No | Contact display name. Alias: `displayName`. When both are sent they must match. Empty string or `null` clears the name. |
-| `contact.company` | No | Company or organization stored on the contact. Empty string or `null` clears the company. |
-| `contact.tags` | No | Array of tag strings. When provided, replaces the contact's current tags. `[]` or `null` clears all tags. |
+| `contact` | No | Optional profile fields to save or update on the recipient. Accepted keys: `name` (alias `displayName`), `company`, `tags`. Full list and clear rules: [Contact fields](#contact-fields). |
+| `contact.name` | No | Display name. Alias: `displayName`. Empty string or `null` clears the name. |
+| `contact.company` | No | Company or organization. Empty string or `null` clears the company. |
+| `contact.tags` | No | Tag string array; replaces current tags when provided. `[]` or `null` clears all tags. |
 | `clientReference` | No | Your order, ticket, campaign, or transaction identifier. It is stored with and returned on the message for reconciliation. |
 | `previewText` | No | Optional inbox-text override. When omitted, Helixcer renders the approved Meta template with the supplied variables, media, footer, and action labels. This does not change the WhatsApp payload. |
 | `template` | Yes | Meta-native template object. `name` and `language.code` are required; `components` is included when the approved template expects parameters. |
@@ -298,7 +336,7 @@ X-Workspace-Id: b0963871-a454-4fb8-94eb-80464e2358b0
 |---|---:|---|
 | `channelId` | Yes | Helixcer ID of the WhatsApp channel. |
 | `to` | Yes | Recipient WhatsApp number in international digits-only format. |
-| `contact` | No | Same optional contact fields as the Meta endpoint. |
+| `contact` | No | Same optional profile fields as the Meta endpoint: `name` / `displayName`, `company`, `tags`. See [Contact fields](#contact-fields). |
 | `clientReference` | No | Your order, ticket, campaign, or transaction ID. |
 | `previewText` | No | Optional inbox-text override. |
 | `template` | Yes | Template identity only: `name` and `language.code`. Do not send Meta `components` here. |
