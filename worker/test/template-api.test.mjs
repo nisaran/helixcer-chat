@@ -476,7 +476,7 @@ test('external template API preserves existing conversation status on send', asy
 });
 
 test('external template API updates contact fields only when supplied and keeps omitted values', async () => {
-  const { database, env } = await fixture();
+  const { database, env, broadcasts } = await fixture();
   const token = `hxc_live_contact1.${'c'.repeat(43)}`;
   await insertKey(database, token, 'key-contact-name', 'hxc_live_contact1');
   const originalFetch = globalThis.fetch;
@@ -504,6 +504,10 @@ test('external template API updates contact fields only when supplied and keeps 
     assert.equal(contact.company, 'Acme');
     assert.deepEqual(JSON.parse(contact.tags_json), ['VIP']);
     assert.equal(database.prepare('SELECT display_name FROM channel_identities WHERE contact_id=?').get(contactId).display_name, 'Original name');
+    let conversation = database.prepare('SELECT subject,tags_json,channel_id FROM conversations WHERE contact_id=?').get(contactId);
+    assert.equal(conversation.subject, 'Original name');
+    assert.deepEqual(JSON.parse(conversation.tags_json), ['VIP']);
+    assert.ok(broadcasts.some(event => event.type === 'contact.updated' && event.contactId === contactId));
 
     await send({ ...baseBody, contact: { displayName: 'Updated contact name' } });
     contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?').get(contactId);
@@ -511,18 +515,84 @@ test('external template API updates contact fields only when supplied and keeps 
     assert.equal(contact.company, 'Acme');
     assert.deepEqual(JSON.parse(contact.tags_json), ['VIP']);
     assert.equal(database.prepare('SELECT display_name FROM channel_identities WHERE contact_id=?').get(contactId).display_name, 'Updated contact name');
+    conversation = database.prepare('SELECT subject,tags_json FROM conversations WHERE contact_id=?').get(contactId);
+    assert.equal(conversation.subject, 'Updated contact name');
+    assert.deepEqual(JSON.parse(conversation.tags_json), ['VIP']);
 
     await send({ ...baseBody, contact: { company: 'Helixcer', tags: ['Retail', 'Orders'] } });
     contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?').get(contactId);
     assert.equal(contact.display_name, 'Updated contact name');
     assert.equal(contact.company, 'Helixcer');
     assert.deepEqual(JSON.parse(contact.tags_json), ['Retail', 'Orders']);
+    conversation = database.prepare('SELECT subject,tags_json FROM conversations WHERE contact_id=?').get(contactId);
+    assert.equal(conversation.subject, 'Updated contact name');
+    assert.deepEqual(JSON.parse(conversation.tags_json), ['Retail', 'Orders']);
 
     await send(baseBody);
     contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?').get(contactId);
     assert.equal(contact.display_name, 'Updated contact name');
     assert.equal(contact.company, 'Helixcer');
     assert.deepEqual(JSON.parse(contact.tags_json), ['Retail', 'Orders']);
+    assert.equal(
+      broadcasts.filter(event => event.type === 'contact.updated' && event.contactId === contactId).length,
+      3,
+      'contact.updated only when contact fields are supplied'
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('external template API updates inbox subject even when conversation channel_id differs', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_contact2.${'c'.repeat(43)}`;
+  await insertKey(database, token, 'key-contact-channel', 'hxc_live_contact2');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ messages: [{ id: crypto.randomUUID() }] }), {
+    status: 200, headers: { 'Content-Type': 'application/json' }
+  });
+  const baseBody = {
+    channelId: 'wa-sales', to: '+91 98765 43210',
+    template: { name: 'order_update', language: { code: 'en_US' } }
+  };
+  try {
+    const send = async (body) => {
+      const waits = [];
+      const response = await handleRequest(postTemplate(token, null, body), env, {
+        waitUntil(promise) { waits.push(promise); }
+      });
+      assert.equal(response.status, 202);
+      await Promise.all(waits);
+    };
+
+    await send({ ...baseBody, contact: { name: 'Stale route', company: 'DropX', tags: ['logistics'] } });
+    const contactId = database.prepare('SELECT contact_id FROM contacts').get().contact_id;
+    const now = new Date().toISOString();
+    database.prepare(`INSERT INTO channels
+        (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+      VALUES ('wa-other','WhatsApp Other','whatsapp_cloud','whatsapp_cloud',1,'["text","template"]','{}','WA_OTHER',?,?, 'ws_default')`)
+      .run(now, now);
+    // Simulate a unified conversation whose last route no longer matches this send channel.
+    database.prepare(`UPDATE conversations SET channel_id='wa-other' WHERE contact_id=?`).run(contactId);
+    assert.equal(
+      database.prepare('SELECT channel_id FROM conversations WHERE contact_id=?').get(contactId).channel_id,
+      'wa-other'
+    );
+
+    await send({
+      ...baseBody,
+      contact: { name: 'Nisar', company: 'DropX Updated', tags: ['logistics', 'priority'] }
+    });
+    const contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?')
+      .get(contactId);
+    assert.equal(contact.display_name, 'Nisar');
+    assert.equal(contact.company, 'DropX Updated');
+    assert.deepEqual(JSON.parse(contact.tags_json), ['logistics', 'priority']);
+    const conversation = database.prepare('SELECT subject,tags_json FROM conversations WHERE contact_id=?')
+      .get(contactId);
+    assert.equal(conversation.subject, 'Nisar');
+    assert.deepEqual(JSON.parse(conversation.tags_json), ['logistics', 'priority']);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();
