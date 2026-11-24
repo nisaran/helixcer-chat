@@ -8307,16 +8307,18 @@
   }
 
   function createTemplateDynamicUrlSuffix() {
-    return $("createTemplateParameterFormat")?.value === "named" ? "{{order_id}}" : "{{1}}";
+    // Meta Visit website buttons only support a numbered trailing variable ({{1}}).
+    return "{{1}}";
   }
 
   function ensureCreateTemplateDynamicUrl(url) {
     const trimmed = decodeTemplateUrlPlaceholders(url).trim();
-    const keys = createTemplatePlaceholders(trimmed);
-    if (keys.length) return trimmed;
     const suffix = createTemplateDynamicUrlSuffix();
-    if (!trimmed) return `https://example.com/orders/${suffix}`;
-    return `${trimmed.replace(/\/+$/, "")}/${suffix}`;
+    // Rewrite any trailing {{name}} / {{n}} to Meta's required {{1}}.
+    const withoutTrailingVar = trimmed.replace(/\{\{\s*[A-Za-z0-9_]+\s*\}\}\s*$/g, "").replace(/\/+$/, "").trim();
+    if (!withoutTrailingVar) return `https://example.com/orders/${suffix}`;
+    if (!/^https:\/\//i.test(withoutTrailingVar)) return `https://example.com/orders/${suffix}`;
+    return `${withoutTrailingVar}/${suffix}`;
   }
 
   function stripCreateTemplateUrlVariables(url) {
@@ -8415,9 +8417,19 @@
           ? `https://example.com/orders/${createTemplateDynamicUrlSuffix()}`
           : "https://example.com/store";
         urlHint.textContent = mode === "dynamic"
-          ? "Put one variable at the end of the link, such as /{{1}} or /{{order_id}}."
+          ? "Meta only allows one numbered variable at the end of the link ({{1}})."
           : "Use a fixed https link with no variables.";
-        if (mode === "static" && createTemplateUrlPlaceholders(urlInput.value).length) {
+        if (mode === "dynamic") {
+          // While typing, only rewrite a trailing named/other placeholder to {{1}}.
+          // Full ensure (append {{1}}) runs on mode switch and submit collect.
+          const decoded = decodeTemplateUrlPlaceholders(urlInput.value);
+          if (/\{\{\s*(?!1\s*\}\})[A-Za-z0-9_]+\s*\}\}$/.test(decoded)) {
+            const rewritten = decoded.replace(/\{\{\s*[A-Za-z0-9_]+\s*\}\}$/, "{{1}}");
+            if (rewritten !== urlInput.value) urlInput.value = rewritten;
+          } else if (decoded !== urlInput.value) {
+            urlInput.value = decoded;
+          }
+        } else if (createTemplateUrlPlaceholders(urlInput.value).length) {
           urlInput.value = stripCreateTemplateUrlVariables(urlInput.value) || "https://example.com/store";
         }
       }
@@ -8622,8 +8634,12 @@
       }
       if (button.urlMode === "dynamic") {
         const keys = createTemplatePlaceholders(button.url || "");
-        if (!keys.length) {
-          showToast("Dynamic URL needed", "Dynamic Visit website buttons need one variable at the end of the URL.", true);
+        if (keys.length !== 1 || keys[0] !== "1" || !/\{\{\s*1\s*\}\}$/.test(button.url || "")) {
+          showToast(
+            "Dynamic URL needed",
+            "Dynamic Visit website buttons must end with {{1}}. Meta does not support named variables on buttons.",
+            true
+          );
           return;
         }
         if (!button.example) {

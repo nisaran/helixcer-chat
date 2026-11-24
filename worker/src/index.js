@@ -7065,14 +7065,15 @@ function parseWhatsAppTemplateWriteRequest(payload, { requireTemplateId = false,
       if (type === 'URL') {
         urlCount += 1;
         if (urlCount > 2) throw httpError(400, 'A template may include no more than 2 URL buttons.');
-        const url = decodeWhatsAppTemplateUrlPlaceholders(cleanRequired(entry.url, `buttons[${index}].url`, 2000));
+        const url = normalizeWhatsAppTemplateButtonUrl(cleanRequired(entry.url, `buttons[${index}].url`, 2000));
         if (!/^https:\/\//i.test(url)) throw httpError(400, `buttons[${index}].url must start with https://.`);
         const urlKeys = templatePlaceholders(url);
         if (urlKeys.length > 1) throw httpError(400, `buttons[${index}].url may include at most one variable.`);
-        if (urlKeys.length && !new RegExp(`\\{\\{\\s*${urlKeys[0]}\\s*\\}\\}\\s*$`).test(url)) {
-          throw httpError(400, `buttons[${index}].url dynamic variable must be at the end of the URL.`);
+        if (urlKeys.length && !/\{\{\s*1\s*\}\}$/.test(url)) {
+          throw httpError(400, `buttons[${index}].url must end with {{1}}. Meta does not support named variables on Visit website buttons.`);
         }
-        assertTemplatePlaceholderFormat(urlKeys, parameterFormat, `buttons[${index}].url`);
+        // URL buttons are always positional {{1}}, even when the template body/header uses named params.
+        assertTemplatePlaceholderFormat(urlKeys, 'positional', `buttons[${index}].url`);
         button.url = url;
         if (urlKeys.length) {
           const example = cleanRequired(
@@ -7933,6 +7934,21 @@ export function decodeWhatsAppTemplateUrlPlaceholders(value) {
   return String(value || '')
     .replace(/%7B%7B/gi, '{{')
     .replace(/%7D%7D/gi, '}}');
+}
+
+/**
+ * Meta Visit website buttons only accept a trailing numbered variable {{1}}.
+ * Rewrite a single trailing {{name}} / {{n}} placeholder to {{1}} before create/update.
+ */
+export function normalizeWhatsAppTemplateButtonUrl(value) {
+  const decoded = decodeWhatsAppTemplateUrlPlaceholders(value).trim();
+  if (!decoded) return decoded;
+  const keys = templatePlaceholders(decoded);
+  if (!keys.length) return decoded;
+  if (keys.length === 1 && /\{\{\s*[A-Za-z0-9_]+\s*\}\}$/.test(decoded)) {
+    return decoded.replace(/\{\{\s*[A-Za-z0-9_]+\s*\}\}$/, '{{1}}');
+  }
+  return decoded;
 }
 
 function sanitizeWhatsAppTemplateButton(value) {
