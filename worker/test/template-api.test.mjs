@@ -187,7 +187,8 @@ test('template inbox preview renders approved copy, runtime values, footer, and 
       { type: 'body', text: 'Hi {{name}}, your order {{order}} is ready.' },
       {
         type: 'buttons',
-        buttons: [{ type: 'url', text: 'Track', url: 'https://example.com/orders/{{order_id}}' }]
+        // Meta URL buttons use {{1}} even when header/body are named.
+        buttons: [{ type: 'url', text: 'Track', url: 'https://example.com/orders/{{1}}' }]
       }
     ]
   }, {
@@ -204,7 +205,7 @@ test('template inbox preview renders approved copy, runtime values, footer, and 
         type: 'button',
         sub_type: 'url',
         index: '0',
-        parameters: [{ type: 'text', parameter_name: 'order_id', text: '123' }]
+        parameters: [{ type: 'text', text: '123' }]
       }
     ]
   });

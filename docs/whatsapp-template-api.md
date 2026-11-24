@@ -316,7 +316,7 @@ Each array item names a component and supplies Meta placeholder values as `"1":"
 ]
 ```
 
-Named templates use the approved parameter name as the key for header, body, and URL button slots:
+Named templates use the approved parameter name as the key for header and body slots. Visit website URL buttons still use the numbered key `"1"` (Meta does not support named variables on buttons):
 
 ```json
 "variables": [
@@ -326,7 +326,7 @@ Named templates use the approved parameter name as the key for header, body, and
     "customer_name": "Asha",
     "order_number": "ORD-1001"
   },
-  { "component": "button", "index": 0, "order_id": "track-abc" }
+  { "component": "button", "index": 0, "1": "track-abc" }
 ]
 ```
 
@@ -654,22 +654,7 @@ For a URL ending in an approved variable, send only the variable value. `index` 
 
 If the approved URL is `https://example.com/orders/{{1}}`, the final URL becomes `https://example.com/orders/ORD-1001`. Do not send the complete URL as the parameter unless that is how the approved template is defined.
 
-For named URL variables such as `https://example.com/orders/{{order_id}}`, include `parameter_name`:
-
-```json
-{
-  "type": "button",
-  "sub_type": "url",
-  "index": "0",
-  "parameters": [
-    {
-      "type": "text",
-      "parameter_name": "order_id",
-      "text": "ORD-1001"
-    }
-  ]
-}
-```
+Meta Visit website buttons only support a trailing numbered variable (`{{1}}`). Even when the template body or header uses named variables, create the button URL with `{{1}}` and send the button parameter as plain text without `parameter_name`. Helixcer rewrites any trailing named placeholder to `{{1}}` when creating or updating templates.
 
 ### Quick-reply button
 

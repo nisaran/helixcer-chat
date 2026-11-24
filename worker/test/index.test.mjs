@@ -31,6 +31,7 @@ import {
   resolveTemplate,
   sanitizeWhatsAppTemplateDefinition,
   decodeWhatsAppTemplateUrlPlaceholders,
+  normalizeWhatsAppTemplateButtonUrl,
   searchMessages,
   timingSafeEqual,
   validateWhatsAppTemplateRequest,
@@ -817,6 +818,7 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
       text: 'Hi {{name}}, your order {{order}} is ready.',
       examples: { name: 'nisar', order: '2' }
     },
+    // Named trailing button vars are rewritten to Meta's required {{1}}.
     buttons: [
       { type: 'URL', text: 'Track', url: 'https://example.com/orders/{{order_id}}', example: '123' }
     ]
@@ -830,8 +832,16 @@ test('validates WhatsApp template create requests and builds Meta payloads', () 
     { param_name: 'name', example: 'nisar' },
     { param_name: 'order', example: '2' }
   ]);
-  assert.equal(namedHeaderButtonPayload.components[2].buttons[0].url, 'https://example.com/orders/{{order_id}}');
+  assert.equal(namedHeaderButtonPayload.components[2].buttons[0].url, 'https://example.com/orders/{{1}}');
   assert.equal(namedHeaderButtonPayload.components[2].buttons[0].example[0], '123');
+  assert.equal(
+    normalizeWhatsAppTemplateButtonUrl('https://helixcer.com/order/%7B%7Border_id%7D%7D'),
+    'https://helixcer.com/order/{{1}}'
+  );
+  assert.equal(
+    normalizeWhatsAppTemplateButtonUrl('https://example.com/orders/{{1}}'),
+    'https://example.com/orders/{{1}}'
+  );
 
   assert.throws(() => validateWhatsAppTemplateCreateRequest({
     channelId: 'wa-sales', name: 'Bad Name', language: 'en_US', category: 'UTILITY',
