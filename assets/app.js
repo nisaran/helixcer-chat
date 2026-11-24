@@ -4942,9 +4942,20 @@
     return { text, buttons };
   }
 
+  function decodeTemplateUrlPlaceholders(value) {
+    // Meta / URL serializers turn {{order_id}} into %7B%7Border_id%7D%7D.
+    return String(value || "")
+      .replace(/%7B%7B/gi, "{{")
+      .replace(/%7D%7D/gi, "}}");
+  }
+
   function safeTemplateActionUrl(value) {
     try {
-      const url = new URL(String(value || ""));
+      const raw = decodeTemplateUrlPlaceholders(value);
+      // Unresolved template placeholders must not be serialized via URL.toString(),
+      // which percent-encodes {{var}} and breaks Visit website dynamic links.
+      if (/\{\{|\}\}/.test(raw)) return "";
+      const url = new URL(raw);
       return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
     } catch {
       return "";
@@ -7916,6 +7927,10 @@
     return result;
   }
 
+  function createTemplateUrlPlaceholders(value) {
+    return createTemplatePlaceholders(decodeTemplateUrlPlaceholders(value));
+  }
+
   function fillCreateTemplatePreviewText(text, examples = {}) {
     return String(text || "").replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_, key) => {
       const value = examples[key];
@@ -8100,22 +8115,23 @@
     // Meta requires URL/phone CTAs before quick replies. Prefill in that order.
     const normalizedButtons = buttons.map((button) => {
       const type = String(button?.type || "QUICK_REPLY").toUpperCase();
+      const url = decodeTemplateUrlPlaceholders(button?.url || "");
+      const urlKeys = createTemplatePlaceholders(url);
+      const example = Array.isArray(button?.example) ? button.example[0] : button?.example;
       return {
         type: ["QUICK_REPLY", "URL", "PHONE_NUMBER"].includes(type) ? type : "QUICK_REPLY",
         text: String(button?.text || ""),
-        url: String(button?.url || ""),
-        example: Array.isArray(button?.example) ? button.example[0] : button?.example,
+        url,
+        example,
         phoneNumber: button?.phone_number || button?.phoneNumber || "",
+        // Treat example-only URL buttons as dynamic when Meta returns encoded braces.
+        urlMode: urlKeys.length || (type === "URL" && example) ? "dynamic" : "static",
       };
     });
     const callToAction = normalizedButtons.filter((button) => button.type === "URL" || button.type === "PHONE_NUMBER");
     const quickReplies = normalizedButtons.filter((button) => button.type === "QUICK_REPLY");
     [...callToAction, ...quickReplies].forEach((button) => {
-      const urlKeys = createTemplatePlaceholders(button.url || "");
-      addCreateTemplateButtonRow({
-        ...button,
-        urlMode: urlKeys.length ? "dynamic" : "static",
-      });
+      addCreateTemplateButtonRow(button);
     });
     renderCreateTemplatePreview();
   }
@@ -8295,7 +8311,7 @@
   }
 
   function ensureCreateTemplateDynamicUrl(url) {
-    const trimmed = String(url || "").trim();
+    const trimmed = decodeTemplateUrlPlaceholders(url).trim();
     const keys = createTemplatePlaceholders(trimmed);
     if (keys.length) return trimmed;
     const suffix = createTemplateDynamicUrlSuffix();
@@ -8304,7 +8320,10 @@
   }
 
   function stripCreateTemplateUrlVariables(url) {
-    return String(url || "").replace(/\{\{\s*[^{}]+\s*\}\}/g, "").replace(/\/+$/, "").trim();
+    return decodeTemplateUrlPlaceholders(url)
+      .replace(/\{\{\s*[^{}]+\s*\}\}/g, "")
+      .replace(/\/+$/, "")
+      .trim();
   }
 
   function addCreateTemplateButtonRow(initial = {}) {
@@ -8345,8 +8364,9 @@
     [["static", "Static URL"], ["dynamic", "Dynamic URL"]].forEach(([value, label]) => {
       urlModeSelect.append(new Option(label, value));
     });
-    const initialUrl = initial.url || "";
-    const initialUrlMode = initial.urlMode || (createTemplatePlaceholders(initialUrl).length ? "dynamic" : "static");
+    const initialUrl = decodeTemplateUrlPlaceholders(initial.url || "");
+    const initialUrlMode = initial.urlMode
+      || (createTemplatePlaceholders(initialUrl).length || initial.example ? "dynamic" : "static");
     urlModeSelect.value = initialUrlMode;
     urlModeLabel.append(urlModeSelect);
 
@@ -8355,7 +8375,7 @@
     urlInput.className = "text-field";
     urlInput.dataset.createTemplateButtonField = "url";
     urlInput.placeholder = "https://example.com/store";
-    urlInput.value = initialUrl;
+    urlInput.value = initialUrlMode === "dynamic" ? ensureCreateTemplateDynamicUrl(initialUrl) : initialUrl;
     const urlHint = element("span", "field-hint", "Use a fixed link, or choose Dynamic URL to append one variable at the end.");
     urlLabel.append(urlInput, urlHint);
 
@@ -8383,6 +8403,8 @@
       urlLabel.hidden = !isUrl;
       phoneLabel.hidden = type !== "PHONE_NUMBER";
       if (isUrl) {
+        const decodedUrl = decodeTemplateUrlPlaceholders(urlInput.value);
+        if (decodedUrl !== urlInput.value) urlInput.value = decodedUrl;
         const mode = urlModeSelect.value === "dynamic" ? "dynamic" : "static";
         if (mode !== lastUrlMode) {
           if (mode === "dynamic") urlInput.value = ensureCreateTemplateDynamicUrl(urlInput.value);
@@ -8395,11 +8417,11 @@
         urlHint.textContent = mode === "dynamic"
           ? "Put one variable at the end of the link, such as /{{1}} or /{{order_id}}."
           : "Use a fixed https link with no variables.";
-        if (mode === "static" && createTemplatePlaceholders(urlInput.value).length) {
+        if (mode === "static" && createTemplateUrlPlaceholders(urlInput.value).length) {
           urlInput.value = stripCreateTemplateUrlVariables(urlInput.value) || "https://example.com/store";
         }
       }
-      const urlKeys = isUrl && urlModeSelect.value === "dynamic" ? createTemplatePlaceholders(urlInput.value) : [];
+      const urlKeys = isUrl && urlModeSelect.value === "dynamic" ? createTemplateUrlPlaceholders(urlInput.value) : [];
       exampleLabel.hidden = !(isUrl && urlModeSelect.value === "dynamic");
       exampleInput.required = !exampleLabel.hidden;
       if (exampleLabel.hidden) exampleInput.value = exampleInput.value;

@@ -30,6 +30,7 @@ import {
   outboundSenderLabel,
   resolveTemplate,
   sanitizeWhatsAppTemplateDefinition,
+  decodeWhatsAppTemplateUrlPlaceholders,
   searchMessages,
   timingSafeEqual,
   validateWhatsAppTemplateRequest,
@@ -1035,6 +1036,34 @@ test('sanitizes Meta template definitions while retaining positional, named, med
     ['body', 'name', 'text', 'nisar'],
     ['body', 'order', 'text', '2'],
     ['button', 'order_id', 'url', '123']
+  ]);
+
+  assert.equal(
+    decodeWhatsAppTemplateUrlPlaceholders('https://helixcer.com/order/%7B%7Border_id%7D%7D'),
+    'https://helixcer.com/order/{{order_id}}'
+  );
+  const encodedUrlButton = sanitizeWhatsAppTemplateDefinition({
+    id: 'encoded-url-btn',
+    name: 'encoded_url_btn',
+    language: 'en',
+    status: 'APPROVED',
+    category: 'UTILITY',
+    components: [
+      { type: 'BODY', text: 'Track your order.' },
+      {
+        type: 'BUTTONS',
+        buttons: [{
+          type: 'URL',
+          text: 'Track',
+          url: 'https://helixcer.com/order/%7B%7Border_id%7D%7D',
+          example: ['ORD-1001']
+        }]
+      }
+    ]
+  });
+  assert.equal(encodedUrlButton.components[1].buttons[0].url, 'https://helixcer.com/order/{{order_id}}');
+  assert.deepEqual(encodedUrlButton.variables.map(item => [item.component, item.key, item.kind, item.example]), [
+    ['button', 'order_id', 'url', 'ORD-1001']
   ]);
 });
 
