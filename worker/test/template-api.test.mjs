@@ -544,6 +544,90 @@ test('external template API updates contact fields only when supplied and keeps 
   }
 });
 
+test('external template API accepts empty or null contact fields to clear stored values', async () => {
+  const { database, env } = await fixture();
+  const token = `hxc_live_contact_empty.${'e'.repeat(43)}`;
+  await insertKey(database, token, 'key-contact-empty', 'hxc_live_contact_empty');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ messages: [{ id: crypto.randomUUID() }] }), {
+    status: 200, headers: { 'Content-Type': 'application/json' }
+  });
+  const baseBody = {
+    channelId: 'wa-sales', to: '+91 98765 43210',
+    template: { name: 'order_update', language: { code: 'en_US' } }
+  };
+  try {
+    const send = async (body) => {
+      const waits = [];
+      const response = await handleRequest(postTemplate(token, null, body), env, {
+        waitUntil(promise) { waits.push(promise); }
+      });
+      assert.equal(response.status, 202, await response.text());
+      await Promise.all(waits);
+      return response;
+    };
+
+    // New contact: empty/null fields store as empty (not rejected).
+    await send({
+      ...baseBody,
+      to: '+91 91111 11111',
+      contact: { name: '', company: null, tags: null }
+    });
+    const emptyContactId = database.prepare(
+      `SELECT c.contact_id FROM contacts c
+        JOIN contact_identities ci ON ci.contact_id=c.contact_id
+        WHERE ci.profile_id=? LIMIT 1`
+    ).get('91111111111')?.contact_id
+      || database.prepare('SELECT contact_id FROM contacts ORDER BY created_at DESC LIMIT 1').get().contact_id;
+    let contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?')
+      .get(emptyContactId);
+    assert.ok(contact, 'new contact should be created');
+    assert.equal(contact.display_name, '');
+    assert.equal(contact.company, '');
+    assert.deepEqual(JSON.parse(contact.tags_json), []);
+
+    // Existing contact: explicit empty/null clears previously set values.
+    await send({ ...baseBody, contact: { name: 'Nisar', company: 'DropX', tags: ['logistics'] } });
+    const contactId = database.prepare(
+      `SELECT c.contact_id FROM contacts c
+        JOIN contact_identities ci ON ci.contact_id=c.contact_id
+        WHERE ci.profile_id=? AND c.contact_id!=? LIMIT 1`
+    ).get('919876543210', emptyContactId)?.contact_id
+      || database.prepare('SELECT contact_id FROM contacts WHERE contact_id!=? ORDER BY created_at DESC LIMIT 1')
+        .get(emptyContactId).contact_id;
+    contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?')
+      .get(contactId);
+    assert.equal(contact.display_name, 'Nisar');
+    assert.equal(contact.company, 'DropX');
+    assert.deepEqual(JSON.parse(contact.tags_json), ['logistics']);
+
+    await send({ ...baseBody, contact: { company: '', tags: [] } });
+    contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?')
+      .get(contactId);
+    assert.equal(contact.display_name, 'Nisar');
+    assert.equal(contact.company, '');
+    assert.deepEqual(JSON.parse(contact.tags_json), []);
+    assert.deepEqual(
+      JSON.parse(database.prepare('SELECT tags_json FROM conversations WHERE contact_id=?').get(contactId).tags_json),
+      []
+    );
+
+    await send({ ...baseBody, contact: { name: null, company: null, tags: null } });
+    contact = database.prepare('SELECT display_name,company,tags_json FROM contacts WHERE contact_id=?')
+      .get(contactId);
+    assert.equal(contact.display_name, '');
+    assert.equal(contact.company, '');
+    assert.deepEqual(JSON.parse(contact.tags_json), []);
+    assert.equal(
+      database.prepare('SELECT subject FROM conversations WHERE contact_id=?').get(contactId).subject,
+      ''
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
 test('external template API updates inbox subject even when conversation channel_id differs', async () => {
   const { database, env } = await fixture();
   const token = `hxc_live_contact2.${'c'.repeat(43)}`;
