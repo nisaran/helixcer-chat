@@ -7065,7 +7065,7 @@ function parseWhatsAppTemplateWriteRequest(payload, { requireTemplateId = false,
       if (type === 'URL') {
         urlCount += 1;
         if (urlCount > 2) throw httpError(400, 'A template may include no more than 2 URL buttons.');
-        const url = cleanRequired(entry.url, `buttons[${index}].url`, 2000);
+        const url = decodeWhatsAppTemplateUrlPlaceholders(cleanRequired(entry.url, `buttons[${index}].url`, 2000));
         if (!/^https:\/\//i.test(url)) throw httpError(400, `buttons[${index}].url must start with https://.`);
         const urlKeys = templatePlaceholders(url);
         if (urlKeys.length > 1) throw httpError(400, `buttons[${index}].url may include at most one variable.`);
@@ -7928,6 +7928,13 @@ function sanitizeWhatsAppTemplateComponent(value, componentIndex) {
   return { definition, variables };
 }
 
+/** Meta / URL serializers sometimes return {{var}} as %7B%7Bvar%7D%7D. Restore placeholders. */
+export function decodeWhatsAppTemplateUrlPlaceholders(value) {
+  return String(value || '')
+    .replace(/%7B%7B/gi, '{{')
+    .replace(/%7D%7D/gi, '}}');
+}
+
 function sanitizeWhatsAppTemplateButton(value) {
   if (!isPlainObject(value)) return null;
   const type = providerEnum(value.type, 40).toLowerCase();
@@ -7935,7 +7942,7 @@ function sanitizeWhatsAppTemplateButton(value) {
   const button = { type };
   const text = providerText(value.text, 100);
   if (text) button.text = text;
-  const url = providerText(value.url, 2048);
+  const url = decodeWhatsAppTemplateUrlPlaceholders(providerText(value.url, 2048));
   if (url && /^https:\/\//i.test(url)) button.url = url;
   const phoneNumber = providerText(value.phone_number, 40);
   if (phoneNumber) button.phoneNumber = phoneNumber;
