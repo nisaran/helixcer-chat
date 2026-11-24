@@ -126,7 +126,7 @@ import {
   validateWhatsAppTemplateMappingsUpsert
 } from './template-mappings.js';
 
-const API_VERSION = '2026-11-24-template-contact-update';
+const API_VERSION = '2026-11-24-template-contact-empty';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -2042,26 +2042,38 @@ function helixcerMediaPreviewFromVariables(variables) {
   return null;
 }
 
+function normalizeExternalContactClearableText(value, label, maximum) {
+  // Explicit null or "" clears the field. Omitted keys are handled by the caller.
+  if (value === null) return '';
+  if (typeof value !== 'string') throw httpError(400, `${label} must be text.`);
+  const text = value.trim();
+  if (text.length > maximum) throw httpError(400, `${label} is too long.`);
+  if (/[\u0000-\u001f\u007f]/.test(text)) throw httpError(400, `${label} contains invalid characters.`);
+  return text;
+}
+
 export function validateExternalTemplateContact(value) {
   if (value === undefined || value === null) return null;
   if (!isPlainObject(value)) throw httpError(400, 'Contact must be an object.');
   rejectUnknownKeys(value, new Set(['displayName', 'name', 'company', 'tags']), 'contact');
   if (!Object.keys(value).length) throw httpError(400, 'Provide at least one contact field.');
-  if (value.displayName !== undefined && value.name !== undefined &&
-      String(value.displayName).trim() !== String(value.name).trim()) {
-    throw httpError(400, 'Display name and name must match when both are supplied.');
+  if (value.displayName !== undefined && value.name !== undefined) {
+    const left = normalizeExternalContactClearableText(value.displayName, 'Contact name', 120);
+    const right = normalizeExternalContactClearableText(value.name, 'Contact name', 120);
+    if (left !== right) throw httpError(400, 'Display name and name must match when both are supplied.');
   }
   const contact = {};
   const suppliedName = value.displayName === undefined ? value.name : value.displayName;
   if (suppliedName !== undefined) {
-    if (typeof suppliedName !== 'string') throw httpError(400, 'Contact name must be text.');
-    contact.displayName = cleanRequired(suppliedName, 'Contact name', 120);
+    // Empty string or null clears the stored display name on create/update.
+    contact.displayName = normalizeExternalContactClearableText(suppliedName, 'Contact name', 120);
   }
   if (value.company !== undefined) {
-    contact.company = cleanOptionalText(value.company, 'Company', 160);
+    contact.company = normalizeExternalContactClearableText(value.company, 'Company', 160);
   }
   if (value.tags !== undefined) {
-    contact.tags = validateContactTags(value.tags);
+    // null or [] clears tags; omitted tags keep the existing list.
+    contact.tags = value.tags === null ? [] : validateContactTags(value.tags);
   }
   return contact;
 }

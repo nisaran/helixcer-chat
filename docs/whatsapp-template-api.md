@@ -145,10 +145,10 @@ Content-Type: application/json
 |---|---:|---|
 | `channelId` | Yes | Helixcer ID of the saved WhatsApp channel that sends the message. |
 | `to` | Yes | Recipient's WhatsApp number in international format, using digits only. Example: `919999999999`. |
-| `contact` | No | Optional contact fields to save or update on the recipient. Include only the fields you want to change. Omitted fields keep their existing values and are never cleared to null. |
-| `contact.name` | No | Contact display name. Alias: `displayName`. When both are sent they must match. |
-| `contact.company` | No | Company or organization stored on the contact. |
-| `contact.tags` | No | Array of tag strings. When provided, replaces the contact's current tags. |
+| `contact` | No | Optional contact fields to save or update on the recipient. Include only the fields you want to change. Omitted fields keep their existing values. Send `""` or `null` (or `[]` / `null` for tags) to clear a field on an existing contact, or to store it empty on a new contact. |
+| `contact.name` | No | Contact display name. Alias: `displayName`. When both are sent they must match. Empty string or `null` clears the name. |
+| `contact.company` | No | Company or organization stored on the contact. Empty string or `null` clears the company. |
+| `contact.tags` | No | Array of tag strings. When provided, replaces the contact's current tags. `[]` or `null` clears all tags. |
 | `clientReference` | No | Your order, ticket, campaign, or transaction identifier. It is stored with and returned on the message for reconciliation. |
 | `previewText` | No | Optional inbox-text override. When omitted, Helixcer renders the approved Meta template with the supplied variables, media, footer, and action labels. This does not change the WhatsApp payload. |
 | `template` | Yes | Meta-native template object. `name` and `language.code` are required; `components` is included when the approved template expects parameters. |
