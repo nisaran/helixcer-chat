@@ -126,7 +126,7 @@ import {
   validateWhatsAppTemplateMappingsUpsert
 } from './template-mappings.js';
 
-const API_VERSION = '2026-11-22-bulk-message-status';
+const API_VERSION = '2026-11-24-template-contact-update';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -1588,7 +1588,7 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
     input.contact?.displayName || '', now);
   const expiresAt = new Date(Date.now() + EXTERNAL_API_IDEMPOTENCY_DAYS * 86400000).toISOString();
   const firstRetryAt = new Date(Date.now() + 30000).toISOString();
-  const contactUpdates = await externalContactUpdateStatements(env, principal.workspaceId, channel,
+  const contactUpdates = await externalContactUpdateStatements(env, principal.workspaceId,
     identity, input.contact, now);
   const statements = [
     ...contactUpdates,
@@ -1640,6 +1640,11 @@ async function createExternalTemplateMessage(request, env, ctx, url, principal, 
     type: 'message.created', conversationId: identity.conversationId, messageId, message: realtimeMessage,
     conversation: realtimeConversation
   });
+  if (input.contact) {
+    await broadcast(env, principal.workspaceId, {
+      type: 'contact.updated', contactId: identity.contactId
+    });
+  }
   ctx.waitUntil(sendOrQueue(env, messageId));
   return externalMessageResponse({
     messageId, conversationId: identity.conversationId, contactId: identity.contactId,
@@ -2061,7 +2066,7 @@ export function validateExternalTemplateContact(value) {
   return contact;
 }
 
-async function externalContactUpdateStatements(env, workspaceId, channel, identity, contact, now) {
+async function externalContactUpdateStatements(env, workspaceId, identity, contact, now) {
   if (!contact) return [];
   const existing = await env.DB.prepare(`SELECT display_name,company,tags_json FROM contacts
     WHERE workspace_id=?1 AND contact_id=?2`).bind(workspaceId, identity.contactId).first();
@@ -2076,22 +2081,27 @@ async function externalContactUpdateStatements(env, workspaceId, channel, identi
   ];
   if (contact.displayName !== undefined) {
     statements.push(
-      env.DB.prepare(`UPDATE channel_identities SET display_name=?4
-        WHERE contact_id=?1 AND workspace_id=?2 AND channel_id=?3`)
-        .bind(identity.contactId, workspaceId, channel.channelId, displayName),
+      // Match admin contact PATCH: one conversation per contact, so identity
+      // labels stay in sync across every channel route for this person.
+      env.DB.prepare(`UPDATE channel_identities SET display_name=?3
+        WHERE contact_id=?1 AND workspace_id=?2`)
+        .bind(identity.contactId, workspaceId, displayName),
       env.DB.prepare(`UPDATE contact_identities SET display_name=?4,updated_at=?5
         WHERE contact_id=?1 AND workspace_id=?2 AND identity_id=?3`)
         .bind(identity.contactId, workspaceId, identity.identityId, displayName, now)
     );
   }
   if (contact.displayName !== undefined || contact.tags !== undefined) {
+    // Conversations are unique per contact (not per channel). Filtering by
+    // channel_id left inbox subject/tags stale when the thread's last route
+    // differed from the template send channelId.
     statements.push(
       env.DB.prepare(`UPDATE conversations SET
-          subject=CASE WHEN ?4=1 THEN ?5 ELSE subject END,
-          tags_json=CASE WHEN ?6=1 THEN ?7 ELSE tags_json END,
-          updated_at=?8
-        WHERE workspace_id=?1 AND contact_id=?2 AND channel_id=?3`)
-        .bind(workspaceId, identity.contactId, channel.channelId,
+          subject=CASE WHEN ?3=1 THEN ?4 ELSE subject END,
+          tags_json=CASE WHEN ?5=1 THEN ?6 ELSE tags_json END,
+          updated_at=?7
+        WHERE workspace_id=?1 AND contact_id=?2`)
+        .bind(workspaceId, identity.contactId,
           contact.displayName !== undefined ? 1 : 0, displayName,
           contact.tags !== undefined ? 1 : 0, JSON.stringify(tags), now)
     );
