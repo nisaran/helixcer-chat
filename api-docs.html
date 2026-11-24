@@ -75,7 +75,7 @@
     <aside class="sidebar" aria-label="Documentation navigation">
       <p class="nav-label">Start</p>
       <nav>
-        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li><li><a href="#connection">Resolve connection</a></li><li><a href="#contacts">Add a contact</a></li></ul>
+        <ul class="nav-list"><li><a href="#overview">Overview</a></li><li><a href="#quickstart">Quickstart</a></li><li><a href="#authentication">Authentication</a></li><li><a href="#connection">Resolve connection</a></li><li><a href="#contacts">Add a contact</a></li><li><a href="#contact-fields">Contact fields</a></li></ul>
         <p class="nav-label">Channels</p>
         <p class="nav-channel">WhatsApp Meta</p>
         <ul class="nav-list nav-sublist"><li><a href="#send">Template messages</a></li><li><a href="#templates">List templates</a></li><li><a href="#template">Fetch template</a></li><li><a href="#examples">Template examples</a></li><li><a href="#advanced">Advanced templates</a></li><li><a href="#meta">Meta references</a></li></ul>
@@ -193,10 +193,10 @@ Content-Type: application/json</code></pre></div>
         <div class="table-wrap" style="margin-top:18px"><table>
           <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
           <tbody>
-            <tr><td><code>name</code></td><td>Yes</td><td>Display name. Alias <code>displayName</code>. Max 120 characters.</td></tr>
-            <tr><td><code>company</code></td><td>No</td><td>Max 160 characters.</td></tr>
-            <tr><td><code>tags</code></td><td>No</td><td>Up to 20 tags, each up to 40 characters.</td></tr>
-            <tr><td><code>platformIds</code></td><td>Yes</td><td>At least one of <code>whatsapp</code>, <code>telegram</code>, <code>instagram</code>, <code>facebook</code>, <code>email</code>. WhatsApp is normalized to digits; email is lowercased.</td></tr>
+            <tr><td><code>name</code></td><td class="yes">Yes</td><td>Display name. Alias <code>displayName</code>. See <a href="#contact-fields">Contact fields</a>.</td></tr>
+            <tr><td><code>company</code></td><td>No</td><td>Optional. See <a href="#contact-fields">Contact fields</a>.</td></tr>
+            <tr><td><code>tags</code></td><td>No</td><td>Optional. See <a href="#contact-fields">Contact fields</a>.</td></tr>
+            <tr><td><code>platformIds</code></td><td class="yes">Yes</td><td>At least one platform ID. See <a href="#contact-fields">Contact fields</a> for keys.</td></tr>
           </tbody>
         </table></div>
         <div class="code-card" style="margin-top:18px"><div class="code-head"><span>201 · contact created</span><button class="copy" type="button">Copy</button></div><pre><code>{
@@ -216,6 +216,41 @@ Content-Type: application/json</code></pre></div>
       "email": "asha@example.com"
     }
   }
+}</code></pre></div>
+      </section>
+
+      <section id="contact-fields">
+        <p class="eyebrow">Contacts</p><h2>Available contact field parameters</h2>
+        <p class="intro">Use only these parameter names. Unknown keys are rejected. The same profile fields apply on <a href="#contacts">Add a contact</a> and on the optional <code class="plain">contact</code> object for WhatsApp template sends.</p>
+        <h3>Profile fields</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Parameter</th><th>Type</th><th>Where</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>name</code></td><td>string</td><td>Create · Template <code>contact</code></td><td>Contact display name. Max 120 characters. Alias: <code>displayName</code>. When both <code>name</code> and <code>displayName</code> are sent they must match. Required on create; optional on template sends.</td></tr>
+            <tr><td><code>displayName</code></td><td>string</td><td>Create · Template <code>contact</code></td><td>Same value as <code>name</code>. Prefer one; do not send conflicting values.</td></tr>
+            <tr><td><code>company</code></td><td>string</td><td>Create · Template <code>contact</code></td><td>Company or organization. Max 160 characters. Optional.</td></tr>
+            <tr><td><code>tags</code></td><td>string[]</td><td>Create · Template <code>contact</code></td><td>Up to 20 tags, each up to 40 characters. On template sends, a supplied array replaces the contact's current tags.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Platform IDs · create only</h3>
+        <p class="intro" style="margin-top:8px">Required on <code class="plain">POST /api/v1/contacts</code>. Include at least one non-empty ID. Not accepted inside the template-send <code class="plain">contact</code> object (the recipient is <code class="plain">to</code>).</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>platformIds</code></td><td>object</td><td>Map of platform → ID. Allowed keys only:</td></tr>
+            <tr><td><code>platformIds.whatsapp</code></td><td>string</td><td>International digits only, for example <code>919999999999</code> (<code>^[1-9]\d{7,14}$</code>).</td></tr>
+            <tr><td><code>platformIds.telegram</code></td><td>string</td><td>Telegram user or chat ID.</td></tr>
+            <tr><td><code>platformIds.instagram</code></td><td>string</td><td>Instagram-scoped user ID.</td></tr>
+            <tr><td><code>platformIds.facebook</code></td><td>string</td><td>Facebook Page-scoped user ID (Messenger).</td></tr>
+            <tr><td><code>platformIds.email</code></td><td>string</td><td>Email address (stored lowercased).</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Omit vs clear on template sends</h3>
+        <div class="notice info" style="margin-top:8px"><span class="notice-mark" aria-hidden="true">i</span><p>On template endpoints, include only the <code class="plain">contact</code> fields you want to change. <strong>Omitted</strong> fields keep their existing values. Send <code class="plain">""</code> or <code class="plain">null</code> (or <code class="plain">[]</code> / <code class="plain">null</code> for tags) to clear a field on an existing contact, or to store it empty on a new contact. Example: <code class="plain">"company":""</code>.</p></div>
+        <div class="code-card" style="margin-top:18px"><div class="code-head"><span>contact object · template send</span><button class="copy" type="button">Copy</button></div><pre><code>"contact": {
+  "name": "Asha",
+  "company": "Acme Retail",
+  "tags": ["VIP", "Orders"]
 }</code></pre></div>
       </section>
 
@@ -252,10 +287,10 @@ Content-Type: application/json</code></pre></div>
           <tbody>
             <tr><td><code>channelId</code></td><td class="yes">Yes</td><td>Helixcer ID of the saved WhatsApp channel that sends the message.</td></tr>
             <tr><td><code>to</code></td><td class="yes">Yes</td><td>Recipient's WhatsApp number in international digits-only format, for example <code>919999999999</code>.</td></tr>
-            <tr><td><code>contact</code></td><td>No</td><td>Optional contact fields to save or update on the recipient. Include only the fields you want to change. Omitted fields keep their existing values and are never cleared to null.</td></tr>
-            <tr><td><code>contact.name</code></td><td>No</td><td>Contact display name. Alias: <code>displayName</code>. When both are sent they must match.</td></tr>
-            <tr><td><code>contact.company</code></td><td>No</td><td>Company or organization stored on the contact.</td></tr>
-            <tr><td><code>contact.tags</code></td><td>No</td><td>Array of tag strings. When provided, replaces the contact's current tags.</td></tr>
+            <tr><td><code>contact</code></td><td>No</td><td>Optional profile fields to save or update on the recipient. Accepted keys: <code>name</code> (alias <code>displayName</code>), <code>company</code>, <code>tags</code>. Full list and clear rules: <a href="#contact-fields">Contact fields</a>.</td></tr>
+            <tr><td><code>contact.name</code></td><td>No</td><td>Display name. Alias: <code>displayName</code>. Empty string or <code>null</code> clears the name.</td></tr>
+            <tr><td><code>contact.company</code></td><td>No</td><td>Company or organization. Empty string or <code>null</code> clears the company.</td></tr>
+            <tr><td><code>contact.tags</code></td><td>No</td><td>Tag string array; replaces current tags when provided. <code>[]</code> or <code>null</code> clears all tags.</td></tr>
             <tr><td><code>clientReference</code></td><td>No</td><td>Your order, ticket, campaign, or transaction ID. It is stored with and returned on the message.</td></tr>
             <tr><td><code>previewText</code></td><td>No</td><td>Optional inbox-text override. When omitted, Helixcer renders the approved Meta template with the supplied variables, media, footer, and action labels.</td></tr>
             <tr><td><code>template</code></td><td class="yes">Yes</td><td>Meta-native template object. <code>name</code> and <code>language.code</code> are required; add <code>components</code> when expected.</td></tr>
@@ -562,7 +597,7 @@ Content-Type: application/json</code></pre></div>
           <tbody>
             <tr><td><code>channelId</code></td><td class="yes">Yes</td><td>Helixcer ID of the saved WhatsApp channel that sends the message.</td></tr>
             <tr><td><code>to</code></td><td class="yes">Yes</td><td>Recipient's WhatsApp number in international digits-only format.</td></tr>
-            <tr><td><code>contact</code></td><td>No</td><td>Same optional contact fields as the Meta endpoint.</td></tr>
+            <tr><td><code>contact</code></td><td>No</td><td>Same optional profile fields as the Meta endpoint: <code>name</code> / <code>displayName</code>, <code>company</code>, <code>tags</code>. See <a href="#contact-fields">Contact fields</a>.</td></tr>
             <tr><td><code>clientReference</code></td><td>No</td><td>Your order, ticket, campaign, or transaction ID.</td></tr>
             <tr><td><code>previewText</code></td><td>No</td><td>Optional inbox-text override.</td></tr>
             <tr><td><code>template</code></td><td class="yes">Yes</td><td>Template identity only: <code>name</code> and <code>language.code</code>. Do not send Meta <code>components</code> here.</td></tr>
