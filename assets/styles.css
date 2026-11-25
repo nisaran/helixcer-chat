@@ -2911,6 +2911,44 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .provider-manual-fields { margin-top: 4px; }
 .google-oauth-connect { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--line, #d9dfdb); border-radius: 16px; background: linear-gradient(180deg, #f7fafc, #eef4fb); }
 .google-oauth-connect .primary-button { justify-self: start; }
+.provider-connected-summary {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line, #d9dfdb);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f7fbf8, #eef6f1);
+}
+.provider-connected-eyebrow {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1f6b45;
+}
+.provider-connected-grid {
+  display: grid;
+  gap: 12px 16px;
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.provider-connected-grid > div { display: grid; gap: 4px; min-width: 0; }
+.provider-connected-grid .form-span { grid-column: 1 / -1; }
+.provider-connected-grid dt {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted, #5b6b63);
+}
+.provider-connected-grid dd {
+  margin: 0;
+  font-weight: 600;
+  word-break: break-word;
+}
+@media (max-width: 720px) {
+  .provider-connected-grid { grid-template-columns: 1fr; }
+}
 .google-location-list { display: grid; gap: 8px; max-height: min(42vh, 360px); overflow: auto; margin: 12px 0 4px; }
 .google-location-option { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 12px 14px; border: 1px solid var(--line, #d9dfdb); border-radius: 14px; background: #fff; cursor: pointer; }
 .google-location-option:has(input:checked) { border-color: #4285f4; box-shadow: inset 0 0 0 1px #4285f4; }

@@ -15560,19 +15560,37 @@
     $("channelDialogTitle").textContent = channel ? `Edit ${channel.name}` : "Add a channel";
     $("channelSubmit").textContent = channel ? "Save changes" : "Save connection";
     $("channelDeleteButton").hidden = !channel;
-    // Editing an existing chooser-based connection opens Manual Setup directly.
-    state.providerSetupMode = PROVIDER_SETUP_CHOOSERS.has(channel?.connectorType) ? "manual" : "";
-    syncChannelForm(channel?.connectorType || "", Boolean(channel), channel?.setup || {});
+    const isEmbeddedWhatsApp = channel?.connectorType === "whatsapp_cloud"
+      && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
+    // Embedded Signup edits show account details; other chooser providers open Manual Setup.
+    state.providerSetupMode = isEmbeddedWhatsApp
+      ? "facebook"
+      : (PROVIDER_SETUP_CHOOSERS.has(channel?.connectorType) ? "manual" : "");
+    syncChannelForm(channel?.connectorType || "", Boolean(channel), channel?.setup || {}, channel?.config || {});
     $("channelDialog").showModal();
   }
 
   function setProviderSetupMode(mode = "") {
     state.providerSetupMode = mode === "manual" ? "manual" : "";
     const provider = $("channelProvider")?.value || "";
-    syncChannelForm(provider, Boolean($("channelIdInput")?.value), {});
+    const channelId = $("channelIdInput")?.value || "";
+    const channel = state.channels.find((item) => item.channelId === channelId) || null;
+    syncChannelForm(provider, Boolean(channelId), channel?.setup || {}, channel?.config || {});
   }
 
-  function syncChannelForm(provider, editing = Boolean($("channelIdInput").value), setup = {}) {
+  function fillWhatsAppEmbeddedDetails(config = {}, setup = {}) {
+    const setText = (id, value, fallback = "—") => {
+      const node = $(id);
+      if (node) node.textContent = String(value || "").trim() || fallback;
+    };
+    setText("whatsappEmbeddedVerifiedName", setup.verifiedName || config.verifiedName, "Not verified yet");
+    setText("whatsappEmbeddedPhoneNumber", setup.verifiedPhoneNumber || config.verifiedPhoneNumber, "Not verified yet");
+    setText("whatsappEmbeddedWabaId", config.wabaId);
+    setText("whatsappEmbeddedPhoneNumberId", config.phoneNumberId);
+    setText("whatsappEmbeddedBusinessId", config.businessId, "Not provided");
+  }
+
+  function syncChannelForm(provider, editing = Boolean($("channelIdInput").value), setup = {}, config = {}) {
     const credentialKeys = {
       whatsappAccessToken: "accessToken", whatsappAppSecret: "appSecret",
       telegramBotToken: "botToken", telegramWebhookSecret: "webhookSecret",
@@ -15582,7 +15600,12 @@
     const selectedProvider = String(provider || "").trim();
     if (!PROVIDER_SETUP_CHOOSERS.has(selectedProvider)) state.providerSetupMode = "";
     const chooserProvider = PROVIDER_SETUP_CHOOSERS.has(selectedProvider);
-    const manualReady = chooserProvider && (editing || state.providerSetupMode === "manual");
+    const embeddedWhatsApp = selectedProvider === "whatsapp_cloud"
+      && (setup.authMode === "embedded_signup" || config.authMode === "embedded_signup");
+    const showEmbeddedDetails = embeddedWhatsApp && editing && state.providerSetupMode !== "manual";
+    const manualReady = chooserProvider
+      && !showEmbeddedDetails
+      && (editing || state.providerSetupMode === "manual");
     document.querySelectorAll("[data-provider-fields]").forEach((section) => {
       const active = Boolean(selectedProvider) && section.dataset.providerFields === selectedProvider;
       section.hidden = !active;
@@ -15627,7 +15650,17 @@
       const providerKey = section?.dataset.providerFields || "";
       fields.hidden = !(selectedProvider === providerKey && manualReady);
     });
+    const embeddedDetails = $("whatsappEmbeddedDetails");
+    if (embeddedDetails) {
+      embeddedDetails.hidden = !(selectedProvider === "whatsapp_cloud" && showEmbeddedDetails);
+      if (!embeddedDetails.hidden) fillWhatsAppEmbeddedDetails(config, setup);
+    }
     document.querySelectorAll('.provider-setup-option[data-action="provider-setup-manual"]').forEach((button) => {
+      const isWhatsAppManual = button.dataset.provider === "whatsapp_cloud";
+      if (isWhatsAppManual && embeddedWhatsApp && editing) {
+        // Keep Manual Setup available as escape hatch, but not the default view.
+        button.hidden = false;
+      }
       const active = selectedProvider === button.dataset.provider && manualReady;
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-pressed", String(active));
@@ -15643,18 +15676,21 @@
         whatsappLogin.disabled = false;
         whatsappLogin.removeAttribute("aria-disabled");
         whatsappLogin.removeAttribute("title");
-        whatsappLogin.classList.toggle("is-active", state.providerSetupMode === "facebook");
-        whatsappLogin.setAttribute("aria-pressed", String(state.providerSetupMode === "facebook"));
+        whatsappLogin.classList.toggle("is-active", showEmbeddedDetails || state.providerSetupMode === "facebook");
+        whatsappLogin.setAttribute("aria-pressed", String(showEmbeddedDetails || state.providerSetupMode === "facebook"));
+        if (showEmbeddedDetails) whatsappLogin.textContent = "Re-link with Facebook";
+        else whatsappLogin.textContent = "Login with Facebook";
       } else {
         whatsappLogin.disabled = true;
         whatsappLogin.setAttribute("aria-disabled", "true");
         whatsappLogin.setAttribute("title", embeddedAvailable ? "" : "Login with Facebook is not configured yet");
         whatsappLogin.classList.remove("is-active");
         whatsappLogin.setAttribute("aria-pressed", "false");
+        whatsappLogin.textContent = "Login with Facebook";
       }
     }
     if (whatsappHelp) {
-      whatsappHelp.hidden = !(selectedProvider === "whatsapp_cloud" && embeddedAvailable && !manualReady);
+      whatsappHelp.hidden = !(selectedProvider === "whatsapp_cloud" && embeddedAvailable && !manualReady && !showEmbeddedDetails);
     }
     const googleConnected = Boolean(editing && setup.credentialsPresent);
     const googleNote = $("googleReviewsConnectedNote");
@@ -15665,7 +15701,7 @@
     if (submit) {
       const hideSubmit = !selectedProvider
         || (selectedProvider === "google_reviews" && !editing)
-        || (chooserProvider && !manualReady);
+        || (chooserProvider && !manualReady && !showEmbeddedDetails);
       if (hideSubmit) {
         submit.hidden = true;
         submit.disabled = true;
@@ -15690,22 +15726,31 @@
       return value === SAVED_SECRET_MASK ? "" : value;
     };
     const connectorType = form.elements.connectorType.value;
+    const channelId = String(values.get("channelId") || form.elements.channelId?.value || "").trim();
+    const existing = state.channels.find((item) => item.channelId === channelId) || null;
+    const embeddedWhatsApp = connectorType === "whatsapp_cloud"
+      && (existing?.setup?.authMode === "embedded_signup" || existing?.config?.authMode === "embedded_signup")
+      && state.providerSetupMode !== "manual";
     const config = connectorType === "whatsapp_cloud"
-      ? { wabaId: String(values.get("wabaId") || "").trim(), phoneNumberId: String(values.get("phoneNumberId") || "").trim(), apiVersion: "v26.0" }
+      ? (embeddedWhatsApp
+        ? { apiVersion: "v26.0", authMode: "embedded_signup" }
+        : { wabaId: String(values.get("wabaId") || "").trim(), phoneNumberId: String(values.get("phoneNumberId") || "").trim(), apiVersion: "v26.0" })
       : connectorType === "instagram"
         ? { instagramAccountId: String(values.get("instagramAccountId") || "").trim(), appId: String(values.get("instagramAppId") || "").trim(), username: String(values.get("instagramUsername") || "").trim(), authMode: "instagram_login", apiVersion: "v26.0" }
         : connectorType === "facebook_messenger"
           ? { pageId: String(values.get("messengerPageId") || "").trim(), appId: String(values.get("messengerAppId") || "").trim(), pageName: String(values.get("messengerPageName") || "").trim(), apiVersion: "v26.0" }
           : {};
-    const credentialMap = connectorType === "whatsapp_cloud"
-      ? { accessToken: credentialValue("whatsappAccessToken"), appSecret: credentialValue("whatsappAppSecret"), verifyToken: credentialValue("metaVerifyToken") }
-      : connectorType === "telegram"
-        ? { botToken: credentialValue("telegramBotToken"), webhookSecret: credentialValue("telegramWebhookSecret") }
-        : connectorType === "facebook_messenger"
-          ? { accessToken: credentialValue("messengerAccessToken"), appSecret: credentialValue("messengerAppSecret"), verifyToken: credentialValue("metaVerifyToken") }
-          : connectorType === "google_reviews"
-            ? {}
-            : { accessToken: credentialValue("instagramAccessToken"), appSecret: credentialValue("instagramAppSecret"), verifyToken: credentialValue("metaVerifyToken") };
+    const credentialMap = embeddedWhatsApp
+      ? {}
+      : connectorType === "whatsapp_cloud"
+        ? { accessToken: credentialValue("whatsappAccessToken"), appSecret: credentialValue("whatsappAppSecret"), verifyToken: credentialValue("metaVerifyToken") }
+        : connectorType === "telegram"
+          ? { botToken: credentialValue("telegramBotToken"), webhookSecret: credentialValue("telegramWebhookSecret") }
+          : connectorType === "facebook_messenger"
+            ? { accessToken: credentialValue("messengerAccessToken"), appSecret: credentialValue("messengerAppSecret"), verifyToken: credentialValue("metaVerifyToken") }
+            : connectorType === "google_reviews"
+              ? {}
+              : { accessToken: credentialValue("instagramAccessToken"), appSecret: credentialValue("instagramAppSecret"), verifyToken: credentialValue("metaVerifyToken") };
     const credentials = Object.fromEntries(Object.entries(credentialMap)
       .map(([key, value]) => [key, String(value || "").trim()])
       .filter(([, value]) => value));
@@ -15781,8 +15826,14 @@
     } finally {
       if (button) {
         button.disabled = !state.whatsappEmbeddedSignup?.available;
-        button.textContent = "Login with Facebook";
-        syncChannelForm($("channelProvider")?.value || "", Boolean($("channelIdInput")?.value), {});
+        const channelId = $("channelIdInput")?.value || "";
+        const channel = state.channels.find((item) => item.channelId === channelId) || null;
+        syncChannelForm(
+          $("channelProvider")?.value || "",
+          Boolean(channelId),
+          channel?.setup || {},
+          channel?.config || {}
+        );
       }
     }
   }
@@ -17889,7 +17940,9 @@
     });
     $("channelProvider").addEventListener("change", (event) => {
       state.providerSetupMode = "";
-      syncChannelForm(event.target.value, Boolean($("channelIdInput")?.value), {});
+      const channelId = $("channelIdInput")?.value || "";
+      const channel = state.channels.find((item) => item.channelId === channelId) || null;
+      syncChannelForm(event.target.value, Boolean(channelId), channel?.setup || {}, channel?.config || {});
     });
     $("contactForm").addEventListener("submit", (event) => { event.preventDefault(); createContact(event.currentTarget); });
     $("contactEditForm").addEventListener("submit", (event) => { event.preventDefault(); saveContactEdits(event.currentTarget); });
