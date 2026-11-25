@@ -44,6 +44,8 @@ import {
   generateWhatsAppVerifyToken,
   metaEmbeddedSignupPublicConfig,
   metaGraphApiVersion,
+  metaWhatsAppAppCallbackUri,
+  metaWhatsAppAppVerifyToken,
   parseWhatsAppEmbeddedSignupSession,
   registerWhatsAppEmbeddedSignupPhone,
   requireMetaEmbeddedSignupConfig,
@@ -463,6 +465,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       if (limited) return withCors(limited, cors);
       const result = await acceptInvitationWithPassword(env, await readJson(request));
       return withCors(passwordSessionResponse(result), cors);
+    }
+    if (url.pathname === '/webhooks/whatsapp-app') {
+      return await handleWhatsAppAppWebhook(request, env, ctx);
     }
     const whatsappMatch = url.pathname.match(/^\/webhooks\/whatsapp\/([^/]+)$/);
     if (whatsappMatch) return await handleWhatsAppWebhook(request, env, decodeURIComponent(whatsappMatch[1]), ctx);
@@ -2420,6 +2425,76 @@ function apiError(status, code, message) {
   return error;
 }
 
+async function handleWhatsAppAppWebhook(request, env, ctx) {
+  const expected = metaWhatsAppAppVerifyToken(env);
+  if (request.method === 'GET') {
+    const url = new URL(request.url);
+    if (url.searchParams.get('hub.mode') === 'subscribe' && expected
+      && timingSafeEqual(url.searchParams.get('hub.verify_token') || '', expected)) {
+      return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
+    }
+    return new Response('Forbidden', { status: 403 });
+  }
+  if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed.' }, 405);
+  const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
+  const appSecret = String(env.META_APP_SECRET || '').trim();
+  if (!appSecret) return json({ ok: false, error: 'Webhook secret is not configured.' }, 503);
+  if (!await verifyMetaSignature(raw, request.headers.get('X-Hub-Signature-256') || '', appSecret)) {
+    return json({ ok: false, error: 'Invalid signature.' }, 401);
+  }
+  const payload = safeJsonParse(raw, null);
+  if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
+  const normalized = normalizeWhatsApp(payload);
+  if (!normalized.phoneNumberIds.length) return json({ ok: true, received: 0, routed: 0 });
+  let received = 0;
+  let routed = 0;
+  for (const phoneNumberId of normalized.phoneNumberIds) {
+    const channel = await findWhatsAppChannelByPhoneNumberId(env, phoneNumberId);
+    if (!channel) continue;
+    routed++;
+    const channelResponse = await handleWhatsAppWebhook(
+      new Request(`https://api.chat.helixcer.com/webhooks/whatsapp/${encodeURIComponent(channel.channelId)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Hub-Signature-256': request.headers.get('X-Hub-Signature-256') || ''
+        },
+        body: raw
+      }),
+      env,
+      channel.channelId,
+      ctx
+    );
+    if (channelResponse.ok) {
+      const body = await channelResponse.json().catch(() => ({}));
+      received += Number(body.received || 0);
+    }
+  }
+  return json({ ok: true, received, routed });
+}
+
+async function findWhatsAppChannelByPhoneNumberId(env, phoneNumberId) {
+  const id = String(phoneNumberId || '').trim();
+  if (!/^\d{5,40}$/.test(id)) return null;
+  const row = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled,
+      capabilities_json,config_json,secret_key,workspace_id
+    FROM channels
+    WHERE enabled=1 AND provider_type='whatsapp_cloud'
+      AND json_extract(config_json,'$.phoneNumberId')=?1
+    ORDER BY updated_at DESC
+    LIMIT 1`).bind(id).first();
+  if (!row) return null;
+  return {
+    channelId: row.channel_id,
+    name: row.name,
+    connectorType: logicalConnectorType(row),
+    capabilities: safeJsonParse(row.capabilities_json, []),
+    config: safeJsonParse(row.config_json, {}),
+    secretKey: row.secret_key,
+    workspaceId: row.workspace_id
+  };
+}
+
 async function handleWhatsAppWebhook(request, env, channelId, ctx) {
   const channel = await getChannel(env, channelId, 'whatsapp_cloud');
   if (!channel) return json({ ok: false, error: 'Unknown or disabled channel.' }, 404);
@@ -3544,7 +3619,8 @@ async function registerWhatsAppEmbeddedWebhook(env, workspaceId, channelId, requ
   if (!accessToken || !verifyToken || !wabaId) {
     throw httpError(409, 'Secure WhatsApp credentials have not been fully configured.');
   }
-  const callbackUri = `${new URL(request.url).origin}/webhooks/whatsapp/${encodeURIComponent(channel.channelId)}`;
+  const requestOrigin = new URL(request.url).origin;
+  const callbackUri = `${requestOrigin}/webhooks/whatsapp/${encodeURIComponent(channel.channelId)}`;
   try {
     await subscribeWhatsAppEmbeddedSignupWebhooks({
       env,
@@ -3552,6 +3628,7 @@ async function registerWhatsAppEmbeddedWebhook(env, workspaceId, channelId, requ
       wabaId,
       callbackUri,
       verifyToken,
+      appCallbackUri: metaWhatsAppAppCallbackUri(requestOrigin),
       fetchImpl
     });
   } catch (error) {
@@ -4024,7 +4101,8 @@ async function completeWhatsAppEmbeddedSignup(env, principal, payload, request, 
     appSecret
   }, principal.user.userId || '');
 
-  const callbackUri = `${new URL(request.url).origin}/webhooks/whatsapp/${encodeURIComponent(channelId)}`;
+  const requestOrigin = new URL(request.url).origin;
+  const callbackUri = `${requestOrigin}/webhooks/whatsapp/${encodeURIComponent(channelId)}`;
   try {
     await subscribeWhatsAppEmbeddedSignupWebhooks({
       env,
@@ -4032,6 +4110,7 @@ async function completeWhatsAppEmbeddedSignup(env, principal, payload, request, 
       wabaId: session.wabaId,
       callbackUri,
       verifyToken,
+      appCallbackUri: metaWhatsAppAppCallbackUri(requestOrigin),
       fetchImpl
     });
   } catch (error) {

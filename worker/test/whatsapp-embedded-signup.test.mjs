@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { handleRequest } from '../src/index.js';
 import {
   metaEmbeddedSignupPublicConfig,
+  metaWhatsAppAppVerifyToken,
   parseWhatsAppEmbeddedSignupSession,
   shouldRegisterWhatsAppPhone
 } from '../src/meta-embedded-signup.js';
@@ -123,6 +124,15 @@ function mockMetaEmbeddedFetch() {
         token_type: 'bearer'
       });
     }
+    if (url.includes('/subscriptions') && (init.method || 'GET') === 'POST') {
+      const bodyText = String(init.body || '');
+      if (!bodyText.includes('whatsapp_business_account') || !bodyText.includes('callback_url')) {
+        return Response.json({
+          error: { message: 'Missing app webhook subscription fields.', type: 'OAuthException', code: 100 }
+        }, { status: 400 });
+      }
+      return Response.json({ success: true });
+    }
     if (url.includes('/subscribed_apps')) {
       const bodyText = String(init.body || '');
       if (bodyText.includes('override_callback_uri') && !bodyText.includes('subscribed_fields')) {
@@ -230,6 +240,10 @@ test('WhatsApp Embedded Signup complete exchanges code, saves channel, subscribe
 
     assert.ok(calls.some(call => call.url.includes('/oauth/access_token')));
     assert.ok(calls.some(call => call.url.includes('/register') && call.method === 'POST'));
+    const appSubscriptions = calls.filter(call => call.url.includes('/subscriptions') && call.method === 'POST');
+    assert.equal(appSubscriptions.length, 1);
+    assert.match(String(appSubscriptions[0].body), /whatsapp_business_account/);
+    assert.match(String(appSubscriptions[0].body), /webhooks%2Fwhatsapp-app|webhooks\/whatsapp-app/);
     const subscriptions = calls.filter(call => call.url.includes('/subscribed_apps'));
     assert.deepEqual(subscriptions.map(call => call.method), ['POST', 'POST']);
     assert.equal(subscriptions[0].body, '');
@@ -241,6 +255,22 @@ test('WhatsApp Embedded Signup complete exchanges code, saves channel, subscribe
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('WhatsApp app webhook answers Meta verification challenge', async () => {
+  const { DB } = await testDatabase();
+  const env = envFor(DB);
+  const verifyToken = metaWhatsAppAppVerifyToken(env);
+  const ok = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/webhooks/whatsapp-app?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(verifyToken)}&hub.challenge=challenge-app-123`
+  ), env);
+  assert.equal(ok.status, 200);
+  assert.equal(await ok.text(), 'challenge-app-123');
+
+  const rejected = await handleRequest(new Request(
+    'https://api.chat.helixcer.com/webhooks/whatsapp-app?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=nope'
+  ), env);
+  assert.equal(rejected.status, 403);
 });
 
 test('Register Webhook re-subscribes Embedded Signup WhatsApp channels only', async () => {
@@ -292,6 +322,7 @@ test('Register Webhook re-subscribes Embedded Signup WhatsApp channels only', as
     assert.ok(body.webhookVerifiedAt);
     assert.equal(body.health, 'connected');
 
+    assert.equal(calls.filter(call => call.url.includes('/subscriptions') && call.method === 'POST').length, 1);
     const subscriptions = calls.filter(call => call.url.includes('/subscribed_apps'));
     assert.equal(subscriptions.length, 2);
     assert.equal(subscriptions[0].body, '');
