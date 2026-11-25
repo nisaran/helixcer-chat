@@ -2245,6 +2245,37 @@
         : this.request(`/api/channels/${encodeURIComponent(channelId)}/register-webhook`, { method: "POST" });
     }
 
+    syncWhatsAppCoexistenceHistory(channelId) {
+      return this.isDemo
+        ? Promise.resolve({
+          ok: true,
+          channelId,
+          coexistence: true,
+          coexistenceSync: {
+            status: "running",
+            progress: 0,
+            imported: 0,
+            startedAt: new Date().toISOString(),
+          },
+        })
+        : this.request(`/api/channels/${encodeURIComponent(channelId)}/sync-coexistence-history`, { method: "POST" });
+    }
+
+    cancelWhatsAppCoexistenceSync(channelId) {
+      return this.isDemo
+        ? Promise.resolve({
+          ok: true,
+          channelId,
+          coexistenceSync: {
+            status: "cancelled",
+            progress: 0,
+            imported: 0,
+            cancelledAt: new Date().toISOString(),
+          },
+        })
+        : this.request(`/api/channels/${encodeURIComponent(channelId)}/cancel-coexistence-sync`, { method: "POST" });
+    }
+
     getVerifyToken(channelId) {
       return this.isDemo
         ? this.demo.getVerifyToken(channelId)
@@ -7475,12 +7506,21 @@
       element("span", "channel-identity-field-label", "Provider display name"),
       element("strong", "channel-identity-field-value", providerDisplayName)
     );
+    const isEmbeddedWhatsAppCard = channel.connectorType === "whatsapp_cloud"
+      && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
+    const isCoexistenceCard = Boolean(isEmbeddedWhatsAppCard
+      && (channel.setup?.coexistence || channel.config?.coexistence));
     name.append(
       element("span", "provider-label", profile.label),
       connectionName,
       providerName,
       element("span", `health-dot${health.className ? ` ${health.className}` : ""}`, health.label)
     );
+    if (isCoexistenceCard) {
+      name.append(element("span", "channel-mode-badge is-coexistence", "Coexistence"));
+    } else if (isEmbeddedWhatsAppCard) {
+      name.append(element("span", "channel-mode-badge", "Login with Facebook"));
+    }
     identity.append(logo, name);
     const headActions = element("div", "channel-head-actions");
     const providerLink = document.createElement("a");
@@ -7645,6 +7685,43 @@
       connect.dataset.channelId = channel.channelId;
       actions.append(toggle, connect);
     } else {
+      if (isEmbeddedWhatsApp && (channel.setup?.coexistence || channel.config?.coexistence)) {
+        const syncState = channel.setup?.coexistenceSync || {};
+        const syncRunning = syncState.status === "running";
+        if (syncRunning) {
+          const cancelSync = element("button", "secondary-button", "Cancel sync");
+          cancelSync.type = "button";
+          cancelSync.dataset.action = "cancel-whatsapp-coexistence-sync";
+          cancelSync.dataset.channelId = channel.channelId;
+          cancelSync.disabled = !channel.enabled;
+          cancelSync.title = "Stop importing further WhatsApp Business history chunks into Helixcer";
+          actions.append(cancelSync);
+        } else {
+          const syncHistory = element("button", "secondary-button",
+            syncState.status === "completed" ? "Sync messages again" : "Sync messages");
+          syncHistory.type = "button";
+          syncHistory.dataset.action = "sync-whatsapp-coexistence-history";
+          syncHistory.dataset.channelId = channel.channelId;
+          syncHistory.disabled = !channel.enabled;
+          syncHistory.title = "Import WhatsApp Business app chat history into Helixcer (Meta allows this once within 24 hours of onboarding)";
+          actions.append(syncHistory);
+        }
+        if (syncState.status) {
+          const syncNote = element("p", "channel-setup-note coexistence-sync-note");
+          const progress = Number(syncState.progress || 0);
+          const imported = Number(syncState.imported || 0);
+          if (syncState.status === "running") {
+            syncNote.textContent = `Syncing chat history… ${progress}% · ${imported} messages imported. You can cancel anytime.`;
+          } else if (syncState.status === "completed") {
+            syncNote.textContent = `History sync complete · ${imported} messages in Helixcer.`;
+          } else if (syncState.status === "cancelled") {
+            syncNote.textContent = `History sync cancelled · ${imported} messages kept in Helixcer.`;
+          } else if (syncState.status === "failed") {
+            syncNote.textContent = syncState.error || "History sync failed.";
+          }
+          setup.append(syncNote);
+        }
+      }
       actions.append(toggle, verify);
       if (isEmbeddedWhatsApp && credentialsReady) {
         const registerWebhook = element("button", "secondary-button",
@@ -16330,6 +16407,53 @@
     }
   }
 
+  async function syncWhatsAppCoexistenceHistory(channelId, button) {
+    if (!channelId || !button) return;
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    button.disabled = true;
+    const previousLabel = button.textContent;
+    button.textContent = "Starting…";
+    try {
+      await state.api.syncWhatsAppCoexistenceHistory(channelId);
+      await loadAll();
+      setRoute("channels");
+      showToast(
+        "WhatsApp history sync started",
+        `${channel?.name || "WhatsApp"} chat history will appear in Helixcer as Meta delivers it. You can cancel anytime.`
+      );
+    } catch (error) {
+      showToast("History sync did not start", error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = previousLabel;
+    }
+  }
+
+  async function cancelWhatsAppCoexistenceSync(channelId, button) {
+    if (!channelId || !button) return;
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    button.disabled = true;
+    const previousLabel = button.textContent;
+    button.textContent = "Cancelling…";
+    try {
+      const result = await state.api.cancelWhatsAppCoexistenceSync(channelId);
+      await loadAll();
+      setRoute("channels");
+      const imported = Number(result?.coexistenceSync?.imported || 0);
+      showToast(
+        "History sync cancelled",
+        imported
+          ? `${imported} messages already imported stay in Helixcer. Later chunks will be ignored.`
+          : `${channel?.name || "WhatsApp"} will ignore further Meta history chunks.`
+      );
+    } catch (error) {
+      showToast("Could not cancel sync", error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = previousLabel;
+    }
+  }
+
   function finishConfirmation(confirmed, { close = true } = {}) {
     const resolve = state.confirmationResolve;
     state.confirmationResolve = null;
@@ -17185,6 +17309,14 @@
         }
         if (actionButton.dataset.action === "register-whatsapp-webhook") {
           registerWhatsAppWebhook(actionButton.dataset.channelId, actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "sync-whatsapp-coexistence-history") {
+          syncWhatsAppCoexistenceHistory(actionButton.dataset.channelId, actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "cancel-whatsapp-coexistence-sync") {
+          cancelWhatsAppCoexistenceSync(actionButton.dataset.channelId, actionButton);
           return;
         }
         if (actionButton.dataset.action === "provider-setup-manual") {

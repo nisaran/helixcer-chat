@@ -50,6 +50,7 @@ import {
   registerWhatsAppEmbeddedSignupPhone,
   requireMetaEmbeddedSignupConfig,
   isWhatsAppCoexistenceSignup,
+  requestWhatsAppSmbAppData,
   shouldRegisterWhatsAppPhone,
   subscribeWhatsAppEmbeddedSignupWebhooks
 } from './meta-embedded-signup.js';
@@ -907,6 +908,22 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       requirePermission(principal, 'channels.manage');
       const channelId = decodeURIComponent(channelRegisterWebhookMatch[1]);
       const result = await registerWhatsAppEmbeddedWebhook(env, workspaceId, channelId, request);
+      await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
+      return withCors(json(result), cors);
+    }
+    const channelSyncHistoryMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/sync-coexistence-history$/);
+    if (channelSyncHistoryMatch && request.method === 'POST') {
+      requirePermission(principal, 'channels.manage');
+      const channelId = decodeURIComponent(channelSyncHistoryMatch[1]);
+      const result = await startWhatsAppCoexistenceHistorySync(env, workspaceId, channelId);
+      await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
+      return withCors(json(result), cors);
+    }
+    const channelCancelSyncMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/cancel-coexistence-sync$/);
+    if (channelCancelSyncMatch && request.method === 'POST') {
+      requirePermission(principal, 'channels.manage');
+      const channelId = decodeURIComponent(channelCancelSyncMatch[1]);
+      const result = await cancelWhatsAppCoexistenceHistorySync(env, workspaceId, channelId);
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
       return withCors(json(result), cors);
     }
@@ -2526,13 +2543,14 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
   const normalized = normalizeWhatsApp(payload);
   const expectedPhoneNumberId = String(channel.config?.phoneNumberId || '');
   const hasEvents = normalized.messages.length > 0 || normalized.statuses.length > 0
-    || normalized.echoes.length > 0;
+    || normalized.echoes.length > 0 || normalized.historyChunks.length > 0;
   if (hasEvents && (!expectedPhoneNumberId || normalized.phoneNumberIds.length === 0 ||
       normalized.phoneNumberIds.some(id => id !== expectedPhoneNumberId))) {
     return json({ ok: false, error: 'Webhook phone number does not match this channel.' }, 403);
   }
   let received = 0;
   let echoes = 0;
+  let historyImported = 0;
   let latestInbound = null;
   const statusChanges = [];
   for (const event of normalized.messages) {
@@ -2550,6 +2568,9 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
       await broadcastStoredInbound(env, channel, stored);
     }
   }
+  if (normalized.historyChunks.length) {
+    historyImported = await ingestWhatsAppCoexistenceHistory(env, channel, normalized.historyChunks, payload);
+  }
   for (const status of normalized.statuses) {
     statusChanges.push(...await applyProviderStatus(env, channel.workspaceId, channel.channelId, status, payload));
   }
@@ -2559,11 +2580,12 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
     webhookVerifiedAt: channel.config?.webhookVerifiedAt || receivedAt
   });
   await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
-  if (received || echoes || normalized.statuses.length) await broadcast(env, channel.workspaceId, {
-    type: 'webhook.received', channelId, received, echoes, statuses: normalized.statuses.length, granular: true
+  if (received || echoes || historyImported || normalized.statuses.length) await broadcast(env, channel.workspaceId, {
+    type: 'webhook.received', channelId, received, echoes, historyImported,
+    statuses: normalized.statuses.length, granular: true
   });
   if (latestInbound) afterInboundStored(ctx, env, channel, latestInbound);
-  return json({ ok: true, received, echoes, statuses: normalized.statuses.length });
+  return json({ ok: true, received, echoes, historyImported, statuses: normalized.statuses.length });
 }
 
 async function handleGenericWebhook(request, env, channelId, ctx) {
@@ -3570,6 +3592,7 @@ function channelSetupView(row, config = safeJsonParse(row.config_json, {}), cred
       ? 'google_oauth'
       : (config.authMode || ''),
     coexistence: connectorType === 'whatsapp_cloud' ? Boolean(config.coexistence) : false,
+    coexistenceSync: connectorType === 'whatsapp_cloud' ? publicCoexistenceSync(config.coexistenceSync) : null,
     callbackPath,
     credentialsVerifiedAt: config.credentialsVerifiedAt || '',
     subscribedAppsAt: config.subscribedAppsAt || '',
@@ -3581,6 +3604,24 @@ function channelSetupView(row, config = safeJsonParse(row.config_json, {}), cred
     verifiedProviderId: config.verifiedProviderId || '',
     accountName: config.accountName || '',
     locationName: config.locationName || ''
+  };
+}
+
+function publicCoexistenceSync(raw = null) {
+  if (!isPlainObject(raw)) return null;
+  const status = String(raw.status || '').trim();
+  if (!['idle', 'running', 'completed', 'cancelled', 'failed'].includes(status)) return null;
+  return {
+    status,
+    progress: Math.max(0, Math.min(100, Number(raw.progress) || 0)),
+    imported: Math.max(0, Number(raw.imported) || 0),
+    startedAt: String(raw.startedAt || ''),
+    updatedAt: String(raw.updatedAt || ''),
+    completedAt: String(raw.completedAt || ''),
+    cancelledAt: String(raw.cancelledAt || ''),
+    error: String(raw.error || '').slice(0, 240),
+    historyRequestId: String(raw.historyRequestId || ''),
+    contactsRequestId: String(raw.contactsRequestId || '')
   };
 }
 
@@ -3662,6 +3703,107 @@ async function registerWhatsAppEmbeddedWebhook(env, workspaceId, channelId, requ
     subscribedAppsAt: config.subscribedAppsAt || now,
     webhookVerifiedAt: config.webhookVerifiedAt || ''
   };
+}
+
+async function loadWorkspaceWhatsAppChannel(env, workspaceId, channelId) {
+  const id = cleanId(channelId, 'Channel ID');
+  const row = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,workspace_id
+    FROM channels WHERE channel_id=?1 AND workspace_id=?2`).bind(id, workspaceId).first();
+  if (!row) throw httpError(404, 'Channel not found.');
+  return {
+    channelId: row.channel_id,
+    name: row.name,
+    connectorType: logicalConnectorType(row),
+    capabilities: safeJsonParse(row.capabilities_json, []),
+    config: safeJsonParse(row.config_json, {}),
+    secretKey: row.secret_key,
+    workspaceId: row.workspace_id
+  };
+}
+
+async function startWhatsAppCoexistenceHistorySync(env, workspaceId, channelId, fetchImpl = fetch) {
+  const channel = await loadWorkspaceWhatsAppChannel(env, workspaceId, channelId);
+  if (channel.connectorType !== 'whatsapp_cloud') {
+    throw httpError(400, 'History sync is only available for WhatsApp channels.');
+  }
+  if (String(channel.config?.authMode || '') !== 'embedded_signup' || !channel.config?.coexistence) {
+    throw httpError(400, 'History sync is only available for coexistence WhatsApp Business app connections.');
+  }
+  const current = publicCoexistenceSync(channel.config?.coexistenceSync);
+  if (current?.status === 'running') {
+    throw httpError(409, 'A coexistence history sync is already running. Cancel it before starting another.');
+  }
+  const credentials = await readChannelCredentials(env, channel);
+  const accessToken = credentials.accessToken;
+  const phoneNumberId = String(channel.config?.phoneNumberId || '').trim();
+  if (!accessToken || !phoneNumberId) {
+    throw httpError(409, 'Secure WhatsApp credentials have not been fully configured.');
+  }
+  const now = new Date().toISOString();
+  let contactsRequestId = '';
+  let historyRequestId = '';
+  try {
+    const contacts = await requestWhatsAppSmbAppData({
+      env, accessToken, phoneNumberId, syncType: 'smb_app_state_sync', fetchImpl
+    });
+    contactsRequestId = contacts.requestId || '';
+    const history = await requestWhatsAppSmbAppData({
+      env, accessToken, phoneNumberId, syncType: 'history', fetchImpl
+    });
+    historyRequestId = history.requestId || '';
+  } catch (error) {
+    await updateChannelRuntimeConfig(env, channel, {
+      coexistenceSync: {
+        status: 'failed',
+        progress: 0,
+        imported: Number(current?.imported || 0),
+        startedAt: now,
+        updatedAt: now,
+        completedAt: now,
+        cancelledAt: '',
+        error: String(error.message || 'Meta could not start coexistence history sync.').slice(0, 240),
+        historyRequestId,
+        contactsRequestId
+      }
+    });
+    throw httpError(error.status || 422, error.message || 'Meta could not start coexistence history sync.');
+  }
+  const sync = {
+    status: 'running',
+    progress: 0,
+    imported: 0,
+    startedAt: now,
+    updatedAt: now,
+    completedAt: '',
+    cancelledAt: '',
+    error: '',
+    historyRequestId,
+    contactsRequestId
+  };
+  await updateChannelRuntimeConfig(env, channel, { coexistenceSync: sync });
+  return { ok: true, channelId: channel.channelId, coexistence: true, coexistenceSync: publicCoexistenceSync(sync) };
+}
+
+async function cancelWhatsAppCoexistenceHistorySync(env, workspaceId, channelId) {
+  const channel = await loadWorkspaceWhatsAppChannel(env, workspaceId, channelId);
+  if (channel.connectorType !== 'whatsapp_cloud' || !channel.config?.coexistence) {
+    throw httpError(400, 'Cancel sync is only available for coexistence WhatsApp connections.');
+  }
+  const current = publicCoexistenceSync(channel.config?.coexistenceSync);
+  if (!current || current.status !== 'running') {
+    throw httpError(409, 'No coexistence history sync is running for this channel.');
+  }
+  const now = new Date().toISOString();
+  const sync = {
+    ...current,
+    status: 'cancelled',
+    updatedAt: now,
+    cancelledAt: now,
+    completedAt: now,
+    error: 'Sync cancelled in Helixcer. Later Meta history chunks will be ignored.'
+  };
+  await updateChannelRuntimeConfig(env, channel, { coexistenceSync: sync });
+  return { ok: true, channelId: channel.channelId, coexistenceSync: publicCoexistenceSync(sync) };
 }
 
 async function getChannelVerifyToken(env, workspaceId, channelId, principal) {
@@ -9867,6 +10009,55 @@ async function storeInbound(env, channel, event, rawPayload) {
   }
 }
 
+async function ingestWhatsAppCoexistenceHistory(env, channel, historyChunks, rawPayload) {
+  if (!Array.isArray(historyChunks) || !historyChunks.length) return 0;
+  const current = publicCoexistenceSync(channel.config?.coexistenceSync) || {
+    status: 'running', progress: 0, imported: 0, startedAt: new Date().toISOString(),
+    updatedAt: '', completedAt: '', cancelledAt: '', error: '', historyRequestId: '', contactsRequestId: ''
+  };
+  if (current.status === 'cancelled') return 0;
+
+  let imported = Number(current.imported || 0);
+  let progress = Number(current.progress || 0);
+  let failedMessage = '';
+  for (const chunk of historyChunks) {
+    if (chunk.errors?.length) {
+      const declined = chunk.errors.find(item => Number(item.code) === 2593109);
+      failedMessage = declined
+        ? 'The business declined sharing WhatsApp chat history with Helixcer.'
+        : (chunk.errors[0].message || `History sync failed (code ${chunk.errors[0].code || 'unknown'}).`);
+      continue;
+    }
+    for (const thread of chunk.threads || []) {
+      for (const event of thread.messages || []) {
+        if (!event.providerMessageId || !event.channelProfileId) continue;
+        const stored = event.direction === 'outbound'
+          ? await storeWhatsAppBusinessAppEcho(env, channel, event, rawPayload)
+          : await storeInbound(env, channel, event, rawPayload);
+        if (stored) imported += 1;
+      }
+    }
+    if (Number.isFinite(chunk.progress)) progress = Math.max(progress, Math.min(100, Number(chunk.progress)));
+  }
+
+  const now = new Date().toISOString();
+  let status = current.status === 'running' ? 'running' : current.status;
+  if (failedMessage) status = 'failed';
+  else if (progress >= 100) status = 'completed';
+  const sync = {
+    ...current,
+    status,
+    progress: status === 'completed' ? 100 : progress,
+    imported,
+    updatedAt: now,
+    completedAt: status === 'completed' || status === 'failed' ? now : '',
+    error: failedMessage
+  };
+  await updateChannelRuntimeConfig(env, channel, { coexistenceSync: sync });
+  await broadcast(env, channel.workspaceId, { type: 'channel.updated', channelId: channel.channelId });
+  return imported - Number(current.imported || 0);
+}
+
 async function storeWhatsAppBusinessAppEcho(env, channel, event, rawPayload) {
   if (!event.channelProfileId || !event.providerMessageId) return false;
   const providerEventKey = String(event.providerMessageId);
@@ -11344,6 +11535,7 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
 export function normalizeWhatsApp(payload) {
   const messages = [];
   const echoes = [];
+  const historyChunks = [];
   const statuses = [];
   const phoneNumberIds = new Set();
   for (const entry of payload?.entry || []) {
@@ -11351,6 +11543,7 @@ export function normalizeWhatsApp(payload) {
       const value = change?.value || {};
       if (value.metadata?.phone_number_id) phoneNumberIds.add(String(value.metadata.phone_number_id));
       const contacts = value.contacts || [];
+      const businessPhone = String(value.metadata?.display_phone_number || '').replace(/\D+/g, '');
       for (const message of value.messages || []) {
         const contact = contacts.find(item => String(item.wa_id) === String(message.from)) || {};
         const text = whatsappInboundText(message);
@@ -11387,6 +11580,57 @@ export function normalizeWhatsApp(payload) {
           ...(reply ? { reply } : {})
         });
       }
+      for (const chunk of value.history || []) {
+        const errors = Array.isArray(chunk?.errors) ? chunk.errors : [];
+        const meta = chunk?.metadata || {};
+        const threads = [];
+        for (const thread of chunk?.threads || []) {
+          const customerId = String(thread?.id || thread?.context?.wa_id || '').trim();
+          const displayName = String(thread?.context?.username || customerId || '').trim();
+          const threadMessages = [];
+          for (const message of thread?.messages || []) {
+            const messageType = String(message?.type || '').toLowerCase();
+            if (messageType === 'edit' || messageType === 'revoke') continue;
+            const from = String(message?.from || '').replace(/\D+/g, '');
+            const to = String(message?.to || '').replace(/\D+/g, '');
+            const customerDigits = customerId.replace(/\D+/g, '');
+            const outbound = Boolean(to)
+              || (businessPhone && from && from === businessPhone)
+              || (customerDigits && from && from !== customerDigits);
+            if (!customerId && !outbound) continue;
+            const attachment = messageType === 'media_placeholder' ? null : whatsappInboundAttachment(message);
+            const text = messageType === 'media_placeholder'
+              ? '[WhatsApp media from chat history]'
+              : whatsappInboundText(message);
+            const reply = whatsappInboundReply(message);
+            threadMessages.push({
+              direction: outbound ? 'outbound' : 'inbound',
+              channelProfileId: customerId,
+              displayName: displayName || customerId,
+              text,
+              providerMessageId: String(message.id || ''),
+              timestamp: message.timestamp ? new Date(Number(message.timestamp) * 1000).toISOString() : '',
+              messageType: attachment?.type || (messageType === 'media_placeholder' ? 'document' : String(message.type || 'text')),
+              historyStatus: String(message?.history_context?.status || '').toLowerCase(),
+              ...(attachment ? { attachment } : {}),
+              ...(reply ? { reply } : {})
+            });
+          }
+          if (customerId && threadMessages.length) {
+            threads.push({ customerId, displayName, messages: threadMessages });
+          }
+        }
+        historyChunks.push({
+          phase: Number(meta.phase),
+          chunkOrder: Number(meta.chunk_order),
+          progress: Number(meta.progress),
+          errors: errors.map(item => ({
+            code: Number(item?.code || 0),
+            message: String(item?.message || item?.title || '').slice(0, 240)
+          })).filter(item => item.code || item.message),
+          threads
+        });
+      }
       for (const status of value.statuses || []) {
         statuses.push({
           providerMessageId: String(status.id || ''), status: String(status.status || ''),
@@ -11400,6 +11644,7 @@ export function normalizeWhatsApp(payload) {
   return {
     messages: messages.filter(item => item.channelProfileId),
     echoes: echoes.filter(item => item.channelProfileId && item.providerMessageId),
+    historyChunks,
     statuses: statuses.filter(item => item.providerMessageId || item.internalMessageId),
     phoneNumberIds: [...phoneNumberIds]
   };
