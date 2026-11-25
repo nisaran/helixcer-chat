@@ -15867,7 +15867,7 @@
           return;
         }
         const payload = data.data || {};
-        pending.wabaId = String(payload.waba_id || pending.wabaId || "");
+        pending.wabaId = String(payload.messaging_account_ids?.[0] || payload.waba_id || pending.wabaId || "");
         pending.phoneNumberId = String(payload.phone_number_id || pending.phoneNumberId || "");
         pending.businessId = String(payload.business_id || pending.businessId || "");
         pending.event = String(data.event || pending.event || "FINISH");
@@ -15900,7 +15900,7 @@
         config_id: config.configId,
         response_type: "code",
         override_default_response_type: true,
-        extras: { setup: {}, featureType: "", sessionInfoVersion: "3" },
+        extras: { version: "v5" },
       });
     });
   }
