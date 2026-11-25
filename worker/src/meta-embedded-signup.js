@@ -267,7 +267,11 @@ export function parseWhatsAppEmbeddedSignupSession(payload = {}) {
 }
 
 export function shouldRegisterWhatsAppPhone(event) {
-  return String(event || '').toUpperCase() !== 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING';
+  return !isWhatsAppCoexistenceSignup(event);
+}
+
+export function isWhatsAppCoexistenceSignup(event) {
+  return String(event || '').toUpperCase() === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING';
 }
 
 export function generateWhatsAppTwoStepPin() {

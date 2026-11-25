@@ -49,6 +49,7 @@ import {
   parseWhatsAppEmbeddedSignupSession,
   registerWhatsAppEmbeddedSignupPhone,
   requireMetaEmbeddedSignupConfig,
+  isWhatsAppCoexistenceSignup,
   shouldRegisterWhatsAppPhone,
   subscribeWhatsAppEmbeddedSignupWebhooks
 } from './meta-embedded-signup.js';
@@ -181,7 +182,7 @@ const TEMPLATE_BUTTON_TYPES = new Set(['quick_reply', 'url', 'phone_number', 'co
 const CONNECTOR_DEFINITIONS = {
   whatsapp_cloud: {
     label: 'WhatsApp Cloud API', webhookPath: 'whatsapp',
-    configFields: ['wabaId', 'phoneNumberId', 'apiVersion', 'authMode', 'businessId'],
+    configFields: ['wabaId', 'phoneNumberId', 'apiVersion', 'authMode', 'businessId', 'coexistence'],
     requiredConfig: ['wabaId', 'phoneNumberId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret'],
     capabilities: ['text', 'attachments']
   },
@@ -3568,6 +3569,7 @@ function channelSetupView(row, config = safeJsonParse(row.config_json, {}), cred
     authMode: connectorType === 'google_reviews'
       ? 'google_oauth'
       : (config.authMode || ''),
+    coexistence: connectorType === 'whatsapp_cloud' ? Boolean(config.coexistence) : false,
     callbackPath,
     credentialsVerifiedAt: config.credentialsVerifiedAt || '',
     subscribedAppsAt: config.subscribedAppsAt || '',
@@ -4066,17 +4068,20 @@ async function completeWhatsAppEmbeddedSignup(env, principal, payload, request, 
   );
   const apiVersion = metaGraphApiVersion(env, previousConfig.apiVersion || 'v26.0');
   const now = new Date().toISOString();
+  const coexistence = isWhatsAppCoexistenceSignup(session.event);
   const config = {
     ...previousConfig,
     wabaId: session.wabaId,
     phoneNumberId: session.phoneNumberId,
     apiVersion,
     authMode: 'embedded_signup',
+    coexistence,
     businessId: session.businessId || previousConfig.businessId || '',
     credentialsVerifiedAt: now,
     subscribedAppsAt: now
   };
   if (!config.businessId) delete config.businessId;
+  if (!config.coexistence) delete config.coexistence;
   await assertUniqueManagedConfig(env, workspaceId, 'whatsapp_cloud', channelId, config);
   const changedIdentity = editableConfigChanges('whatsapp_cloud', previousConfig, config)
     .filter(key => key === 'wabaId' || key === 'phoneNumberId');
@@ -4153,6 +4158,7 @@ async function completeWhatsAppEmbeddedSignup(env, principal, payload, request, 
     connectorType: 'whatsapp_cloud',
     enabled: enabled === 1,
     authMode: 'embedded_signup',
+    coexistence,
     updatedCredentialFields: ['accessToken', 'verifyToken', 'appSecret'],
     phoneRegistered
   });
@@ -4164,6 +4170,7 @@ async function completeWhatsAppEmbeddedSignup(env, principal, payload, request, 
     name: channelName,
     health: 'webhook_required',
     authMode: 'embedded_signup',
+    coexistence,
     phoneRegistered,
     wabaId: session.wabaId,
     phoneNumberId: session.phoneNumberId
@@ -4459,6 +4466,11 @@ function normalizeChannelConfigValue(key, value) {
       throw httpError(400, 'Authentication mode is invalid.');
     }
     return text;
+  }
+  if (key === 'coexistence') {
+    if (value === true || value === 1 || text === 'true' || text === '1') return true;
+    if (value === false || value === 0 || text === 'false' || text === '0' || text === '') return '';
+    throw httpError(400, 'Coexistence flag is invalid.');
   }
   if (key === 'accountId' || key === 'locationId') {
     if (!/^[A-Za-z0-9_.-]{1,128}$/.test(text)) throw httpError(400, `${key} is invalid.`);
