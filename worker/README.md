@@ -61,8 +61,9 @@ Optional Meta WhatsApp Embedded Signup (`Login with Facebook` on WhatsApp channe
 - `META_APP_SECRET`: Meta App Secret used to exchange Embedded Signup codes and to verify per-channel WhatsApp webhook signatures after signup.
 - `META_EMBEDDED_SIGNUP_CONFIG_ID`: Facebook Login for Business configuration ID created from the WhatsApp Embedded Signup template.
 - `META_GRAPH_API_VERSION`: optional Graph API version override (defaults to `v22.0`).
+- `META_WEBHOOK_VERIFY_TOKEN`: optional shared verify token for the app-level WhatsApp webhook at `/webhooks/whatsapp-app`. When unset, Helixcer uses `helixcer-wa-app-{META_APP_ID}`.
 
-In Meta, allow Helixcer app domains under Facebook Login for Business → Settings (Allowed domains / Valid OAuth redirect URIs), and ensure WhatsApp product webhooks can reach `https://api.chat.helixcer.com/webhooks/whatsapp/{channelId}` via the per-WABA `override_callback_uri` Helixcer sets during signup.
+In Meta, allow Helixcer app domains under Facebook Login for Business → Settings (Allowed domains / Valid OAuth redirect URIs). Helixcer auto-configures the app-level WhatsApp webhook (`/webhooks/whatsapp-app`) and then sets each WABA’s `override_callback_uri` to `https://api.chat.helixcer.com/webhooks/whatsapp/{channelId}` during Embedded Signup / Register Webhook.
 
 Optional password-reset delivery secrets:
 

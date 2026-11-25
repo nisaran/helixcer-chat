@@ -65,14 +65,72 @@ export async function exchangeMetaEmbeddedSignupCode(env, code, fetchImpl = fetc
   };
 }
 
+export function metaWhatsAppAppVerifyToken(env) {
+  const explicit = String(env.META_WEBHOOK_VERIFY_TOKEN || '').trim();
+  if (explicit) return explicit;
+  const appId = String(env.META_APP_ID || '').trim();
+  return appId ? `helixcer-wa-app-${appId}` : '';
+}
+
+export function metaWhatsAppAppWebhookPath() {
+  return '/webhooks/whatsapp-app';
+}
+
+export function metaWhatsAppAppCallbackUri(origin) {
+  return `${String(origin || '').replace(/\/$/, '')}${metaWhatsAppAppWebhookPath()}`;
+}
+
+export async function ensureWhatsAppAppWebhookSubscription({
+  env,
+  callbackUri,
+  fetchImpl = fetch
+}) {
+  requireMetaEmbeddedSignupConfig(env);
+  const appId = String(env.META_APP_ID).trim();
+  const appSecret = String(env.META_APP_SECRET).trim();
+  const verifyToken = metaWhatsAppAppVerifyToken(env);
+  const version = metaGraphApiVersion(env);
+  const endpoint = `https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(appId)}/subscriptions`;
+  const body = new URLSearchParams({
+    object: 'whatsapp_business_account',
+    callback_url: String(callbackUri || ''),
+    verify_token: verifyToken,
+    fields: WHATSAPP_WEBHOOK_FIELDS.join(','),
+    access_token: `${appId}|${appSecret}`
+  });
+  const response = await fetchImpl(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success === false) {
+    const message = metaEmbeddedSignupErrorMessage(payload, response.status,
+      'Meta could not configure the Helixcer WhatsApp app webhook.');
+    const error = new Error(clarifyWhatsAppAppWebhookError(message));
+    error.status = 422;
+    throw error;
+  }
+  return { ok: true, callbackUri, verifyToken };
+}
+
 export async function subscribeWhatsAppEmbeddedSignupWebhooks({
   env,
   accessToken,
   wabaId,
   callbackUri,
   verifyToken,
+  appCallbackUri,
   fetchImpl = fetch
 }) {
+  // Meta requires an active app-level whatsapp_business_account webhook before
+  // per-WABA override_callback_uri succeeds.
+  await ensureWhatsAppAppWebhookSubscription({
+    env,
+    callbackUri: appCallbackUri,
+    fetchImpl
+  });
+
   const version = metaGraphApiVersion(env);
   const endpoint = `https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/subscribed_apps`;
 
@@ -126,7 +184,14 @@ async function postWhatsAppSubscribedApps({
 
 function clarifyWhatsAppWebhookSubscribeError(message) {
   if (/before override the current callback uri/i.test(message)) {
-    return `${message} In Meta App Dashboard → WhatsApp → Configuration, confirm the app webhook is connected and the messages field is subscribed, then try Register Webhook again.`;
+    return `${message} Helixcer tried to configure the app webhook first; confirm Callback URL https://api.chat.helixcer.com/webhooks/whatsapp-app is reachable, then try Register Webhook again.`;
+  }
+  return message;
+}
+
+function clarifyWhatsAppAppWebhookError(message) {
+  if (/callback.?url|verify.?token|could not be validated|unreachable/i.test(message)) {
+    return `${message} Ensure https://api.chat.helixcer.com/webhooks/whatsapp-app answers Meta's verification challenge.`;
   }
   return message;
 }
