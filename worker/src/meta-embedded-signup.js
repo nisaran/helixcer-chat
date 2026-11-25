@@ -1,4 +1,10 @@
 const DEFAULT_GRAPH_VERSION = 'v22.0';
+const WHATSAPP_WEBHOOK_FIELDS = [
+  'messages',
+  'message_template_status_update',
+  'account_update',
+  'smb_message_echoes'
+];
 
 export function metaEmbeddedSignupConfigured(env) {
   return Boolean(String(env.META_APP_ID || '').trim()
@@ -68,27 +74,61 @@ export async function subscribeWhatsAppEmbeddedSignupWebhooks({
   fetchImpl = fetch
 }) {
   const version = metaGraphApiVersion(env);
-  const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/subscribed_apps`);
-  const headers = {
-    Authorization: `Bearer ${accessToken}`,
-    'Content-Type': 'application/json'
-  };
-  // Meta requires an existing account subscription before overriding its callback.
-  for (const body of [undefined, { override_callback_uri: callbackUri, verify_token: verifyToken }]) {
-    const response = await fetchImpl(endpoint.toString(), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.success === false) {
-      const error = new Error(metaEmbeddedSignupErrorMessage(payload, response.status,
-        'Meta could not subscribe Helixcer to this WhatsApp account.'));
-      error.status = 422;
-      throw error;
-    }
-  }
+  const endpoint = `https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/subscribed_apps`;
+
+  // Step 1: plain WABA subscribe. Must be a body-less POST — do not send JSON null/undefined.
+  await postWhatsAppSubscribedApps({
+    endpoint,
+    accessToken,
+    body: null,
+    fetchImpl,
+    fallback: 'Meta could not subscribe Helixcer to this WhatsApp account.'
+  });
+
+  // Step 2: override callback + explicitly subscribe message webhook fields.
+  await postWhatsAppSubscribedApps({
+    endpoint,
+    accessToken,
+    body: {
+      override_callback_uri: callbackUri,
+      verify_token: verifyToken,
+      subscribed_fields: WHATSAPP_WEBHOOK_FIELDS
+    },
+    fetchImpl,
+    fallback: 'Meta could not set Helixcer as the webhook callback for this WhatsApp account.'
+  });
   return { ok: true };
+}
+
+async function postWhatsAppSubscribedApps({
+  endpoint,
+  accessToken,
+  body,
+  fetchImpl,
+  fallback
+}) {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const init = { method: 'POST', headers };
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetchImpl(endpoint, init);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success === false) {
+    const message = metaEmbeddedSignupErrorMessage(payload, response.status, fallback);
+    const error = new Error(clarifyWhatsAppWebhookSubscribeError(message));
+    error.status = 422;
+    throw error;
+  }
+  return payload;
+}
+
+function clarifyWhatsAppWebhookSubscribeError(message) {
+  if (/before override the current callback uri/i.test(message)) {
+    return `${message} In Meta App Dashboard → WhatsApp → Configuration, confirm the app webhook is connected and the messages field is subscribed, then try Register Webhook again.`;
+  }
+  return message;
 }
 
 export async function registerWhatsAppEmbeddedSignupPhone({
