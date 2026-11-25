@@ -25,6 +25,7 @@ import {
   normalizeInstagram,
   normalizeTelegram,
   normalizeWhatsApp,
+  isWhatsAppPlaceholderContactName,
   normalizeWhatsAppRecipient,
   outboundSenderAttribution,
   outboundSenderLabel,
@@ -375,6 +376,47 @@ test('normalizes WhatsApp coexistence history chunks', () => {
   assert.equal(result.historyChunks[0].threads[0].messages[0].direction, 'outbound');
   assert.equal(result.historyChunks[0].threads[0].messages[1].direction, 'inbound');
   assert.equal(result.historyChunks[0].threads[0].messages[1].text, 'Past customer reply');
+});
+
+test('normalizes WhatsApp coexistence smb_app_state_sync contacts', () => {
+  const result = normalizeWhatsApp({
+    object: 'whatsapp_business_account',
+    entry: [{
+      id: '102290129340398',
+      changes: [{
+        field: 'smb_app_state_sync',
+        value: {
+          messaging_product: 'whatsapp',
+          metadata: {
+            display_phone_number: '15550783881',
+            phone_number_id: '106540352242922'
+          },
+          state_sync: [{
+            type: 'contact',
+            contact: {
+              full_name: 'Pablo Morales',
+              first_name: 'Pablo',
+              phone_number: '16505551234'
+            },
+            action: 'add',
+            metadata: { timestamp: '1739321024' }
+          }, {
+            type: 'contact',
+            contact: { phone_number: '16505559876' },
+            action: 'remove',
+            metadata: { timestamp: '1739321100' }
+          }]
+        }
+      }]
+    }]
+  });
+  assert.equal(result.contactSyncs.length, 2);
+  assert.equal(result.contactSyncs[0].action, 'add');
+  assert.equal(result.contactSyncs[0].fullName, 'Pablo Morales');
+  assert.equal(result.contactSyncs[0].phoneNumber, '16505551234');
+  assert.equal(result.contactSyncs[1].action, 'remove');
+  assert.equal(isWhatsAppPlaceholderContactName('919643014144', '919643014144'), true);
+  assert.equal(isWhatsAppPlaceholderContactName('Pablo Morales', '16505551234'), false);
 });
 
 test('providerError surfaces Meta template create details beyond Invalid parameter', () => {

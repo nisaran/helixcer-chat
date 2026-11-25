@@ -1491,7 +1491,7 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signed.signature }, body: signed.raw
     }), env);
     assert.equal(delivered.status, 200);
-    assert.deepEqual(await delivered.json(), { ok: true, received: 1, echoes: 0, historyImported: 0, statuses: 0 });
+    assert.deepEqual(await delivered.json(), { ok: true, received: 1, echoes: 0, historyImported: 0, contactsSynced: 0, statuses: 0 });
     assert.equal(providerCalls, 0);
 
     const conversation = database.prepare(`SELECT conversation_id,status,subject,unread_count FROM conversations
@@ -1581,7 +1581,7 @@ test('signed WhatsApp webhooks reach the Inbox before Meta API verification', as
     const reopened = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/whatsapp/${channelId}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': reopenedSigned.signature }, body: reopenedSigned.raw
     }), env);
-    assert.deepEqual(await reopened.json(), { ok: true, received: 1, echoes: 0, historyImported: 0, statuses: 0 });
+    assert.deepEqual(await reopened.json(), { ok: true, received: 1, echoes: 0, historyImported: 0, contactsSynced: 0, statuses: 0 });
     const conversationMessages = await handleRequest(new Request(
       `https://api.chat.helixcer.com/api/conversations/${conversation.conversation_id}/messages`, {
         headers: { Authorization: 'Bearer recovery-secret' }
@@ -1685,7 +1685,7 @@ test('WhatsApp Business app coexistence echoes store as outbound messages', asyn
     body: raw
   }), env);
   assert.equal(response.status, 200, await response.clone().text());
-  assert.deepEqual(await response.json(), { ok: true, received: 0, echoes: 1, historyImported: 0, statuses: 0 });
+  assert.deepEqual(await response.json(), { ok: true, received: 0, echoes: 1, historyImported: 0, contactsSynced: 0, statuses: 0 });
 
   const message = database.prepare(`SELECT direction,text,status,provider_message_id,sender_login,sender_name
     FROM messages WHERE channel_id=? AND provider_message_id=?`).get(channelId, 'wamid.echo-business-app');
@@ -1701,6 +1701,97 @@ test('WhatsApp Business app coexistence echoes store as outbound messages', asyn
   assert.equal(echoEvent.message.direction, 'outbound');
   assert.equal(echoEvent.message.senderName, 'WhatsApp Business');
   assert.equal(echoEvent.source, 'webhook');
+  database.close();
+});
+
+test('WhatsApp coexistence contact sync saves address book names', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2)
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const channelId = 'wa-smb-contacts';
+  const phoneNumberId = '106540352242922';
+  const appSecret = '1234567890abcdef1234567890abcdef';
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      channelId, name: 'Coexistence Contacts', connectorType: 'whatsapp_cloud', enabled: true,
+      config: {
+        wabaId: '102290129340398', phoneNumberId, apiVersion: 'v26.0',
+        authMode: 'embedded_signup', coexistence: true
+      },
+      credentials: {
+        accessToken: 'contact-access-token-value-1234567890', appSecret, verifyToken: 'verify-token-value'
+      }
+    })
+  }), env);
+  assert.equal(created.status, 201, await created.clone().text());
+
+  // Seed a phone-only contact created by history/live messaging.
+  const seedContactId = 'ct-phone-only';
+  const seedIdentityId = 'id-phone-only';
+  const now = new Date().toISOString();
+  database.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+    VALUES (?, ?, ?, ?, 'ws_default')`).run(seedContactId, '919643014144', now, now);
+  database.prepare(`INSERT INTO contact_identities
+    (identity_id,workspace_id,contact_id,platform,profile_id,phone_number,display_name,created_at,updated_at)
+    VALUES (?,'ws_default',?,'whatsapp',?,?,?,?,?)`).run(
+    seedIdentityId, seedContactId, '919643014144', '919643014144', '919643014144', now, now);
+  database.prepare(`INSERT INTO channel_identity_bindings
+    (binding_id,workspace_id,identity_id,channel_id,scoped_profile_id,active,first_seen_at,last_seen_at,created_at,updated_at)
+    VALUES (?,'ws_default',?,?,?,1,?,?,?,?)`).run(
+    'bind-phone-only', seedIdentityId, channelId, '919643014144', now, now, now, now);
+  database.prepare(`INSERT INTO conversations
+    (conversation_id,contact_id,channel_id,identity_id,status,subject,last_message_at,unread_count,created_at,updated_at,workspace_id)
+    VALUES (?,?,?,?,'open',?,?,0,?,?,'ws_default')`).run(
+    'conv-phone-only', seedContactId, channelId, seedIdentityId, '919643014144', now, now, now);
+
+  const payload = {
+    object: 'whatsapp_business_account',
+    entry: [{
+      id: '102290129340398',
+      changes: [{
+        field: 'smb_app_state_sync',
+        value: {
+          messaging_product: 'whatsapp',
+          metadata: { display_phone_number: '15550783881', phone_number_id: phoneNumberId },
+          state_sync: [{
+            type: 'contact',
+            action: 'add',
+            contact: {
+              full_name: 'Ananya Sharma',
+              first_name: 'Ananya',
+              phone_number: '919643014144'
+            },
+            metadata: { timestamp: '1739321024' }
+          }]
+        }
+      }]
+    }]
+  };
+  const raw = JSON.stringify(payload);
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(appSecret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(raw));
+  const signature = `sha256=${Buffer.from(digest).toString('hex')}`;
+
+  const response = await handleRequest(new Request(`https://api.chat.helixcer.com/webhooks/whatsapp/${channelId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature },
+    body: raw
+  }), env);
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.deepEqual(await response.json(), {
+    ok: true, received: 0, echoes: 0, historyImported: 0, contactsSynced: 1, statuses: 0
+  });
+
+  const contact = database.prepare('SELECT display_name FROM contacts WHERE contact_id=?').get(seedContactId);
+  assert.equal(contact.display_name, 'Ananya Sharma');
+  const conversation = database.prepare('SELECT subject FROM conversations WHERE conversation_id=?')
+    .get('conv-phone-only');
+  assert.equal(conversation.subject, 'Ananya Sharma');
   database.close();
 });
 
@@ -2840,7 +2931,7 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
       body: statusRaw
     }), env, ctx);
     assert.equal(statusResponse.status, 200);
-    assert.deepEqual(await statusResponse.json(), { ok: true, received: 0, echoes: 0, historyImported: 0, statuses: 1 });
+    assert.deepEqual(await statusResponse.json(), { ok: true, received: 0, echoes: 0, historyImported: 0, contactsSynced: 0, statuses: 1 });
     const afterStatus = database.prepare(
       'SELECT status,payload_json,sender_login,sender_name FROM messages WHERE message_id=?'
     ).get(plainItem.messageId);

@@ -201,7 +201,7 @@ test('campaign Excel local number keeps thread when WhatsApp replies with countr
       body: raw
     }), env);
   assert.equal(delivered.status, 200);
-  assert.deepEqual(await delivered.json(), { ok: true, received: 1, echoes: 0, historyImported: 0, statuses: 0 });
+  assert.deepEqual(await delivered.json(), { ok: true, received: 1, echoes: 0, historyImported: 0, contactsSynced: 0, statuses: 0 });
 
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM contacts WHERE workspace_id=?')
     .get(workspaceId).count, 1);
