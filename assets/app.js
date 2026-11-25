@@ -2234,6 +2234,17 @@
         : this.request(`/api/channels/${encodeURIComponent(channelId)}/verify`, { method: "POST" });
     }
 
+    registerWhatsAppWebhook(channelId) {
+      return this.isDemo
+        ? Promise.resolve({
+          ok: true,
+          channelId,
+          health: "connected",
+          webhookVerifiedAt: new Date().toISOString(),
+        })
+        : this.request(`/api/channels/${encodeURIComponent(channelId)}/register-webhook`, { method: "POST" });
+    }
+
     getVerifyToken(channelId) {
       return this.isDemo
         ? this.demo.getVerifyToken(channelId)
@@ -7624,6 +7635,8 @@
     toggle.type = "button";
     toggle.dataset.action = "toggle-channel";
     toggle.dataset.channelId = channel.channelId;
+    const isEmbeddedWhatsApp = channel.connectorType === "whatsapp_cloud"
+      && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
     if (isGoogleReviews && !credentialsReady) {
       const connect = element("button", "primary-button", "Connect with Google");
       connect.type = "button";
@@ -7632,13 +7645,30 @@
       actions.append(toggle, connect);
     } else {
       actions.append(toggle, verify);
+      if (isEmbeddedWhatsApp && credentialsReady) {
+        const registerWebhook = element("button", "secondary-button",
+          webhookVerified ? "Re-register webhook" : "Register Webhook");
+        registerWebhook.type = "button";
+        registerWebhook.dataset.action = "register-whatsapp-webhook";
+        registerWebhook.dataset.channelId = channel.channelId;
+        registerWebhook.disabled = !channel.enabled;
+        registerWebhook.title = webhookVerified
+          ? "Ask Meta to subscribe this WhatsApp account to Helixcer's webhook again"
+          : "Subscribe this WhatsApp account and set Helixcer's webhook callback in Meta";
+        actions.append(registerWebhook);
+      }
     }
     setup.append(actions);
 
     if ((channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram" ||
         channel.connectorType === "facebook_messenger") && !webhookVerified) {
       const note = element("div", "meta-webhook-warning");
-      if (channel.connectorType === "instagram" && channel.config?.appId) {
+      if (isEmbeddedWhatsApp) {
+        note.append(
+          element("strong", "", "Login with Facebook webhook"),
+          element("span", "", "Use Register Webhook if Meta did not finish the automatic callback setup for this connection.")
+        );
+      } else if (channel.connectorType === "instagram" && channel.config?.appId) {
         note.append(element("strong", "", "Shared Meta app callback"), element("span", "", "Use this URL once for every Instagram account connected through the same Meta App ID. Helixcer routes messages by account ID."));
       } else if (channel.connectorType === "facebook_messenger" && channel.config?.appId) {
         note.append(element("strong", "", "Shared Meta app callback"), element("span", "", "Use this URL once for every Facebook Page connected through the same Meta App ID. Helixcer routes messages by Page ID."));
@@ -16210,6 +16240,30 @@
     }
   }
 
+  async function registerWhatsAppWebhook(channelId, button) {
+    if (!channelId || !button) return;
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    button.disabled = true;
+    const previousLabel = button.textContent;
+    button.textContent = "Registering…";
+    try {
+      const result = await state.api.registerWhatsAppWebhook(channelId);
+      await loadAll();
+      setRoute("channels");
+      showToast(
+        result.health === "connected" ? "WhatsApp webhook registered" : "WhatsApp webhook updated",
+        result.health === "connected"
+          ? `${channel?.name || "WhatsApp"} is subscribed to Helixcer's callback.`
+          : "Meta accepted the subscription. Send a test message if the webhook step is still pending."
+      );
+    } catch (error) {
+      showToast("Webhook was not registered", error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = previousLabel;
+    }
+  }
+
   function finishConfirmation(confirmed, { close = true } = {}) {
     const resolve = state.confirmationResolve;
     state.confirmationResolve = null;
@@ -17061,6 +17115,10 @@
         }
         if (actionButton.dataset.action === "verify-channel") {
           verifyChannelConnection(actionButton.dataset.channelId, actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "register-whatsapp-webhook") {
+          registerWhatsAppWebhook(actionButton.dataset.channelId, actionButton);
           return;
         }
         if (actionButton.dataset.action === "provider-setup-manual") {
