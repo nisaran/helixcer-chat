@@ -69,24 +69,24 @@ export async function subscribeWhatsAppEmbeddedSignupWebhooks({
 }) {
   const version = metaGraphApiVersion(env);
   const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/subscribed_apps`);
-  const body = {
-    override_callback_uri: callbackUri,
-    verify_token: verifyToken
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
   };
-  const response = await fetchImpl(endpoint.toString(), {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.success === false) {
-    const error = new Error(metaEmbeddedSignupErrorMessage(payload, response.status,
-      'Meta could not subscribe Helixcer to this WhatsApp account.'));
-    error.status = 422;
-    throw error;
+  // Meta requires an existing account subscription before overriding its callback.
+  for (const body of [undefined, { override_callback_uri: callbackUri, verify_token: verifyToken }]) {
+    const response = await fetchImpl(endpoint.toString(), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) {
+      const error = new Error(metaEmbeddedSignupErrorMessage(payload, response.status,
+        'Meta could not subscribe Helixcer to this WhatsApp account.'));
+      error.status = 422;
+      throw error;
+    }
   }
   return { ok: true };
 }
