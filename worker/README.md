@@ -62,7 +62,7 @@ Optional Meta WhatsApp Embedded Signup (`Login with Facebook` on WhatsApp channe
 - `META_EMBEDDED_SIGNUP_CONFIG_ID`: Facebook Login for Business configuration ID created from the WhatsApp Embedded Signup template.
 - `META_GRAPH_API_VERSION`: optional Graph API version override (defaults to `v22.0`).
 
-In Meta, allow Helixcer app domains under Facebook Login for Business → Settings (Allowed domains / Valid OAuth redirect URIs), and ensure WhatsApp product webhooks can reach `https://api.chat.helixcer.com/webhooks/whatsapp/{channelId}` via the per-WABA `override_callback_uri` Helixcer sets during signup.
+In Meta, allow Helixcer app domains under Facebook Login for Business → Settings (Allowed domains / Valid OAuth redirect URIs), and ensure the WhatsApp product has an app-level webhook for `whatsapp_business_account` / `messages`. During Embedded Signup Helixcer first `POST /{WABA_ID}/subscribed_apps`, then sets per-channel `override_callback_uri` to `https://api.chat.helixcer.com/webhooks/whatsapp/{channelId}`.
 
 Optional password-reset delivery secrets:
 

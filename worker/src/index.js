@@ -3896,11 +3896,19 @@ async function completeWhatsAppEmbeddedSignup(env, principal, payload, request, 
 
   const workspaceId = principal.workspace.workspaceId;
   const forcedChannelId = String(payload.channelId || '').trim();
-  const channelId = forcedChannelId ? cleanId(forcedChannelId, 'Channel ID') : crypto.randomUUID();
-  const existing = await env.DB.prepare('SELECT * FROM channels WHERE channel_id=?1 AND workspace_id=?2')
-    .bind(channelId, workspaceId).first();
-  if (forcedChannelId && !existing) throw httpError(404, 'Channel not found.');
-  if (!forcedChannelId && existing) throw httpError(409, 'Channel ID already exists.');
+  let existing = null;
+  if (forcedChannelId) {
+    existing = await env.DB.prepare('SELECT * FROM channels WHERE channel_id=?1 AND workspace_id=?2')
+      .bind(cleanId(forcedChannelId, 'Channel ID'), workspaceId).first();
+    if (!existing) throw httpError(404, 'Channel not found.');
+  } else {
+    // Reuse a channel left behind by a previous Embedded Signup attempt for this phone.
+    existing = await env.DB.prepare(`SELECT * FROM channels
+      WHERE workspace_id=?1 AND provider_type='whatsapp_cloud'
+        AND json_extract(config_json,'$.phoneNumberId')=?2
+      LIMIT 1`).bind(workspaceId, session.phoneNumberId).first();
+  }
+  const channelId = existing?.channel_id || (forcedChannelId ? cleanId(forcedChannelId, 'Channel ID') : crypto.randomUUID());
   if (existing && logicalConnectorType(existing) !== 'whatsapp_cloud') {
     throw httpError(400, 'Only WhatsApp channels can complete Login with Facebook.');
   }

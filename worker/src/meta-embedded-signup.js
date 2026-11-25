@@ -69,26 +69,50 @@ export async function subscribeWhatsAppEmbeddedSignupWebhooks({
 }) {
   const version = metaGraphApiVersion(env);
   const endpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/subscribed_apps`);
-  const body = {
-    override_callback_uri: callbackUri,
-    verify_token: verifyToken
-  };
-  const response = await fetchImpl(endpoint.toString(), {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
+  // Meta requires a plain WABA subscribe before override_callback_uri is allowed.
+  await postWhatsAppSubscribedApps({
+    endpoint: endpoint.toString(),
+    accessToken,
+    body: null,
+    fetchImpl,
+    fallback: 'Meta could not subscribe Helixcer to this WhatsApp account.'
   });
+  await postWhatsAppSubscribedApps({
+    endpoint: endpoint.toString(),
+    accessToken,
+    body: {
+      override_callback_uri: callbackUri,
+      verify_token: verifyToken
+    },
+    fetchImpl,
+    fallback: 'Meta could not set Helixcer as the webhook callback for this WhatsApp account.'
+  });
+  return { ok: true };
+}
+
+async function postWhatsAppSubscribedApps({
+  endpoint,
+  accessToken,
+  body,
+  fetchImpl,
+  fallback
+}) {
+  const init = {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` }
+  };
+  if (body) {
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetchImpl(endpoint, init);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.success === false) {
-    const error = new Error(metaEmbeddedSignupErrorMessage(payload, response.status,
-      'Meta could not subscribe Helixcer to this WhatsApp account.'));
+    const error = new Error(metaEmbeddedSignupErrorMessage(payload, response.status, fallback));
     error.status = 422;
     throw error;
   }
-  return { ok: true };
+  return payload;
 }
 
 export async function registerWhatsAppEmbeddedSignupPhone({
