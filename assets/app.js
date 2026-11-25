@@ -7570,9 +7570,12 @@
       setup.append(locationBlock);
     }
 
-    const callbackUrl = channel.setup?.webhookUrl || state.api.webhookUrl(channel);
-    const callbackBlock = element("div", "callback-block");
-    if (!isGoogleReviews) {
+    const isEmbeddedWhatsApp = channel.connectorType === "whatsapp_cloud"
+      && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
+    // Embedded Signup owns webhook config via Meta override; hide manual callback/token UI.
+    if (!isGoogleReviews && !isEmbeddedWhatsApp) {
+      const callbackUrl = channel.setup?.webhookUrl || state.api.webhookUrl(channel);
+      const callbackBlock = element("div", "callback-block");
       callbackBlock.append(element("span", "callback-label", "Webhook callback"));
       const callbackRow = element("div", "meta-callback-row");
       callbackRow.append(element("code", "channel-callback", callbackUrl));
@@ -7582,46 +7585,46 @@
       copyButton.dataset.copyValue = callbackUrl;
       callbackRow.append(copyButton);
       callbackBlock.append(callbackRow);
-    }
 
-    if (channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram" ||
-        channel.connectorType === "facebook_messenger") {
-      const storedVerifyToken = Boolean(channel.setup?.credentialFields?.verifyToken || channel.setup?.credentialsPresent);
-      const recentVerifyToken = state.recentVerifyTokens.get(channel.channelId) || "";
-      const tokenBlock = element("div", "callback-token-block");
-      tokenBlock.append(element("span", "callback-label", "Webhook verify token"));
-      const tokenRow = element("div", "callback-token-row");
-      const display = document.createElement("input");
-      display.className = "text-field callback-token-display";
-      display.type = "password";
-      display.readOnly = true;
-      display.value = recentVerifyToken || (storedVerifyToken ? SAVED_SECRET_MASK : "");
-      display.placeholder = "No verify token saved";
-      display.setAttribute("aria-label", recentVerifyToken
-        ? "New webhook verify token ready to copy"
-        : storedVerifyToken ? "Webhook verify token saved securely" : "No webhook verify token saved");
-      const status = element("span", `saved-secret-status${recentVerifyToken || storedVerifyToken ? " is-saved" : ""}`,
-        recentVerifyToken ? "New token ready to copy" : storedVerifyToken ? "Saved securely" : "Not set");
-      const displayWrap = element("div", "callback-token-display-wrap");
-      displayWrap.append(display, status);
-      tokenRow.append(displayWrap);
-      const copyToken = element("button", "secondary-button compact-button", "Copy token");
-      copyToken.type = "button";
-      copyToken.dataset.action = "copy-webhook-token";
-      copyToken.dataset.channelId = channel.channelId;
-      tokenRow.append(copyToken);
-      const replaceToken = element("button", "secondary-button compact-button", storedVerifyToken ? "Replace token" : "Set token");
-      replaceToken.type = "button";
-      replaceToken.dataset.action = "edit-webhook-token";
-      replaceToken.dataset.channelId = channel.channelId;
-      tokenRow.append(replaceToken);
-      tokenBlock.append(tokenRow, element("span", "callback-token-help",
-        recentVerifyToken ? "Copy this value into Meta now. It will be masked again after a refresh."
-          : storedVerifyToken ? "The saved value stays masked. Replace it only when you also update Meta."
-            : "Set this to the same private value used in Meta's webhook configuration."));
-      callbackBlock.append(tokenBlock);
+      if (channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram" ||
+          channel.connectorType === "facebook_messenger") {
+        const storedVerifyToken = Boolean(channel.setup?.credentialFields?.verifyToken || channel.setup?.credentialsPresent);
+        const recentVerifyToken = state.recentVerifyTokens.get(channel.channelId) || "";
+        const tokenBlock = element("div", "callback-token-block");
+        tokenBlock.append(element("span", "callback-label", "Webhook verify token"));
+        const tokenRow = element("div", "callback-token-row");
+        const display = document.createElement("input");
+        display.className = "text-field callback-token-display";
+        display.type = "password";
+        display.readOnly = true;
+        display.value = recentVerifyToken || (storedVerifyToken ? SAVED_SECRET_MASK : "");
+        display.placeholder = "No verify token saved";
+        display.setAttribute("aria-label", recentVerifyToken
+          ? "New webhook verify token ready to copy"
+          : storedVerifyToken ? "Webhook verify token saved securely" : "No webhook verify token saved");
+        const status = element("span", `saved-secret-status${recentVerifyToken || storedVerifyToken ? " is-saved" : ""}`,
+          recentVerifyToken ? "New token ready to copy" : storedVerifyToken ? "Saved securely" : "Not set");
+        const displayWrap = element("div", "callback-token-display-wrap");
+        displayWrap.append(display, status);
+        tokenRow.append(displayWrap);
+        const copyToken = element("button", "secondary-button compact-button", "Copy token");
+        copyToken.type = "button";
+        copyToken.dataset.action = "copy-webhook-token";
+        copyToken.dataset.channelId = channel.channelId;
+        tokenRow.append(copyToken);
+        const replaceToken = element("button", "secondary-button compact-button", storedVerifyToken ? "Replace token" : "Set token");
+        replaceToken.type = "button";
+        replaceToken.dataset.action = "edit-webhook-token";
+        replaceToken.dataset.channelId = channel.channelId;
+        tokenRow.append(replaceToken);
+        tokenBlock.append(tokenRow, element("span", "callback-token-help",
+          recentVerifyToken ? "Copy this value into Meta now. It will be masked again after a refresh."
+            : storedVerifyToken ? "The saved value stays masked. Replace it only when you also update Meta."
+              : "Set this to the same private value used in Meta's webhook configuration."));
+        callbackBlock.append(tokenBlock);
+      }
+      setup.append(callbackBlock);
     }
-    if (!isGoogleReviews) setup.append(callbackBlock);
 
     const actions = element("div", "channel-card-actions");
     const verify = element("button", "primary-button", channel.health === "connected"
@@ -7635,8 +7638,6 @@
     toggle.type = "button";
     toggle.dataset.action = "toggle-channel";
     toggle.dataset.channelId = channel.channelId;
-    const isEmbeddedWhatsApp = channel.connectorType === "whatsapp_cloud"
-      && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
     if (isGoogleReviews && !credentialsReady) {
       const connect = element("button", "primary-button", "Connect with Google");
       connect.type = "button";
@@ -15657,11 +15658,9 @@
     }
     document.querySelectorAll('.provider-setup-option[data-action="provider-setup-manual"]').forEach((button) => {
       const isWhatsAppManual = button.dataset.provider === "whatsapp_cloud";
-      if (isWhatsAppManual && embeddedWhatsApp && editing) {
-        // Keep Manual Setup available as escape hatch, but not the default view.
-        button.hidden = false;
-      }
-      const active = selectedProvider === button.dataset.provider && manualReady;
+      // Editing Embedded Signup: hide Manual Setup. New connects still offer both options.
+      if (isWhatsAppManual) button.hidden = Boolean(editing && embeddedWhatsApp);
+      const active = selectedProvider === button.dataset.provider && manualReady && !button.hidden;
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-pressed", String(active));
     });
@@ -15670,7 +15669,9 @@
     const embeddedAvailable = Boolean(state.whatsappEmbeddedSignup?.available && state.whatsappEmbeddedSignup?.appId
       && state.whatsappEmbeddedSignup?.configId);
     if (whatsappLogin) {
-      const showLogin = selectedProvider === "whatsapp_cloud";
+      // Editing a manual WhatsApp channel: hide Login with Facebook.
+      const showLogin = selectedProvider === "whatsapp_cloud"
+        && (!editing || embeddedWhatsApp);
       whatsappLogin.hidden = !showLogin;
       if (showLogin && embeddedAvailable) {
         whatsappLogin.disabled = false;
