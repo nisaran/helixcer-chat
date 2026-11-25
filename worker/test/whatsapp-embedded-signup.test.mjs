@@ -214,11 +214,12 @@ test('WhatsApp Embedded Signup complete exchanges code, saves channel, subscribe
     assert.deepEqual(credentials, ['accessToken', 'appSecret', 'verifyToken']);
 
     assert.ok(calls.some(call => call.url.includes('/oauth/access_token')));
-    assert.ok(calls.some(call => call.url.includes('/subscribed_apps') && call.method === 'POST'));
     assert.ok(calls.some(call => call.url.includes('/register') && call.method === 'POST'));
-    const subscribe = calls.find(call => call.url.includes('/subscribed_apps'));
-    assert.match(subscribe.body, /override_callback_uri/);
-    assert.match(subscribe.body, new RegExp(`/webhooks/whatsapp/${body.channelId}`));
+    const subscriptions = calls.filter(call => call.url.includes('/subscribed_apps'));
+    assert.deepEqual(subscriptions.map(call => call.method), ['POST', 'POST']);
+    assert.equal(subscriptions[0].body, '');
+    assert.match(subscriptions[1].body, /override_callback_uri/);
+    assert.match(subscriptions[1].body, new RegExp(`/webhooks/whatsapp/${body.channelId}`));
   } finally {
     globalThis.fetch = originalFetch;
   }
