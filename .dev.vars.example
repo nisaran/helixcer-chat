@@ -8,6 +8,12 @@ GOOGLE_REDIRECT_URI="http://localhost:8787/auth/google/callback"
 # Separate callback for Google Business / Reviews channel connect (same OAuth client).
 # Add this exact URI in Google Cloud Console → Credentials → Authorized redirect URIs.
 GOOGLE_BUSINESS_REDIRECT_URI="http://localhost:8787/auth/google-business/callback"
+# Meta WhatsApp Embedded Signup (Login with Facebook). App ID + config ID are public;
+# App Secret must stay a Worker secret. Create the Login for Business config in Meta.
+META_APP_ID="your-meta-app-id"
+META_APP_SECRET="your-meta-app-secret"
+META_EMBEDDED_SIGNUP_CONFIG_ID="your-facebook-login-for-business-config-id"
+META_GRAPH_API_VERSION="v22.0"
 BOOTSTRAP_OWNER_EMAIL="owner@example.com"
 ADMIN_TOKEN="generate-a-long-random-emergency-token"
 RECOVERY_MODE="false"

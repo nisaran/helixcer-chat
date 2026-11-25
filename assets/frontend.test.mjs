@@ -130,6 +130,7 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /id="whatsappSetupChooser"/);
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="whatsapp_cloud"/);
   assert.match(html, /data-action="provider-setup-login"[^>]*data-provider="whatsapp_cloud"[^>]*disabled/);
+  assert.match(html, /id="whatsappEmbeddedSignupHelp"/);
   assert.match(html, /id="whatsappManualFields" hidden/);
   assert.match(html, /id="instagramSetupChooser"/);
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="instagram"/);
@@ -140,6 +141,9 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="facebook_messenger"/);
   assert.match(html, /data-action="provider-setup-login"[^>]*data-provider="facebook_messenger"[^>]*disabled/);
   assert.match(html, /id="messengerManualFields" hidden/);
+  assert.match(app, /completeWhatsAppEmbeddedSignup|\/api\/channels\/oauth\/whatsapp-embedded\/complete/);
+  assert.match(app, /WA_EMBEDDED_SIGNUP/);
+  assert.match(app, /startWhatsAppEmbeddedSignup/);
   assert.match(html, /Instagram User access token/);
   assert.match(html, /Facebook Page ID/);
   assert.match(html, /Page access token/);

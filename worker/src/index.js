@@ -39,6 +39,18 @@ import {
   verifyGoogleBusinessLocation
 } from './google-business.js';
 import {
+  exchangeMetaEmbeddedSignupCode,
+  generateWhatsAppTwoStepPin,
+  generateWhatsAppVerifyToken,
+  metaEmbeddedSignupPublicConfig,
+  metaGraphApiVersion,
+  parseWhatsAppEmbeddedSignupSession,
+  registerWhatsAppEmbeddedSignupPhone,
+  requireMetaEmbeddedSignupConfig,
+  shouldRegisterWhatsAppPhone,
+  subscribeWhatsAppEmbeddedSignupWebhooks
+} from './meta-embedded-signup.js';
+import {
   assertChatAccess,
   attachPrincipalPermissions,
   chatScope,
@@ -167,7 +179,7 @@ const TEMPLATE_BUTTON_TYPES = new Set(['quick_reply', 'url', 'phone_number', 'co
 const CONNECTOR_DEFINITIONS = {
   whatsapp_cloud: {
     label: 'WhatsApp Cloud API', webhookPath: 'whatsapp',
-    configFields: ['wabaId', 'phoneNumberId', 'apiVersion'],
+    configFields: ['wabaId', 'phoneNumberId', 'apiVersion', 'authMode', 'businessId'],
     requiredConfig: ['wabaId', 'phoneNumberId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret'],
     capabilities: ['text', 'attachments']
   },
@@ -666,6 +678,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         tags,
         workspace,
         me: principalView(principal),
+        whatsappEmbeddedSignup: metaEmbeddedSignupPublicConfig(env),
         connectorTypes: [
           { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: CONNECTOR_DEFINITIONS.whatsapp_cloud.capabilities },
           { value: 'telegram', label: 'Telegram Bot', capabilities: CONNECTOR_DEFINITIONS.telegram.capabilities },
@@ -839,6 +852,18 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (url.pathname === '/api/channels/oauth/google-reviews/confirm' && request.method === 'POST') {
       requirePermission(principal, 'channels.manage');
       const result = await confirmGoogleBusinessChannel(env, principal, await readJson(request));
+      await broadcast(env, workspaceId, { type: 'channel.updated', channelId: result.channelId });
+      return withCors(json(result, result.created ? 201 : 200), cors);
+    }
+    if (url.pathname === '/api/channels/meta/embedded-signup/config' && request.method === 'GET') {
+      requirePermission(principal, 'channels.manage');
+      return withCors(json(metaEmbeddedSignupPublicConfig(env)), cors);
+    }
+    if (url.pathname === '/api/channels/oauth/whatsapp-embedded/complete' && request.method === 'POST') {
+      requirePermission(principal, 'channels.manage');
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return withCors(limited, cors);
+      const result = await completeWhatsAppEmbeddedSignup(env, principal, await readJson(request), request);
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId: result.channelId });
       return withCors(json(result, result.created ? 201 : 200), cors);
     }
@@ -3444,7 +3469,9 @@ function channelSetupView(row, config = safeJsonParse(row.config_json, {}), cred
   return {
     credentialsPresent: definition.requiredConfig.every(key => Boolean(config[key])) && Object.values(presence).every(Boolean),
     credentialFields: presence,
-    authMode: connectorType === 'google_reviews' ? 'google_oauth' : '',
+    authMode: connectorType === 'google_reviews'
+      ? 'google_oauth'
+      : (config.authMode || ''),
     callbackPath,
     credentialsVerifiedAt: config.credentialsVerifiedAt || '',
     subscribedAppsAt: config.subscribedAppsAt || '',
@@ -3848,6 +3875,146 @@ async function finishGoogleBusinessOAuth(request, env, fetchImpl = fetch) {
   });
 }
 
+async function completeWhatsAppEmbeddedSignup(env, principal, payload, request, fetchImpl = fetch) {
+  requireMetaEmbeddedSignupConfig(env);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw httpError(400, 'WhatsApp Embedded Signup payload is invalid.');
+  }
+  let session;
+  try {
+    session = parseWhatsAppEmbeddedSignupSession(payload);
+  } catch (error) {
+    throw httpError(error.status || 400, error.message || 'WhatsApp Embedded Signup payload is invalid.');
+  }
+
+  let tokenResult;
+  try {
+    tokenResult = await exchangeMetaEmbeddedSignupCode(env, session.code, fetchImpl);
+  } catch (error) {
+    throw httpError(error.status || 422, error.message || 'Meta could not exchange the Embedded Signup code.');
+  }
+
+  const workspaceId = principal.workspace.workspaceId;
+  const forcedChannelId = String(payload.channelId || '').trim();
+  const channelId = forcedChannelId ? cleanId(forcedChannelId, 'Channel ID') : crypto.randomUUID();
+  const existing = await env.DB.prepare('SELECT * FROM channels WHERE channel_id=?1 AND workspace_id=?2')
+    .bind(channelId, workspaceId).first();
+  if (forcedChannelId && !existing) throw httpError(404, 'Channel not found.');
+  if (!forcedChannelId && existing) throw httpError(409, 'Channel ID already exists.');
+  if (existing && logicalConnectorType(existing) !== 'whatsapp_cloud') {
+    throw httpError(400, 'Only WhatsApp channels can complete Login with Facebook.');
+  }
+
+  const previousConfig = safeJsonParse(existing?.config_json, {});
+  const channelName = cleanRequired(
+    payload.name || existing?.name || 'WhatsApp',
+    'Channel name',
+    80
+  );
+  const apiVersion = metaGraphApiVersion(env, previousConfig.apiVersion || 'v26.0');
+  const now = new Date().toISOString();
+  const config = {
+    ...previousConfig,
+    wabaId: session.wabaId,
+    phoneNumberId: session.phoneNumberId,
+    apiVersion,
+    authMode: 'embedded_signup',
+    businessId: session.businessId || previousConfig.businessId || '',
+    credentialsVerifiedAt: now,
+    subscribedAppsAt: now
+  };
+  if (!config.businessId) delete config.businessId;
+  await assertUniqueManagedConfig(env, workspaceId, 'whatsapp_cloud', channelId, config);
+  const changedIdentity = editableConfigChanges('whatsapp_cloud', previousConfig, config)
+    .filter(key => key === 'wabaId' || key === 'phoneNumberId');
+  await assertProviderIdentityConfigMutable(env, workspaceId, existing, 'whatsapp_cloud', changedIdentity);
+
+  const verifyToken = generateWhatsAppVerifyToken();
+  const appSecret = String(env.META_APP_SECRET || '').trim();
+  assertMetaAppSecret(appSecret, 422);
+
+  const capabilities = CONNECTOR_DEFINITIONS.whatsapp_cloud.capabilities;
+  const enabled = payload.enabled === false ? 0 : 1;
+  let saved;
+  try {
+    saved = await env.DB.prepare(`INSERT INTO channels
+        (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,'whatsapp_cloud','whatsapp_cloud',?3,?4,?5,'DATABASE',?6,?6,?7)
+      ON CONFLICT(channel_id) DO UPDATE SET name=excluded.name,connector_type=excluded.connector_type,
+        provider_type=excluded.provider_type,enabled=excluded.enabled,capabilities_json=excluded.capabilities_json,
+        config_json=excluded.config_json,secret_key='DATABASE',updated_at=excluded.updated_at
+        WHERE channels.workspace_id=excluded.workspace_id`)
+      .bind(channelId, channelName, enabled, JSON.stringify(capabilities), JSON.stringify(config), now, workspaceId).run();
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw httpError(409, 'This WhatsApp phone number is already connected in the workspace.');
+    throw error;
+  }
+  if (!saved.meta?.changes) throw httpError(409, 'Channel ID is already used by another workspace.');
+
+  await storeChannelCredentials(env, {
+    workspaceId,
+    channelId,
+    connectorType: 'whatsapp_cloud'
+  }, {
+    accessToken: tokenResult.accessToken,
+    verifyToken,
+    appSecret
+  }, principal.user.userId || '');
+
+  const callbackUri = `${new URL(request.url).origin}/webhooks/whatsapp/${encodeURIComponent(channelId)}`;
+  try {
+    await subscribeWhatsAppEmbeddedSignupWebhooks({
+      env,
+      accessToken: tokenResult.accessToken,
+      wabaId: session.wabaId,
+      callbackUri,
+      verifyToken,
+      fetchImpl
+    });
+  } catch (error) {
+    throw httpError(error.status || 422, error.message || 'Meta could not subscribe Helixcer to this WhatsApp account.');
+  }
+
+  let phoneRegistered = false;
+  if (shouldRegisterWhatsAppPhone(session.event)) {
+    try {
+      await registerWhatsAppEmbeddedSignupPhone({
+        env,
+        accessToken: tokenResult.accessToken,
+        phoneNumberId: session.phoneNumberId,
+        pin: generateWhatsAppTwoStepPin(),
+        fetchImpl
+      });
+      phoneRegistered = true;
+    } catch (error) {
+      // Channel + webhooks are already saved; surface registration failure without rolling back.
+      throw httpError(error.status || 422, error.message
+        || 'WhatsApp was connected, but Meta could not register the phone number for Cloud API.');
+    }
+  }
+
+  await audit(env, principal, existing ? 'update' : 'create', 'channel', channelId, {
+    name: channelName,
+    connectorType: 'whatsapp_cloud',
+    enabled: enabled === 1,
+    authMode: 'embedded_signup',
+    updatedCredentialFields: ['accessToken', 'verifyToken', 'appSecret'],
+    phoneRegistered
+  });
+
+  return {
+    ok: true,
+    created: !existing,
+    channelId,
+    name: channelName,
+    health: 'webhook_required',
+    authMode: 'embedded_signup',
+    phoneRegistered,
+    wabaId: session.wabaId,
+    phoneNumberId: session.phoneNumberId
+  };
+}
+
 async function getGoogleBusinessPending(env, principal, pendingToken) {
   const pending = await loadGoogleBusinessPending(env, principal, pendingToken);
   return {
@@ -4133,7 +4300,9 @@ function normalizeChannelConfigValue(key, value) {
     return text.slice(0, 100);
   }
   if (key === 'authMode') {
-    if (text !== 'instagram_login') throw httpError(400, 'Instagram authentication mode is invalid.');
+    if (text !== 'instagram_login' && text !== 'embedded_signup') {
+      throw httpError(400, 'Authentication mode is invalid.');
+    }
     return text;
   }
   if (key === 'accountId' || key === 'locationId') {
