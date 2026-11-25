@@ -225,6 +225,100 @@ test('WhatsApp Embedded Signup complete exchanges code, saves channel, subscribe
   }
 });
 
+test('Register Webhook re-subscribes Embedded Signup WhatsApp channels only', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const { fetchImpl, calls } = mockMetaEmbeddedFetch();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  try {
+    const created = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/channels/oauth/whatsapp-embedded/complete',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer recovery-secret',
+          Origin: 'https://chat.helixcer.com',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          code: 'AQBx-embedded-signup-code-value',
+          wabaId: '524126980791429',
+          phoneNumberId: '106540352242922',
+          event: 'FINISH',
+          name: 'Sales WhatsApp'
+        })
+      }
+    ), env, { waitUntil() {} });
+    assert.equal(created.status, 201, await created.clone().text());
+    const createdBody = await created.json();
+    database.prepare(`UPDATE channels
+      SET config_json=json_remove(json_remove(config_json,'$.webhookVerifiedAt'),'$.subscribedAppsAt')
+      WHERE channel_id=?`).run(createdBody.channelId);
+    calls.length = 0;
+
+    const response = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/channels/${encodeURIComponent(createdBody.channelId)}/register-webhook`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer recovery-secret',
+          Origin: 'https://chat.helixcer.com'
+        }
+      }
+    ), env, { waitUntil() {} });
+    assert.equal(response.status, 200, await response.clone().text());
+    const body = await response.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.channelId, createdBody.channelId);
+    assert.ok(body.webhookVerifiedAt);
+    assert.equal(body.health, 'connected');
+
+    const subscriptions = calls.filter(call => call.url.includes('/subscribed_apps'));
+    assert.equal(subscriptions.length, 2);
+    assert.match(subscriptions[1].body, /override_callback_uri/);
+
+    const manual = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/channels',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer recovery-secret',
+          Origin: 'https://chat.helixcer.com',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: 'Manual WhatsApp',
+          connectorType: 'whatsapp_cloud',
+          config: { wabaId: '1111222233334444', phoneNumberId: '5555666677778888', apiVersion: 'v26.0' },
+          credentials: {
+            accessToken: 'EAAG-manual-access-token-abcdef',
+            verifyToken: 'manual-verify-token-value',
+            appSecret: 'meta-app-secret-value-123456'
+          }
+        })
+      }
+    ), env, { waitUntil() {} });
+    assert.equal(manual.status, 201, await manual.clone().text());
+    const manualBody = await manual.json();
+    const rejected = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/channels/${encodeURIComponent(manualBody.channelId)}/register-webhook`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer recovery-secret',
+          Origin: 'https://chat.helixcer.com'
+        }
+      }
+    ), env, { waitUntil() {} });
+    assert.equal(rejected.status, 400, await rejected.clone().text());
+    const rejectedBody = await rejected.json();
+    assert.match(rejectedBody.error || '', /Login with Facebook/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('WhatsApp coexistence Embedded Signup skips phone registration', async () => {
   const { DB } = await testDatabase();
   const env = envFor(DB);

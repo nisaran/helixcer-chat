@@ -896,6 +896,14 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
       return withCors(json(result), cors);
     }
+    const channelRegisterWebhookMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/register-webhook$/);
+    if (channelRegisterWebhookMatch && request.method === 'POST') {
+      requirePermission(principal, 'channels.manage');
+      const channelId = decodeURIComponent(channelRegisterWebhookMatch[1]);
+      const result = await registerWhatsAppEmbeddedWebhook(env, workspaceId, channelId, request);
+      await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
+      return withCors(json(result), cors);
+    }
     const channelVerifyTokenMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/verify-token$/);
     if (channelVerifyTokenMatch && request.method === 'GET') {
       requirePermission(principal, 'channels.manage');
@@ -3507,6 +3515,61 @@ async function verifyChannel(env, workspaceId, channelId, request) {
   if (channel.connectorType === 'facebook_messenger') return verifyFacebookMessengerChannel(env, channel);
   if (channel.connectorType === 'google_reviews') return verifyGoogleReviewsChannel(env, channel);
   throw httpError(400, 'This connector cannot be verified automatically.');
+}
+
+async function registerWhatsAppEmbeddedWebhook(env, workspaceId, channelId, request, fetchImpl = fetch) {
+  const id = cleanId(channelId, 'Channel ID');
+  const row = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,workspace_id
+    FROM channels WHERE channel_id=?1 AND workspace_id=?2`).bind(id, workspaceId).first();
+  if (!row) throw httpError(404, 'Channel not found.');
+  const channel = {
+    channelId: row.channel_id,
+    name: row.name,
+    connectorType: logicalConnectorType(row),
+    capabilities: safeJsonParse(row.capabilities_json, []),
+    config: safeJsonParse(row.config_json, {}),
+    secretKey: row.secret_key,
+    workspaceId: row.workspace_id
+  };
+  if (channel.connectorType !== 'whatsapp_cloud') {
+    throw httpError(400, 'Webhook registration is only available for WhatsApp channels.');
+  }
+  if (String(channel.config?.authMode || '') !== 'embedded_signup') {
+    throw httpError(400, 'Register Webhook is only available for Login with Facebook connections.');
+  }
+  const credentials = await readChannelCredentials(env, channel);
+  const accessToken = credentials.accessToken;
+  const verifyToken = credentials.verifyToken;
+  const wabaId = String(channel.config?.wabaId || '').trim();
+  if (!accessToken || !verifyToken || !wabaId) {
+    throw httpError(409, 'Secure WhatsApp credentials have not been fully configured.');
+  }
+  const callbackUri = `${new URL(request.url).origin}/webhooks/whatsapp/${encodeURIComponent(channel.channelId)}`;
+  try {
+    await subscribeWhatsAppEmbeddedSignupWebhooks({
+      env,
+      accessToken,
+      wabaId,
+      callbackUri,
+      verifyToken,
+      fetchImpl
+    });
+  } catch (error) {
+    throw httpError(error.status || 422, error.message || 'Meta could not register this WhatsApp webhook.');
+  }
+  const now = new Date().toISOString();
+  // Meta verifies the override callback during subscribe; treat success as webhook-ready.
+  const config = await updateChannelRuntimeConfig(env, channel, {
+    subscribedAppsAt: now,
+    webhookVerifiedAt: channel.config?.webhookVerifiedAt || now
+  });
+  return {
+    ok: true,
+    channelId: channel.channelId,
+    health: config.webhookVerifiedAt ? 'connected' : 'webhook_required',
+    subscribedAppsAt: config.subscribedAppsAt || now,
+    webhookVerifiedAt: config.webhookVerifiedAt || ''
+  };
 }
 
 async function getChannelVerifyToken(env, workspaceId, channelId, principal) {
