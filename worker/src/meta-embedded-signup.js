@@ -274,6 +274,55 @@ export function isWhatsAppCoexistenceSignup(event) {
   return String(event || '').toUpperCase() === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING';
 }
 
+export async function requestWhatsAppSmbAppData({
+  env,
+  accessToken,
+  phoneNumberId,
+  syncType,
+  fetchImpl = fetch
+}) {
+  const type = String(syncType || '').trim();
+  if (type !== 'history' && type !== 'smb_app_state_sync') {
+    const error = new Error('Unsupported WhatsApp coexistence sync type.');
+    error.status = 400;
+    throw error;
+  }
+  const phoneId = String(phoneNumberId || '').trim();
+  if (!/^\d{5,40}$/.test(phoneId)) {
+    const error = new Error('WhatsApp phone number ID is invalid.');
+    error.status = 400;
+    throw error;
+  }
+  const version = metaGraphApiVersion(env);
+  const endpoint = `https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneId)}/smb_app_data`;
+  const response = await fetchImpl(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      sync_type: type
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(metaEmbeddedSignupErrorMessage(payload, response.status,
+      type === 'history'
+        ? 'Meta could not start WhatsApp Business chat history sync.'
+        : 'Meta could not start WhatsApp Business contacts sync.'));
+    error.status = 422;
+    throw error;
+  }
+  return {
+    ok: true,
+    syncType: type,
+    requestId: String(payload.request_id || ''),
+    messagingProduct: String(payload.messaging_product || 'whatsapp')
+  };
+}
+
 export function generateWhatsAppTwoStepPin() {
   const bytes = new Uint8Array(3);
   crypto.getRandomValues(bytes);

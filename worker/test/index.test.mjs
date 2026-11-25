@@ -289,6 +289,7 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
   assert.equal(result.statuses[0].status, 'delivered');
   assert.equal(result.statuses[0].internalMessageId, 'internal-message-1');
   assert.deepEqual(result.echoes, []);
+  assert.deepEqual(result.historyChunks, []);
   assert.deepEqual(result.phoneNumberIds, ['123456789']);
 });
 
@@ -325,6 +326,55 @@ test('normalizes WhatsApp Business app coexistence message echoes as outbound', 
   assert.equal(result.echoes[0].text, 'Sent from WhatsApp Business app');
   assert.equal(result.echoes[0].providerMessageId, 'wamid.echo.1');
   assert.deepEqual(result.phoneNumberIds, ['106540352242922']);
+});
+
+test('normalizes WhatsApp coexistence history chunks', () => {
+  const result = normalizeWhatsApp({
+    object: 'whatsapp_business_account',
+    entry: [{
+      id: '102290129340398',
+      changes: [{
+        field: 'history',
+        value: {
+          messaging_product: 'whatsapp',
+          metadata: {
+            display_phone_number: '15550783881',
+            phone_number_id: '106540352242922'
+          },
+          history: [{
+            metadata: { phase: 0, chunk_order: 1, progress: 100 },
+            threads: [{
+              id: '919999999999',
+              messages: [
+                {
+                  from: '15550783881',
+                  id: 'wamid.history.out',
+                  timestamp: '1739230955',
+                  type: 'text',
+                  text: { body: 'Past business message' },
+                  history_context: { status: 'read' }
+                },
+                {
+                  from: '919999999999',
+                  id: 'wamid.history.in',
+                  timestamp: '1739230970',
+                  type: 'text',
+                  text: { body: 'Past customer reply' },
+                  history_context: { status: 'read' }
+                }
+              ]
+            }]
+          }]
+        }
+      }]
+    }]
+  });
+  assert.equal(result.historyChunks.length, 1);
+  assert.equal(result.historyChunks[0].progress, 100);
+  assert.equal(result.historyChunks[0].threads[0].messages.length, 2);
+  assert.equal(result.historyChunks[0].threads[0].messages[0].direction, 'outbound');
+  assert.equal(result.historyChunks[0].threads[0].messages[1].direction, 'inbound');
+  assert.equal(result.historyChunks[0].threads[0].messages[1].text, 'Past customer reply');
 });
 
 test('providerError surfaces Meta template create details beyond Invalid parameter', () => {

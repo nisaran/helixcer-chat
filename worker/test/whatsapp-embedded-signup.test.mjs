@@ -150,6 +150,18 @@ function mockMetaEmbeddedFetch() {
     if (url.includes('/register')) {
       return Response.json({ success: true });
     }
+    if (url.includes('/smb_app_data')) {
+      const body = JSON.parse(String(init.body || '{}'));
+      if (body.sync_type !== 'history' && body.sync_type !== 'smb_app_state_sync') {
+        return Response.json({
+          error: { message: 'Invalid sync_type', type: 'OAuthException', code: 100 }
+        }, { status: 400 });
+      }
+      return Response.json({
+        messaging_product: 'whatsapp',
+        request_id: `req-${body.sync_type}-123`
+      });
+    }
     return new Response(`unexpected fetch ${url}`, { status: 500 });
   };
   return { fetchImpl, calls };
@@ -370,6 +382,92 @@ test('Register Webhook re-subscribes Embedded Signup WhatsApp channels only', as
     assert.equal(rejected.status, 400, await rejected.clone().text());
     const rejectedBody = await rejected.json();
     assert.match(rejectedBody.error || '', /Login with Facebook/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Coexistence history sync can start and cancel', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const { fetchImpl, calls } = mockMetaEmbeddedFetch();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  try {
+    const created = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/channels/oauth/whatsapp-embedded/complete',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer recovery-secret',
+          Origin: 'https://chat.helixcer.com',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          code: 'AQBx-embedded-signup-code-value',
+          wabaId: '524126980791429',
+          phoneNumberId: '106540352242922',
+          event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+          name: 'Coexistence Sync WhatsApp'
+        })
+      }
+    ), env, { waitUntil() {} });
+    assert.equal(created.status, 201, await created.clone().text());
+    const body = await created.json();
+
+    const started = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/channels/${encodeURIComponent(body.channelId)}/sync-coexistence-history`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer recovery-secret',
+          Origin: 'https://chat.helixcer.com'
+        }
+      }
+    ), env, { waitUntil() {} });
+    assert.equal(started.status, 200, await started.clone().text());
+    const startedBody = await started.json();
+    assert.equal(startedBody.ok, true);
+    assert.equal(startedBody.coexistenceSync.status, 'running');
+    assert.equal(
+      calls.filter(call => call.url.includes('/smb_app_data')).length,
+      2
+    );
+
+    const conflict = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/channels/${encodeURIComponent(body.channelId)}/sync-coexistence-history`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer recovery-secret',
+          Origin: 'https://chat.helixcer.com'
+        }
+      }
+    ), env, { waitUntil() {} });
+    assert.equal(conflict.status, 409);
+
+    const cancelled = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/channels/${encodeURIComponent(body.channelId)}/cancel-coexistence-sync`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer recovery-secret',
+          Origin: 'https://chat.helixcer.com'
+        }
+      }
+    ), env, { waitUntil() {} });
+    assert.equal(cancelled.status, 200, await cancelled.clone().text());
+    const cancelledBody = await cancelled.json();
+    assert.equal(cancelledBody.coexistenceSync.status, 'cancelled');
+
+    const listed = await handleRequest(new Request(
+      'https://api.chat.helixcer.com/api/channels',
+      { headers: { Authorization: 'Bearer recovery-secret', Origin: 'https://chat.helixcer.com' } }
+    ), env);
+    const channels = await listed.json();
+    const channel = (channels.items || channels).find(item => item.channelId === body.channelId);
+    assert.equal(channel.setup.coexistence, true);
+    assert.equal(channel.setup.coexistenceSync.status, 'cancelled');
   } finally {
     globalThis.fetch = originalFetch;
   }
