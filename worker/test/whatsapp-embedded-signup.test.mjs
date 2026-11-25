@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { handleRequest } from '../src/index.js';
 import {
+  isWhatsAppCoexistenceSignup,
   metaEmbeddedSignupPublicConfig,
   metaWhatsAppAppVerifyToken,
   parseWhatsAppEmbeddedSignupSession,
@@ -166,6 +167,8 @@ test('Embedded Signup helpers parse session and gate phone registration', () => 
   assert.equal(session.phoneNumberId, '106540352242922');
   assert.equal(shouldRegisterWhatsAppPhone('FINISH'), true);
   assert.equal(shouldRegisterWhatsAppPhone('FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING'), false);
+  assert.equal(isWhatsAppCoexistenceSignup('FINISH'), false);
+  assert.equal(isWhatsAppCoexistenceSignup('FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING'), true);
   assert.equal(metaEmbeddedSignupPublicConfig({}).available, false);
   assert.equal(metaEmbeddedSignupPublicConfig({
     META_APP_ID: '1',
@@ -222,6 +225,7 @@ test('WhatsApp Embedded Signup complete exchanges code, saves channel, subscribe
     assert.equal(body.created, true);
     assert.equal(body.name, 'Sales WhatsApp');
     assert.equal(body.authMode, 'embedded_signup');
+    assert.equal(body.coexistence, false);
     assert.equal(body.phoneRegistered, true);
     assert.ok(body.channelId);
 
@@ -231,6 +235,7 @@ test('WhatsApp Embedded Signup complete exchanges code, saves channel, subscribe
     assert.equal(config.wabaId, '524126980791429');
     assert.equal(config.phoneNumberId, '106540352242922');
     assert.equal(config.authMode, 'embedded_signup');
+    assert.equal(config.coexistence, undefined);
     assert.equal(config.businessId, '2729063490586005');
 
     const credentials = database.prepare(
@@ -398,7 +403,13 @@ test('WhatsApp coexistence Embedded Signup skips phone registration', async () =
     assert.equal(response.status, 201, await response.clone().text());
     const body = await response.json();
     assert.equal(body.phoneRegistered, false);
+    assert.equal(body.coexistence, true);
     assert.equal(calls.some(call => call.url.includes('/register')), false);
+    const channel = await env.DB.prepare('SELECT config_json FROM channels WHERE channel_id=?1')
+      .bind(body.channelId).first();
+    const config = JSON.parse(channel.config_json);
+    assert.equal(config.coexistence, true);
+    assert.equal(config.authMode, 'embedded_signup');
   } finally {
     globalThis.fetch = originalFetch;
   }

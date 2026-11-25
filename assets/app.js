@@ -15584,6 +15584,16 @@
       const node = $(id);
       if (node) node.textContent = String(value || "").trim() || fallback;
     };
+    const coexistence = Boolean(setup.coexistence || config.coexistence);
+    const eyebrow = $("whatsappEmbeddedEyebrow");
+    if (eyebrow) {
+      eyebrow.textContent = coexistence
+        ? "Connected with coexistence (WhatsApp Business app)"
+        : "Connected with Login with Facebook";
+    }
+    setText("whatsappEmbeddedConnectionType", coexistence
+      ? "Coexistence — WhatsApp Business app + Cloud API"
+      : "Cloud API via Login with Facebook");
     setText("whatsappEmbeddedVerifiedName", setup.verifiedName || config.verifiedName, "Not verified yet");
     setText("whatsappEmbeddedPhoneNumber", setup.verifiedPhoneNumber || config.verifiedPhoneNumber, "Not verified yet");
     setText("whatsappEmbeddedWabaId", config.wabaId);
@@ -15734,7 +15744,11 @@
       && state.providerSetupMode !== "manual";
     const config = connectorType === "whatsapp_cloud"
       ? (embeddedWhatsApp
-        ? { apiVersion: "v26.0", authMode: "embedded_signup" }
+        ? {
+            apiVersion: "v26.0",
+            authMode: "embedded_signup",
+            ...(existing?.config?.coexistence || existing?.setup?.coexistence ? { coexistence: true } : {})
+          }
         : { wabaId: String(values.get("wabaId") || "").trim(), phoneNumberId: String(values.get("phoneNumberId") || "").trim(), apiVersion: "v26.0" })
       : connectorType === "instagram"
         ? { instagramAccountId: String(values.get("instagramAccountId") || "").trim(), appId: String(values.get("instagramAppId") || "").trim(), username: String(values.get("instagramUsername") || "").trim(), authMode: "instagram_login", apiVersion: "v26.0" }

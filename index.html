@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261126-embedded-ui-polish">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261126-coexistence-flag">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261126-embedded-ui-polish" defer></script>
+  <script src="./assets/app.js?v=20261126-coexistence-flag" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1443,8 +1443,9 @@
         </div>
         <p class="field-help" id="whatsappEmbeddedSignupHelp" hidden>Opens Meta WhatsApp Embedded Signup. Helixcer stores the business token and wires this channel webhook automatically.</p>
         <div class="provider-connected-summary" id="whatsappEmbeddedDetails" hidden>
-          <p class="provider-connected-eyebrow">Connected with Login with Facebook</p>
+          <p class="provider-connected-eyebrow" id="whatsappEmbeddedEyebrow">Connected with Login with Facebook</p>
           <dl class="provider-connected-grid">
+            <div class="form-span"><dt>Connection type</dt><dd id="whatsappEmbeddedConnectionType">—</dd></div>
             <div><dt>Verified name</dt><dd id="whatsappEmbeddedVerifiedName">—</dd></div>
             <div><dt>Phone number</dt><dd id="whatsappEmbeddedPhoneNumber">—</dd></div>
             <div><dt>WhatsApp Business Account ID</dt><dd id="whatsappEmbeddedWabaId">—</dd></div>
