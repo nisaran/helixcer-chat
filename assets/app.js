@@ -7703,7 +7703,7 @@
           syncHistory.dataset.action = "sync-whatsapp-coexistence-history";
           syncHistory.dataset.channelId = channel.channelId;
           syncHistory.disabled = !channel.enabled;
-          syncHistory.title = "Import WhatsApp Business app chat history into Helixcer (Meta allows this once within 24 hours of onboarding)";
+          syncHistory.title = "Import WhatsApp Business app contacts and chat history into Helixcer (Meta allows this once within 24 hours of onboarding)";
           actions.append(syncHistory);
         }
         if (syncState.status) {
@@ -16419,7 +16419,7 @@
       setRoute("channels");
       showToast(
         "WhatsApp history sync started",
-        `${channel?.name || "WhatsApp"} chat history will appear in Helixcer as Meta delivers it. You can cancel anytime.`
+        `${channel?.name || "WhatsApp"} contact names and chat history will appear in Helixcer as Meta delivers them. You can cancel anytime.`
       );
     } catch (error) {
       showToast("History sync did not start", error.message, true);

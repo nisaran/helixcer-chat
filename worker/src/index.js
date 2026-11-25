@@ -2543,7 +2543,8 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
   const normalized = normalizeWhatsApp(payload);
   const expectedPhoneNumberId = String(channel.config?.phoneNumberId || '');
   const hasEvents = normalized.messages.length > 0 || normalized.statuses.length > 0
-    || normalized.echoes.length > 0 || normalized.historyChunks.length > 0;
+    || normalized.echoes.length > 0 || normalized.historyChunks.length > 0
+    || normalized.contactSyncs.length > 0;
   if (hasEvents && (!expectedPhoneNumberId || normalized.phoneNumberIds.length === 0 ||
       normalized.phoneNumberIds.some(id => id !== expectedPhoneNumberId))) {
     return json({ ok: false, error: 'Webhook phone number does not match this channel.' }, 403);
@@ -2551,8 +2552,13 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
   let received = 0;
   let echoes = 0;
   let historyImported = 0;
+  let contactsSynced = 0;
   let latestInbound = null;
   const statusChanges = [];
+  // Apply WhatsApp Business address-book names before history/message ingest.
+  if (normalized.contactSyncs.length) {
+    contactsSynced = await ingestWhatsAppCoexistenceContacts(env, channel, normalized.contactSyncs);
+  }
   for (const event of normalized.messages) {
     const stored = await storeInbound(env, channel, event, payload);
     if (stored) {
@@ -2580,12 +2586,16 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
     webhookVerifiedAt: channel.config?.webhookVerifiedAt || receivedAt
   });
   await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
-  if (received || echoes || historyImported || normalized.statuses.length) await broadcast(env, channel.workspaceId, {
-    type: 'webhook.received', channelId, received, echoes, historyImported,
-    statuses: normalized.statuses.length, granular: true
-  });
+  if (received || echoes || historyImported || contactsSynced || normalized.statuses.length) {
+    await broadcast(env, channel.workspaceId, {
+      type: 'webhook.received', channelId, received, echoes, historyImported, contactsSynced,
+      statuses: normalized.statuses.length, granular: true
+    });
+  }
   if (latestInbound) afterInboundStored(ctx, env, channel, latestInbound);
-  return json({ ok: true, received, echoes, historyImported, statuses: normalized.statuses.length });
+  return json({
+    ok: true, received, echoes, historyImported, contactsSynced, statuses: normalized.statuses.length
+  });
 }
 
 async function handleGenericWebhook(request, env, channelId, ctx) {
@@ -4591,6 +4601,11 @@ function mergeChannelConfig(connectorType, previous = {}, supplied) {
 
 function normalizeChannelConfigValue(key, value) {
   if (value === undefined || value === null) return '';
+  if (key === 'coexistence') {
+    if (value === true || value === 1 || value === 'true' || value === '1') return true;
+    if (value === false || value === 0 || value === 'false' || value === '0' || value === '') return '';
+    throw httpError(400, 'Coexistence flag is invalid.');
+  }
   if (typeof value !== 'string' && typeof value !== 'number') throw httpError(400, `${key} must be text.`);
   const text = String(value).trim();
   if (!text) return '';
@@ -4608,11 +4623,6 @@ function normalizeChannelConfigValue(key, value) {
       throw httpError(400, 'Authentication mode is invalid.');
     }
     return text;
-  }
-  if (key === 'coexistence') {
-    if (value === true || value === 1 || text === 'true' || text === '1') return true;
-    if (value === false || value === 0 || text === 'false' || text === '0' || text === '') return '';
-    throw httpError(400, 'Coexistence flag is invalid.');
   }
   if (key === 'accountId' || key === 'locationId') {
     if (!/^[A-Za-z0-9_.-]{1,128}$/.test(text)) throw httpError(400, `${key} is invalid.`);
@@ -10009,6 +10019,97 @@ async function storeInbound(env, channel, event, rawPayload) {
   }
 }
 
+export function isWhatsAppPlaceholderContactName(name, phoneDigits = '') {
+  const text = String(name || '').trim();
+  if (!text) return true;
+  const digits = whatsappPhoneDigits(text);
+  if (digits && phoneDigits && whatsappProfileIdsEquivalent(digits, phoneDigits)) return true;
+  if (/^\+?[\d\s().-]{8,22}$/.test(text) && digits.length >= 8) return true;
+  return false;
+}
+
+async function ingestWhatsAppCoexistenceContacts(env, channel, contactSyncs) {
+  if (!Array.isArray(contactSyncs) || !contactSyncs.length) return 0;
+  let changed = 0;
+  const now = new Date().toISOString();
+  for (const item of contactSyncs) {
+    if (item.action === 'remove') continue;
+    const phone = String(item.phoneNumber || '').replace(/\D/g, '');
+    if (!/^[1-9]\d{7,14}$/.test(phone)) continue;
+    const displayName = String(item.fullName || item.firstName || '').trim().slice(0, 120);
+    if (!displayName || isWhatsAppPlaceholderContactName(displayName, phone)) continue;
+
+    let identity = await resolveWhatsAppIdentity(env, channel.workspaceId, channel.channelId, phone);
+    if (identity?.matchedBy === 'alias') {
+      identity = await canonicalizeWhatsAppIdentityProfile(env, channel.workspaceId, channel.channelId,
+        identity, phone, now);
+    }
+    if (!identity) {
+      const contactId = crypto.randomUUID();
+      try {
+        await env.DB.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+          VALUES (?1,?2,?3,?3,?4)`).bind(contactId, displayName, now, channel.workspaceId).run();
+        const created = await ensureContactIdentity(env, channel.workspaceId, contactId, {
+          platform: 'whatsapp',
+          profileId: phone,
+          phoneNumber: phone,
+          displayName,
+          channelId: channel.channelId,
+          scopedProfileId: phone,
+          isPrimary: true
+        }, now);
+        identity = { identity_id: created.identityId, contact_id: contactId, contact_display_name: displayName };
+        changed += 1;
+        await broadcast(env, channel.workspaceId, { type: 'contact.created', contactId });
+      } catch (error) {
+        await env.DB.prepare(`DELETE FROM contacts WHERE workspace_id=?1 AND contact_id=?2
+          AND NOT EXISTS (SELECT 1 FROM conversations WHERE workspace_id=?1 AND contact_id=?2)`)
+          .bind(channel.workspaceId, contactId).run().catch(() => {});
+        identity = await resolveWhatsAppIdentity(env, channel.workspaceId, channel.channelId, phone);
+        if (!identity) throw error;
+      }
+    }
+
+    const currentName = String(identity.contact_display_name || '').trim();
+    const shouldRename = isWhatsAppPlaceholderContactName(currentName, phone)
+      || currentName === phone
+      || !currentName;
+    if (shouldRename && currentName !== displayName) {
+      await env.DB.batch([
+        env.DB.prepare(`UPDATE contacts SET display_name=?3,updated_at=?4
+          WHERE workspace_id=?1 AND contact_id=?2`)
+          .bind(channel.workspaceId, identity.contact_id, displayName, now),
+        env.DB.prepare(`UPDATE contact_identities SET display_name=?3,updated_at=?4
+          WHERE workspace_id=?1 AND identity_id=?2`)
+          .bind(channel.workspaceId, identity.identity_id, displayName, now),
+        env.DB.prepare(`UPDATE channel_identities SET display_name=?3
+          WHERE workspace_id=?1 AND contact_id=?2`)
+          .bind(channel.workspaceId, identity.contact_id, displayName),
+        env.DB.prepare(`UPDATE conversations SET subject=?3,updated_at=?4
+          WHERE workspace_id=?1 AND contact_id=?2`)
+          .bind(channel.workspaceId, identity.contact_id, displayName, now)
+      ]);
+      changed += 1;
+      await broadcast(env, channel.workspaceId, { type: 'contact.updated', contactId: identity.contact_id });
+    }
+
+    try {
+      await ensureIdentityBinding(env, channel.workspaceId, identity.contact_id, identity.identity_id, {
+        platform: 'whatsapp',
+        profileId: phone,
+        phoneNumber: phone,
+        displayName: shouldRename ? displayName : (currentName || displayName),
+        metadata: {},
+        channelId: channel.channelId,
+        scopedProfileId: phone
+      }, now);
+    } catch {
+      // Binding may already exist for this scoped profile.
+    }
+  }
+  return changed;
+}
+
 async function ingestWhatsAppCoexistenceHistory(env, channel, historyChunks, rawPayload) {
   if (!Array.isArray(historyChunks) || !historyChunks.length) return 0;
   const current = publicCoexistenceSync(channel.config?.coexistenceSync) || {
@@ -11536,6 +11637,7 @@ export function normalizeWhatsApp(payload) {
   const messages = [];
   const echoes = [];
   const historyChunks = [];
+  const contactSyncs = [];
   const statuses = [];
   const phoneNumberIds = new Set();
   for (const entry of payload?.entry || []) {
@@ -11544,6 +11646,22 @@ export function normalizeWhatsApp(payload) {
       if (value.metadata?.phone_number_id) phoneNumberIds.add(String(value.metadata.phone_number_id));
       const contacts = value.contacts || [];
       const businessPhone = String(value.metadata?.display_phone_number || '').replace(/\D+/g, '');
+      for (const sync of value.state_sync || []) {
+        if (String(sync?.type || '').toLowerCase() !== 'contact') continue;
+        const contact = sync?.contact || {};
+        const phoneNumber = String(contact.phone_number || '').replace(/\D/g, '');
+        contactSyncs.push({
+          action: String(sync?.action || '').toLowerCase() === 'remove' ? 'remove' : 'add',
+          phoneNumber,
+          fullName: String(contact.full_name || '').trim(),
+          firstName: String(contact.first_name || '').trim(),
+          username: String(contact.username || '').trim(),
+          userId: String(contact.user_id || '').trim(),
+          timestamp: sync?.metadata?.timestamp
+            ? new Date(Number(sync.metadata.timestamp) * 1000).toISOString()
+            : ''
+        });
+      }
       for (const message of value.messages || []) {
         const contact = contacts.find(item => String(item.wa_id) === String(message.from)) || {};
         const text = whatsappInboundText(message);
@@ -11645,6 +11763,7 @@ export function normalizeWhatsApp(payload) {
     messages: messages.filter(item => item.channelProfileId),
     echoes: echoes.filter(item => item.channelProfileId && item.providerMessageId),
     historyChunks,
+    contactSyncs: contactSyncs.filter(item => item.phoneNumber || item.userId || item.action === 'remove'),
     statuses: statuses.filter(item => item.providerMessageId || item.internalMessageId),
     phoneNumberIds: [...phoneNumberIds]
   };
