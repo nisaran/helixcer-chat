@@ -158,6 +158,8 @@
     composerDrafts: new Map(),
     recentVerifyTokens: new Map(),
     providerSetupMode: "",
+    whatsappEmbeddedSignup: { available: false },
+    whatsappEmbeddedSignupPending: null,
     selectedConversationId: null,
     selectedContactId: null,
     contactCreateIdentityDrafts: [],
@@ -2238,6 +2240,29 @@
         : this.request(`/api/channels/${encodeURIComponent(channelId)}/verify-token`);
     }
 
+    getWhatsAppEmbeddedSignupConfig() {
+      return this.isDemo
+        ? Promise.resolve({ available: false, provider: "whatsapp_cloud" })
+        : this.request("/api/channels/meta/embedded-signup/config");
+    }
+
+    completeWhatsAppEmbeddedSignup(payload) {
+      return this.isDemo
+        ? Promise.resolve({
+          ok: true,
+          created: true,
+          channelId: "demo-whatsapp-embedded",
+          name: payload.name || "WhatsApp",
+          health: "webhook_required",
+          authMode: "embedded_signup",
+          phoneRegistered: true,
+        })
+        : this.request("/api/channels/oauth/whatsapp-embedded/complete", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+    }
+
     webhookUrl(channel) {
       const channelId = typeof channel === "string" ? channel : channel?.channelId;
       const connectorType = typeof channel === "string" ? "whatsapp_cloud" : channel?.connectorType;
@@ -3798,6 +3823,9 @@
         else updateWorkspaceIdentity(state.workspaceProfile);
       }
       state.channels = asItems(data.channels).map(normalizeChannel);
+      if (data.whatsappEmbeddedSignup && typeof data.whatsappEmbeddedSignup === "object") {
+        state.whatsappEmbeddedSignup = data.whatsappEmbeddedSignup;
+      }
       if (data.tags) state.workspaceTags = normalizeWorkspaceTags(data.tags);
       const searchQuery = state.search.trim();
       state.conversationSearchActive = Boolean(searchQuery);
@@ -3871,6 +3899,9 @@
         else updateWorkspaceIdentity(state.workspaceProfile);
       }
       state.channels = asItems(data.channels).map(normalizeChannel);
+      if (data.whatsappEmbeddedSignup && typeof data.whatsappEmbeddedSignup === "object") {
+        state.whatsappEmbeddedSignup = data.whatsappEmbeddedSignup;
+      }
       if (data.tags) state.workspaceTags = normalizeWorkspaceTags(data.tags);
       // Bootstrap has no search `q`. Never merge that unfiltered first page over an
       // active conversation search — that is what reintroduces unrelated chats.
@@ -15571,6 +15602,30 @@
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-pressed", String(active));
     });
+    const whatsappLogin = $("whatsappSetupFacebook");
+    const whatsappHelp = $("whatsappEmbeddedSignupHelp");
+    const embeddedAvailable = Boolean(state.whatsappEmbeddedSignup?.available && state.whatsappEmbeddedSignup?.appId
+      && state.whatsappEmbeddedSignup?.configId);
+    if (whatsappLogin) {
+      const showLogin = selectedProvider === "whatsapp_cloud";
+      whatsappLogin.hidden = !showLogin;
+      if (showLogin && embeddedAvailable) {
+        whatsappLogin.disabled = false;
+        whatsappLogin.removeAttribute("aria-disabled");
+        whatsappLogin.removeAttribute("title");
+        whatsappLogin.classList.toggle("is-active", state.providerSetupMode === "facebook");
+        whatsappLogin.setAttribute("aria-pressed", String(state.providerSetupMode === "facebook"));
+      } else {
+        whatsappLogin.disabled = true;
+        whatsappLogin.setAttribute("aria-disabled", "true");
+        whatsappLogin.setAttribute("title", embeddedAvailable ? "" : "Login with Facebook is not configured yet");
+        whatsappLogin.classList.remove("is-active");
+        whatsappLogin.setAttribute("aria-pressed", "false");
+      }
+    }
+    if (whatsappHelp) {
+      whatsappHelp.hidden = !(selectedProvider === "whatsapp_cloud" && embeddedAvailable && !manualReady);
+    }
     const googleConnected = Boolean(editing && setup.credentialsPresent);
     const googleNote = $("googleReviewsConnectedNote");
     if (googleNote) googleNote.hidden = !(selectedProvider === "google_reviews" && googleConnected);
@@ -15641,6 +15696,202 @@
     }
     const url = state.api.googleReviewsConnectUrl({ name, channelId });
     location.assign(url);
+  }
+
+  async function startWhatsAppEmbeddedSignup() {
+    const name = $("channelNameInput")?.value?.trim() || "";
+    if (!name) {
+      showToast("Connection name required", "Enter a connection name, then try Login with Facebook again.", true);
+      $("channelNameInput")?.focus();
+      return;
+    }
+    if (state.api.isDemo) {
+      showToast("Demo mode", "WhatsApp Login with Facebook is simulated in demo mode.");
+      return;
+    }
+    const button = $("whatsappSetupFacebook");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Opening Facebook…";
+    }
+    try {
+      let config = state.whatsappEmbeddedSignup;
+      if (!config?.available) {
+        config = await state.api.getWhatsAppEmbeddedSignupConfig();
+        state.whatsappEmbeddedSignup = config;
+      }
+      if (!config?.available || !config.appId || !config.configId) {
+        throw new Error("Login with Facebook is not configured on this Helixcer workspace yet.");
+      }
+      await ensureFacebookSdk(config);
+      const session = await launchWhatsAppEmbeddedSignup(config);
+      const result = await state.api.completeWhatsAppEmbeddedSignup({
+        code: session.code,
+        wabaId: session.wabaId,
+        phoneNumberId: session.phoneNumberId,
+        businessId: session.businessId || "",
+        event: session.event || "FINISH",
+        name,
+        channelId: $("channelIdInput")?.value || "",
+        enabled: $("channelEnabledInput")?.checked !== false,
+      });
+      $("channelDialog")?.close();
+      await loadAll();
+      setRoute("channels");
+      showToast(
+        result.created ? "WhatsApp connected" : "WhatsApp updated",
+        `${result.name || name} is linked through Login with Facebook.`
+      );
+    } catch (error) {
+      if (String(error?.message || "").toLowerCase().includes("cancel")) {
+        showToast("Signup cancelled", "Facebook signup was closed before finishing.");
+      } else {
+        showToast("WhatsApp was not connected", error.message || "Login with Facebook failed.", true);
+      }
+    } finally {
+      if (button) {
+        button.disabled = !state.whatsappEmbeddedSignup?.available;
+        button.textContent = "Login with Facebook";
+        syncChannelForm($("channelProvider")?.value || "", Boolean($("channelIdInput")?.value), {});
+      }
+    }
+  }
+
+  function ensureFacebookSdk(config) {
+    if (window.FB && state.facebookSdkAppId === config.appId) {
+      return Promise.resolve(window.FB);
+    }
+    return new Promise((resolve, reject) => {
+      const finish = () => {
+        try {
+          window.FB.init({
+            appId: config.appId,
+            autoLogAppEvents: true,
+            xfbml: false,
+            version: config.graphVersion || "v22.0",
+          });
+          state.facebookSdkAppId = config.appId;
+          resolve(window.FB);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      if (window.FB) {
+        finish();
+        return;
+      }
+      const previous = window.fbAsyncInit;
+      window.fbAsyncInit = function fbAsyncInit() {
+        if (typeof previous === "function") previous();
+        finish();
+      };
+      if (!document.getElementById("facebook-jssdk")) {
+        const script = document.createElement("script");
+        script.id = "facebook-jssdk";
+        script.async = true;
+        script.defer = true;
+        script.crossOrigin = "anonymous";
+        script.src = "https://connect.facebook.net/en_US/sdk.js";
+        script.onerror = () => reject(new Error("Facebook SDK failed to load."));
+        document.head.appendChild(script);
+      }
+      window.setTimeout(() => {
+        if (!window.FB) reject(new Error("Facebook SDK timed out while loading."));
+      }, 15000);
+    });
+  }
+
+  function launchWhatsAppEmbeddedSignup(config) {
+    return new Promise((resolve, reject) => {
+      const pending = {
+        code: "",
+        wabaId: "",
+        phoneNumberId: "",
+        businessId: "",
+        event: "",
+        settled: false,
+      };
+      state.whatsappEmbeddedSignupPending = pending;
+
+      const cleanup = () => {
+        window.removeEventListener("message", onMessage);
+        if (state.whatsappEmbeddedSignupPending === pending) state.whatsappEmbeddedSignupPending = null;
+      };
+
+      const tryResolve = () => {
+        if (pending.settled) return;
+        if (!pending.code || !pending.wabaId || !pending.phoneNumberId) return;
+        pending.settled = true;
+        cleanup();
+        resolve({
+          code: pending.code,
+          wabaId: pending.wabaId,
+          phoneNumberId: pending.phoneNumberId,
+          businessId: pending.businessId,
+          event: pending.event || "FINISH",
+        });
+      };
+
+      const onMessage = (event) => {
+        if (!String(event.origin || "").endsWith("facebook.com")) return;
+        let data = event.data;
+        if (typeof data === "string") {
+          try { data = JSON.parse(data); } catch { return; }
+        }
+        if (!data || data.type !== "WA_EMBEDDED_SIGNUP") return;
+        if (data.event === "CANCEL") {
+          if (!pending.settled) {
+            pending.settled = true;
+            cleanup();
+            reject(new Error("cancelled"));
+          }
+          return;
+        }
+        if (data.event === "ERROR") {
+          if (!pending.settled) {
+            pending.settled = true;
+            cleanup();
+            reject(new Error(data.data?.error_message || "Meta Embedded Signup reported an error."));
+          }
+          return;
+        }
+        const payload = data.data || {};
+        pending.wabaId = String(payload.waba_id || pending.wabaId || "");
+        pending.phoneNumberId = String(payload.phone_number_id || pending.phoneNumberId || "");
+        pending.businessId = String(payload.business_id || pending.businessId || "");
+        pending.event = String(data.event || pending.event || "FINISH");
+        tryResolve();
+      };
+
+      window.addEventListener("message", onMessage);
+      window.FB.login((response) => {
+        if (!response?.authResponse?.code) {
+          if (!pending.settled) {
+            pending.settled = true;
+            cleanup();
+            reject(new Error(response?.status === "unknown" ? "cancelled" : "Facebook did not return a signup code."));
+          }
+          return;
+        }
+        pending.code = String(response.authResponse.code || "");
+        // Session message can arrive slightly after the code callback.
+        window.setTimeout(() => {
+          if (!pending.settled && pending.code && (!pending.wabaId || !pending.phoneNumberId)) {
+            pending.settled = true;
+            cleanup();
+            reject(new Error("Meta finished login but did not return a WhatsApp account and phone number."));
+          } else {
+            tryResolve();
+          }
+        }, 2500);
+        tryResolve();
+      }, {
+        config_id: config.configId,
+        response_type: "code",
+        override_default_response_type: true,
+        extras: { setup: {}, featureType: "", sessionInfoVersion: "3" },
+      });
+    });
   }
 
   async function consumeGoogleReviewsOAuthReturn() {
@@ -16806,6 +17057,9 @@
           return;
         }
         if (actionButton.dataset.action === "provider-setup-login") {
+          if (actionButton.dataset.provider === "whatsapp_cloud") {
+            startWhatsAppEmbeddedSignup();
+          }
           return;
         }
         if (actionButton.dataset.action === "connect-google-reviews") {

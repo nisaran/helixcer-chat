@@ -43,6 +43,9 @@ npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_ANDROID_CLIENT_IDS
 npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put GOOGLE_REDIRECT_URI
+npx wrangler secret put META_APP_ID
+npx wrangler secret put META_APP_SECRET
+npx wrangler secret put META_EMBEDDED_SIGNUP_CONFIG_ID
 npx wrangler secret put BOOTSTRAP_OWNER_EMAIL
 npx wrangler secret put CHANNEL_CREDENTIALS_KEY
 npx wrangler secret put VAPID_PRIVATE_KEY
@@ -51,6 +54,15 @@ npx wrangler secret put FIREBASE_CLIENT_EMAIL
 npx wrangler secret put FIREBASE_PRIVATE_KEY
 npx wrangler secret put RESEND_API_KEY
 ```
+
+Optional Meta WhatsApp Embedded Signup (`Login with Facebook` on WhatsApp channel setup):
+
+- `META_APP_ID`: Meta app ID shown in the App Dashboard (also returned to the browser for the Facebook JS SDK).
+- `META_APP_SECRET`: Meta App Secret used to exchange Embedded Signup codes and to verify per-channel WhatsApp webhook signatures after signup.
+- `META_EMBEDDED_SIGNUP_CONFIG_ID`: Facebook Login for Business configuration ID created from the WhatsApp Embedded Signup template.
+- `META_GRAPH_API_VERSION`: optional Graph API version override (defaults to `v22.0`).
+
+In Meta, allow Helixcer app domains under Facebook Login for Business → Settings (Allowed domains / Valid OAuth redirect URIs), and ensure WhatsApp product webhooks can reach `https://api.chat.helixcer.com/webhooks/whatsapp/{channelId}` via the per-WABA `override_callback_uri` Helixcer sets during signup.
 
 Optional password-reset delivery secrets:
 
