@@ -288,7 +288,43 @@ test('normalizes inbound WhatsApp messages and statuses', () => {
   assert.equal(result.messages[2].attachment.filename, 'invoice.pdf');
   assert.equal(result.statuses[0].status, 'delivered');
   assert.equal(result.statuses[0].internalMessageId, 'internal-message-1');
+  assert.deepEqual(result.echoes, []);
   assert.deepEqual(result.phoneNumberIds, ['123456789']);
+});
+
+test('normalizes WhatsApp Business app coexistence message echoes as outbound', () => {
+  const result = normalizeWhatsApp({
+    object: 'whatsapp_business_account',
+    entry: [{
+      id: '102290129340398',
+      changes: [{
+        value: {
+          messaging_product: 'whatsapp',
+          metadata: {
+            display_phone_number: '15550783881',
+            phone_number_id: '106540352242922'
+          },
+          contacts: [{ wa_id: '919999999999', profile: { name: 'Asha' } }],
+          message_echoes: [{
+            from: '15550783881',
+            to: '919999999999',
+            id: 'wamid.echo.1',
+            timestamp: '1761360100',
+            type: 'text',
+            text: { body: 'Sent from WhatsApp Business app' }
+          }]
+        },
+        field: 'smb_message_echoes'
+      }]
+    }]
+  });
+  assert.equal(result.messages.length, 0);
+  assert.equal(result.echoes.length, 1);
+  assert.equal(result.echoes[0].channelProfileId, '919999999999');
+  assert.equal(result.echoes[0].displayName, 'Asha');
+  assert.equal(result.echoes[0].text, 'Sent from WhatsApp Business app');
+  assert.equal(result.echoes[0].providerMessageId, 'wamid.echo.1');
+  assert.deepEqual(result.phoneNumberIds, ['106540352242922']);
 });
 
 test('providerError surfaces Meta template create details beyond Invalid parameter', () => {

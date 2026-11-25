@@ -2389,6 +2389,10 @@ function importSourceSenderAttribution(source) {
   return { login: '', name: '' };
 }
 
+function whatsappBusinessAppSenderAttribution() {
+  return { login: 'whatsapp_business', name: 'WhatsApp Business' };
+}
+
 function cleanPreviewText(value, maximum) {
   if (typeof value !== 'string') throw httpError(400, 'Preview text must be text.');
   const text = value.replace(/\r\n?/g, '\n').replace(/\t/g, ' ').trim();
@@ -2520,12 +2524,14 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
   if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
   const normalized = normalizeWhatsApp(payload);
   const expectedPhoneNumberId = String(channel.config?.phoneNumberId || '');
-  const hasEvents = normalized.messages.length > 0 || normalized.statuses.length > 0;
+  const hasEvents = normalized.messages.length > 0 || normalized.statuses.length > 0
+    || normalized.echoes.length > 0;
   if (hasEvents && (!expectedPhoneNumberId || normalized.phoneNumberIds.length === 0 ||
       normalized.phoneNumberIds.some(id => id !== expectedPhoneNumberId))) {
     return json({ ok: false, error: 'Webhook phone number does not match this channel.' }, 403);
   }
   let received = 0;
+  let echoes = 0;
   let latestInbound = null;
   const statusChanges = [];
   for (const event of normalized.messages) {
@@ -2533,6 +2539,13 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
     if (stored) {
       received++;
       latestInbound = stored;
+      await broadcastStoredInbound(env, channel, stored);
+    }
+  }
+  for (const event of normalized.echoes) {
+    const stored = await storeWhatsAppBusinessAppEcho(env, channel, event, payload);
+    if (stored) {
+      echoes++;
       await broadcastStoredInbound(env, channel, stored);
     }
   }
@@ -2545,11 +2558,11 @@ async function handleWhatsAppWebhook(request, env, channelId, ctx) {
     webhookVerifiedAt: channel.config?.webhookVerifiedAt || receivedAt
   });
   await broadcastMessageStatusChanges(env, channel.workspaceId, statusChanges);
-  if (received || normalized.statuses.length) await broadcast(env, channel.workspaceId, {
-    type: 'webhook.received', channelId, received, statuses: normalized.statuses.length, granular: true
+  if (received || echoes || normalized.statuses.length) await broadcast(env, channel.workspaceId, {
+    type: 'webhook.received', channelId, received, echoes, statuses: normalized.statuses.length, granular: true
   });
   if (latestInbound) afterInboundStored(ctx, env, channel, latestInbound);
-  return json({ ok: true, received, statuses: normalized.statuses.length });
+  return json({ ok: true, received, echoes, statuses: normalized.statuses.length });
 }
 
 async function handleGenericWebhook(request, env, channelId, ctx) {
@@ -9842,6 +9855,124 @@ async function storeInbound(env, channel, event, rawPayload) {
   }
 }
 
+async function storeWhatsAppBusinessAppEcho(env, channel, event, rawPayload) {
+  if (!event.channelProfileId || !event.providerMessageId) return false;
+  const providerEventKey = String(event.providerMessageId);
+  const eventKey = `${channel.workspaceId}:${channel.channelId}:echo:${providerEventKey}`;
+  const dedupe = await env.DB.prepare(`INSERT OR IGNORE INTO webhook_events (event_key,channel_id,event_type,received_at,workspace_id)
+    VALUES (?1,?2,'echo',?3,?4)`).bind(eventKey, channel.channelId, new Date().toISOString(), channel.workspaceId).run();
+  if (!dedupe.meta?.changes) return false;
+  try {
+    // If Helixcer already sent this wamid, keep the original outbound row.
+    const existing = await env.DB.prepare(`SELECT message_id FROM messages
+      WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3 LIMIT 1`)
+      .bind(channel.workspaceId, channel.channelId, providerEventKey).first();
+    if (existing) return false;
+
+    const now = new Date().toISOString();
+    const timestamp = normalizeTimestamp(event.timestamp, now);
+    const profileId = String(event.channelProfileId);
+    let identity = await resolveWhatsAppIdentity(env, channel.workspaceId, channel.channelId, profileId);
+    if (identity?.matchedBy === 'alias') {
+      identity = await canonicalizeWhatsAppIdentityProfile(env, channel.workspaceId, channel.channelId,
+        identity, profileId, now);
+    }
+    if (!identity) {
+      const candidates = await env.DB.prepare(`SELECT ci.identity_id,ci.contact_id,c.display_name AS contact_display_name
+          FROM contact_identities ci JOIN contacts c ON c.contact_id=ci.contact_id AND c.workspace_id=ci.workspace_id
+          WHERE ci.workspace_id=?1 AND ci.platform='whatsapp' AND ci.profile_id=?2
+          ORDER BY ci.created_at,ci.identity_id`).bind(channel.workspaceId, profileId).all();
+      if ((candidates.results || []).length === 1) {
+        identity = candidates.results[0];
+        try {
+          await ensureIdentityBinding(env, channel.workspaceId, identity.contact_id, identity.identity_id, {
+            platform: 'whatsapp', profileId, scopedProfileId: profileId, username: '',
+            phoneNumber: /^\d{6,20}$/.test(profileId) ? profileId : '',
+            displayName: String(event.displayName || identity.contact_display_name || profileId).slice(0, 120),
+            metadata: {}, channelId: channel.channelId
+          }, now);
+        } catch (error) {
+          const winner = await resolveWhatsAppIdentity(env, channel.workspaceId, channel.channelId, profileId);
+          if (!winner) throw error;
+          identity = winner;
+        }
+      } else {
+        const contactId = crypto.randomUUID();
+        const name = String(event.displayName || profileId).slice(0, 120);
+        try {
+          await env.DB.prepare(`INSERT INTO contacts (contact_id,display_name,created_at,updated_at,workspace_id)
+            VALUES (?1,?2,?3,?3,?4)`).bind(contactId, name, now, channel.workspaceId).run();
+          const created = await ensureContactIdentity(env, channel.workspaceId, contactId, {
+            platform: 'whatsapp', profileId, channelId: channel.channelId, scopedProfileId: profileId,
+            phoneNumber: /^\d{6,20}$/.test(profileId) ? profileId : '',
+            displayName: name, isPrimary: true
+          }, now);
+          identity = { identity_id: created.identityId, contact_id: contactId, contact_display_name: name };
+        } catch (error) {
+          await env.DB.prepare(`DELETE FROM contacts WHERE workspace_id=?1 AND contact_id=?2
+            AND NOT EXISTS (SELECT 1 FROM conversations WHERE workspace_id=?1 AND contact_id=?2)`)
+            .bind(channel.workspaceId, contactId).run().catch(() => {});
+          const winner = await resolveWhatsAppIdentity(env, channel.workspaceId, channel.channelId, profileId);
+          if (!winner) throw error;
+          identity = winner;
+        }
+      }
+    }
+
+    identity = await upgradeInboundContactDisplayName(env, channel.workspaceId, identity, profileId,
+      event.displayName, now);
+    const conversationId = await ensureIdentityConversation(env, channel.workspaceId, identity.contact_id,
+      identity.identity_id, channel.channelId, '');
+    const messageId = crypto.randomUUID();
+    const reply = await resolveInboundReply(env, channel.workspaceId, conversationId,
+      channel.channelId, event.reply);
+    const sender = whatsappBusinessAppSenderAttribution();
+    const storedPayload = {
+      source: 'whatsapp_business_app',
+      senderName: sender.name,
+      providerMessageId: String(event.providerMessageId || ''),
+      ...(event.attachment ? { attachment: event.attachment } : {}),
+      ...(reply ? { reply } : {})
+    };
+    const messageType = String(event.messageType || 'text').slice(0, 40);
+    const text = String(event.text || '').slice(0, MAX_TEXT_LENGTH);
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO messages (message_id,conversation_id,contact_id,channel_id,identity_id,direction,message_type,text,
+        provider_message_id,status,timestamp,payload_json,workspace_id,sender_login,sender_name)
+        VALUES (?1,?2,?3,?4,?5,'outbound',?6,?7,?8,'sent',?9,?10,?11,?12,?13)`)
+        .bind(messageId, conversationId, identity.contact_id, channel.channelId, identity.identity_id,
+          messageType, text, String(event.providerMessageId || ''), timestamp, truncateJson(storedPayload),
+          channel.workspaceId, sender.login, sender.name),
+      env.DB.prepare(`UPDATE conversations SET channel_id=?3,identity_id=?4,last_message_at=?5,updated_at=?6
+        WHERE conversation_id=?1 AND workspace_id=?2`)
+        .bind(conversationId, channel.workspaceId, channel.channelId, identity.identity_id, timestamp, now)
+    ]);
+    await touchIdentityBinding(env, channel.workspaceId, identity.identity_id, channel.channelId,
+      'outbound', conversationId, timestamp);
+    const conversationItem = await getConversationItem(env, channel.workspaceId, conversationId);
+    return {
+      messageId,
+      conversationId,
+      senderName: sender.name,
+      preview: text,
+      messageType,
+      message: {
+        messageId, conversationId, channelId: channel.channelId,
+        contactIdentityId: identity.identity_id, identityId: identity.identity_id,
+        direction: 'outbound', messageType, text, status: 'sent', timestamp,
+        channelMessageId: String(event.providerMessageId || ''), error: '', senderName: sender.name,
+        connectorType: channel.connectorType, channelName: channel.name || '', channelProfileId: profileId,
+        attachment: messageAttachmentView(messageType, storedPayload, messageId),
+        reply: messageReplyView(storedPayload)
+      },
+      conversation: conversationItem
+    };
+  } catch (error) {
+    await env.DB.prepare('DELETE FROM webhook_events WHERE event_key=?1').bind(eventKey).run();
+    throw error;
+  }
+}
+
 async function resolveInboundReply(env, workspaceId, conversationId, channelId, providerReply) {
   const channelMessageId = String(providerReply?.channelMessageId || '').trim();
   if (!channelMessageId) return null;
@@ -11200,6 +11331,7 @@ async function importInteraktConversation(env, workspaceId, channel, conversatio
 
 export function normalizeWhatsApp(payload) {
   const messages = [];
+  const echoes = [];
   const statuses = [];
   const phoneNumberIds = new Set();
   for (const entry of payload?.entry || []) {
@@ -11221,6 +11353,28 @@ export function normalizeWhatsApp(payload) {
           ...(reply ? { reply } : {})
         });
       }
+      // Coexistence: WhatsApp Business app → customer messages arrive as smb_message_echoes.
+      for (const echo of value.message_echoes || []) {
+        const echoType = String(echo?.type || '').toLowerCase();
+        if (echoType === 'edit' || echoType === 'revoke') continue;
+        const customerId = String(echo?.to || '').trim();
+        const contact = contacts.find(item => String(item.wa_id) === customerId)
+          || contacts.find(item => String(item.user_id || '') === String(echo?.to_user_id || ''))
+          || {};
+        const text = whatsappInboundText(echo);
+        const attachment = whatsappInboundAttachment(echo);
+        const reply = whatsappInboundReply(echo);
+        echoes.push({
+          channelProfileId: customerId,
+          displayName: contact.profile?.name || contact.profile?.username || customerId,
+          text,
+          providerMessageId: String(echo.id || ''),
+          timestamp: echo.timestamp ? new Date(Number(echo.timestamp) * 1000).toISOString() : '',
+          messageType: attachment?.type || String(echo.type || 'text'),
+          ...(attachment ? { attachment } : {}),
+          ...(reply ? { reply } : {})
+        });
+      }
       for (const status of value.statuses || []) {
         statuses.push({
           providerMessageId: String(status.id || ''), status: String(status.status || ''),
@@ -11233,6 +11387,7 @@ export function normalizeWhatsApp(payload) {
   }
   return {
     messages: messages.filter(item => item.channelProfileId),
+    echoes: echoes.filter(item => item.channelProfileId && item.providerMessageId),
     statuses: statuses.filter(item => item.providerMessageId || item.internalMessageId),
     phoneNumberIds: [...phoneNumberIds]
   };
