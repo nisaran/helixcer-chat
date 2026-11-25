@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#171827">
   <meta name="description" content="Helixcer Chat — a focused omnichannel inbox for customer conversations.">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://api.chat.helixcer.com wss://api.chat.helixcer.com; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://connect.facebook.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://api.chat.helixcer.com wss://api.chat.helixcer.com https://www.facebook.com https://graph.facebook.com https://connect.facebook.net; frame-src 'self' blob: https://www.facebook.com https://web.facebook.com https://staticxx.facebook.com https://m.facebook.com; object-src 'none'; base-uri 'none'; form-action 'self'">
   <meta name="helixcer-api-base" content="https://api.chat.helixcer.com">
   <title>Helixcer Chat</title>
   <link rel="icon" href="./assets/helixcer-chat-32.png?v=20261106-role-cards" type="image/png">
@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261123-tallyprime-download-domain">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261125-facebook-sdk-csp">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261123-tallyprime-download-domain" defer></script>
+  <script src="./assets/app.js?v=20261125-facebook-sdk-csp" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>

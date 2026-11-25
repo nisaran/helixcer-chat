@@ -15762,6 +15762,12 @@
       return Promise.resolve(window.FB);
     }
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const settle = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        fn(value);
+      };
       const finish = () => {
         try {
           window.FB.init({
@@ -15771,9 +15777,9 @@
             version: config.graphVersion || "v22.0",
           });
           state.facebookSdkAppId = config.appId;
-          resolve(window.FB);
+          settle(resolve, window.FB);
         } catch (error) {
-          reject(error);
+          settle(reject, error);
         }
       };
       if (window.FB) {
@@ -15785,18 +15791,23 @@
         if (typeof previous === "function") previous();
         finish();
       };
-      if (!document.getElementById("facebook-jssdk")) {
+      const existing = document.getElementById("facebook-jssdk");
+      if (!existing) {
         const script = document.createElement("script");
         script.id = "facebook-jssdk";
         script.async = true;
         script.defer = true;
-        script.crossOrigin = "anonymous";
+        // Avoid crossorigin so a CSP/CORS mismatch cannot block classic script execution.
         script.src = "https://connect.facebook.net/en_US/sdk.js";
-        script.onerror = () => reject(new Error("Facebook SDK failed to load."));
+        script.onerror = () => settle(reject, new Error(
+          "Facebook SDK failed to load. Allow connect.facebook.net in this browser (disable blockers for Helixcer), then try again."
+        ));
         document.head.appendChild(script);
       }
       window.setTimeout(() => {
-        if (!window.FB) reject(new Error("Facebook SDK timed out while loading."));
+        if (!window.FB) {
+          settle(reject, new Error("Facebook SDK timed out while loading. Check that connect.facebook.net is reachable."));
+        }
       }, 15000);
     });
   }
