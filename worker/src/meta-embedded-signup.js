@@ -3,7 +3,9 @@ const WHATSAPP_WEBHOOK_FIELDS = [
   'messages',
   'message_template_status_update',
   'account_update',
-  'smb_message_echoes'
+  'smb_message_echoes',
+  'history',
+  'smb_app_state_sync'
 ];
 
 export function metaEmbeddedSignupConfigured(env) {
