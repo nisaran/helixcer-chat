@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261125-register-webhook">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261126-embedded-details">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261125-register-webhook" defer></script>
+  <script src="./assets/app.js?v=20261126-embedded-details" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1442,6 +1442,17 @@
           <button class="secondary-button provider-setup-option" type="button" id="whatsappSetupFacebook" data-action="provider-setup-login" data-provider="whatsapp_cloud" disabled aria-disabled="true">Login with Facebook</button>
         </div>
         <p class="field-help" id="whatsappEmbeddedSignupHelp" hidden>Opens Meta WhatsApp Embedded Signup. Helixcer stores the business token and wires this channel webhook automatically.</p>
+        <div class="provider-connected-summary" id="whatsappEmbeddedDetails" hidden>
+          <p class="provider-connected-eyebrow">Connected with Login with Facebook</p>
+          <dl class="provider-connected-grid">
+            <div><dt>Verified name</dt><dd id="whatsappEmbeddedVerifiedName">—</dd></div>
+            <div><dt>Phone number</dt><dd id="whatsappEmbeddedPhoneNumber">—</dd></div>
+            <div><dt>WhatsApp Business Account ID</dt><dd id="whatsappEmbeddedWabaId">—</dd></div>
+            <div><dt>Phone Number ID</dt><dd id="whatsappEmbeddedPhoneNumberId">—</dd></div>
+            <div class="form-span"><dt>Business portfolio ID</dt><dd id="whatsappEmbeddedBusinessId">—</dd></div>
+          </dl>
+          <p class="field-help">Access token and App Secret stay encrypted in Helixcer. Use Login with Facebook again only to re-link this account.</p>
+        </div>
         <div class="provider-manual-fields" id="whatsappManualFields" hidden>
           <div class="form-grid channel-form-grid">
             <label class="field-label">WhatsApp Business Account ID <span class="field-hint">Messaging account ID in Meta</span><input class="text-field" name="wabaId" inputmode="numeric" maxlength="40" placeholder="123456789012345" required></label>
