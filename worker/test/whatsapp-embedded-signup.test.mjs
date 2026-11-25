@@ -111,7 +111,12 @@ function mockMetaEmbeddedFetch() {
   const calls = [];
   const fetchImpl = async (input, init = {}) => {
     const url = String(input);
-    calls.push({ url, method: init.method || 'GET', body: init.body || '' });
+    calls.push({
+      url,
+      method: init.method || 'GET',
+      body: init.body || '',
+      headers: init.headers || {}
+    });
     if (url.includes('/oauth/access_token')) {
       return Response.json({
         access_token: 'EAAG-embedded-business-token-abcdef',
@@ -119,6 +124,16 @@ function mockMetaEmbeddedFetch() {
       });
     }
     if (url.includes('/subscribed_apps')) {
+      const bodyText = String(init.body || '');
+      if (bodyText.includes('override_callback_uri') && !bodyText.includes('subscribed_fields')) {
+        return Response.json({
+          error: {
+            message: '(#100) Before override the current callback uri, your app must be subscribed to receive messages for WhatsApp Business Account',
+            type: 'OAuthException',
+            code: 100
+          }
+        }, { status: 400 });
+      }
       return Response.json({ success: true });
     }
     if (url.includes('/register')) {
@@ -218,7 +233,10 @@ test('WhatsApp Embedded Signup complete exchanges code, saves channel, subscribe
     const subscriptions = calls.filter(call => call.url.includes('/subscribed_apps'));
     assert.deepEqual(subscriptions.map(call => call.method), ['POST', 'POST']);
     assert.equal(subscriptions[0].body, '');
+    assert.doesNotMatch(String(subscriptions[0].headers?.['Content-Type'] || ''), /application\/json/);
     assert.match(subscriptions[1].body, /override_callback_uri/);
+    assert.match(subscriptions[1].body, /"subscribed_fields"/);
+    assert.match(subscriptions[1].body, /"messages"/);
     assert.match(subscriptions[1].body, new RegExp(`/webhooks/whatsapp/${body.channelId}`));
   } finally {
     globalThis.fetch = originalFetch;
@@ -276,7 +294,9 @@ test('Register Webhook re-subscribes Embedded Signup WhatsApp channels only', as
 
     const subscriptions = calls.filter(call => call.url.includes('/subscribed_apps'));
     assert.equal(subscriptions.length, 2);
+    assert.equal(subscriptions[0].body, '');
     assert.match(subscriptions[1].body, /override_callback_uri/);
+    assert.match(subscriptions[1].body, /"subscribed_fields"/);
 
     const manual = await handleRequest(new Request(
       'https://api.chat.helixcer.com/api/channels',
