@@ -15756,9 +15756,10 @@
     const embeddedAvailable = Boolean(state.whatsappEmbeddedSignup?.available && state.whatsappEmbeddedSignup?.appId
       && state.whatsappEmbeddedSignup?.configId);
     if (whatsappLogin) {
-      // Editing a manual WhatsApp channel: hide Login with Facebook.
+      // Editing a manual WhatsApp channel: hide Continue with Facebook.
       const showLogin = selectedProvider === "whatsapp_cloud"
         && (!editing || embeddedWhatsApp);
+      const loginLabel = whatsappLogin.querySelector(".facebook-login-button-label");
       whatsappLogin.hidden = !showLogin;
       if (showLogin && embeddedAvailable) {
         whatsappLogin.disabled = false;
@@ -15766,15 +15767,18 @@
         whatsappLogin.removeAttribute("title");
         whatsappLogin.classList.toggle("is-active", showEmbeddedDetails || state.providerSetupMode === "facebook");
         whatsappLogin.setAttribute("aria-pressed", String(showEmbeddedDetails || state.providerSetupMode === "facebook"));
-        if (showEmbeddedDetails) whatsappLogin.textContent = "Re-link with Facebook";
-        else whatsappLogin.textContent = "Login with Facebook";
+        if (loginLabel) loginLabel.textContent = "Continue with Facebook";
+        whatsappLogin.setAttribute("aria-label", showEmbeddedDetails
+          ? "Continue with Facebook to re-link"
+          : "Continue with Facebook");
       } else {
         whatsappLogin.disabled = true;
         whatsappLogin.setAttribute("aria-disabled", "true");
-        whatsappLogin.setAttribute("title", embeddedAvailable ? "" : "Login with Facebook is not configured yet");
+        whatsappLogin.setAttribute("title", embeddedAvailable ? "" : "Continue with Facebook is not configured yet");
         whatsappLogin.classList.remove("is-active");
         whatsappLogin.setAttribute("aria-pressed", "false");
-        whatsappLogin.textContent = "Login with Facebook";
+        if (loginLabel) loginLabel.textContent = "Continue with Facebook";
+        whatsappLogin.setAttribute("aria-label", "Continue with Facebook");
       }
     }
     if (whatsappHelp) {
