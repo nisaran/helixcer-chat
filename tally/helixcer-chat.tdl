@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 422-contact-choice-party-sync
-;; Title must show "(build 422)".
+;; BUILD: 423-contact-choice-simple-buyer
+;; Title must show "(build 423)".
 ;;
 ;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
 ;; Company Storage is used for saved HxcVoucherConfigs on Commit — never for Create UI.
@@ -3020,7 +3020,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 422)"
+    Set as    : "Create Voucher Config (build 423)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3097,7 +3097,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 422)"
+    Set as    : "Alter Voucher Config (build 423)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3157,7 +3157,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 422)"
+    Set as    : "Voucher Config List (build 423)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3272,7 +3272,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 422)"
+    Set as    : "Helixcer Chat (build 423)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -4877,9 +4877,9 @@
 [System: Formula]
     Hxc Voucher Buyer Ledger Name : If @@HxcSettlementVoucher Then @@HxcSettlementSavedParty Else @@HxcVoucherStoredBuyerLedger
     Hxc Invoice Buyer Changed : @@HxcInvoiceContactVisible AND NOT $$IsEmpty:$$Value AND NOT ($$Value = @@HxcVoucherStoredBuyerLedger)
-    Hxc Voucher Stored Buyer Ledger : If NOT $$IsEmpty:##HxcInvoiceContactParty Then ##HxcInvoiceContactParty Else If NOT $$IsEmpty:##HxcInvoiceBuyerInput Then ##HxcInvoiceBuyerInput Else If NOT $$IsEmpty:($$ReportObject:$BasicBuyerName) Then $$ReportObject:$BasicBuyerName Else If NOT $$IsEmpty:($$ReportObject:$PartyLedgerName) Then $$ReportObject:$PartyLedgerName Else If NOT $$IsEmpty:#EI PartyLedger Then #EI PartyLedger Else If NOT $$IsEmpty:$BasicBuyerName Then $BasicBuyerName Else If NOT $$IsEmpty:$$Owner:$BasicBuyerName Then $$Owner:$BasicBuyerName Else If NOT $$IsEmpty:$PartyLedgerName Then $PartyLedgerName Else $$Owner:$PartyLedgerName
+    Hxc Voucher Stored Buyer Ledger : If NOT $$IsEmpty:##HxcInvoiceContactParty Then ##HxcInvoiceContactParty Else If NOT $$IsEmpty:##HxcInvoiceBuyerInput Then ##HxcInvoiceBuyerInput Else If NOT $$IsEmpty:$BasicBuyerName Then $BasicBuyerName Else If NOT $$IsEmpty:$$Owner:$BasicBuyerName Then $$Owner:$BasicBuyerName Else If NOT $$IsEmpty:$PartyLedgerName Then $PartyLedgerName Else $$Owner:$PartyLedgerName
     Hxc Voucher Recipient Draft Matches : NOT $$IsEmpty:##HxcRecipientDraftLedger AND ##HxcRecipientDraftLedger = @@HxcVoucherRecipientScope
-    Hxc Voucher Buyer Address Raw : If @@HxcSettlementVoucher Then $HxcSettlementAddress Else If NOT $$IsEmpty:##HxcInvoiceAddressInput Then ##HxcInvoiceAddressInput Else If NOT $$IsEmpty:($$ReportObject:$PartyAddressType) Then $$ReportObject:$PartyAddressType Else If $$IsEmpty:$PartyAddressType Then $$Owner:$PartyAddressType Else $PartyAddressType
+    Hxc Voucher Buyer Address Raw : If @@HxcSettlementVoucher Then $HxcSettlementAddress Else If NOT $$IsEmpty:##HxcInvoiceAddressInput Then ##HxcInvoiceAddressInput Else If $$IsEmpty:$PartyAddressType Then $$Owner:$PartyAddressType Else $PartyAddressType
     Hxc Voucher Buyer Address : If $$IsEmpty:@@HxcVoucherBuyerAddressRaw OR @@HxcVoucherBuyerAddressRaw = "Primary" OR $$StringPart:@@HxcVoucherBuyerAddressRaw:2:7 = "Primary" Then "Primary" Else @@HxcVoucherBuyerAddressRaw
     Hxc Voucher Recipient Scope : (If @@HxcSettlementVoucher Then "Settlement|" Else "") + @@HxcVoucherBuyerLedgerName + "|" + @@HxcVoucherBuyerAddress
     Hxc Voucher Legacy Primary Prefix : @@HxcVoucherBuyerLedgerName + "|Primary|"
