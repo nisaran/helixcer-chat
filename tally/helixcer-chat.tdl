@@ -1,6 +1,6 @@
 ;; Helixcer Chat — TallyPrime TDL
-;; BUILD: 419-contact-above-narration
-;; Title must show "(build 419)".
+;; BUILD: 420-contact-choice-above-narration
+;; Title must show "(build 420)".
 ;;
 ;; Create draft is session Variables only (Name/Template/Lang + voucher slots).
 ;; Company Storage is used for saved HxcVoucherConfigs on Commit — never for Create UI.
@@ -3020,7 +3020,7 @@
 
 [Field: Hxc Vc Cr Title]
     Use       : Name Field
-    Set as    : "Create Voucher Config (build 419)"
+    Set as    : "Create Voucher Config (build 420)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3097,7 +3097,7 @@
 
 [Field: Hxc Vc Al Title]
     Use       : Name Field
-    Set as    : "Alter Voucher Config (build 419)"
+    Set as    : "Alter Voucher Config (build 420)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3157,7 +3157,7 @@
 
 [Field: Hxc Vc Ls Title]
     Use       : Name Field
-    Set as    : "Voucher Config List (build 419)"
+    Set as    : "Voucher Config List (build 420)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -3272,7 +3272,7 @@
 
 [Field: Helixcer Chat About Title]
     Use       : Name Field
-    Set as    : "Helixcer Chat (build 419)"
+    Set as    : "Helixcer Chat (build 420)"
     Style     : Bold
     Align     : Centre
     FullWidth : Yes
@@ -4439,11 +4439,9 @@
 ;; Voucher recipient details
 
 [#Part: VCH Narration]
-    Add : Line : At Beginning : Hxc Provide Party Details Line, Hxc Voucher Recipient Name Line, Hxc Voucher Recipient Mobile Line, Hxc Voucher Recipient Email Line
-    Add : Line : At End : Hxc Voucher Last WhatsApp Footer
-    Local : Line : Hxc Voucher Recipient Name Line : Invisible : NOT @@HxcInvoiceContactVisible
-    Local : Line : Hxc Voucher Recipient Mobile Line : Invisible : NOT @@HxcInvoiceContactVisible
-    Local : Line : Hxc Voucher Recipient Email Line : Invisible : NOT @@HxcInvoiceContactVisible
+    Add : Line : At Beginning : Hxc Provide Party Details Line, Hxc Voucher Invoice Contact Line, Hxc Voucher Last WhatsApp Footer
+    Local : Line : Hxc Voucher Invoice Contact Line : Invisible : NOT @@HxcInvoiceContactVisible
+    Local : Line : Hxc Voucher Last WhatsApp Footer : Invisible : $$InPrintMode OR NOT ($HxcShowLastVoucherMessageStatus:Company:##SVCurrentCompany)
 
 [Line: Hxc Provide Party Details Line]
     Fields : Medium Prompt, Hxc Provide Party Details
@@ -4641,6 +4639,40 @@
 [Variable: HxcRecipientDraftEmail]
     Type : String
 
+[Line: Hxc Voucher Invoice Contact Line]
+    Field : Hxc Voucher Invoice Contact
+    Invisible : NOT @@HxcInvoiceContactVisible
+
+[Field: Hxc Voucher Invoice Contact]
+    Use : Name Field
+    Bold : Yes
+    Set as : @@HxcVoucherInvoiceContactChoice
+    Set Always : Yes
+    Table : Hxc Voucher Contact Table, Not Applicable
+    Show Table : Always
+    Width : 65
+    On : Focus : NOT @@HxcVoucherRecipientDraftMatches : CALL : Hxc Populate Recipient Draft
+    On : Focus : Yes : Refresh Data
+    On : Focus : Yes : Refresh
+    On : Accept : @@HxcVoucherRecipientChanged : SET : HxcRecipientDraftEmail : $$CurrentTableObj:$HxcRecipientEmail
+    On : Accept : @@HxcVoucherRecipientChanged AND NOT @@HxcVoucherRecipientNotApplicable : SET : HxcRecipientDraftMobile : $$CurrentTableObj:$HxcRecipientMobile
+    On : Accept : @@HxcVoucherRecipientCountryUpdate AND NOT @@HxcVoucherRecipientNotApplicable : SET : HxcRecipientDraftCountry : $$CurrentTableObj:$HxcRecipientCountry
+    On : Accept : @@HxcVoucherRecipientCountryUpdate AND NOT @@HxcVoucherRecipientNotApplicable : Set Object Values : HxcVoucherContactCountry : ##HxcRecipientDraftCountry
+    On : Accept : @@HxcVoucherRecipientChanged AND NOT @@HxcVoucherRecipientNotApplicable : Set Object Values : HxcVoucherContactMobile : ##HxcRecipientDraftMobile
+    On : Accept : @@HxcVoucherRecipientChanged : Set Object Values : HxcVoucherContactEmail : ##HxcRecipientDraftEmail
+    On : Accept : @@HxcVoucherRecipientChanged : Set Object Values : HxcVoucherContactKey : @@HxcVoucherRecipientInputKey
+    On : Accept : Yes : SET : HxcRecipientDraftName : If @@HxcVoucherRecipientNotApplicable Then $$SysName:NotApplicable Else If NOT $$IsEmpty:$$CurrentTableObj:$HxcRecipientName Then $$CurrentTableObj:$HxcRecipientName Else $$Value
+    On : Accept : Yes : Set Object Values : HxcVoucherContactName : If @@HxcVoucherRecipientNotApplicable Then $$SysName:NotApplicable Else ##HxcRecipientDraftName
+    On : Accept : @@HxcVoucherRecipientNotApplicable : Set Object Values : HxcVoucherContactMobile : ""
+    On : Accept : @@HxcVoucherRecipientNotApplicable : Set Object Values : HxcVoucherContactCountry : ""
+    On : Accept : @@HxcVoucherRecipientNotApplicable : Set Object Values : HxcVoucherContactEmail : ""
+    On : Accept : @@HxcVoucherRecipientNotApplicable : Set Object Values : HxcVoucherContactKey : ""
+    On : Accept : Yes : Set Object Values : HxcVoucherContactScope : @@HxcVoucherRecipientScope
+    On : Accept : Yes : SET : HxcRecipientDraftLedger : @@HxcVoucherRecipientScope
+    On : Accept : Yes : Refresh Data
+    On : Accept : Yes : Refresh
+    On : Accept : Yes : Field Accept
+
 [Part: Hxc Voucher Recipient]
     On : Focus : NOT @@HxcVoucherRecipientDraftMatches : CALL : Hxc Populate Recipient Draft
     Lines : Hxc Voucher Recipient Name Line, Hxc Voucher Recipient Mobile Line, Hxc Voucher Recipient Email Line
@@ -4655,12 +4687,10 @@
     Color : Hxc Recipient Dark Orange
     Use : Name Field
     Storage : HxcVoucherContactName
-    Set as : If @@HxcInvoiceContactVisible AND $$IsEmpty:@@HxcVoucherRecipientDisplayName Then "" Else If $$IsEmpty:@@HxcVoucherRecipientDisplayName Then $$SysName:NotApplicable Else @@HxcVoucherRecipientDisplayName
+    Set as : If $$IsEmpty:@@HxcVoucherRecipientDisplayName Then $$SysName:NotApplicable Else @@HxcVoucherRecipientDisplayName
     Set Always : Yes
-    Table : Hxc Voucher Contact Table, Not Applicable
+    Table : Hxc Settlement Contact Table, Not Applicable
     Show Table : Always
-    Dynamic : ""
-    Process Change Table : Yes
     Width : 32
     On : Focus : NOT @@HxcVoucherRecipientDraftMatches : CALL : Hxc Populate Recipient Draft
     On : Focus : Yes : Refresh Data
@@ -4672,7 +4702,8 @@
     On : Accept : @@HxcVoucherRecipientChanged AND NOT @@HxcVoucherRecipientNotApplicable : Set Object Values : HxcVoucherContactMobile : ##HxcRecipientDraftMobile
     On : Accept : @@HxcVoucherRecipientChanged : Set Object Values : HxcVoucherContactEmail : ##HxcRecipientDraftEmail
     On : Accept : @@HxcVoucherRecipientChanged : Set Object Values : HxcVoucherContactKey : @@HxcVoucherRecipientInputKey
-    On : Accept : Yes : SET : HxcRecipientDraftName : If @@HxcVoucherRecipientNotApplicable Then $$SysName:NotApplicable Else $$Value
+    On : Accept : Yes : SET : HxcRecipientDraftName : If @@HxcVoucherRecipientNotApplicable Then $$SysName:NotApplicable Else If NOT $$IsEmpty:$$CurrentTableObj:$HxcRecipientName Then $$CurrentTableObj:$HxcRecipientName Else $$Value
+    On : Accept : Yes : Set Object Values : HxcVoucherContactName : ##HxcRecipientDraftName
     On : Accept : Yes : Set Object Values : HxcVoucherContactScope : @@HxcVoucherRecipientScope
     On : Accept : Yes : Refresh Data
     On : Accept : Yes : Refresh
@@ -4690,7 +4721,7 @@
     Validate : $$IsEmpty:$$Value OR $$HxcValidDialingCode:$$Value
     Skip Forward : No
     Storage : HxcVoucherContactCountry
-    Set as : If @@HxcInvoiceContactVisible AND ##HxcInvoiceAddressPending Then @@HxcCompanyDefaultCountryCode Else If $$IsEmpty:@@HxcVoucherRecipientCountryValue AND (If @@HxcInvoiceContactVisible Then @@HxcInvoiceRecipientHasNoNumber Else @@HxcVoucherAddressHasNoContact) Then @@HxcCompanyDefaultCountryCode Else @@HxcVoucherRecipientCountryValue
+    Set as : If $$IsEmpty:@@HxcVoucherRecipientCountryValue AND @@HxcVoucherAddressHasNoContact Then @@HxcCompanyDefaultCountryCode Else @@HxcVoucherRecipientCountryValue
     On : Accept : Yes : SET : HxcRecipientDraftCountry : $$Value
     On : Accept : Yes : Set Object Values : HxcVoucherContactScope : @@HxcVoucherRecipientScope
     On : Accept : Yes : Field Accept
@@ -4701,7 +4732,7 @@
     Color : Hxc Recipient Dark Orange
     Use : Name Field
     Storage : HxcVoucherContactMobile
-    Set as : If @@HxcInvoiceContactVisible AND ##HxcInvoiceAddressPending Then "" Else If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftMobile Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactMobile Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultMobile
+    Set as : If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftMobile Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactMobile Else @@HxcVoucherDefaultMobile
     Modifies : HxcRecipientDraftMobile : Yes
     On : Accept : Yes : Set Object Values : HxcVoucherContactScope : @@HxcVoucherRecipientScope
     On : Accept : Yes : Field Accept
@@ -4718,7 +4749,7 @@
     Color : Hxc Recipient Dark Orange
     Use : Name Field
     Storage : HxcVoucherContactEmail
-    Set as : If @@HxcInvoiceContactVisible AND ##HxcInvoiceAddressPending Then "" Else If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftEmail Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactEmail Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultEmail
+    Set as : If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftEmail Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactEmail Else @@HxcVoucherDefaultEmail
     Modifies : HxcRecipientDraftEmail : Yes
     On : Accept : Yes : Set Object Values : HxcVoucherContactScope : @@HxcVoucherRecipientScope
     On : Accept : Yes : Field Accept
@@ -4726,16 +4757,21 @@
     Width : 35
 
 [Table: Hxc Voucher Contact Table]
-    Collection : Hxc Voucher Primary Contact, Hxc Voucher Address Contacts
+    Collection : Hxc Voucher Primary Contact, Hxc Voucher Address Contacts, Hxc Voucher Mobile Contacts
     Title : "Address Type / Contact Name / Contact No."
-    Format : $HxcRecipientAddress, 22
+    Format : $HxcRecipientChoice, 65
+
+[Table: Hxc Settlement Contact Table]
+    Collection : Hxc Voucher Primary Contact, Hxc Voucher Address Contacts, Hxc Voucher Mobile Contacts
+    Title : "Address Type / Contact Name / Contact No."
     Format : $HxcRecipientName, 28
     Format : $HxcRecipientMobile, 22
+    Format : $HxcRecipientAddress, 28
 
 [Collection: Hxc Voucher Buyer Ledger]
     Type : Ledger
-    Parm Var : HxcContactPartyName : String : If @@HxcSettlementVoucher AND NOT $$IsEmpty:#HxcSettlementPartyLedger Then #HxcSettlementPartyLedger Else @@HxcVoucherBuyerLedgerName
-    Fetch : Name, LedgerContact, LedgerMobile, Email, CountryName, LedMultiAddressList, LedMultiAddressList.*, AddressName, AddrTypeMobileCountryCode, CountryISDCode, LedgercountryISDcode, MobileCountryCode, LedgerMobileCountryCode, MobileISDCode, ISDCode, CountryCode
+    Parm Var : HxcContactPartyName : String : If @@HxcSettlementVoucher AND NOT $$IsEmpty:#HxcSettlementPartyLedger Then #HxcSettlementPartyLedger Else If NOT $$IsEmpty:@@HxcVoucherBuyerLedgerName Then @@HxcVoucherBuyerLedgerName Else If NOT $$IsEmpty:$BasicBuyerName Then $BasicBuyerName Else If NOT $$IsEmpty:$PartyLedgerName Then $PartyLedgerName Else If NOT $$IsEmpty:($$ReportObject:$BasicBuyerName) Then $$ReportObject:$BasicBuyerName Else If NOT $$IsEmpty:($$ReportObject:$PartyLedgerName) Then $$ReportObject:$PartyLedgerName Else $$Owner:$PartyLedgerName
+    Fetch : Name, LedgerContact, LedgerMobile, MobileNumber, AddrTypeMobileNumber, Email, CountryName, LedMultiAddressList, LedMultiAddressList.*, AddressName, AddrTypeMobileCountryCode, CountryISDCode, LedgercountryISDcode, MobileCountryCode, LedgerMobileCountryCode, MobileISDCode, ISDCode, CountryCode, ContactDetails, ContactDetails.*
     Filter : Hxc Voucher Buyer Ledger Match
 
 [Collection: Hxc Voucher Primary Contact]
@@ -4743,10 +4779,11 @@
     By : HxcRecipientPrimaryLedger : $Name
     Compute : HxcRecipientName : $LedgerContact
     Compute : HxcRecipientCountry : If NOT $$IsEmpty:$LedgercountryISDcode Then $LedgercountryISDcode Else If NOT $$IsEmpty:$AddrTypeMobileCountryCode Then $AddrTypeMobileCountryCode Else If NOT $$IsEmpty:$CountryISDCode Then $CountryISDCode Else If NOT $$IsEmpty:$MobileCountryCode Then $MobileCountryCode Else If NOT $$IsEmpty:$LedgerMobileCountryCode Then $LedgerMobileCountryCode Else If NOT $$IsEmpty:$MobileISDCode Then $MobileISDCode Else If NOT $$IsEmpty:$ISDCode Then $ISDCode Else If NOT $$IsEmpty:$CountryCode Then $CountryCode Else If $CountryName = "India" Then "+91" Else ""
-    Compute : HxcRecipientMobile : $LedgerMobile
+    Compute : HxcRecipientMobile : If NOT $$IsEmpty:$LedgerMobile Then $LedgerMobile Else If NOT $$IsEmpty:$MobileNumber Then $MobileNumber Else $AddrTypeMobileNumber
     Compute : HxcRecipientEmail : $Email
     Compute : HxcRecipientAddress : "Primary"
     Compute : HxcRecipientKey : $Name + "|Primary|" + $LedgerContact
+    Compute : HxcRecipientChoice : $$HxcFormatVoucherContactChoice:$HxcRecipientAddress:$HxcRecipientName:$HxcRecipientMobile:$HxcRecipientCountry
     Search Key : "PRIMARY"
     Filter : Hxc Voucher Contact Available
 
@@ -4761,13 +4798,40 @@
     Compute : HxcRecipientEmail : If $$IsEmpty:$Email Then $AddrTypeEMail Else $Email
     Compute : HxcRecipientAddress : $AddressName
     Compute : HxcRecipientKey : $$Owner:$Name + "|Address|" + $AddressName + "|" + $HxcRecipientName
+    Compute : HxcRecipientChoice : $$HxcFormatVoucherContactChoice:$HxcRecipientAddress:$HxcRecipientName:$HxcRecipientMobile:$HxcRecipientCountry
     Search Key : $$Upper:$AddressName
     Filter : Hxc Voucher Contact Available
+
+[Collection: Hxc Voucher Mobile Contact Rows]
+    Source Collection : Hxc Voucher Buyer Ledger
+    Walk : ContactDetails
+    Fetch : Name, PhoneNumber, CountryISDCode
+    Compute : HxcRecipientName : $Name
+    Compute : HxcRecipientCountry : $CountryISDCode
+    Compute : HxcRecipientMobile : $PhoneNumber
+    Compute : HxcRecipientEmail : ""
+    Compute : HxcRecipientAddress : "Additional Mobile"
+    Compute : HxcRecipientKey : $$Owner:$Name + "|Mobile|" + $Name + "|" + $PhoneNumber
+    Compute : HxcRecipientChoice : $$HxcFormatVoucherContactChoice:$HxcRecipientAddress:$HxcRecipientName:$HxcRecipientMobile:$HxcRecipientCountry
+    Filter : Hxc Voucher Mobile Contact Available
+
+[Collection: Hxc Voucher Mobile Contacts]
+    Source Collection : Hxc Voucher Mobile Contact Rows
+    By : HxcRecipientMobileKey : $HxcRecipientKey
+    Compute : HxcRecipientName : $HxcRecipientName
+    Compute : HxcRecipientCountry : $HxcRecipientCountry
+    Compute : HxcRecipientMobile : $HxcRecipientMobile
+    Compute : HxcRecipientEmail : $HxcRecipientEmail
+    Compute : HxcRecipientAddress : $HxcRecipientAddress
+    Compute : HxcRecipientKey : $HxcRecipientKey
+    Compute : HxcRecipientChoice : $HxcRecipientChoice
+    Search Key : $$Upper:$HxcRecipientKey
+    Filter : Hxc Voucher Mobile Contact Available
 
 [System: Formula]
     Hxc Voucher Buyer Ledger Name : If @@HxcSettlementVoucher Then @@HxcSettlementSavedParty Else @@HxcVoucherStoredBuyerLedger
     Hxc Invoice Buyer Changed : @@HxcInvoiceContactVisible AND NOT $$IsEmpty:$$Value AND NOT ($$Value = @@HxcVoucherStoredBuyerLedger)
-    Hxc Voucher Stored Buyer Ledger : If NOT $$IsEmpty:##HxcInvoiceBuyerInput Then ##HxcInvoiceBuyerInput Else If NOT $$IsEmpty:$BasicBuyerName Then $BasicBuyerName Else If NOT $$IsEmpty:$$Owner:$BasicBuyerName Then $$Owner:$BasicBuyerName Else If NOT $$IsEmpty:$PartyLedgerName Then $PartyLedgerName Else $$Owner:$PartyLedgerName
+    Hxc Voucher Stored Buyer Ledger : If NOT $$IsEmpty:##HxcInvoiceBuyerInput Then ##HxcInvoiceBuyerInput Else If NOT $$IsEmpty:$BasicBuyerName Then $BasicBuyerName Else If NOT $$IsEmpty:$$Owner:$BasicBuyerName Then $$Owner:$BasicBuyerName Else If NOT $$IsEmpty:$PartyLedgerName Then $PartyLedgerName Else If NOT $$IsEmpty:($$ReportObject:$BasicBuyerName) Then $$ReportObject:$BasicBuyerName Else If NOT $$IsEmpty:($$ReportObject:$PartyLedgerName) Then $$ReportObject:$PartyLedgerName Else $$Owner:$PartyLedgerName
     Hxc Voucher Recipient Draft Matches : NOT $$IsEmpty:##HxcRecipientDraftLedger AND ##HxcRecipientDraftLedger = @@HxcVoucherRecipientScope
     Hxc Voucher Buyer Address Raw : If @@HxcSettlementVoucher Then $HxcSettlementAddress Else If NOT $$IsEmpty:##HxcInvoiceAddressInput Then ##HxcInvoiceAddressInput Else If $$IsEmpty:$PartyAddressType Then $$Owner:$PartyAddressType Else $PartyAddressType
     Hxc Voucher Buyer Address : If $$IsEmpty:@@HxcVoucherBuyerAddressRaw OR @@HxcVoucherBuyerAddressRaw = "Primary" OR $$StringPart:@@HxcVoucherBuyerAddressRaw:2:7 = "Primary" Then "Primary" Else @@HxcVoucherBuyerAddressRaw
@@ -4786,11 +4850,14 @@
     Hxc Voucher Default Email : If @@HxcVoucherBuyerAddress = "Primary" Then (If NOT $$IsEmpty:($Email:Ledger:@@HxcVoucherBuyerLedgerName) Then $Email:Ledger:@@HxcVoucherBuyerLedgerName Else $AddrTypeEMail:Ledger:@@HxcVoucherBuyerLedgerName) Else $$HxcVoucherAddressRecipient:@@HxcVoucherBuyerLedgerName:@@HxcVoucherBuyerAddress:"Email"
     Hxc Voucher Buyer Ledger Match : NOT $$IsEmpty:##HxcContactPartyName AND $Name = ##HxcContactPartyName
     Hxc Voucher Contact Available : NOT $$IsEmpty:$HxcRecipientName
+    Hxc Voucher Mobile Contact Available : NOT $$IsEmpty:$HxcRecipientName AND NOT $$IsEmpty:$HxcRecipientChoice AND NOT $$IsEmpty:($$HxcDialingDigits:$HxcRecipientMobile)
     Hxc Voucher Recipient Input Key : If $$IsEmpty:$$CurrentTableObj:$HxcRecipientKey Then @@HxcVoucherBuyerLedgerName + "|Manual|" + $$Value Else $$CurrentTableObj:$HxcRecipientKey
     Hxc Voucher Recipient Country Update : @@HxcVoucherRecipientChanged OR ($$IsEmpty:$HxcVoucherContactCountry AND NOT $$IsEmpty:$$CurrentTableObj:$HxcRecipientCountry)
     Hxc Voucher Recipient Display Name : If @@HxcInvoiceContactVisible AND ##HxcInvoiceAddressPending Then $$SysName:NotApplicable Else If @@HxcVoucherRecipientDraftMatches Then ##HxcRecipientDraftName Else If @@HxcVoucherSavedContactMatches Then $HxcVoucherContactName Else If @@HxcInvoiceContactVisible Then "" Else @@HxcVoucherDefaultName
-    Hxc Voucher Recipient Not Applicable : $$IsSysNameEqual:NotApplicable:$$Value OR $$Value = "Not Applicable"
+    Hxc Voucher Recipient Not Applicable : $$IsSysNameEqual:NotApplicable:$$Value OR $$Value = "Not Applicable" OR $$Value = "♦ Not Applicable" OR (NOT $$IsEmpty:$$Value AND ($$StringFindAndReplace:$$Value:"Not Applicable":"") <> $$Value)
     Hxc Voucher Recipient Changed : @@HxcVoucherRecipientNotApplicable OR NOT (@@HxcVoucherRecipientInputKey = $HxcVoucherContactKey) OR ($$IsEmpty:$HxcVoucherContactMobile AND NOT $$IsEmpty:$$CurrentTableObj:$HxcRecipientMobile)
+    Hxc Voucher Contact Address Label : $$HxcVoucherContactAddressFromKey:$HxcVoucherContactKey:@@HxcVoucherBuyerAddress
+    Hxc Voucher Invoice Contact Choice : If ##HxcInvoiceAddressPending Then "" Else If @@HxcVoucherRecipientDraftMatches AND ($$IsSysNameEqual:NotApplicable:##HxcRecipientDraftName OR ##HxcRecipientDraftName = "Not Applicable") Then $$SysName:NotApplicable Else If @@HxcVoucherRecipientDraftMatches AND NOT $$IsEmpty:##HxcRecipientDraftName Then $$HxcFormatVoucherContactChoice:@@HxcVoucherContactAddressLabel:##HxcRecipientDraftName:##HxcRecipientDraftMobile:##HxcRecipientDraftCountry Else If @@HxcVoucherSavedContactMatches AND ($$IsSysNameEqual:NotApplicable:$HxcVoucherContactName OR $HxcVoucherContactName = "Not Applicable") Then $$SysName:NotApplicable Else If @@HxcVoucherSavedContactMatches Then $$HxcFormatVoucherContactChoice:@@HxcVoucherContactAddressLabel:$HxcVoucherContactName:$HxcVoucherContactMobile:$HxcVoucherContactCountry Else If NOT $$IsEmpty:@@HxcVoucherDefaultName AND NOT $$IsSysNameEqual:NotApplicable:@@HxcVoucherDefaultName Then $$HxcFormatVoucherContactChoice:@@HxcVoucherBuyerAddress:@@HxcVoucherDefaultName:@@HxcVoucherDefaultMobile:@@HxcVoucherDefaultCountry Else ""
 
 [Function: Hxc Voucher Address Recipient]
     Parameter : Buyer : String
@@ -4830,6 +4897,53 @@
     03 : SET : HxcRecipientDraftCountry : ""
     04 : SET : HxcRecipientDraftMobile : ""
     05 : SET : HxcRecipientDraftEmail : ""
+
+[Function: Hxc Format Voucher Contact Choice]
+    Parameter : Address : String
+    Parameter : Name : String
+    Parameter : Mobile : String
+    Parameter : Country : String
+    Returns : String
+    Variable : Phone : String
+    01 : SET : Phone : $$HxcPreviewLedgerNumber:##Mobile:##Country
+    02 : IF : $$IsEmpty:##Phone AND NOT $$IsEmpty:##Mobile
+    03 :    SET : Phone : If $$StringPart:##Mobile:0:1 = "+" Then ##Mobile Else ("+" + $$HxcDialingDigits:##Mobile)
+    04 : END IF
+    05 : IF : $$IsEmpty:##Name
+    06 :    RETURN : ""
+    07 : END IF
+    08 : RETURN : ##Address + " . " + ##Name + If $$IsEmpty:##Phone Then "" Else (" . " + ##Phone)
+
+[Function: Hxc Voucher Contact Address From Key]
+    Parameter : Key : String
+    Parameter : Fallback : String
+    Returns : String
+    Variable : Kind : String
+    Variable : Address : String
+    Variable : Index : Number
+    01 : IF : $$IsEmpty:##Key
+    02 :    RETURN : ##Fallback
+    03 : END IF
+    04 : SET : Index : 0
+    05 : FOR TOKEN : Part : ##Key : "|"
+    06 :    INCREMENT : Index
+    07 :    IF : ##Index = 2
+    08 :       SET : Kind : ##Part
+    09 :    END IF
+    10 :    IF : ##Index = 3
+    11 :       SET : Address : ##Part
+    12 :    END IF
+    13 : END FOR
+    14 : IF : ##Kind = "Primary"
+    15 :    RETURN : "Primary"
+    16 : END IF
+    17 : IF : ##Kind = "Mobile"
+    18 :    RETURN : "Additional Mobile"
+    19 : END IF
+    20 : IF : ##Kind = "Address" AND NOT $$IsEmpty:##Address
+    21 :    RETURN : ##Address
+    22 : END IF
+    23 : RETURN : ##Fallback
 
 [Color: Hxc Recipient Dark Orange]
     RGB : 184, 83, 0
