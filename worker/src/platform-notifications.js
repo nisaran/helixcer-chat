@@ -1,5 +1,4 @@
 import { normalizeEmail } from './auth.js';
-import { sendMembershipNotifications } from './push.js';
 
 const AUDIENCES = new Set(['all', 'workspace', 'email']);
 const MAX_TITLE = 160;
@@ -54,9 +53,9 @@ export async function createPlatformNotification(env, principal, payload = {}, o
 
   const shouldSend = send || payload.send === true;
   if (shouldSend) {
+    // In-app bell only (websocket broadcast). Never browser/Android device push.
     return sendPlatformNotification(env, notificationId, {
-      broadcast: options.broadcast,
-      push: options.push !== false
+      broadcast: options.broadcast
     });
   }
   const row = await env.DB.prepare(`SELECT * FROM platform_notifications WHERE notification_id=?1`)
@@ -104,36 +103,24 @@ export async function sendPlatformNotification(env, notificationId, hooks = {}) 
     byWorkspace.get(recipient.workspaceId).push(recipient);
   }
 
+  // Deliver to the Helixcer Chat bell via realtime only. Do not call web push
+  // or Android FCM — admin announcements must not appear as OS notifications.
   const broadcastFn = typeof hooks.broadcast === 'function' ? hooks.broadcast : null;
-  const shouldPush = hooks.push !== false;
   for (const [workspaceId, members] of byWorkspace.entries()) {
-    if (broadcastFn) {
-      try {
-        await broadcastFn(env, workspaceId, {
-          type: 'platform.notification',
-          notification: {
-            notificationId: item.notificationId,
-            title: item.title,
-            body: item.body,
-            linkUrl: item.linkUrl,
-            createdAt: item.sentAt || item.createdAt
-          },
-          membershipIds: members.map((member) => member.membershipId)
-        });
-      } catch { /* realtime fan-out is best-effort */ }
-    }
-    if (shouldPush) {
-      for (const member of members) {
-        try {
-          await sendMembershipNotifications(env, workspaceId, member.membershipId, {
-            title: item.title,
-            body: item.body,
-            url: item.linkUrl || '/',
-            tag: `platform-notification-${item.notificationId}`
-          });
-        } catch { /* device push is best-effort */ }
-      }
-    }
+    if (!broadcastFn) continue;
+    try {
+      await broadcastFn(env, workspaceId, {
+        type: 'platform.notification',
+        notification: {
+          notificationId: item.notificationId,
+          title: item.title,
+          body: item.body,
+          linkUrl: item.linkUrl,
+          createdAt: item.sentAt || item.createdAt
+        },
+        membershipIds: members.map((member) => member.membershipId)
+      });
+    } catch { /* realtime fan-out is best-effort */ }
   }
 
   return { ok: true, item, recipientCount: recipients.length };
