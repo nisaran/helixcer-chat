@@ -142,7 +142,7 @@ import {
   validateWhatsAppTemplateMappingsUpsert
 } from './template-mappings.js';
 
-const API_VERSION = '2026-11-24-template-contact-empty';
+const API_VERSION = '2026-11-26-admin-notify-bell-only';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;

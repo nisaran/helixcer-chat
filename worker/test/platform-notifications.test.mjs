@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { hashToken } from '../src/auth.js';
 import { handleRequest } from '../src/index.js';
+import { sendPlatformNotification } from '../src/platform-notifications.js';
 
 class TestD1Statement {
   constructor(statement, values = []) {
@@ -196,4 +197,40 @@ test('email audience targets login users and drafts can be pushed later', async 
   });
   assert.equal(mine.payload.unreadCount, 1);
   assert.equal(mine.payload.items[0].title, 'Account notice');
+});
+
+test('sending a platform notification broadcasts to the in-app bell only', async () => {
+  const { env, cookies } = await fixture();
+  const draft = await call(env, '/api/platform/notifications', {
+    method: 'POST',
+    cookie: cookies.owner,
+    body: {
+      title: 'Bell only',
+      body: 'Should not trigger OS push.',
+      audience: 'workspace',
+      workspaceId: 'ws_client'
+    }
+  });
+  assert.equal(draft.status, 201, JSON.stringify(draft.payload));
+
+  const broadcasts = [];
+  const result = await sendPlatformNotification(env, draft.payload.item.notificationId, {
+    broadcast: async (_env, workspaceId, event) => {
+      broadcasts.push({ workspaceId, event });
+    },
+    // Even if a caller asks for device push, platform notifications stay bell-only.
+    push: true
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.recipientCount, 1);
+  assert.equal(broadcasts.length, 1);
+  assert.equal(broadcasts[0].workspaceId, 'ws_client');
+  assert.equal(broadcasts[0].event.type, 'platform.notification');
+  assert.equal(broadcasts[0].event.notification.title, 'Bell only');
+  assert.deepEqual(broadcasts[0].event.membershipIds, ['agent-membership']);
+
+  const source = await readFile(new URL('../src/platform-notifications.js', import.meta.url), 'utf8');
+  assert.equal(source.includes('sendMembershipNotifications'), false);
+  assert.equal(source.includes('sendWorkspacePush'), false);
+  assert.equal(source.includes('sendWorkspaceMobilePush'), false);
 });
