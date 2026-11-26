@@ -130,6 +130,8 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /id="whatsappSetupChooser"/);
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="whatsapp_cloud"/);
   assert.match(html, /data-action="provider-setup-login"[^>]*data-provider="whatsapp_cloud"[^>]*disabled/);
+  assert.match(html, /class="facebook-login-button provider-setup-option"/);
+  assert.match(html, /Continue with Facebook/);
   assert.match(html, /id="whatsappEmbeddedSignupHelp"/);
   assert.match(html, /id="whatsappManualFields" hidden/);
   assert.match(html, /id="instagramSetupChooser"/);
@@ -177,7 +179,9 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.doesNotMatch(app, /channelId:\s*"wa-main"/);
   assert.doesNotMatch(`${html}\n${app}`, /WA_MAIN_(?:ACCESS_TOKEN|APP_SECRET|VERIFY_TOKEN|PHONE_NUMBER_ID)/);
   assert.match(styles, /\.provider-setup-chooser/);
-  assert.match(styles, /\.provider-setup-option\.is-active/);
+  assert.match(styles, /\.provider-setup-option\.is-active:not\(\.facebook-login-button\)/);
+  assert.match(styles, /\.facebook-login-button\s*\{/);
+  assert.match(styles, /background:\s*#1877f2/);
 });
 
 test("Channel navigation is collapsed by default and nests the WhatsApp template library", () => {
@@ -693,7 +697,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261125-register-webhook/);
+  assert.match(html, /app\.js\?v=20261126-facebook-login-btn/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -1063,8 +1067,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261125-register-webhook/);
-  assert.match(html, /assets\/styles\.css\?v=20261125-register-webhook/);
+  assert.match(html, /assets\/app\.js\?v=20261126-facebook-login-btn/);
+  assert.match(html, /assets\/styles\.css\?v=20261126-facebook-login-btn/);
   assert.match(html, /connect\.facebook\.net/);
   assert.match(html, /frame-src[^"]*https:\/\/www\.facebook\.com/);
   assert.doesNotMatch(html, /Bulk messaging/);

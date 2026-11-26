@@ -2917,6 +2917,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .provider-setup-chooser {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
   margin-top: 14px;
 }
@@ -2924,7 +2925,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   min-height: 36px;
   padding: 0 14px;
 }
-.provider-setup-option.is-active {
+.provider-setup-option.is-active:not(.facebook-login-button) {
   border-color: #b9a4ef;
   background: #f4efff;
   color: #4b2f9b;
@@ -2932,6 +2933,58 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .provider-setup-option:disabled {
   opacity: .55;
   cursor: not-allowed;
+}
+/* Meta Login button look: https://developers.facebook.com/docs/facebook-login/userexperience/ */
+.facebook-login-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 16px 0 12px;
+  border: 0;
+  border-radius: 4px;
+  background: #1877f2;
+  color: #fff;
+  box-shadow: none;
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: none;
+  cursor: pointer;
+}
+.facebook-login-button:hover:not(:disabled) {
+  background: #166fe5;
+}
+.facebook-login-button:focus-visible {
+  outline: 2px solid #0d65d9;
+  outline-offset: 2px;
+}
+.facebook-login-button.is-active {
+  background: #0d65d9;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .28);
+}
+.facebook-login-button:disabled {
+  background: #1877f2;
+  color: #fff;
+  opacity: .55;
+}
+.facebook-login-button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+.facebook-login-button-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+.facebook-login-button-label {
+  white-space: nowrap;
 }
 .provider-manual-fields { margin-top: 4px; }
 .google-oauth-connect { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--line, #d9dfdb); border-radius: 16px; background: linear-gradient(180deg, #f7fafc, #eef4fb); }
