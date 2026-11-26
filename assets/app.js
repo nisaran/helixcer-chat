@@ -15649,7 +15649,9 @@
   }
 
   function setProviderSetupMode(mode = "") {
-    state.providerSetupMode = mode === "manual" ? "manual" : "";
+    const normalized = String(mode || "").trim();
+    // manual → show credential fields; facebook → hide them and use Embedded Signup
+    state.providerSetupMode = normalized === "manual" || normalized === "facebook" ? normalized : "";
     const provider = $("channelProvider")?.value || "";
     const channelId = $("channelIdInput")?.value || "";
     const channel = state.channels.find((item) => item.channelId === channelId) || null;
@@ -15881,9 +15883,10 @@
       return;
     }
     const button = $("whatsappSetupFacebook");
+    const buttonLabel = button?.querySelector(".facebook-login-button-label");
     if (button) {
       button.disabled = true;
-      button.textContent = "Opening Facebook…";
+      if (buttonLabel) buttonLabel.textContent = "Opening Facebook…";
     }
     try {
       let config = state.whatsappEmbeddedSignup;
@@ -17329,6 +17332,7 @@
         }
         if (actionButton.dataset.action === "provider-setup-login") {
           if (actionButton.dataset.provider === "whatsapp_cloud") {
+            setProviderSetupMode("facebook");
             startWhatsAppEmbeddedSignup();
           }
           return;
