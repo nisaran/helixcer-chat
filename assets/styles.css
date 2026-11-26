@@ -2970,6 +2970,10 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   color: #fff;
   opacity: .55;
 }
+.facebook-login-button.is-busy:disabled {
+  opacity: 1;
+  cursor: wait;
+}
 .facebook-login-button-icon {
   display: inline-flex;
   align-items: center;
@@ -2982,6 +2986,22 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   display: block;
   width: 20px;
   height: 20px;
+}
+.facebook-login-button-spinner {
+  display: none;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 2px solid rgba(255, 255, 255, .35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+.facebook-login-button.is-busy .facebook-login-button-icon {
+  display: none;
+}
+.facebook-login-button.is-busy .facebook-login-button-spinner {
+  display: inline-block;
 }
 .facebook-login-button-label {
   white-space: nowrap;
