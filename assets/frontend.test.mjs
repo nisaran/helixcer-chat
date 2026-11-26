@@ -131,8 +131,12 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="whatsapp_cloud"/);
   assert.match(html, /data-action="provider-setup-login"[^>]*data-provider="whatsapp_cloud"[^>]*disabled/);
   assert.match(html, /class="facebook-login-button provider-setup-option"/);
+  assert.match(html, /facebook-login-button-spinner/);
   assert.match(html, /Continue with Facebook/);
   assert.match(html, /id="whatsappEmbeddedSignupHelp"/);
+  assert.match(app, /function setWhatsAppFacebookLoginBusy/);
+  assert.match(app, /Connecting…/);
+  assert.match(styles, /\.facebook-login-button\.is-busy \.facebook-login-button-spinner/);
   assert.match(html, /id="whatsappManualFields" hidden/);
   assert.match(html, /id="instagramSetupChooser"/);
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="instagram"/);
@@ -700,7 +704,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261126-facebook-hides-manual/);
+  assert.match(html, /app\.js\?v=20261126-facebook-login-spinner/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -1070,8 +1074,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261126-facebook-hides-manual/);
-  assert.match(html, /assets\/styles\.css\?v=20261126-facebook-hides-manual/);
+  assert.match(html, /assets\/app\.js\?v=20261126-facebook-login-spinner/);
+  assert.match(html, /assets\/styles\.css\?v=20261126-facebook-login-spinner/);
   assert.match(html, /connect\.facebook\.net/);
   assert.match(html, /frame-src[^"]*https:\/\/www\.facebook\.com/);
   assert.doesNotMatch(html, /Bulk messaging/);

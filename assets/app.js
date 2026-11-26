@@ -15883,11 +15883,7 @@
       return;
     }
     const button = $("whatsappSetupFacebook");
-    const buttonLabel = button?.querySelector(".facebook-login-button-label");
-    if (button) {
-      button.disabled = true;
-      if (buttonLabel) buttonLabel.textContent = "Opening Facebook…";
-    }
+    setWhatsAppFacebookLoginBusy(true);
     try {
       let config = state.whatsappEmbeddedSignup;
       if (!config?.available) {
@@ -15923,8 +15919,8 @@
         showToast("WhatsApp was not connected", error.message || "Login with Facebook failed.", true);
       }
     } finally {
+      setWhatsAppFacebookLoginBusy(false);
       if (button) {
-        button.disabled = !state.whatsappEmbeddedSignup?.available;
         const channelId = $("channelIdInput")?.value || "";
         const channel = state.channels.find((item) => item.channelId === channelId) || null;
         syncChannelForm(
@@ -15935,6 +15931,22 @@
         );
       }
     }
+  }
+
+  function setWhatsAppFacebookLoginBusy(busy) {
+    const button = $("whatsappSetupFacebook");
+    if (!button) return;
+    const label = button.querySelector(".facebook-login-button-label");
+    button.classList.toggle("is-busy", Boolean(busy));
+    button.setAttribute("aria-busy", String(Boolean(busy)));
+    if (busy) {
+      button.disabled = true;
+      button.removeAttribute("aria-disabled");
+      if (label) label.textContent = "Connecting…";
+      button.setAttribute("aria-label", "Connecting with Facebook");
+      return;
+    }
+    if (label) label.textContent = "Continue with Facebook";
   }
 
   function ensureFacebookSdk(config) {
