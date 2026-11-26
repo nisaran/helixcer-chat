@@ -4645,7 +4645,7 @@
 
 [Field: Hxc Voucher Invoice Contact]
     Use : Name Field
-    Bold : Yes
+    Style : Bold
     Set as : @@HxcVoucherInvoiceContactChoice
     Set Always : Yes
     Table : Hxc Voucher Contact Table, Not Applicable
