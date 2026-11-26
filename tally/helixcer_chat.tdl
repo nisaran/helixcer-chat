@@ -4905,14 +4905,23 @@
     Parameter : Country : String
     Returns : String
     Variable : Phone : String
+    Variable : Label : String
     01 : SET : Phone : $$HxcPreviewLedgerNumber:##Mobile:##Country
     02 : IF : $$IsEmpty:##Phone AND NOT $$IsEmpty:##Mobile
-    03 :    SET : Phone : If $$StringPart:##Mobile:0:1 = "+" Then ##Mobile Else ("+" + $$HxcDialingDigits:##Mobile)
-    04 : END IF
-    05 : IF : $$IsEmpty:##Name
-    06 :    RETURN : ""
-    07 : END IF
-    08 : RETURN : ##Address + " . " + ##Name + If $$IsEmpty:##Phone Then "" Else (" . " + ##Phone)
+    03 :    IF : $$StringPart:##Mobile:0:1 = "+"
+    04 :       SET : Phone : ##Mobile
+    05 :    ELSE
+    06 :       SET : Phone : "+" + $$HxcDialingDigits:##Mobile
+    07 :    END IF
+    08 : END IF
+    09 : IF : $$IsEmpty:##Name
+    10 :    RETURN : ""
+    11 : END IF
+    12 : SET : Label : ##Address + " . " + ##Name
+    13 : IF : $$IsEmpty:##Phone
+    14 :    RETURN : ##Label
+    15 : END IF
+    16 : RETURN : ##Label + " . " + ##Phone
 
 [Function: Hxc Voucher Contact Address From Key]
     Parameter : Key : String
