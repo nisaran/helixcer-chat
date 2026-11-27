@@ -1439,12 +1439,10 @@
         <div class="provider-form-head"><img class="provider-mark whatsapp" src="./assets/provider-whatsapp.svg" alt=""><div><strong>WhatsApp Cloud API</strong><span>Choose how you want to connect this WhatsApp account.</span></div></div>
         <div class="provider-setup-chooser" id="whatsappSetupChooser" role="group" aria-label="WhatsApp setup method">
           <button class="secondary-button provider-setup-option" type="button" id="whatsappSetupManual" data-action="provider-setup-manual" data-provider="whatsapp_cloud" aria-pressed="false">Manual Setup</button>
-          <button class="facebook-login-button provider-setup-option" type="button" id="whatsappSetupFacebook" data-action="provider-setup-login" data-provider="whatsapp_cloud" disabled aria-disabled="true" aria-label="Continue with Facebook">
-            <span class="facebook-login-button-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M22.675 0H1.325C.593 0 0 .593 0 1.325v21.351C0 23.407.593 24 1.325 24H12.82v-9.294H9.692v-3.622h3.128V8.413c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.313h3.587l-.467 3.622h-3.12V24h6.116C23.407 24 24 23.407 24 22.676V1.325C24 .593 23.407 0 22.675 0z"/></svg>
-            </span>
+          <button class="facebook-login-button facebook-login-button--image provider-setup-option" type="button" id="whatsappSetupFacebook" data-action="provider-setup-login" data-provider="whatsapp_cloud" disabled aria-disabled="true" aria-label="Continue with Facebook">
+            <img class="facebook-login-button-image" src="https://pub-b4499776d4ea416a8f12772bf91952a3.r2.dev/Helixcer-Chat/bt_fb.png" alt="" width="241" height="38" decoding="async">
             <span class="facebook-login-button-spinner" aria-hidden="true"></span>
-            <span class="facebook-login-button-label">Continue with Facebook</span>
+            <span class="facebook-login-button-label sr-only">Continue with Facebook</span>
           </button>
         </div>
         <p class="field-help" id="whatsappEmbeddedSignupHelp" hidden>Opens Meta WhatsApp Embedded Signup. Helixcer stores the business token and wires this channel webhook automatically.</p>
