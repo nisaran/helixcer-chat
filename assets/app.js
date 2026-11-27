@@ -16063,11 +16063,17 @@
     if (busy) {
       button.disabled = true;
       button.removeAttribute("aria-disabled");
-      if (label) label.textContent = "Connecting…";
-      button.setAttribute("aria-label", "Connecting with Facebook");
+      if (label) {
+        label.textContent = "Loading...";
+        label.classList.remove("sr-only");
+      }
+      button.setAttribute("aria-label", "Loading...");
       return;
     }
-    if (label) label.textContent = "Continue with Facebook";
+    if (label) {
+      label.textContent = "Continue with Facebook";
+      label.classList.add("sr-only");
+    }
     button.setAttribute("aria-label", "Continue with Facebook");
   }
 
