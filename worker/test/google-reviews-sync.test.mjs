@@ -6,8 +6,10 @@ import { handleRequest } from '../src/index.js';
 import { GOOGLE_BUSINESS_OAUTH_COOKIE } from '../src/google-business.js';
 import {
   decodePubSubPushMessage,
+  googleReviewIdFromChannelProfile,
   normalizeGoogleReviewToInbound,
-  parseGoogleReviewNotification
+  parseGoogleReviewNotification,
+  updateGoogleBusinessReviewReply
 } from '../src/google-business.js';
 
 class TestD1Statement {
@@ -222,6 +224,37 @@ test('normalizeGoogleReviewToInbound maps stars and comment', () => {
   assert.match(event.text, /Great service/);
   assert.equal(event.messageType, 'review');
   assert.equal(event.review.starRating, 5);
+});
+
+test('googleReviewIdFromChannelProfile strips review prefix', () => {
+  assert.equal(googleReviewIdFromChannelProfile('review:abc123'), 'abc123');
+  assert.equal(googleReviewIdFromChannelProfile('abc123'), 'abc123');
+  assert.equal(googleReviewIdFromChannelProfile(''), '');
+});
+
+test('updateGoogleBusinessReviewReply PUTs comment to Google', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({ url: String(url), method: init.method || 'GET', body: init.body || '' });
+    return new Response(JSON.stringify({
+      comment: 'Thanks for visiting!',
+      updateTime: '2026-11-27T19:00:00Z'
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  const reply = await updateGoogleBusinessReviewReply(
+    'token',
+    '111',
+    '222',
+    'r1',
+    'Thanks for visiting!',
+    fetchImpl
+  );
+  assert.equal(reply.comment, 'Thanks for visiting!');
+  assert.equal(reply.reviewName, 'accounts/111/locations/222/reviews/r1');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, 'PUT');
+  assert.match(calls[0].url, /\/accounts\/111\/locations\/222\/reviews\/r1\/reply$/);
+  assert.deepEqual(JSON.parse(calls[0].body), { comment: 'Thanks for visiting!' });
 });
 
 test('parseGoogleReviewNotification accepts review_name fields', () => {
