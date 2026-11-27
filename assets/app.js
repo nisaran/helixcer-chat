@@ -15862,7 +15862,7 @@
     const embeddedAvailable = Boolean(state.whatsappEmbeddedSignup?.available && state.whatsappEmbeddedSignup?.appId
       && state.whatsappEmbeddedSignup?.configId);
     if (whatsappLogin) {
-      // New WhatsApp: Continue with Facebook. Editing Facebook/coexistence: Re-connect only.
+      // New WhatsApp: Login with Facebook. Editing Facebook/coexistence: Re-connect only.
       // Editing manual: hide Facebook CTA (fields only).
       const showLogin = selectedProvider === "whatsapp_cloud"
         && (!editing || embeddedWhatsApp);
@@ -15878,7 +15878,7 @@
       } else {
         whatsappLogin.disabled = true;
         whatsappLogin.setAttribute("aria-disabled", "true");
-        whatsappLogin.setAttribute("title", embeddedAvailable ? "" : "Continue with Facebook is not configured yet");
+        whatsappLogin.setAttribute("title", embeddedAvailable ? "" : "Login with Facebook is not configured yet");
         whatsappLogin.classList.remove("is-active");
         whatsappLogin.setAttribute("aria-pressed", "false");
         syncWhatsAppFacebookLoginPresentation({ reconnect: false, busy: false });
@@ -16162,22 +16162,12 @@
     const button = $("whatsappSetupFacebook");
     if (!button) return;
     const label = button.querySelector(".facebook-login-button-label");
-    const image = button.querySelector(".facebook-login-button-image");
-    const showText = Boolean(busy || reconnect);
-    const text = busy ? "Loading..." : (reconnect ? "Re-connect" : "Continue with Facebook");
+    const text = busy ? "Loading..." : (reconnect ? "Re-connect" : "Login with Facebook");
     button.classList.toggle("is-reconnect", Boolean(reconnect));
     button.classList.toggle("is-busy", Boolean(busy));
     button.setAttribute("aria-busy", String(Boolean(busy)));
     button.setAttribute("aria-label", text);
-    if (image) {
-      // bt_fb.png has "Continue with Facebook" baked in — hide it for Re-connect / Loading.
-      image.hidden = showText;
-      image.setAttribute("aria-hidden", showText ? "true" : "false");
-    }
-    if (label) {
-      label.textContent = text;
-      label.classList.toggle("sr-only", !showText);
-    }
+    if (label) label.textContent = text;
   }
 
   function setWhatsAppFacebookLoginBusy(busy) {

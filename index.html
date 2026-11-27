@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261127-channel-reconnect-buttons">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261127-login-with-facebook-text">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261127-channel-reconnect-buttons" defer></script>
+  <script src="./assets/app.js?v=20261127-login-with-facebook-text" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1439,10 +1439,9 @@
         <div class="provider-form-head"><img class="provider-mark whatsapp" src="./assets/provider-whatsapp.svg" alt=""><div><strong>WhatsApp Cloud API</strong><span>Choose how you want to connect this WhatsApp account.</span></div></div>
         <div class="provider-setup-chooser" id="whatsappSetupChooser" role="group" aria-label="WhatsApp setup method">
           <button class="secondary-button provider-setup-option" type="button" id="whatsappSetupManual" data-action="provider-setup-manual" data-provider="whatsapp_cloud" aria-pressed="false">Manual Setup</button>
-          <button class="facebook-login-button facebook-login-button--image provider-setup-option" type="button" id="whatsappSetupFacebook" data-action="provider-setup-login" data-provider="whatsapp_cloud" disabled aria-disabled="true" aria-label="Continue with Facebook">
-            <img class="facebook-login-button-image" src="https://pub-b4499776d4ea416a8f12772bf91952a3.r2.dev/Helixcer-Chat/bt_fb.png" alt="" width="241" height="38" decoding="async">
+          <button class="facebook-login-button provider-setup-option" type="button" id="whatsappSetupFacebook" data-action="provider-setup-login" data-provider="whatsapp_cloud" disabled aria-disabled="true" aria-label="Login with Facebook">
             <span class="facebook-login-button-spinner" aria-hidden="true"></span>
-            <span class="facebook-login-button-label sr-only">Continue with Facebook</span>
+            <span class="facebook-login-button-label">Login with Facebook</span>
           </button>
         </div>
         <p class="field-help" id="whatsappEmbeddedSignupHelp" hidden>Opens Meta WhatsApp Embedded Signup. Helixcer stores the business token and wires this channel webhook automatically.</p>
