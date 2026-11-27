@@ -139,6 +139,8 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(app, /reconnect \? "Re-connect" : "Login with Facebook"/);
   assert.match(app, /Connecting…/);
   assert.match(styles, /\.facebook-login-button\.is-busy \.facebook-login-button-spinner/);
+  assert.match(styles, /\.provider-setup-option\s*\{[^}]*height:\s*36px/);
+  assert.match(styles, /\.facebook-login-button\s*\{[^}]*height:\s*36px/);
   assert.match(styles, /\.facebook-login-button\s*\{[^}]*min-height:\s*36px/);
   assert.match(styles, /\.facebook-login-button\s*\{[^}]*font-size:\s*12px/);
   assert.match(styles, /\.facebook-login-button\s*\{[^}]*background:\s*#1877f2/);
@@ -723,7 +725,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261127-login-with-facebook-text/);
+  assert.match(html, /app\.js\?v=20261127-provider-setup-button-height/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -1093,8 +1095,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261127-login-with-facebook-text/);
-  assert.match(html, /assets\/styles\.css\?v=20261127-login-with-facebook-text/);
+  assert.match(html, /assets\/app\.js\?v=20261127-provider-setup-button-height/);
+  assert.match(html, /assets\/styles\.css\?v=20261127-provider-setup-button-height/);
   assert.match(html, /connect\.facebook\.net/);
   assert.match(html, /frame-src[^"]*https:\/\/www\.facebook\.com/);
   assert.doesNotMatch(html, /Bulk messaging/);
