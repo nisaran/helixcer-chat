@@ -187,6 +187,13 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(app, /normalized === "manual" \|\| normalized === "facebook"/);
   assert.match(app, /setProviderSetupMode\("facebook"\);\s*startWhatsAppEmbeddedSignup\(\)/);
   assert.match(app, /fields\.hidden = !\(selectedProvider === providerKey && manualReady\)/);
+  // WhatsApp-style chooser: Manual Setup hidden while editing; OAuth CTA shows Re-connect.
+  assert.match(app, /PROVIDER_SETUP_CHOOSERS\.has\(button\.dataset\.provider\)\) button\.hidden = Boolean\(editing\)/);
+  assert.match(app, /showMessengerLogin = selectedProvider === "facebook_messenger" && !editing/);
+  assert.match(app, /showInstagramOauthReconnect/);
+  assert.match(app, /instagramLoginButton\.textContent = showInstagramOauthReconnect \? "Re-connect" : "Login with Instagram"/);
+  assert.match(app, /googleConnect\.textContent = googleConnected \? "Reconnect" : "Connect with Google"/);
+  assert.match(html, /Use Reconnect only when you need to re-authorize/);
   assert.doesNotMatch(app, /\$\("channelProvider"\)\.value = channel\?\.connectorType \|\| "whatsapp_cloud"/);
   assert.doesNotMatch(app, /\$\{providerProfiles\[provider\]\?\.label \|\| "Channel"\} connection/);
   assert.doesNotMatch(app, /channelId:\s*"wa-main"/);
@@ -712,7 +719,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261126-facebook-login-spinner/);
+  assert.match(html, /app\.js\?v=20261127-channel-reconnect-buttons/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -1082,8 +1089,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261126-facebook-login-spinner/);
-  assert.match(html, /assets\/styles\.css\?v=20261126-facebook-login-spinner/);
+  assert.match(html, /assets\/app\.js\?v=20261127-channel-reconnect-buttons/);
+  assert.match(html, /assets\/styles\.css\?v=20261127-channel-reconnect-buttons/);
   assert.match(html, /connect\.facebook\.net/);
   assert.match(html, /frame-src[^"]*https:\/\/www\.facebook\.com/);
   assert.doesNotMatch(html, /Bulk messaging/);
