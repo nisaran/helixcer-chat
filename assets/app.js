@@ -6367,7 +6367,7 @@
     if (pagination) pagination.hidden = false;
     const selectHeader = $("contactSelectHeader");
     if (selectHeader) selectHeader.hidden = !state.contactSelectMode;
-    const columnCount = state.contactSelectMode ? 7 : 6;
+    const columnCount = state.contactSelectMode ? 8 : 7;
     const tbody = $("contactTableBody");
     tbody.replaceChildren();
     renderContactBulkBar(contacts);
@@ -6454,6 +6454,17 @@
       const closed = contact.status === "inactive";
       statusCell.append(element("span", `status-chip${closed ? " is-inactive" : ""}`, closed ? "Closed" : "Open"));
       row.append(statusCell);
+
+      const messageCell = document.createElement("td");
+      messageCell.className = "contact-message-col";
+      const messageButton = element("button", "secondary-button compact-button contact-message-button", "Message");
+      messageButton.type = "button";
+      messageButton.dataset.action = "open-contact-chat";
+      messageButton.dataset.contactId = contact.contactId;
+      messageButton.title = `Open chat with ${contact.displayName}`;
+      messageButton.setAttribute("aria-label", `Message ${contact.displayName}`);
+      messageCell.append(messageButton);
+      row.append(messageCell);
       tbody.append(row);
     });
   }
@@ -7014,6 +7025,44 @@
       return;
     }
     openContactRoute(route);
+  }
+
+  function defaultContactMessageRoute(contact) {
+    if (!contact) return null;
+    const routes = [];
+    (contact.identities || []).forEach((identity) => {
+      if (!identity?.platform) return;
+      routes.push(...contactPlatformRoutes(contact, identity.platform, identity.identityId));
+    });
+    const eligible = routes.filter((route) => route.eligible);
+    const messaging = eligible.filter((route) => route.kind !== "email");
+    const pool = messaging.length ? messaging : eligible;
+    return pool.sort((a, b) => Number(b.isLastUsed) - Number(a.isLastUsed)
+      || new Date(b.lastUsedAt || 0) - new Date(a.lastUsedAt || 0)
+      || Number(b.isBound) - Number(a.isBound))[0] || null;
+  }
+
+  async function openContactChat(contactId) {
+    const id = String(contactId || "").trim();
+    const contact = state.contacts.find((item) => item.contactId === id);
+    if (!contact) {
+      showToast("Contact not found", "Refresh contacts and try again.", true);
+      return;
+    }
+    const existing = state.conversations
+      .filter((conversation) => conversation.contactId === id)
+      .sort((a, b) => new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0))[0];
+    if (existing?.conversationId) {
+      setRoute("inbox");
+      await selectConversation(existing.conversationId);
+      return;
+    }
+    const route = defaultContactMessageRoute(contact);
+    if (!route) {
+      showToast("No available chat", "This contact has no messaging channel ready to open.", true);
+      return;
+    }
+    await openContactRoute(route);
   }
 
   function chooseContactIdentityRoute(contactId, identityId, trigger) {
@@ -17582,6 +17631,12 @@
           openContactIdentityDefault(actionButton.dataset.contactId, actionButton.dataset.identityId);
           return;
         }
+        if (actionButton.dataset.action === "open-contact-chat") {
+          openContactChat(actionButton.dataset.contactId).catch((error) => {
+            showToast("Conversation could not be opened", error?.message || "Try again.", true);
+          });
+          return;
+        }
         if (actionButton.dataset.action === "choose-contact-identity-route") {
           chooseContactIdentityRoute(actionButton.dataset.contactId, actionButton.dataset.identityId, actionButton);
           return;
@@ -17804,7 +17859,8 @@
     messageThread.addEventListener("pointercancel", finishReplySwipe);
 
     $("contactTableBody").addEventListener("click", (event) => {
-      const row = event.target.closest("[data-contact-id]");
+      if (event.target.closest("[data-action]")) return;
+      const row = event.target.closest("tr[data-contact-id]");
       if (!row) return;
       if (state.contactSelectMode) {
         toggleContactSelection(row.dataset.contactId);
@@ -17814,7 +17870,8 @@
     });
     $("contactTableBody").addEventListener("keydown", (event) => {
       if (!['Enter', ' '].includes(event.key)) return;
-      const row = event.target.closest("[data-contact-id]");
+      if (event.target.closest("[data-action]")) return;
+      const row = event.target.closest("tr[data-contact-id]");
       if (!row) return;
       event.preventDefault();
       if (state.contactSelectMode) {

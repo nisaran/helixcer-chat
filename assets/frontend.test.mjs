@@ -690,7 +690,9 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(renderContactsBody, /contact-platform-logos/);
   assert.match(renderContactsBody, /contact-list-platform-logo/);
   assert.match(renderContactsBody, /providerLogo\(platformConnectorType\(platform\)/);
-  assert.match(renderContactsBody, /columnCount = state\.contactSelectMode \? 7 : 6/);
+  assert.match(renderContactsBody, /columnCount = state\.contactSelectMode \? 8 : 7/);
+  assert.match(renderContactsBody, /open-contact-chat/);
+  assert.match(renderContactsBody, /contact-message-button/);
   assert.match(renderContactsBody, /Closed" : "Open"/);
   assert.doesNotMatch(renderContactsBody, /Inactive" : "Active"|providerLogoPaths|provider-(?:whatsapp|telegram|instagram)\.svg/);
   assert.doesNotMatch(renderContactsBody, /avatarPalettes|element\("span", "avatar"/);
