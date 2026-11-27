@@ -2934,6 +2934,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   margin-top: 14px;
 }
 .provider-setup-option {
+  box-sizing: border-box;
+  height: 36px;
   min-height: 36px;
   padding: 0 14px;
 }
@@ -2947,20 +2949,22 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   cursor: not-allowed;
 }
 /* Meta Login button look: https://developers.facebook.com/docs/facebook-login/userexperience/
-   Sized to match adjacent Manual Setup (.provider-setup-option / .secondary-button). */
+   Same 36px height as Manual Setup in the chooser row. */
 .facebook-login-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   gap: 7px;
+  height: 36px;
   min-height: 36px;
   padding: 0 14px;
-  border: 0;
+  border: 1px solid #1877f2;
   border-radius: 10px;
   background: #1877f2;
   color: #fff;
   box-shadow: none;
-  font-family: Helvetica, Arial, sans-serif;
+  font: inherit;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0;
