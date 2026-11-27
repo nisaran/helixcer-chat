@@ -15804,9 +15804,10 @@
     const embeddedAvailable = Boolean(state.whatsappEmbeddedSignup?.available && state.whatsappEmbeddedSignup?.appId
       && state.whatsappEmbeddedSignup?.configId);
     if (whatsappLogin) {
-      // Editing a manual WhatsApp channel: hide Continue with Facebook.
-      const showLogin = selectedProvider === "whatsapp_cloud"
-        && (!editing || embeddedWhatsApp);
+      // Always offer Facebook login for WhatsApp, including already-connected manual channels
+      // so they can switch to / re-link with Embedded Signup. Re-connect label is only for
+      // channels that were already linked via Facebook / coexistence.
+      const showLogin = selectedProvider === "whatsapp_cloud";
       whatsappLogin.hidden = !showLogin;
       if (showLogin && embeddedAvailable) {
         const reconnect = showEmbeddedDetails;
