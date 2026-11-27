@@ -15738,10 +15738,14 @@
     $("channelDeleteButton").hidden = !channel;
     const isEmbeddedWhatsApp = channel?.connectorType === "whatsapp_cloud"
       && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
-    // Embedded Signup edits show account details; other chooser providers open Manual Setup.
+    const isInstagramOauth = channel?.connectorType === "instagram"
+      && (channel.setup?.authMode === "unified_login" || channel.config?.authMode === "unified_login");
+    // OAuth edits show Re-connect (and WhatsApp account details); manual chooser providers open fields.
     state.providerSetupMode = isEmbeddedWhatsApp
       ? "facebook"
-      : (PROVIDER_SETUP_CHOOSERS.has(channel?.connectorType) ? "manual" : "");
+      : isInstagramOauth
+        ? "login"
+        : (PROVIDER_SETUP_CHOOSERS.has(channel?.connectorType) ? "manual" : "");
     syncChannelForm(channel?.connectorType || "", Boolean(channel), channel?.setup || {}, channel?.config || {});
     $("channelDialog").showModal();
   }
@@ -15792,9 +15796,14 @@
     const chooserProvider = PROVIDER_SETUP_CHOOSERS.has(selectedProvider);
     const embeddedWhatsApp = selectedProvider === "whatsapp_cloud"
       && (setup.authMode === "embedded_signup" || config.authMode === "embedded_signup");
+    const instagramOauth = selectedProvider === "instagram"
+      && (setup.authMode === "unified_login" || config.authMode === "unified_login");
     const showEmbeddedDetails = embeddedWhatsApp && editing && state.providerSetupMode !== "manual";
+    // Instagram Login edits: hide credential fields; show Re-connect only (same as WhatsApp FB).
+    const showInstagramOauthReconnect = instagramOauth && editing && state.providerSetupMode !== "manual";
     const manualReady = chooserProvider
       && !showEmbeddedDetails
+      && !showInstagramOauthReconnect
       && (editing || state.providerSetupMode === "manual");
     document.querySelectorAll("[data-provider-fields]").forEach((section) => {
       const active = Boolean(selectedProvider) && section.dataset.providerFields === selectedProvider;
@@ -15841,9 +15850,9 @@
       if (!embeddedDetails.hidden) fillWhatsAppEmbeddedDetails(config, setup);
     }
     document.querySelectorAll('.provider-setup-option[data-action="provider-setup-manual"]').forEach((button) => {
-      const isWhatsAppManual = button.dataset.provider === "whatsapp_cloud";
-      // WhatsApp: show Manual Setup only for new connects. Editing (manual or Facebook) hides it.
-      if (isWhatsAppManual) button.hidden = Boolean(editing);
+      // WhatsApp / Facebook / Instagram: Manual Setup only for new connects.
+      // Editing hides it so already-connected channels show fields or Re-connect only.
+      if (PROVIDER_SETUP_CHOOSERS.has(button.dataset.provider)) button.hidden = Boolean(editing);
       const active = selectedProvider === button.dataset.provider && manualReady && !button.hidden;
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-pressed", String(active));
@@ -15853,7 +15862,7 @@
     const embeddedAvailable = Boolean(state.whatsappEmbeddedSignup?.available && state.whatsappEmbeddedSignup?.appId
       && state.whatsappEmbeddedSignup?.configId);
     if (whatsappLogin) {
-      // New WhatsApp: Continue with Facebook. Editing Facebook/coexistence: Re-connect only.
+      // New WhatsApp: Login with Facebook. Editing Facebook/coexistence: Re-connect only.
       // Editing manual: hide Facebook CTA (fields only).
       const showLogin = selectedProvider === "whatsapp_cloud"
         && (!editing || embeddedWhatsApp);
@@ -15869,24 +15878,12 @@
       } else {
         whatsappLogin.disabled = true;
         whatsappLogin.setAttribute("aria-disabled", "true");
-        whatsappLogin.setAttribute("title", embeddedAvailable ? "" : "Continue with Facebook is not configured yet");
+        whatsappLogin.setAttribute("title", embeddedAvailable ? "" : "Login with Facebook is not configured yet");
         whatsappLogin.classList.remove("is-active");
         whatsappLogin.setAttribute("aria-pressed", "false");
         syncWhatsAppFacebookLoginPresentation({ reconnect: false, busy: false });
       }
     }
-    document.querySelectorAll(".provider-setup-chooser").forEach((chooser) => {
-      const section = chooser.closest("[data-provider-fields]");
-      const providerKey = section?.dataset.providerFields || "";
-      if (selectedProvider !== providerKey) {
-        chooser.hidden = true;
-        return;
-      }
-      // Hide the chooser when every option inside is hidden (e.g. editing a manual WhatsApp channel).
-      const hasVisibleOption = Array.from(chooser.querySelectorAll(".provider-setup-option"))
-        .some((button) => !button.hidden);
-      chooser.hidden = !hasVisibleOption;
-    });
     if (whatsappHelp) {
       whatsappHelp.hidden = !(selectedProvider === "whatsapp_cloud" && embeddedAvailable && !manualReady && !showEmbeddedDetails);
     }
@@ -15896,35 +15893,66 @@
       && state.instagramLogin?.appId
       && state.instagramLogin?.configId);
     if (instagramLoginButton) {
-      const showInstagramLogin = selectedProvider === "instagram";
+      // Match WhatsApp: show login for new connects, or Re-connect when editing an OAuth link.
+      // Editing a manual Instagram channel hides the login CTA (credential fields only).
+      const showInstagramLogin = selectedProvider === "instagram" && (!editing || showInstagramOauthReconnect);
       instagramLoginButton.hidden = !showInstagramLogin;
       if (showInstagramLogin && instagramLoginAvailable) {
         instagramLoginButton.disabled = false;
         instagramLoginButton.removeAttribute("aria-disabled");
         instagramLoginButton.removeAttribute("title");
-        instagramLoginButton.classList.toggle("is-active", state.providerSetupMode === "login");
-        instagramLoginButton.setAttribute("aria-pressed", String(state.providerSetupMode === "login"));
+        instagramLoginButton.classList.toggle("is-active", state.providerSetupMode === "login" || showInstagramOauthReconnect);
+        instagramLoginButton.setAttribute("aria-pressed", String(state.providerSetupMode === "login" || showInstagramOauthReconnect));
+        instagramLoginButton.textContent = showInstagramOauthReconnect ? "Re-connect" : "Login with Instagram";
       } else {
         instagramLoginButton.disabled = true;
         instagramLoginButton.setAttribute("aria-disabled", "true");
         instagramLoginButton.setAttribute("title", instagramLoginAvailable ? "" : "Login with Instagram is not configured yet");
         instagramLoginButton.classList.remove("is-active");
         instagramLoginButton.setAttribute("aria-pressed", "false");
+        if (showInstagramLogin) instagramLoginButton.textContent = "Login with Instagram";
       }
     }
     if (instagramHelp) {
-      instagramHelp.hidden = !(selectedProvider === "instagram" && instagramLoginAvailable && !manualReady);
+      instagramHelp.hidden = !(selectedProvider === "instagram" && instagramLoginAvailable && !manualReady && !showInstagramOauthReconnect);
     }
+    const messengerLogin = $("messengerSetupFacebook");
+    if (messengerLogin) {
+      // Same visibility as WhatsApp Facebook CTA: new connects only until Messenger
+      // Login with Facebook is available for re-auth of OAuth-connected pages.
+      const showMessengerLogin = selectedProvider === "facebook_messenger" && !editing;
+      messengerLogin.hidden = !showMessengerLogin;
+      if (!showMessengerLogin) {
+        messengerLogin.classList.remove("is-active");
+        messengerLogin.setAttribute("aria-pressed", "false");
+      }
+    }
+    document.querySelectorAll(".provider-setup-chooser").forEach((chooser) => {
+      const section = chooser.closest("[data-provider-fields]");
+      const providerKey = section?.dataset.providerFields || "";
+      if (selectedProvider !== providerKey) {
+        chooser.hidden = true;
+        return;
+      }
+      // Hide the chooser when every option inside is hidden (e.g. editing a manual channel).
+      const hasVisibleOption = Array.from(chooser.querySelectorAll(".provider-setup-option"))
+        .some((button) => !button.hidden);
+      chooser.hidden = !hasVisibleOption;
+    });
     const googleConnected = Boolean(editing && setup.credentialsPresent);
     const googleNote = $("googleReviewsConnectedNote");
     if (googleNote) googleNote.hidden = !(selectedProvider === "google_reviews" && googleConnected);
+    const googleConnect = $("googleReviewsConnectButton");
+    if (googleConnect) {
+      googleConnect.textContent = googleConnected ? "Reconnect" : "Connect with Google";
+    }
     const enabledRow = document.querySelector("#channelForm .channel-enabled");
     if (enabledRow) enabledRow.hidden = !selectedProvider;
     const submit = $("channelSubmit");
     if (submit) {
       const hideSubmit = !selectedProvider
         || (selectedProvider === "google_reviews" && !editing)
-        || (chooserProvider && !manualReady && !showEmbeddedDetails);
+        || (chooserProvider && !manualReady && !showEmbeddedDetails && !showInstagramOauthReconnect);
       if (hideSubmit) {
         submit.hidden = true;
         submit.disabled = true;
@@ -16134,22 +16162,12 @@
     const button = $("whatsappSetupFacebook");
     if (!button) return;
     const label = button.querySelector(".facebook-login-button-label");
-    const image = button.querySelector(".facebook-login-button-image");
-    const showText = Boolean(busy || reconnect);
-    const text = busy ? "Loading..." : (reconnect ? "Re-connect" : "Continue with Facebook");
+    const text = busy ? "Loading..." : (reconnect ? "Re-connect" : "Login with Facebook");
     button.classList.toggle("is-reconnect", Boolean(reconnect));
     button.classList.toggle("is-busy", Boolean(busy));
     button.setAttribute("aria-busy", String(Boolean(busy)));
     button.setAttribute("aria-label", text);
-    if (image) {
-      // bt_fb.png has "Continue with Facebook" baked in — hide it for Re-connect / Loading.
-      image.hidden = showText;
-      image.setAttribute("aria-hidden", showText ? "true" : "false");
-    }
-    if (label) {
-      label.textContent = text;
-      label.classList.toggle("sr-only", !showText);
-    }
+    if (label) label.textContent = text;
   }
 
   function setWhatsAppFacebookLoginBusy(busy) {
