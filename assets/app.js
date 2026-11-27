@@ -4808,7 +4808,12 @@
     if (attachment.localPreview === true || rawUrl.startsWith("blob:") || rawUrl.startsWith("data:")) {
       return rawUrl.startsWith("blob:") || rawUrl.startsWith("data:") ? rawUrl : "";
     }
+    // Prefer Helixcer's authenticated proxy for PDF preview. Direct CDN links
+    // often fail browser fetch with CORS ("Failed to fetch") even when Download works.
     if (attachment.external === true) {
+      if (message?.messageId && state.api?.attachmentUrl && isPdfAttachment(attachment)) {
+        return state.api.attachmentUrl(message.messageId, { download });
+      }
       try {
         const url = new URL(rawUrl);
         return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";

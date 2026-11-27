@@ -18,6 +18,16 @@ test('external documents omit credentials and invalid responses show a download 
  const h=setup();h.context.fetch=async(url,options)=>{assert.equal(options.credentials,'omit');return {ok:true,arrayBuffer:async()=>new TextEncoder().encode('<html>Sign in</html>').buffer};};
  await h.context.loadAttachmentPdfPreview('https://example.test/file',{external:true},'Invoice.pdf');assert.match(h.body.children[0].textContent,/valid PDF.*Download/);assert.equal(h.body.children[0].tag,'p');
 });
+test('PDF preview prefers Helixcer proxy over external CDN links that fail CORS',()=>{
+ const h=setup();
+ h.context.state={api:{attachmentUrl:(id,{download}={})=>`https://api.chat.helixcer.com/api/messages/${id}/attachment${download?'?download=1':''}`}};
+ const message={messageId:'msg-invoice',attachment:{available:true,external:true,filename:'Invoice_INV2627S060.pdf',mimeType:'application/pdf',url:'https://cdn.example.com/Invoice_INV2627S060.pdf'}};
+ // Inject messageAttachmentUrl from app.js
+ const start=source.indexOf('  function messageAttachmentUrl('),end=source.indexOf('  function mediaLoadingIndicator(',start);
+ vm.runInContext(source.slice(start,end),h.context);
+ assert.equal(h.context.messageAttachmentUrl(message), 'https://api.chat.helixcer.com/api/messages/msg-invoice/attachment');
+ assert.equal(h.context.messageAttachmentUrl(message,true), 'https://api.chat.helixcer.com/api/messages/msg-invoice/attachment?download=1');
+});
 test('closing during PDF load prevents a late response from replacing the next preview',async()=>{
  const h=setup();let resolve;h.context.fetch=()=>new Promise(done=>{resolve=done;});
  const pending=h.context.loadAttachmentPdfPreview('/protected',{},'Invoice.pdf');h.context.cleanupAttachmentPdfPreview();h.body.replaceChildren({tag:'new-preview'});

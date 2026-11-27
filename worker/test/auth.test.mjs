@@ -2951,16 +2951,23 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
       headers: { Authorization: 'Bearer recovery-secret' }
     }), env);
     assert.equal(protectedTemplateMedia.status, 200);
-    assert.match(protectedTemplateMedia.headers.get('Content-Disposition'), /^attachment;/);
+    assert.equal(protectedTemplateMedia.headers.get('Content-Type'), 'application/pdf');
+    assert.match(protectedTemplateMedia.headers.get('Content-Disposition'), /^inline;/);
     assert.equal(await protectedTemplateMedia.text(), 'invoice bytes');
 
     const protectedAttachment = await handleRequest(new Request(`https://api.chat.helixcer.com${documentMessage.attachment.url}`, {
       headers: { Authorization: 'Bearer recovery-secret' }
     }), env);
     assert.equal(protectedAttachment.status, 200);
-    assert.equal(protectedAttachment.headers.get('Content-Type'), 'application/octet-stream');
-    assert.match(protectedAttachment.headers.get('Content-Disposition'), /^attachment;/);
+    assert.equal(protectedAttachment.headers.get('Content-Type'), 'application/pdf');
+    assert.match(protectedAttachment.headers.get('Content-Disposition'), /^inline;/);
     assert.equal(await protectedAttachment.text(), 'invoice bytes');
+
+    const downloadedAttachment = await handleRequest(new Request(`https://api.chat.helixcer.com${documentMessage.attachment.url}?download=1`, {
+      headers: { Authorization: 'Bearer recovery-secret' }
+    }), env);
+    assert.equal(downloadedAttachment.status, 200);
+    assert.match(downloadedAttachment.headers.get('Content-Disposition'), /^attachment;/);
 
     const unsupportedBody = new FormData();
     unsupportedBody.set('file', new Blob(['binary'], { type: 'application/x-msdownload' }), 'unsafe.exe');
@@ -3041,8 +3048,8 @@ test('dashboard WhatsApp replies enforce the 24-hour window while templates and 
     assert.equal(allowedTemplateItem.text, `${'A'.repeat(5000)}`);
     assert.equal(allowedTemplateItem.senderName, 'Emergency recovery');
     assert.equal(allowedTemplateItem.attachment.type, 'image');
-    assert.equal(allowedTemplateItem.attachment.external, true);
-    assert.equal(allowedTemplateItem.attachment.url, 'https://cdn.example.com/banner.jpg');
+    assert.equal(allowedTemplateItem.attachment.external, false);
+    assert.match(allowedTemplateItem.attachment.url, /\/api\/messages\/.+\/attachment$/);
     assert.equal(database.prepare('SELECT message_type FROM messages WHERE message_id=?').get(allowedTemplateItem.messageId).message_type,
       'template');
     await Promise.all(pending.splice(0));
