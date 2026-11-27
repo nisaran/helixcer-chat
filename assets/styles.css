@@ -3067,6 +3067,28 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .facebook-login-button--image.is-busy .facebook-login-button-label {
   color: #1877f2;
 }
+/* Already connected: show Re-connect text instead of the FB image CTA. */
+.facebook-login-button--image.is-reconnect {
+  gap: 8px;
+  min-width: 120px;
+  height: 36px;
+  padding: 0 14px;
+  background: #1877f2;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.facebook-login-button--image.is-reconnect:hover:not(:disabled) {
+  background: #166fe5;
+  filter: none;
+}
+.facebook-login-button--image.is-reconnect .facebook-login-button-image {
+  display: none;
+}
+.facebook-login-button--image.is-reconnect.is-busy {
+  background: #f0f2f5;
+  color: #1877f2;
+}
 .provider-manual-fields { margin-top: 4px; }
 .google-oauth-connect { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--line, #d9dfdb); border-radius: 16px; background: linear-gradient(180deg, #f7fafc, #eef4fb); }
 .google-oauth-connect .primary-button { justify-self: start; }
