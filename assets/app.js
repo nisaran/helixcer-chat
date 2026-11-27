@@ -16068,6 +16068,7 @@
       return;
     }
     if (label) label.textContent = "Continue with Facebook";
+    button.setAttribute("aria-label", "Continue with Facebook");
   }
 
   function ensureFacebookSdk(config) {
