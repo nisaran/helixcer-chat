@@ -3082,8 +3082,9 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   background: #166fe5;
   filter: none;
 }
-.facebook-login-button--image.is-reconnect .facebook-login-button-image {
-  display: none;
+.facebook-login-button--image.is-reconnect .facebook-login-button-image,
+.facebook-login-button--image .facebook-login-button-image[hidden] {
+  display: none !important;
 }
 .facebook-login-button--image.is-reconnect.is-busy {
   background: #f0f2f5;
