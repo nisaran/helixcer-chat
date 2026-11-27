@@ -55,6 +55,19 @@ import {
   subscribeWhatsAppEmbeddedSignupWebhooks
 } from './meta-embedded-signup.js';
 import {
+  buildInstagramAuthorizeUrl,
+  clearInstagramOAuthCookieHeader,
+  exchangeInstagramAuthorizationCode,
+  exchangeInstagramLongLivedToken,
+  fetchInstagramLoginProfile,
+  instagramAppId,
+  instagramAppSecret,
+  instagramLoginPublicConfig,
+  instagramOAuthCookieHeader,
+  readInstagramOAuthCookie,
+  requireInstagramLoginConfig
+} from './instagram-login.js';
+import {
   assertChatAccess,
   attachPrincipalPermissions,
   chatScope,
@@ -403,6 +416,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (request.method === 'GET' && url.pathname === '/auth/google-business/callback') {
       return await finishGoogleBusinessOAuthResponse(request, env);
     }
+    if (request.method === 'GET' && url.pathname === '/auth/instagram/callback') {
+      return await finishInstagramLoginOAuthResponse(request, env);
+    }
     if (request.method === 'GET' && url.pathname === '/auth/mobile/config') {
       return json(mobileAuthConfiguration(env));
     }
@@ -686,6 +702,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         workspace,
         me: principalView(principal),
         whatsappEmbeddedSignup: metaEmbeddedSignupPublicConfig(env),
+        instagramLogin: instagramLoginPublicConfig(env),
         connectorTypes: [
           { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: CONNECTOR_DEFINITIONS.whatsapp_cloud.capabilities },
           { value: 'telegram', label: 'Telegram Bot', capabilities: CONNECTOR_DEFINITIONS.telegram.capabilities },
@@ -851,6 +868,16 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       const limited = await enforceOAuthRateLimit(request, env);
       if (limited) return withCors(limited, cors);
       return await startGoogleBusinessChannelOAuth(request, env, principal);
+    }
+    if (url.pathname === '/api/channels/oauth/instagram/config' && request.method === 'GET') {
+      requirePermission(principal, 'channels.manage');
+      return withCors(json(instagramLoginPublicConfig(env)), cors);
+    }
+    if (url.pathname === '/api/channels/oauth/instagram/start' && request.method === 'GET') {
+      requirePermission(principal, 'channels.manage');
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return withCors(limited, cors);
+      return await startInstagramLoginChannelOAuth(request, env, principal);
     }
     if (url.pathname === '/api/channels/oauth/google-reviews/pending' && request.method === 'GET') {
       requirePermission(principal, 'channels.manage');
@@ -4057,6 +4084,221 @@ async function verifyGoogleReviewsChannel(env, channel, fetchImpl = fetch) {
     totalReviewCount: reviewSummary.totalReviewCount,
     averageRating: reviewSummary.averageRating
   };
+}
+
+async function startInstagramLoginChannelOAuth(request, env, principal) {
+  requireInstagramLoginConfig(env);
+  const url = new URL(request.url);
+  const returnTo = validateReturnTo(url.searchParams.get('return_to') || url.searchParams.get('returnTo') || '/#channels', env);
+  const channelName = String(url.searchParams.get('name') || '').trim().slice(0, 80);
+  const channelIdRaw = String(url.searchParams.get('channelId') || '').trim();
+  let channelId = '';
+  if (channelIdRaw) {
+    channelId = cleanId(channelIdRaw, 'Channel ID');
+    const existing = await env.DB.prepare(`SELECT channel_id,provider_type,name FROM channels
+      WHERE channel_id=?1 AND workspace_id=?2`).bind(channelId, principal.workspace.workspaceId).first();
+    if (!existing) throw httpError(404, 'Channel not found.');
+    if (logicalConnectorType(existing) !== 'instagram') {
+      throw httpError(400, 'Only Instagram connections can be linked with Login with Instagram.');
+    }
+  }
+  const previousState = readInstagramOAuthCookie(request);
+  if (previousState) {
+    await env.DB.prepare('DELETE FROM instagram_login_oauth_states WHERE state_hash=?1')
+      .bind(await hashToken(previousState)).run();
+  }
+  const state = randomOAuthToken(32);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+  await env.DB.prepare(`INSERT INTO instagram_login_oauth_states
+      (state_hash,workspace_id,user_id,channel_id,channel_name,return_to,expires_at,created_at)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8)`)
+    .bind(await hashToken(state), principal.workspace.workspaceId, principal.user.userId,
+      channelId || null, channelName, returnTo, expiresAt, now.toISOString()).run();
+  const authorizeUrl = buildInstagramAuthorizeUrl({ request, env, state });
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: authorizeUrl,
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'Set-Cookie': instagramOAuthCookieHeader(state, 10 * 60)
+    }
+  });
+}
+
+async function finishInstagramLoginOAuthResponse(request, env, fetchImpl = fetch) {
+  try {
+    return await finishInstagramLoginOAuth(request, env, fetchImpl);
+  } catch (error) {
+    const message = String(error?.message || 'Instagram connection failed.');
+    const target = googleBusinessFailureTarget(env);
+    const headers = new Headers({
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'Set-Cookie': clearInstagramOAuthCookieHeader()
+    });
+    if (!target) {
+      return new Response(`Instagram connection failed: ${message}`, {
+        status: Number(error?.status) >= 500 ? 503 : (Number(error?.status) || 400),
+        headers: { ...Object.fromEntries(headers), 'Content-Type': 'text/plain; charset=utf-8' }
+      });
+    }
+    target.searchParams.set('instagram_error', message.slice(0, 240));
+    target.hash = 'channels';
+    headers.set('Location', target.toString());
+    return new Response(null, { status: 302, headers });
+  }
+}
+
+async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('error')) {
+    const description = String(url.searchParams.get('error_description') || 'Instagram authorization was cancelled or denied.')
+      .replace(/\+/g, ' ')
+      .trim();
+    throw httpError(401, description || 'Instagram authorization was cancelled or denied.');
+  }
+  const code = String(url.searchParams.get('code') || '').replace(/#_+$/, '');
+  const state = url.searchParams.get('state') || '';
+  const cookieState = readInstagramOAuthCookie(request) || '';
+  if (!code || !state || !cookieState || !timingSafeEqual(state, cookieState)) {
+    throw httpError(400, 'Invalid Instagram OAuth state.');
+  }
+  const stateHash = await hashToken(state);
+  const stored = await env.DB.prepare(`SELECT state_hash,workspace_id,user_id,channel_id,channel_name,return_to,expires_at
+    FROM instagram_login_oauth_states WHERE state_hash=?1`).bind(stateHash).first();
+  if (!stored || stored.expires_at <= new Date().toISOString()) throw httpError(400, 'Instagram OAuth state expired.');
+  await env.DB.prepare('DELETE FROM instagram_login_oauth_states WHERE state_hash=?1').bind(stateHash).run();
+
+  const shortLived = await exchangeInstagramAuthorizationCode({ request, env, code, fetchImpl });
+  const longLived = await exchangeInstagramLongLivedToken(env, shortLived.accessToken, fetchImpl);
+  const profile = await fetchInstagramLoginProfile(env, longLived.accessToken, fetchImpl);
+  if (shortLived.userId && shortLived.userId !== profile.userId) {
+    throw httpError(422, 'Instagram returned a different professional account than the login token.');
+  }
+
+  const workspaceId = stored.workspace_id;
+  const forcedChannelId = String(stored.channel_id || '').trim();
+  let channelId = forcedChannelId ? cleanId(forcedChannelId, 'Channel ID') : crypto.randomUUID();
+  let existing = await env.DB.prepare('SELECT * FROM channels WHERE channel_id=?1 AND workspace_id=?2')
+    .bind(channelId, workspaceId).first();
+  if (forcedChannelId && !existing) throw httpError(404, 'Channel not found.');
+  if (!forcedChannelId) {
+    const byAccount = await env.DB.prepare(`SELECT * FROM channels
+      WHERE workspace_id=?1 AND provider_type='instagram'
+        AND json_extract(config_json,'$.instagramAccountId')=?2`)
+      .bind(workspaceId, profile.userId).first();
+    if (byAccount) {
+      existing = byAccount;
+      channelId = byAccount.channel_id;
+    }
+  }
+  if (existing && logicalConnectorType(existing) !== 'instagram') {
+    throw httpError(400, 'Only Instagram channels can complete Login with Instagram.');
+  }
+
+  const previousConfig = safeJsonParse(existing?.config_json, {});
+  const channelName = cleanRequired(
+    stored.channel_name || existing?.name || profile.username || 'Instagram',
+    'Channel name',
+    80
+  );
+  const apiVersion = metaGraphApiVersion(env, previousConfig.apiVersion || 'v26.0');
+  const appId = instagramAppId(env);
+  const appSecret = instagramAppSecret(env);
+  assertMetaAppSecret(appSecret, 422);
+  const now = new Date().toISOString();
+  const config = {
+    ...previousConfig,
+    instagramAccountId: profile.userId,
+    username: profile.username || previousConfig.username || '',
+    appId,
+    apiVersion,
+    authMode: 'instagram_login',
+    credentialsVerifiedAt: now,
+    verifiedProviderId: profile.userId,
+    verifiedName: profile.username || profile.name || '',
+    verifiedUsername: profile.username || ''
+  };
+  if (!config.username) delete config.username;
+  if (!config.verifiedName) delete config.verifiedName;
+  if (!config.verifiedUsername) delete config.verifiedUsername;
+  await assertUniqueManagedConfig(env, workspaceId, 'instagram', channelId, config);
+  const changedIdentity = editableConfigChanges('instagram', previousConfig, config)
+    .filter(key => key === 'instagramAccountId' || key === 'appId');
+  await assertProviderIdentityConfigMutable(env, workspaceId, existing, 'instagram', changedIdentity);
+
+  let verifyToken = generateWhatsAppVerifyToken();
+  if (existing) {
+    try {
+      const previousCredentials = await readChannelCredentials(env, {
+        workspaceId,
+        channelId,
+        connectorType: 'instagram'
+      });
+      if (previousCredentials.verifyToken) verifyToken = previousCredentials.verifyToken;
+    } catch { /* Keep the freshly generated verify token. */ }
+  }
+  const capabilities = CONNECTOR_DEFINITIONS.instagram.capabilities;
+  const enabled = 1;
+  let saved;
+  try {
+    saved = await env.DB.prepare(`INSERT INTO channels
+        (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,'generic_http','instagram',?3,?4,?5,'DATABASE',?6,?6,?7)
+      ON CONFLICT(channel_id) DO UPDATE SET name=excluded.name,connector_type=excluded.connector_type,
+        provider_type=excluded.provider_type,enabled=excluded.enabled,capabilities_json=excluded.capabilities_json,
+        config_json=excluded.config_json,secret_key='DATABASE',updated_at=excluded.updated_at
+        WHERE channels.workspace_id=excluded.workspace_id`)
+      .bind(channelId, channelName, enabled, JSON.stringify(capabilities), JSON.stringify(config), now, workspaceId).run();
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw httpError(409, 'This Instagram account is already connected in the workspace.');
+    throw error;
+  }
+  if (!saved.meta?.changes) throw httpError(409, 'Channel ID is already used by another workspace.');
+
+  await storeChannelCredentials(env, {
+    workspaceId,
+    channelId,
+    connectorType: 'instagram'
+  }, {
+    accessToken: longLived.accessToken,
+    verifyToken,
+    appSecret
+  }, stored.user_id || '');
+
+  const actor = await env.DB.prepare('SELECT user_id,email FROM users WHERE user_id=?1')
+    .bind(stored.user_id).first();
+  const principal = {
+    workspace: { workspaceId },
+    user: { userId: stored.user_id, email: actor?.email || '' }
+  };
+  await audit(env, principal, existing ? 'update' : 'create', 'channel', channelId, {
+    name: channelName,
+    connectorType: 'instagram',
+    enabled: true,
+    authMode: 'instagram_login',
+    updatedCredentialFields: ['accessToken', 'verifyToken', 'appSecret'],
+    instagramAccountId: profile.userId,
+    username: profile.username || ''
+  });
+
+  const returnTo = new URL(stored.return_to);
+  returnTo.searchParams.set('instagram_connected', '1');
+  returnTo.searchParams.set('instagram_channel', channelId);
+  if (profile.username) returnTo.searchParams.set('instagram_username', profile.username);
+  returnTo.searchParams.delete('instagram_error');
+  if (!returnTo.hash) returnTo.hash = 'channels';
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: returnTo.toString(),
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'Set-Cookie': clearInstagramOAuthCookieHeader()
+    }
+  });
 }
 
 async function startGoogleBusinessChannelOAuth(request, env, principal) {
@@ -12680,6 +12922,7 @@ async function cleanupExpiredAuth(env) {
     env.DB.prepare('DELETE FROM oauth_states WHERE expires_at<=?1').bind(now),
     env.DB.prepare('DELETE FROM google_business_oauth_states WHERE expires_at<=?1').bind(now),
     env.DB.prepare('DELETE FROM google_business_pending WHERE expires_at<=?1').bind(now),
+    env.DB.prepare('DELETE FROM instagram_login_oauth_states WHERE expires_at<=?1').bind(now),
     env.DB.prepare('DELETE FROM mobile_auth_challenges WHERE expires_at<=?1 OR consumed_at IS NOT NULL').bind(now),
     env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?1 OR revoked_at IS NOT NULL').bind(now),
     env.DB.prepare('DELETE FROM password_reset_tokens WHERE expires_at<=?1 OR consumed_at IS NOT NULL').bind(now),
