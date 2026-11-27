@@ -137,6 +137,8 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(app, /function setWhatsAppFacebookLoginBusy/);
   assert.match(app, /Connecting…/);
   assert.match(styles, /\.facebook-login-button\.is-busy \.facebook-login-button-spinner/);
+  assert.match(styles, /\.facebook-login-button\s*\{[^}]*min-height:\s*36px/);
+  assert.match(styles, /\.facebook-login-button\s*\{[^}]*font-size:\s*12px/);
   assert.match(html, /id="whatsappManualFields" hidden/);
   assert.match(html, /id="instagramSetupChooser"/);
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="instagram"/);
