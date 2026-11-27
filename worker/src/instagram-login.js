@@ -1,24 +1,39 @@
 import { metaGraphApiVersion } from './meta-embedded-signup.js';
 
 export const INSTAGRAM_OAUTH_COOKIE = '__Host-helixcer_ig_oauth';
+/** @deprecated Kept for older Instagram Business Login tests/docs; Unified Login uses config_id. */
 export const INSTAGRAM_LOGIN_SCOPES = [
   'instagram_business_basic',
   'instagram_business_manage_messages'
 ];
-const INSTAGRAM_AUTHORIZE_URL = 'https://www.instagram.com/oauth/authorize';
-const INSTAGRAM_TOKEN_URL = 'https://api.instagram.com/oauth/access_token';
+const FACEBOOK_AUTHORIZE_URL = 'https://www.facebook.com/dialog/oauth';
+const FACEBOOK_GRAPH_HOST = 'https://graph.facebook.com';
 const INSTAGRAM_GRAPH_HOST = 'https://graph.instagram.com';
 
-export function instagramAppId(env) {
-  return String(env.INSTAGRAM_APP_ID || env.META_APP_ID || '').trim();
+export function instagramMetaAppId(env) {
+  return String(env.META_APP_ID || env.INSTAGRAM_APP_ID || '').trim();
 }
 
+export function instagramMetaAppSecret(env) {
+  return String(env.META_APP_SECRET || env.INSTAGRAM_APP_SECRET || '').trim();
+}
+
+export function instagramLoginConfigId(env) {
+  return String(env.META_INSTAGRAM_LOGIN_CONFIG_ID || env.INSTAGRAM_LOGIN_CONFIG_ID || '').trim();
+}
+
+/** @deprecated Prefer instagramMetaAppId for Unified Login. */
+export function instagramAppId(env) {
+  return instagramMetaAppId(env);
+}
+
+/** @deprecated Prefer instagramMetaAppSecret for Unified Login. */
 export function instagramAppSecret(env) {
-  return String(env.INSTAGRAM_APP_SECRET || env.META_APP_SECRET || '').trim();
+  return instagramMetaAppSecret(env);
 }
 
 export function instagramLoginConfigured(env) {
-  return Boolean(instagramAppId(env) && instagramAppSecret(env));
+  return Boolean(instagramMetaAppId(env) && instagramMetaAppSecret(env) && instagramLoginConfigId(env));
 }
 
 export function instagramLoginPublicConfig(env) {
@@ -28,9 +43,10 @@ export function instagramLoginPublicConfig(env) {
   return {
     available: true,
     provider: 'instagram',
-    appId: instagramAppId(env),
+    appId: instagramMetaAppId(env),
+    configId: instagramLoginConfigId(env),
     graphVersion: metaGraphApiVersion(env),
-    scopes: [...INSTAGRAM_LOGIN_SCOPES]
+    authMode: 'unified_login'
   };
 }
 
@@ -43,17 +59,25 @@ export function requireInstagramLoginConfig(env) {
 }
 
 export function instagramOAuthRedirectUri(request, env) {
-  return String(env.INSTAGRAM_OAUTH_REDIRECT_URI || '').trim()
-    || new URL('/auth/instagram/callback', request.url).toString();
+  const explicit = String(
+    env.META_INSTAGRAM_OAUTH_REDIRECT_URI
+    || env.INSTAGRAM_OAUTH_REDIRECT_URI
+    || ''
+  ).trim();
+  if (explicit) return explicit;
+  return new URL('/auth/meta/callback', request.url).toString();
 }
 
 export function buildInstagramAuthorizeUrl({ request, env, state }) {
   requireInstagramLoginConfig(env);
-  const authorize = new URL(INSTAGRAM_AUTHORIZE_URL);
-  authorize.searchParams.set('client_id', instagramAppId(env));
+  const authorize = new URL(FACEBOOK_AUTHORIZE_URL);
+  authorize.searchParams.set('client_id', instagramMetaAppId(env));
+  authorize.searchParams.set('config_id', instagramLoginConfigId(env));
   authorize.searchParams.set('redirect_uri', instagramOAuthRedirectUri(request, env));
   authorize.searchParams.set('response_type', 'code');
-  authorize.searchParams.set('scope', INSTAGRAM_LOGIN_SCOPES.join(','));
+  authorize.searchParams.set('override_default_response_type', 'true');
+  authorize.searchParams.set('display', 'popup');
+  authorize.searchParams.set('prompt', 'login');
   authorize.searchParams.set('state', state);
   return authorize.toString();
 }
@@ -68,46 +92,17 @@ export async function exchangeInstagramAuthorizationCode({
     error.status = 400;
     throw error;
   }
-  const body = new URLSearchParams({
-    client_id: instagramAppId(env),
-    client_secret: instagramAppSecret(env),
-    grant_type: 'authorization_code',
-    redirect_uri: instagramOAuthRedirectUri(request, env),
-    code: authorizationCode
-  });
-  const response = await fetchImpl(INSTAGRAM_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString()
-  });
-  const payload = await response.json().catch(() => ({}));
-  const tokenPayload = normalizeInstagramTokenPayload(payload);
-  if (!response.ok || !tokenPayload.accessToken) {
-    const error = new Error(instagramLoginErrorMessage(payload, response.status,
-      'Instagram could not exchange the authorization code.'));
-    error.status = 422;
-    throw error;
-  }
-  return tokenPayload;
-}
-
-export async function exchangeInstagramLongLivedToken(env, shortLivedToken, fetchImpl = fetch) {
-  requireInstagramLoginConfig(env);
-  const token = String(shortLivedToken || '').trim();
-  if (!token) {
-    const error = new Error('Instagram access token is missing.');
-    error.status = 400;
-    throw error;
-  }
-  const endpoint = new URL(`${INSTAGRAM_GRAPH_HOST}/access_token`);
-  endpoint.searchParams.set('grant_type', 'ig_exchange_token');
-  endpoint.searchParams.set('client_secret', instagramAppSecret(env));
-  endpoint.searchParams.set('access_token', token);
+  const version = metaGraphApiVersion(env);
+  const endpoint = new URL(`${FACEBOOK_GRAPH_HOST}/${encodeURIComponent(version)}/oauth/access_token`);
+  endpoint.searchParams.set('client_id', instagramMetaAppId(env));
+  endpoint.searchParams.set('client_secret', instagramMetaAppSecret(env));
+  endpoint.searchParams.set('redirect_uri', instagramOAuthRedirectUri(request, env));
+  endpoint.searchParams.set('code', authorizationCode);
   const response = await fetchImpl(endpoint.toString(), { method: 'GET' });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.access_token) {
     const error = new Error(instagramLoginErrorMessage(payload, response.status,
-      'Instagram could not create a long-lived access token.'));
+      'Meta could not exchange the Instagram login code.'));
     error.status = 422;
     throw error;
   }
@@ -118,7 +113,7 @@ export async function exchangeInstagramLongLivedToken(env, shortLivedToken, fetc
   };
 }
 
-export async function fetchInstagramLoginProfile(env, accessToken, fetchImpl = fetch) {
+export async function fetchUnifiedInstagramAccounts(env, accessToken, fetchImpl = fetch) {
   const token = String(accessToken || '').trim();
   if (!token) {
     const error = new Error('Instagram access token is missing.');
@@ -126,29 +121,67 @@ export async function fetchInstagramLoginProfile(env, accessToken, fetchImpl = f
     throw error;
   }
   const version = metaGraphApiVersion(env);
-  const endpoint = new URL(`${INSTAGRAM_GRAPH_HOST}/${encodeURIComponent(version)}/me`);
-  endpoint.searchParams.set('fields', 'user_id,username,account_type,name');
+  const endpoint = new URL(
+    `${FACEBOOK_GRAPH_HOST}/${encodeURIComponent(version)}/me/assigned_instagram_accounts`
+  );
+  endpoint.searchParams.set('fields', 'id,username,name');
   const response = await fetchImpl(endpoint.toString(), {
     headers: { Authorization: `Bearer ${token}` }
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(instagramLoginErrorMessage(payload, response.status,
-      'Instagram could not load the professional account profile.'));
+      'Meta could not list Instagram accounts for this login.'));
     error.status = 422;
     throw error;
   }
-  const userId = String(payload.user_id || payload.id || '').trim();
-  if (!/^\d{5,40}$/.test(userId)) {
-    const error = new Error('Instagram did not return a professional account ID.');
+  const accounts = (Array.isArray(payload.data) ? payload.data : [])
+    .map((row) => ({
+      userId: String(row?.id || '').trim(),
+      username: String(row?.username || '').trim(),
+      name: String(row?.name || '').trim()
+    }))
+    .filter((row) => /^\d{5,40}$/.test(row.userId));
+  return accounts;
+}
+
+export async function fetchUnifiedInstagramClientBusinessId(env, accessToken, fetchImpl = fetch) {
+  const token = String(accessToken || '').trim();
+  if (!token) return '';
+  const version = metaGraphApiVersion(env);
+  const endpoint = new URL(`${FACEBOOK_GRAPH_HOST}/${encodeURIComponent(version)}/me`);
+  endpoint.searchParams.set('fields', 'client_business_id');
+  const response = await fetchImpl(endpoint.toString(), {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return '';
+  return String(payload.client_business_id || '').trim();
+}
+
+export function instagramGraphApiHost(channelOrAuthMode = '') {
+  const authMode = typeof channelOrAuthMode === 'string'
+    ? channelOrAuthMode
+    : String(channelOrAuthMode?.config?.authMode || channelOrAuthMode?.authMode || '');
+  return authMode === 'unified_login' ? FACEBOOK_GRAPH_HOST : INSTAGRAM_GRAPH_HOST;
+}
+
+export async function fetchInstagramLoginProfile(env, accessToken, fetchImpl = fetch) {
+  const accounts = await fetchUnifiedInstagramAccounts(env, accessToken, fetchImpl);
+  if (!accounts.length) {
+    const error = new Error('No Instagram professional account was shared with Helixcer.');
     error.status = 422;
     throw error;
   }
+  const primary = accounts[0];
+  const clientBusinessId = await fetchUnifiedInstagramClientBusinessId(env, accessToken, fetchImpl);
   return {
-    userId,
-    username: String(payload.username || '').trim(),
-    name: String(payload.name || '').trim(),
-    accountType: String(payload.account_type || '').trim()
+    userId: primary.userId,
+    username: primary.username,
+    name: primary.name,
+    accountType: '',
+    clientBusinessId,
+    accounts
   };
 }
 
@@ -169,22 +202,6 @@ export function readInstagramOAuthCookie(request) {
     try { return decodeURIComponent(part.slice(index + 1).trim()); } catch { return ''; }
   }
   return '';
-}
-
-function normalizeInstagramTokenPayload(payload) {
-  const row = Array.isArray(payload?.data) ? payload.data[0] : payload;
-  if (!row || typeof row !== 'object') {
-    return { accessToken: '', userId: '', permissions: [] };
-  }
-  const permissions = String(row.permissions || '')
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean);
-  return {
-    accessToken: String(row.access_token || ''),
-    userId: String(row.user_id || row.id || ''),
-    permissions
-  };
 }
 
 function instagramLoginErrorMessage(payload, status, fallback) {

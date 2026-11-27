@@ -58,11 +58,11 @@ import {
   buildInstagramAuthorizeUrl,
   clearInstagramOAuthCookieHeader,
   exchangeInstagramAuthorizationCode,
-  exchangeInstagramLongLivedToken,
   fetchInstagramLoginProfile,
-  instagramAppId,
-  instagramAppSecret,
+  instagramGraphApiHost,
   instagramLoginPublicConfig,
+  instagramMetaAppId,
+  instagramMetaAppSecret,
   instagramOAuthCookieHeader,
   readInstagramOAuthCookie,
   requireInstagramLoginConfig
@@ -416,7 +416,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (request.method === 'GET' && url.pathname === '/auth/google-business/callback') {
       return await finishGoogleBusinessOAuthResponse(request, env);
     }
-    if (request.method === 'GET' && url.pathname === '/auth/instagram/callback') {
+    if (request.method === 'GET' && (url.pathname === '/auth/instagram/callback' || url.pathname === '/auth/meta/callback')) {
       return await finishInstagramLoginOAuthResponse(request, env);
     }
     if (request.method === 'GET' && url.pathname === '/auth/mobile/config') {
@@ -3966,16 +3966,29 @@ async function verifyInstagramChannel(env, channel) {
   }
   assertMetaAppSecret(credentials.appSecret, 422);
   const version = metaApiVersion(channel.config?.apiVersion);
-  const endpoint = new URL(`https://graph.instagram.com/${encodeURIComponent(version)}/me`);
-  endpoint.searchParams.set('fields', 'user_id,username');
-  const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${credentials.accessToken}` } });
-  const data = safeJsonParse(await response.text(), {});
-  if (!response.ok) throw httpError(422, `Meta could not verify this Instagram account: ${providerError(data, response.status)}`);
-  if (String(data.user_id || '') !== accountId) throw httpError(422, 'Meta returned a different Instagram account.');
+  const graphHost = instagramGraphApiHost(channel);
+  let verifiedUsername = '';
+  if (String(channel.config?.authMode || '') === 'unified_login') {
+    const endpoint = new URL(`${graphHost}/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}`);
+    endpoint.searchParams.set('fields', 'id,username,name');
+    const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${credentials.accessToken}` } });
+    const data = safeJsonParse(await response.text(), {});
+    if (!response.ok) throw httpError(422, `Meta could not verify this Instagram account: ${providerError(data, response.status)}`);
+    if (String(data.id || '') !== accountId) throw httpError(422, 'Meta returned a different Instagram account.');
+    verifiedUsername = String(data.username || data.name || '');
+  } else {
+    const endpoint = new URL(`${graphHost}/${encodeURIComponent(version)}/me`);
+    endpoint.searchParams.set('fields', 'user_id,username');
+    const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${credentials.accessToken}` } });
+    const data = safeJsonParse(await response.text(), {});
+    if (!response.ok) throw httpError(422, `Meta could not verify this Instagram account: ${providerError(data, response.status)}`);
+    if (String(data.user_id || '') !== accountId) throw httpError(422, 'Meta returned a different Instagram account.');
+    verifiedUsername = String(data.username || '');
+  }
   const now = new Date().toISOString();
   const config = await updateChannelRuntimeConfig(env, channel, {
     apiVersion: version, credentialsVerifiedAt: now, verifiedProviderId: accountId,
-    verifiedName: String(data.username || ''), verifiedUsername: String(data.username || '')
+    verifiedName: verifiedUsername, verifiedUsername
   });
   await refreshInstagramPlaceholderProfiles(env, channel, credentials).catch(() => {});
   return { ok: true, channelId: channel.channelId, health: config.webhookVerifiedAt ? 'connected' : 'webhook_required',
@@ -4171,12 +4184,8 @@ async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
   if (!stored || stored.expires_at <= new Date().toISOString()) throw httpError(400, 'Instagram OAuth state expired.');
   await env.DB.prepare('DELETE FROM instagram_login_oauth_states WHERE state_hash=?1').bind(stateHash).run();
 
-  const shortLived = await exchangeInstagramAuthorizationCode({ request, env, code, fetchImpl });
-  const longLived = await exchangeInstagramLongLivedToken(env, shortLived.accessToken, fetchImpl);
-  const profile = await fetchInstagramLoginProfile(env, longLived.accessToken, fetchImpl);
-  if (shortLived.userId && shortLived.userId !== profile.userId) {
-    throw httpError(422, 'Instagram returned a different professional account than the login token.');
-  }
+  const tokenResult = await exchangeInstagramAuthorizationCode({ request, env, code, fetchImpl });
+  const profile = await fetchInstagramLoginProfile(env, tokenResult.accessToken, fetchImpl);
 
   const workspaceId = stored.workspace_id;
   const forcedChannelId = String(stored.channel_id || '').trim();
@@ -4205,8 +4214,8 @@ async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
     80
   );
   const apiVersion = metaGraphApiVersion(env, previousConfig.apiVersion || 'v26.0');
-  const appId = instagramAppId(env);
-  const appSecret = instagramAppSecret(env);
+  const appId = instagramMetaAppId(env);
+  const appSecret = instagramMetaAppSecret(env);
   assertMetaAppSecret(appSecret, 422);
   const now = new Date().toISOString();
   const config = {
@@ -4215,12 +4224,13 @@ async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
     username: profile.username || previousConfig.username || '',
     appId,
     apiVersion,
-    authMode: 'instagram_login',
+    authMode: 'unified_login',
     credentialsVerifiedAt: now,
     verifiedProviderId: profile.userId,
     verifiedName: profile.username || profile.name || '',
     verifiedUsername: profile.username || ''
   };
+  if (profile.clientBusinessId) config.clientBusinessId = profile.clientBusinessId;
   if (!config.username) delete config.username;
   if (!config.verifiedName) delete config.verifiedName;
   if (!config.verifiedUsername) delete config.verifiedUsername;
@@ -4263,7 +4273,7 @@ async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
     channelId,
     connectorType: 'instagram'
   }, {
-    accessToken: longLived.accessToken,
+    accessToken: tokenResult.accessToken,
     verifyToken,
     appSecret
   }, stored.user_id || '');
@@ -4278,7 +4288,7 @@ async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
     name: channelName,
     connectorType: 'instagram',
     enabled: true,
-    authMode: 'instagram_login',
+    authMode: 'unified_login',
     updatedCredentialFields: ['accessToken', 'verifyToken', 'appSecret'],
     instagramAccountId: profile.userId,
     username: profile.username || ''
@@ -4861,7 +4871,7 @@ function normalizeChannelConfigValue(key, value) {
     return text.slice(0, 100);
   }
   if (key === 'authMode') {
-    if (text !== 'instagram_login' && text !== 'embedded_signup') {
+    if (text !== 'instagram_login' && text !== 'unified_login' && text !== 'embedded_signup') {
       throw httpError(400, 'Authentication mode is invalid.');
     }
     return text;
@@ -9866,7 +9876,8 @@ async function sendInstagram(env, channel, recipient, text) {
   const accountId = String(channel.config?.instagramAccountId || '');
   if (!credentials.accessToken || !accountId) throw nonRetryableError('Instagram credentials are not configured.');
   const version = metaApiVersion(channel.config?.apiVersion);
-  const response = await fetch(`https://graph.instagram.com/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}/messages`, {
+  const graphHost = instagramGraphApiHost(channel);
+  const response = await fetch(`${graphHost}/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${credentials.accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ recipient: { id: String(recipient) }, message: { text } })
@@ -9902,8 +9913,9 @@ async function sendInstagramMedia(env, channel, recipient, file, attachment) {
     }
   }));
   body.set('filedata', file, attachment.filename);
+  const graphHost = instagramGraphApiHost(channel);
   const response = await fetch(
-    `https://graph.instagram.com/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}/messages`,
+    `${graphHost}/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}/messages`,
     { method: 'POST', headers: { Authorization: `Bearer ${credentials.accessToken}` }, body }
   );
   const data = safeJsonParse(await response.text(), {});
@@ -12421,7 +12433,8 @@ export async function fetchInstagramProfileName(channel, credentials, igsid, fet
   const token = String(credentials?.accessToken || '');
   if (!profileId || !token) return '';
   const version = metaApiVersion(channel?.config?.apiVersion);
-  const endpoint = new URL(`https://graph.instagram.com/${encodeURIComponent(version)}/${encodeURIComponent(profileId)}`);
+  const graphHost = instagramGraphApiHost(channel);
+  const endpoint = new URL(`${graphHost}/${encodeURIComponent(version)}/${encodeURIComponent(profileId)}`);
   endpoint.searchParams.set('fields', 'name,username');
   const response = await fetchImpl(endpoint, {
     headers: { Authorization: `Bearer ${token}` }

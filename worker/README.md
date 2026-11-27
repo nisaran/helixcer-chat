@@ -46,8 +46,7 @@ npx wrangler secret put GOOGLE_REDIRECT_URI
 npx wrangler secret put META_APP_ID
 npx wrangler secret put META_APP_SECRET
 npx wrangler secret put META_EMBEDDED_SIGNUP_CONFIG_ID
-npx wrangler secret put INSTAGRAM_APP_ID
-npx wrangler secret put INSTAGRAM_APP_SECRET
+npx wrangler secret put META_INSTAGRAM_LOGIN_CONFIG_ID
 npx wrangler secret put BOOTSTRAP_OWNER_EMAIL
 npx wrangler secret put CHANNEL_CREDENTIALS_KEY
 npx wrangler secret put VAPID_PRIVATE_KEY
@@ -65,11 +64,11 @@ Optional Meta WhatsApp Embedded Signup (`Login with Facebook` on WhatsApp channe
 - `META_GRAPH_API_VERSION`: optional Graph API version override (defaults to `v22.0`).
 - `META_WEBHOOK_VERIFY_TOKEN`: optional shared verify token for the app-level WhatsApp webhook at `/webhooks/whatsapp-app`. When unset, Helixcer uses `helixcer-wa-app-{META_APP_ID}`.
 
-Optional Instagram Business Login (`Login with Instagram` on Instagram channel setup):
+Optional Instagram Unified Login (`Login with Instagram` on Instagram channel setup):
 
-- `INSTAGRAM_APP_ID`: Instagram App ID from App Dashboard → Instagram → API setup with Instagram login → Business login settings. Falls back to `META_APP_ID` when unset.
-- `INSTAGRAM_APP_SECRET`: Instagram App Secret from the same Business login settings. Falls back to `META_APP_SECRET` when unset. Used for authorization-code exchange, long-lived token exchange, and per-channel Instagram webhook signature verification.
-- `INSTAGRAM_OAUTH_REDIRECT_URI`: optional override for the OAuth callback (defaults to `https://api.chat.helixcer.com/auth/instagram/callback`). Register this exact URI under Instagram Business login → OAuth redirect URIs.
+- `META_APP_ID` / `META_APP_SECRET`: Meta app credentials used for Facebook Login for Business code exchange and webhook signature verification.
+- `META_INSTAGRAM_LOGIN_CONFIG_ID`: Facebook Login for Business configuration ID from App Dashboard → Instagram → API setup with Unified login (the `config_id` in the Login URL).
+- `META_INSTAGRAM_OAUTH_REDIRECT_URI`: optional override for the OAuth callback (defaults to `https://api.chat.helixcer.com/auth/meta/callback`). Register this exact URI under the configuration’s Redirect URL list.
 
 In Meta, allow Helixcer app domains under Facebook Login for Business → Settings (Allowed domains / Valid OAuth redirect URIs). Helixcer auto-configures the app-level WhatsApp webhook (`/webhooks/whatsapp-app`) and then sets each WABA’s `override_callback_uri` to `https://api.chat.helixcer.com/webhooks/whatsapp/{channelId}` during Embedded Signup / Register Webhook.
 
@@ -220,7 +219,8 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `POST /api/channels/oauth/google-reviews/confirm`
 - `GET /api/channels/oauth/instagram/config` (owner/admin; whether Login with Instagram is configured)
 - `GET /api/channels/oauth/instagram/start` (owner/admin; redirects to Instagram Business Login)
-- `GET /auth/instagram/callback` (Instagram OAuth callback; creates/updates the Instagram channel)
+- `GET /auth/meta/callback` (Instagram Unified Login OAuth callback; creates/updates the Instagram channel)
+- `GET /auth/instagram/callback` (alias for the same Instagram OAuth callback)
 - `GET /api/conversations`
 - `POST /api/conversations` (opens or reuses one conversation for an exact contact identity and connected channel)
 - `PATCH /api/conversations/:id`

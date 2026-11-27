@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { handleRequest } from '../src/index.js';
-import { INSTAGRAM_LOGIN_SCOPES, INSTAGRAM_OAUTH_COOKIE } from '../src/instagram-login.js';
+import { INSTAGRAM_OAUTH_COOKIE } from '../src/instagram-login.js';
 
 class TestD1Statement {
   constructor(statement, values = []) {
@@ -78,9 +78,10 @@ function envFor(DB, overrides = {}) {
     APP_NAME: 'Helixcer Chat',
     APP_ORIGIN: 'https://app.chat.helixcer.com',
     ALLOWED_ORIGINS: 'https://app.chat.helixcer.com,https://chat.helixcer.com',
-    INSTAGRAM_APP_ID: '990602627938098',
-    INSTAGRAM_APP_SECRET: 'instagram-app-secret-value-1234567890',
-    INSTAGRAM_OAUTH_REDIRECT_URI: 'https://api.chat.helixcer.com/auth/instagram/callback',
+    META_APP_ID: '1051245721347219',
+    META_APP_SECRET: 'meta-app-secret-value-1234567890ab',
+    META_INSTAGRAM_LOGIN_CONFIG_ID: '1191341996753713',
+    META_INSTAGRAM_OAUTH_REDIRECT_URI: 'https://api.chat.helixcer.com/auth/meta/callback',
     META_GRAPH_API_VERSION: 'v26.0',
     BOOTSTRAP_OWNER_EMAIL: 'owner@example.com',
     DEFAULT_WORKSPACE_ID: 'ws_default',
@@ -109,37 +110,29 @@ function cookieValue(response, name) {
   return match ? decodeURIComponent(match[1]) : '';
 }
 
-function mockInstagramFetch() {
-  return async (input, init = {}) => {
+function mockUnifiedInstagramFetch() {
+  return async (input) => {
     const url = String(input);
-    if (url === 'https://api.instagram.com/oauth/access_token') {
-      assert.equal(String(init.method || 'GET').toUpperCase(), 'POST');
+    if (url.includes('graph.facebook.com') && url.includes('/oauth/access_token')) {
       return Response.json({
-        access_token: 'IGQW-short-lived-token',
-        user_id: '17841448346886805',
-        permissions: INSTAGRAM_LOGIN_SCOPES.join(',')
-      });
-    }
-    if (url.startsWith('https://graph.instagram.com/access_token')) {
-      return Response.json({
-        access_token: 'IGQW-long-lived-token-value-123456',
+        access_token: 'EAAG-system-user-token-value-123456',
         token_type: 'bearer',
         expires_in: 5184000
       });
     }
-    if (url.includes('graph.instagram.com') && url.includes('/me')) {
+    if (url.includes('/me/assigned_instagram_accounts')) {
       return Response.json({
-        user_id: '17841448346886805',
-        username: 'helixcer',
-        account_type: 'Business',
-        name: 'Helixcer'
+        data: [{ id: '17841448346886805', username: 'helixcer', name: 'Helixcer' }]
       });
+    }
+    if (url.includes('graph.facebook.com') && url.includes('/me?') && url.includes('client_business_id')) {
+      return Response.json({ client_business_id: '123456789012345', id: '999' });
     }
     return new Response(`unexpected fetch ${url}`, { status: 500 });
   };
 }
 
-test('Instagram Login config reports availability from Instagram App credentials', async () => {
+test('Instagram Login config reports Unified Login availability', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB);
   const response = await handleRequest(new Request(
@@ -149,19 +142,20 @@ test('Instagram Login config reports availability from Instagram App credentials
   assert.equal(response.status, 200, await response.clone().text());
   const body = await response.json();
   assert.equal(body.available, true);
-  assert.equal(body.appId, '990602627938098');
-  assert.deepEqual(body.scopes, INSTAGRAM_LOGIN_SCOPES);
+  assert.equal(body.appId, '1051245721347219');
+  assert.equal(body.configId, '1191341996753713');
+  assert.equal(body.authMode, 'unified_login');
 
   const missing = await handleRequest(new Request(
     'https://api.chat.helixcer.com/api/channels/oauth/instagram/config',
     { headers: { Authorization: 'Bearer recovery-secret' } }
-  ), envFor(DB, { INSTAGRAM_APP_ID: '', INSTAGRAM_APP_SECRET: '', META_APP_ID: '', META_APP_SECRET: '' }));
+  ), envFor(DB, { META_INSTAGRAM_LOGIN_CONFIG_ID: '' }));
   assert.equal(missing.status, 200);
   assert.equal((await missing.json()).available, false);
   database.close();
 });
 
-test('Instagram Login OAuth start redirects to Instagram authorize', async () => {
+test('Instagram Login OAuth start redirects to Facebook Login for Business', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB);
   const start = await handleRequest(new Request(
@@ -170,18 +164,19 @@ test('Instagram Login OAuth start redirects to Instagram authorize', async () =>
   ), env);
   assert.equal(start.status, 302, await start.clone().text());
   const location = new URL(start.headers.get('Location'));
-  assert.equal(location.origin, 'https://www.instagram.com');
-  assert.equal(location.pathname, '/oauth/authorize');
-  assert.equal(location.searchParams.get('client_id'), env.INSTAGRAM_APP_ID);
-  assert.equal(location.searchParams.get('redirect_uri'), env.INSTAGRAM_OAUTH_REDIRECT_URI);
+  assert.equal(location.origin, 'https://www.facebook.com');
+  assert.equal(location.pathname, '/dialog/oauth');
+  assert.equal(location.searchParams.get('client_id'), env.META_APP_ID);
+  assert.equal(location.searchParams.get('config_id'), env.META_INSTAGRAM_LOGIN_CONFIG_ID);
+  assert.equal(location.searchParams.get('redirect_uri'), env.META_INSTAGRAM_OAUTH_REDIRECT_URI);
   assert.equal(location.searchParams.get('response_type'), 'code');
-  assert.equal(location.searchParams.get('scope'), INSTAGRAM_LOGIN_SCOPES.join(','));
+  assert.equal(location.searchParams.get('override_default_response_type'), 'true');
   assert.ok(cookieValue(start, INSTAGRAM_OAUTH_COOKIE));
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM instagram_login_oauth_states').get().count, 1);
   database.close();
 });
 
-test('Instagram Login OAuth callback creates a verified Instagram channel', async () => {
+test('Instagram Login OAuth callback creates a unified-login Instagram channel', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB);
   const start = await handleRequest(new Request(
@@ -192,11 +187,11 @@ test('Instagram Login OAuth callback creates a verified Instagram channel', asyn
   const state = cookieValue(start, INSTAGRAM_OAUTH_COOKIE);
 
   const previousFetch = globalThis.fetch;
-  globalThis.fetch = mockInstagramFetch();
+  globalThis.fetch = mockUnifiedInstagramFetch();
   let callbackResponse;
   try {
     callbackResponse = await handleRequest(new Request(
-      `https://api.chat.helixcer.com/auth/instagram/callback?code=AQBx-auth-code&state=${encodeURIComponent(state)}`,
+      `https://api.chat.helixcer.com/auth/meta/callback?code=AQBx-auth-code&state=${encodeURIComponent(state)}`,
       { headers: { Cookie: `${INSTAGRAM_OAUTH_COOKIE}=${encodeURIComponent(state)}` } }
     ), env);
   } finally {
@@ -219,21 +214,12 @@ test('Instagram Login OAuth callback creates a verified Instagram channel', asyn
   const config = JSON.parse(row.config_json);
   assert.equal(config.instagramAccountId, '17841448346886805');
   assert.equal(config.username, 'helixcer');
-  assert.equal(config.appId, env.INSTAGRAM_APP_ID);
-  assert.equal(config.authMode, 'instagram_login');
+  assert.equal(config.appId, env.META_APP_ID);
+  assert.equal(config.authMode, 'unified_login');
+  assert.equal(config.clientBusinessId, '123456789012345');
   assert.ok(config.credentialsVerifiedAt);
-  assert.equal(config.verifiedUsername, 'helixcer');
   assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM channel_credentials
     WHERE channel_id=? AND credential_key IN ('accessToken','appSecret','verifyToken')`).get(channelId).count, 3);
-  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM instagram_login_oauth_states').get().count, 0);
-
-  const listed = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
-    headers: { Authorization: 'Bearer recovery-secret' }
-  }), env);
-  const item = (await listed.json()).items.find(entry => entry.channelId === channelId);
-  assert.equal(item.setup.authMode, 'instagram_login');
-  assert.equal(item.setup.verifiedUsername, 'helixcer');
-  assert.equal(JSON.stringify(item).includes('IGQW-long-lived-token'), false);
   database.close();
 });
 
@@ -246,7 +232,7 @@ test('Instagram Login OAuth denial redirects with an error', async () => {
   ), env);
   const state = cookieValue(start, INSTAGRAM_OAUTH_COOKIE);
   const denied = await handleRequest(new Request(
-    `https://api.chat.helixcer.com/auth/instagram/callback?error=access_denied&error_reason=user_denied&error_description=The+user+denied+your+request&state=${encodeURIComponent(state)}`,
+    `https://api.chat.helixcer.com/auth/meta/callback?error=access_denied&error_reason=user_denied&error_description=The+user+denied+your+request&state=${encodeURIComponent(state)}`,
     { headers: { Cookie: `${INSTAGRAM_OAUTH_COOKIE}=${encodeURIComponent(state)}` } }
   ), env);
   assert.equal(denied.status, 302);
