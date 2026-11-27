@@ -8,6 +8,12 @@ GOOGLE_REDIRECT_URI="http://localhost:8787/auth/google/callback"
 # Separate callback for Google Business / Reviews channel connect (same OAuth client).
 # Add this exact URI in Google Cloud Console → Credentials → Authorized redirect URIs.
 GOOGLE_BUSINESS_REDIRECT_URI="http://localhost:8787/auth/google-business/callback"
+# Optional: Pub/Sub topic for near-realtime NEW_REVIEW / UPDATED_REVIEW events.
+# Format: projects/PROJECT_ID/topics/TOPIC_ID
+GOOGLE_BUSINESS_PUBSUB_TOPIC=""
+# Optional shared secret for the Pub/Sub push subscription URL:
+# https://api.chat.helixcer.com/webhooks/google-reviews-pubsub?token=...
+GOOGLE_REVIEWS_WEBHOOK_TOKEN=""
 # Meta WhatsApp Embedded Signup (Login with Facebook). App ID + config ID are public;
 # App Secret must stay a Worker secret. Create the Login for Business config in Meta.
 META_APP_ID="your-meta-app-id"

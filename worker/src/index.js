@@ -37,10 +37,16 @@ import {
   exchangeGoogleBusinessCode,
   fetchGoogleBusinessEmail,
   googleBusinessOAuthCookieHeader,
+  decodePubSubPushMessage,
+  getGoogleBusinessReview,
   listGoogleBusinessLocations,
+  listGoogleBusinessReviews,
+  normalizeGoogleReviewToInbound,
   parseGoogleBusinessLocationSelection,
+  parseGoogleReviewNotification,
   readGoogleBusinessOAuthCookie,
   refreshGoogleBusinessToken,
+  updateGoogleBusinessNotificationSetting,
   verifyGoogleBusinessLocation
 } from './google-business.js';
 import {
@@ -236,7 +242,13 @@ export default {
     return handleRequest(request, env, ctx);
   },
   scheduled(_event, env, ctx) {
-    ctx.waitUntil(Promise.all([wakeCampaignRunners(env), retryDueMessages(env, {nonCampaignOnly:true}), cleanupExpiredAuth(env), cleanupExpiredExternalRequests(env)]));
+    ctx.waitUntil(Promise.all([
+      wakeCampaignRunners(env),
+      retryDueMessages(env, { nonCampaignOnly: true }),
+      cleanupExpiredAuth(env),
+      cleanupExpiredExternalRequests(env),
+      syncDueGoogleReviewsChannels(env)
+    ]));
   }
 };
 
@@ -506,6 +518,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (messengerMatch) return await handleFacebookMessengerWebhook(request, env, decodeURIComponent(messengerMatch[1]), ctx);
     const genericMatch = url.pathname.match(/^\/webhooks\/generic\/([^/]+)$/);
     if (genericMatch && request.method === 'POST') return await handleGenericWebhook(request, env, decodeURIComponent(genericMatch[1]), ctx);
+    if (url.pathname === '/webhooks/google-reviews-pubsub' && request.method === 'POST') {
+      return await handleGoogleReviewsPubSubWebhook(request, env, ctx);
+    }
 
     if (url.pathname.startsWith('/api/v1/')) return await handleExternalApi(request, env, ctx, url);
 
@@ -892,6 +907,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       requirePermission(principal, 'channels.manage');
       const result = await confirmGoogleBusinessChannel(env, principal, await readJson(request));
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId: result.channelId });
+      ctx.waitUntil(bootstrapGoogleReviewsChannel(env, workspaceId, result.channelId).catch(() => {}));
       return withCors(json(result, result.created ? 201 : 200), cors);
     }
     if (url.pathname === '/api/channels/meta/embedded-signup/config' && request.method === 'GET') {
@@ -956,6 +972,14 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       requirePermission(principal, 'channels.manage');
       const channelId = decodeURIComponent(channelCancelSyncMatch[1]);
       const result = await cancelWhatsAppCoexistenceHistorySync(env, workspaceId, channelId);
+      await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
+      return withCors(json(result), cors);
+    }
+    const channelSyncReviewsMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/sync-reviews$/);
+    if (channelSyncReviewsMatch && request.method === 'POST') {
+      requirePermission(principal, 'channels.manage');
+      const channelId = decodeURIComponent(channelSyncReviewsMatch[1]);
+      const result = await syncGoogleReviewsChannel(env, workspaceId, channelId, { mode: 'manual' });
       await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
       return withCors(json(result), cors);
     }
@@ -3609,10 +3633,23 @@ function channelHealth(row, config = safeJsonParse(row.config_json, {}), credent
     definition.requiredCredentials.every(key => credentialFields.has(key));
   if (!configured) return 'setup_required';
   if (!config.credentialsVerifiedAt) return config.webhookVerifiedAt ? 'receiving' : 'configured';
-  // Google Reviews is OAuth/pull based and does not use provider webhooks.
+  // Google Reviews uses OAuth + Pub/Sub / scheduled pull (no Meta-style channel webhook).
   if (connectorType === 'google_reviews') return 'connected';
   if (!config.webhookVerifiedAt) return 'webhook_required';
   return 'connected';
+}
+
+function publicGoogleReviewsSync(sync = {}) {
+  if (!sync || typeof sync !== 'object' || Array.isArray(sync)) return null;
+  return {
+    status: String(sync.status || ''),
+    imported: Number(sync.imported) || 0,
+    updated: Number(sync.updated) || 0,
+    lastSyncAt: String(sync.lastSyncAt || ''),
+    lastWebhookAt: String(sync.lastWebhookAt || ''),
+    notificationsRegisteredAt: String(sync.notificationsRegisteredAt || ''),
+    error: String(sync.error || '').slice(0, 240)
+  };
 }
 
 function channelSetupView(row, config = safeJsonParse(row.config_json, {}), credentialFields = new Set()) {
@@ -3621,7 +3658,7 @@ function channelSetupView(row, config = safeJsonParse(row.config_json, {}), cred
   if (!definition) return {};
   const presence = Object.fromEntries(definition.requiredCredentials.map(key => [key, credentialFields.has(key)]));
   const callbackPath = connectorType === 'google_reviews'
-    ? ''
+    ? '/webhooks/google-reviews-pubsub'
     : connectorType === 'instagram' && config.appId
       ? `/webhooks/instagram-app/${encodeURIComponent(config.appId)}`
       : connectorType === 'facebook_messenger' && config.appId
@@ -3635,6 +3672,7 @@ function channelSetupView(row, config = safeJsonParse(row.config_json, {}), cred
       : (config.authMode || ''),
     coexistence: connectorType === 'whatsapp_cloud' ? Boolean(config.coexistence) : false,
     coexistenceSync: connectorType === 'whatsapp_cloud' ? publicCoexistenceSync(config.coexistenceSync) : null,
+    reviewsSync: connectorType === 'google_reviews' ? publicGoogleReviewsSync(config.reviewsSync) : null,
     callbackPath,
     credentialsVerifiedAt: config.credentialsVerifiedAt || '',
     subscribedAppsAt: config.subscribedAppsAt || '',
@@ -4102,6 +4140,380 @@ async function verifyGoogleReviewsChannel(env, channel, fetchImpl = fetch) {
     totalReviewCount: reviewSummary.totalReviewCount,
     averageRating: reviewSummary.averageRating
   };
+}
+
+async function googleReviewsAccessToken(env, channel, fetchImpl = fetch) {
+  const credentials = await readChannelCredentials(env, channel);
+  if (!credentials.refreshToken) {
+    throw httpError(409, 'Google Reviews refresh token is missing. Reconnect with Google.');
+  }
+  let accessToken = String(credentials.accessToken || '');
+  if (accessToken) return { accessToken, refreshToken: credentials.refreshToken };
+  const refreshed = await refreshGoogleBusinessToken(env, credentials.refreshToken, fetchImpl);
+  accessToken = refreshed.accessToken;
+  await storeChannelCredentials(env, channel, {
+    accessToken,
+    refreshToken: refreshed.refreshToken || credentials.refreshToken
+  });
+  return { accessToken, refreshToken: refreshed.refreshToken || credentials.refreshToken };
+}
+
+async function withGoogleReviewsAccessToken(env, channel, work, fetchImpl = fetch) {
+  let token = await googleReviewsAccessToken(env, channel, fetchImpl);
+  try {
+    return await work(token.accessToken);
+  } catch (error) {
+    if (![401, 403, 422].includes(Number(error?.status))) throw error;
+    const refreshed = await refreshGoogleBusinessToken(env, token.refreshToken, fetchImpl);
+    await storeChannelCredentials(env, channel, {
+      accessToken: refreshed.accessToken,
+      refreshToken: refreshed.refreshToken || token.refreshToken
+    });
+    return work(refreshed.accessToken);
+  }
+}
+
+async function findGoogleReviewsChannelByLocation(env, accountId, locationId) {
+  const account = String(accountId || '').trim();
+  const location = String(locationId || '').trim();
+  if (!account || !location) return null;
+  const row = await env.DB.prepare(`SELECT channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,workspace_id
+    FROM channels
+    WHERE enabled=1 AND provider_type='google_reviews'
+      AND json_extract(config_json,'$.accountId')=?1
+      AND json_extract(config_json,'$.locationId')=?2
+    LIMIT 1`).bind(account, location).first();
+  if (!row) return null;
+  return {
+    channelId: row.channel_id,
+    name: row.name,
+    connectorType: logicalConnectorType(row),
+    capabilities: safeJsonParse(row.capabilities_json, []),
+    config: safeJsonParse(row.config_json, {}),
+    secretKey: row.secret_key,
+    workspaceId: row.workspace_id
+  };
+}
+
+function requireGoogleReviewsWebhookAuth(request, env) {
+  const expected = String(env.GOOGLE_REVIEWS_WEBHOOK_TOKEN || '').trim();
+  if (!expected) return;
+  const url = new URL(request.url);
+  const provided = String(
+    url.searchParams.get('token')
+    || request.headers.get('X-Helixcer-Google-Reviews-Token')
+    || ''
+  ).trim();
+  const bearer = String(request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!timingSafeEqual(provided, expected) && !timingSafeEqual(bearer, expected)) {
+    throw httpError(401, 'Invalid Google Reviews webhook token.');
+  }
+}
+
+async function handleGoogleReviewsPubSubWebhook(request, env, ctx) {
+  try {
+    requireGoogleReviewsWebhookAuth(request, env);
+  } catch (error) {
+    return json({ ok: false, error: error.message || 'Unauthorized.' }, error.status || 401);
+  }
+  const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
+  const body = safeJsonParse(raw, null);
+  if (!body) return json({ ok: false, error: 'Invalid JSON.' }, 400);
+  const push = decodePubSubPushMessage(body);
+  if (!push) return json({ ok: false, error: 'Invalid Pub/Sub push envelope.' }, 400);
+  // Acknowledge empty keep-alive / probe messages.
+  if (!push.data || typeof push.data !== 'object') return json({ ok: true, ignored: true });
+  const notice = parseGoogleReviewNotification(push.data);
+  if (!['NEW_REVIEW', 'UPDATED_REVIEW'].includes(notice.type)) {
+    return json({ ok: true, ignored: true, type: notice.type || '' });
+  }
+  if (!notice.accountId || !notice.locationId || !notice.reviewName) {
+    return json({ ok: false, error: 'Review notification is missing location or review name.' }, 400);
+  }
+  const channel = await findGoogleReviewsChannelByLocation(env, notice.accountId, notice.locationId);
+  if (!channel) return json({ ok: true, unmatched: true });
+  try {
+    const review = await withGoogleReviewsAccessToken(env, channel, (accessToken) => (
+      getGoogleBusinessReview(accessToken, notice.reviewName)
+    ));
+    const result = await ingestGoogleReview(env, channel, review, {
+      rawPayload: { pubsub: body, notice, review },
+      quiet: false,
+      ctx
+    });
+    const now = new Date().toISOString();
+    await updateChannelRuntimeConfig(env, channel, {
+      lastWebhookAt: now,
+      webhookVerifiedAt: channel.config?.webhookVerifiedAt || now,
+      reviewsSync: {
+        ...(channel.config?.reviewsSync || {}),
+        lastWebhookAt: now,
+        status: 'live',
+        error: ''
+      }
+    });
+    await broadcast(env, channel.workspaceId, {
+      type: 'webhook.received',
+      channelId: channel.channelId,
+      received: result.imported ? 1 : 0,
+      updated: result.updated ? 1 : 0,
+      provider: 'google_reviews'
+    });
+    return json({
+      ok: true,
+      channelId: channel.channelId,
+      imported: Boolean(result.imported),
+      updated: Boolean(result.updated)
+    });
+  } catch (error) {
+    await updateChannelRuntimeConfig(env, channel, {
+      reviewsSync: {
+        ...(channel.config?.reviewsSync || {}),
+        status: 'error',
+        error: String(error.message || 'Google Reviews webhook failed.').slice(0, 240)
+      }
+    }).catch(() => {});
+    return json({ ok: false, error: String(error.message || 'Google Reviews webhook failed.').slice(0, 240) },
+      Number(error.status) || 500);
+  }
+}
+
+async function ingestGoogleReview(env, channel, review, { rawPayload = review, quiet = false, ctx = null } = {}) {
+  const event = normalizeGoogleReviewToInbound(review);
+  const existing = await env.DB.prepare(`SELECT message_id,conversation_id,contact_id,identity_id,text,payload_json,timestamp
+    FROM messages
+    WHERE workspace_id=?1 AND channel_id=?2 AND provider_message_id=?3
+    LIMIT 1`).bind(channel.workspaceId, channel.channelId, event.providerMessageId).first();
+  if (!existing) {
+    const stored = await storeInbound(env, channel, event, {
+      ...(rawPayload && typeof rawPayload === 'object' ? rawPayload : { review }),
+      googleReview: event.review
+    });
+    if (!stored) return { imported: false, updated: false };
+    await broadcastStoredInbound(env, channel, stored);
+    if (!quiet && ctx) afterInboundStored(ctx, env, channel, stored);
+    return { imported: true, updated: false, stored };
+  }
+
+  const nextPayload = truncateJson({
+    ...(safeJsonParse(existing.payload_json, {}) || {}),
+    googleReview: event.review,
+    providerMessageId: event.providerMessageId
+  });
+  const nextText = String(event.text || '').slice(0, MAX_TEXT_LENGTH);
+  const nextTimestamp = normalizeTimestamp(event.timestamp, existing.timestamp || new Date().toISOString());
+  const changed = nextText !== String(existing.text || '')
+    || nextPayload !== String(existing.payload_json || '')
+    || nextTimestamp !== String(existing.timestamp || '');
+  if (!changed) return { imported: false, updated: false };
+
+  const now = new Date().toISOString();
+  await env.DB.prepare(`UPDATE messages
+    SET text=?4, payload_json=?5, timestamp=?6, message_type='review'
+    WHERE workspace_id=?1 AND channel_id=?2 AND message_id=?3`)
+    .bind(channel.workspaceId, channel.channelId, existing.message_id, nextText, nextPayload, nextTimestamp)
+    .run();
+  await env.DB.prepare(`UPDATE conversations SET last_message_at=?3, updated_at=?4
+    WHERE workspace_id=?1 AND conversation_id=?2`)
+    .bind(channel.workspaceId, existing.conversation_id, nextTimestamp, now)
+    .run();
+  const stored = {
+    messageId: existing.message_id,
+    conversationId: existing.conversation_id,
+    senderName: event.displayName,
+    preview: nextText,
+    messageType: 'review',
+    message: {
+      messageId: existing.message_id,
+      conversationId: existing.conversation_id,
+      channelId: channel.channelId,
+      contactIdentityId: existing.identity_id,
+      identityId: existing.identity_id,
+      direction: 'inbound',
+      messageType: 'review',
+      text: nextText,
+      status: 'received',
+      timestamp: nextTimestamp,
+      channelMessageId: event.providerMessageId,
+      error: '',
+      senderName: event.displayName,
+      connectorType: channel.connectorType,
+      channelName: channel.name || '',
+      channelProfileId: event.channelProfileId,
+      attachment: null,
+      reply: null
+    },
+    conversation: await getConversationItem(env, channel.workspaceId, existing.conversation_id)
+  };
+  await broadcastStoredInbound(env, channel, stored);
+  return { imported: false, updated: true, stored };
+}
+
+async function registerGoogleReviewsNotifications(env, channel, fetchImpl = fetch) {
+  const topic = String(env.GOOGLE_BUSINESS_PUBSUB_TOPIC || '').trim();
+  if (!topic) {
+    return { ok: false, skipped: true, reason: 'GOOGLE_BUSINESS_PUBSUB_TOPIC is not configured.' };
+  }
+  const accountId = String(channel.config?.accountId || '').trim();
+  if (!accountId) throw httpError(409, 'Google Business account ID is missing.');
+  const setting = await withGoogleReviewsAccessToken(env, channel, (accessToken) => (
+    updateGoogleBusinessNotificationSetting(accessToken, accountId, {
+      pubsubTopic: topic,
+      notificationTypes: ['NEW_REVIEW', 'UPDATED_REVIEW']
+    }, fetchImpl)
+  ), fetchImpl);
+  const now = new Date().toISOString();
+  await updateChannelRuntimeConfig(env, channel, {
+    reviewsSync: {
+      ...(channel.config?.reviewsSync || {}),
+      notificationsRegisteredAt: now,
+      pubsubTopic: topic,
+      status: channel.config?.reviewsSync?.status || 'registered',
+      error: ''
+    }
+  });
+  return { ok: true, setting, notificationsRegisteredAt: now };
+}
+
+async function syncGoogleReviewsChannel(env, workspaceId, channelId, {
+  mode = 'incremental',
+  maxPages = 4,
+  fetchImpl = fetch,
+  ctx = null
+} = {}) {
+  const id = cleanId(channelId, 'Channel ID');
+  const channel = await getChannel(env, id, 'google_reviews', workspaceId);
+  if (!channel) throw httpError(404, 'Google Reviews channel not found.');
+  const accountId = String(channel.config?.accountId || '').trim();
+  const locationId = String(channel.config?.locationId || '').trim();
+  if (!accountId || !locationId) throw httpError(409, 'Google Business location is not configured.');
+
+  const quiet = mode !== 'manual';
+  let imported = 0;
+  let updated = 0;
+  let pages = 0;
+  let pageToken = '';
+  let newestUpdateTime = String(channel.config?.reviewsSync?.newestUpdateTime || '');
+  const watermark = mode === 'initial' || mode === 'manual'
+    ? ''
+    : String(channel.config?.reviewsSync?.newestUpdateTime || '');
+
+  await updateChannelRuntimeConfig(env, channel, {
+    reviewsSync: {
+      ...(channel.config?.reviewsSync || {}),
+      status: 'syncing',
+      error: ''
+    }
+  });
+
+  try {
+    do {
+      const page = await withGoogleReviewsAccessToken(env, channel, (accessToken) => (
+        listGoogleBusinessReviews(accessToken, accountId, locationId, {
+          pageSize: 50,
+          pageToken,
+          orderBy: 'updateTime desc'
+        }, fetchImpl)
+      ), fetchImpl);
+      pages += 1;
+      let reachedWatermark = false;
+      for (const review of page.reviews) {
+        const updateTime = String(review.updateTime || review.createTime || '');
+        if (watermark && updateTime && updateTime <= watermark) {
+          reachedWatermark = true;
+          break;
+        }
+        if (updateTime && (!newestUpdateTime || updateTime > newestUpdateTime)) newestUpdateTime = updateTime;
+        const result = await ingestGoogleReview(env, channel, review, {
+          rawPayload: { googleReviewList: true, review },
+          quiet,
+          ctx
+        });
+        if (result.imported) imported += 1;
+        if (result.updated) updated += 1;
+      }
+      pageToken = reachedWatermark ? '' : String(page.nextPageToken || '');
+    } while (pageToken && pages < maxPages);
+
+    const now = new Date().toISOString();
+    const reviewsSync = {
+      ...(channel.config?.reviewsSync || {}),
+      status: 'idle',
+      imported: Number(channel.config?.reviewsSync?.imported || 0) + imported,
+      updated: Number(channel.config?.reviewsSync?.updated || 0) + updated,
+      lastSyncAt: now,
+      newestUpdateTime: newestUpdateTime || channel.config?.reviewsSync?.newestUpdateTime || '',
+      error: ''
+    };
+    await updateChannelRuntimeConfig(env, channel, {
+      lastWebhookAt: now,
+      webhookVerifiedAt: channel.config?.webhookVerifiedAt || now,
+      reviewsSync
+    });
+    return {
+      ok: true,
+      channelId: channel.channelId,
+      imported,
+      updated,
+      pages,
+      reviewsSync: publicGoogleReviewsSync(reviewsSync)
+    };
+  } catch (error) {
+    await updateChannelRuntimeConfig(env, channel, {
+      reviewsSync: {
+        ...(channel.config?.reviewsSync || {}),
+        status: 'error',
+        error: String(error.message || 'Google Reviews sync failed.').slice(0, 240)
+      }
+    }).catch(() => {});
+    throw error;
+  }
+}
+
+async function bootstrapGoogleReviewsChannel(env, workspaceId, channelId) {
+  const channel = await getChannel(env, channelId, 'google_reviews', workspaceId);
+  if (!channel) return;
+  try {
+    await registerGoogleReviewsNotifications(env, channel);
+  } catch (error) {
+    await updateChannelRuntimeConfig(env, channel, {
+      reviewsSync: {
+        ...(channel.config?.reviewsSync || {}),
+        status: 'error',
+        error: String(error.message || 'Notification registration failed.').slice(0, 240)
+      }
+    }).catch(() => {});
+  }
+  await syncGoogleReviewsChannel(env, workspaceId, channelId, { mode: 'initial', maxPages: 4 });
+  await broadcast(env, workspaceId, { type: 'channel.updated', channelId });
+}
+
+async function syncDueGoogleReviewsChannels(env) {
+  const cutoff = new Date(Date.now() - (15 * 60 * 1000)).toISOString();
+  const rows = await env.DB.prepare(`SELECT channel_id,workspace_id,config_json
+    FROM channels
+    WHERE enabled=1 AND provider_type='google_reviews'
+    ORDER BY updated_at ASC
+    LIMIT 20`).all();
+  let synced = 0;
+  for (const row of rows.results || []) {
+    const config = safeJsonParse(row.config_json, {});
+    const lastSyncAt = String(config?.reviewsSync?.lastSyncAt || '');
+    const status = String(config?.reviewsSync?.status || '');
+    if (status === 'syncing') continue;
+    if (lastSyncAt && lastSyncAt > cutoff) continue;
+    try {
+      await syncGoogleReviewsChannel(env, row.workspace_id, row.channel_id, {
+        mode: lastSyncAt ? 'incremental' : 'initial',
+        maxPages: lastSyncAt ? 2 : 4
+      });
+      synced += 1;
+    } catch {
+      // Keep polling other channels; failures are stored on reviewsSync.error.
+    }
+    if (synced >= 3) break;
+  }
+  return { ok: true, synced };
 }
 
 async function startInstagramLoginChannelOAuth(request, env, principal) {
