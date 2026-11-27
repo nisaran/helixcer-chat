@@ -1482,8 +1482,9 @@
         <div class="provider-form-head"><img class="provider-mark instagram" src="./assets/provider-instagram.svg" alt=""><div><strong>Instagram Messaging</strong><span>Choose how you want to connect this Instagram account.</span></div></div>
         <div class="provider-setup-chooser" id="instagramSetupChooser" role="group" aria-label="Instagram setup method">
           <button class="secondary-button provider-setup-option" type="button" id="instagramSetupManual" data-action="provider-setup-manual" data-provider="instagram" aria-pressed="false">Manual Setup</button>
-          <button class="secondary-button provider-setup-option" type="button" id="instagramSetupLogin" data-action="provider-setup-login" data-provider="instagram" disabled aria-disabled="true" title="Coming soon">Login with Instagram</button>
+          <button class="secondary-button provider-setup-option" type="button" id="instagramSetupLogin" data-action="provider-setup-login" data-provider="instagram" disabled aria-disabled="true" title="Login with Instagram is not configured yet">Login with Instagram</button>
         </div>
+        <p class="field-help provider-setup-help" id="instagramLoginHelp" hidden>Sign in with your Instagram professional account. Helixcer stores a long-lived Instagram User token and verifies the account ID automatically.</p>
         <div class="provider-manual-fields" id="instagramManualFields" hidden>
           <div class="form-grid channel-form-grid">
             <label class="field-label">Instagram account ID<input class="text-field" name="instagramAccountId" inputmode="numeric" maxlength="40" placeholder="17841400000000000" required></label>

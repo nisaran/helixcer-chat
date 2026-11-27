@@ -142,7 +142,11 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="instagram"/);
   assert.match(html, /data-action="provider-setup-login"[^>]*data-provider="instagram"[^>]*disabled/);
   assert.match(html, /Login with Instagram/);
+  assert.match(html, /id="instagramLoginHelp" hidden/);
   assert.match(html, /id="instagramManualFields" hidden/);
+  assert.match(app, /startInstagramLogin|\/api\/channels\/oauth\/instagram\/start/);
+  assert.match(app, /consumeInstagramOAuthReturn/);
+  assert.match(app, /instagramLoginConnectUrl/);
   assert.match(html, /id="messengerSetupChooser"/);
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="facebook_messenger"/);
   assert.match(html, /data-action="provider-setup-login"[^>]*data-provider="facebook_messenger"[^>]*disabled/);

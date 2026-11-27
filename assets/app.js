@@ -160,6 +160,7 @@
     providerSetupMode: "",
     whatsappEmbeddedSignup: { available: false },
     whatsappEmbeddedSignupPending: null,
+    instagramLogin: { available: false },
     selectedConversationId: null,
     selectedContactId: null,
     contactCreateIdentityDrafts: [],
@@ -1779,6 +1780,23 @@
       return url.toString();
     }
 
+    instagramLoginConnectUrl({ name = "", channelId = "" } = {}) {
+      if (this.isDemo) return "#";
+      const url = new URL("/api/channels/oauth/instagram/start", this.base);
+      const returnTo = new URL(location.pathname || "/", location.origin);
+      returnTo.hash = "#channels";
+      url.searchParams.set("return_to", returnTo.toString());
+      if (name) url.searchParams.set("name", name);
+      if (channelId) url.searchParams.set("channelId", channelId);
+      return url.toString();
+    }
+
+    getInstagramLoginConfig() {
+      return this.isDemo
+        ? Promise.resolve({ available: false, provider: "instagram" })
+        : this.request("/api/channels/oauth/instagram/config");
+    }
+
     getGoogleReviewsPending(token) {
       if (this.isDemo) {
         return Promise.resolve({
@@ -3004,6 +3022,7 @@
       ]);
       await applyLocationRoute();
       await consumeGoogleReviewsOAuthReturn();
+      await consumeInstagramOAuthReturn();
     } catch (error) {
       const message = error.status === 403
         ? "Your account does not currently have access to this workspace."
@@ -3073,6 +3092,7 @@
     ]);
     await applyLocationRoute();
     await consumeGoogleReviewsOAuthReturn();
+    await consumeInstagramOAuthReturn();
   }
 
   async function submitPasswordLogin(form) {
@@ -3868,6 +3888,9 @@
       if (data.whatsappEmbeddedSignup && typeof data.whatsappEmbeddedSignup === "object") {
         state.whatsappEmbeddedSignup = data.whatsappEmbeddedSignup;
       }
+      if (data.instagramLogin && typeof data.instagramLogin === "object") {
+        state.instagramLogin = data.instagramLogin;
+      }
       if (data.tags) state.workspaceTags = normalizeWorkspaceTags(data.tags);
       const searchQuery = state.search.trim();
       state.conversationSearchActive = Boolean(searchQuery);
@@ -3943,6 +3966,9 @@
       state.channels = asItems(data.channels).map(normalizeChannel);
       if (data.whatsappEmbeddedSignup && typeof data.whatsappEmbeddedSignup === "object") {
         state.whatsappEmbeddedSignup = data.whatsappEmbeddedSignup;
+      }
+      if (data.instagramLogin && typeof data.instagramLogin === "object") {
+        state.instagramLogin = data.instagramLogin;
       }
       if (data.tags) state.workspaceTags = normalizeWorkspaceTags(data.tags);
       // Bootstrap has no search `q`. Never merge that unfiltered first page over an
@@ -15650,8 +15676,10 @@
 
   function setProviderSetupMode(mode = "") {
     const normalized = String(mode || "").trim();
-    // manual → show credential fields; facebook → hide them and use Embedded Signup
-    state.providerSetupMode = normalized === "manual" || normalized === "facebook" ? normalized : "";
+    // manual → show credential fields; facebook/login → hide them and use OAuth
+    state.providerSetupMode = normalized === "manual" || normalized === "facebook" || normalized === "login"
+      ? normalized
+      : "";
     const provider = $("channelProvider")?.value || "";
     const channelId = $("channelIdInput")?.value || "";
     const channel = state.channels.find((item) => item.channelId === channelId) || null;
@@ -15786,6 +15814,29 @@
     if (whatsappHelp) {
       whatsappHelp.hidden = !(selectedProvider === "whatsapp_cloud" && embeddedAvailable && !manualReady && !showEmbeddedDetails);
     }
+    const instagramLoginButton = $("instagramSetupLogin");
+    const instagramHelp = $("instagramLoginHelp");
+    const instagramLoginAvailable = Boolean(state.instagramLogin?.available && state.instagramLogin?.appId);
+    if (instagramLoginButton) {
+      const showInstagramLogin = selectedProvider === "instagram";
+      instagramLoginButton.hidden = !showInstagramLogin;
+      if (showInstagramLogin && instagramLoginAvailable) {
+        instagramLoginButton.disabled = false;
+        instagramLoginButton.removeAttribute("aria-disabled");
+        instagramLoginButton.removeAttribute("title");
+        instagramLoginButton.classList.toggle("is-active", state.providerSetupMode === "login");
+        instagramLoginButton.setAttribute("aria-pressed", String(state.providerSetupMode === "login"));
+      } else {
+        instagramLoginButton.disabled = true;
+        instagramLoginButton.setAttribute("aria-disabled", "true");
+        instagramLoginButton.setAttribute("title", instagramLoginAvailable ? "" : "Login with Instagram is not configured yet");
+        instagramLoginButton.classList.remove("is-active");
+        instagramLoginButton.setAttribute("aria-pressed", "false");
+      }
+    }
+    if (instagramHelp) {
+      instagramHelp.hidden = !(selectedProvider === "instagram" && instagramLoginAvailable && !manualReady);
+    }
     const googleConnected = Boolean(editing && setup.credentialsPresent);
     const googleNote = $("googleReviewsConnectedNote");
     if (googleNote) googleNote.hidden = !(selectedProvider === "google_reviews" && googleConnected);
@@ -15869,6 +15920,74 @@
     }
     const url = state.api.googleReviewsConnectUrl({ name, channelId });
     location.assign(url);
+  }
+
+  async function startInstagramLogin() {
+    const name = $("channelNameInput")?.value?.trim() || "";
+    if (!name) {
+      showToast("Connection name required", "Enter a connection name, then try Login with Instagram again.", true);
+      $("channelNameInput")?.focus();
+      return;
+    }
+    if (state.api.isDemo) {
+      showToast("Demo mode", "Login with Instagram is simulated in demo mode. Use a live workspace to connect an Instagram account.");
+      return;
+    }
+    const button = $("instagramSetupLogin");
+    if (button) {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.textContent = "Connecting…";
+    }
+    try {
+      let config = state.instagramLogin;
+      if (!config?.available) {
+        config = await state.api.getInstagramLoginConfig();
+        state.instagramLogin = config;
+      }
+      if (!config?.available) {
+        showToast("Login with Instagram unavailable", "Instagram Business Login is not configured on this Helixcer API yet.", true);
+        return;
+      }
+      const channelId = $("channelIdInput")?.value || "";
+      location.assign(state.api.instagramLoginConnectUrl({ name, channelId }));
+    } catch (error) {
+      showToast("Login with Instagram failed", error.message, true);
+      if (button) {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        button.textContent = "Login with Instagram";
+      }
+    }
+  }
+
+  async function consumeInstagramOAuthReturn() {
+    const params = new URLSearchParams(location.search);
+    const connected = String(params.get("instagram_connected") || "").trim();
+    const oauthError = String(params.get("instagram_error") || "").trim();
+    const channelId = String(params.get("instagram_channel") || "").trim();
+    const username = String(params.get("instagram_username") || "").trim();
+    if (!connected && !oauthError) return;
+    params.delete("instagram_connected");
+    params.delete("instagram_error");
+    params.delete("instagram_channel");
+    params.delete("instagram_username");
+    const cleanQuery = params.toString();
+    history.replaceState(null, "", `${location.pathname}${cleanQuery ? `?${cleanQuery}` : ""}${location.hash || "#channels"}`);
+    setRoute("channels");
+    if (oauthError) {
+      showToast("Instagram was not connected", oauthError, true);
+      return;
+    }
+    await loadAll();
+    if (channelId) state.expandedChannelIds.add(channelId);
+    renderChannels();
+    showToast(
+      "Instagram connected",
+      username
+        ? `@${username} is linked with Login with Instagram.`
+        : "Your Instagram professional account is linked."
+    );
   }
 
   async function startWhatsAppEmbeddedSignup() {
@@ -17346,6 +17465,9 @@
           if (actionButton.dataset.provider === "whatsapp_cloud") {
             setProviderSetupMode("facebook");
             startWhatsAppEmbeddedSignup();
+          } else if (actionButton.dataset.provider === "instagram") {
+            setProviderSetupMode("login");
+            startInstagramLogin();
           }
           return;
         }
