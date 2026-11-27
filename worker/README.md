@@ -103,7 +103,23 @@ https://api.chat.helixcer.com/auth/google/callback
 
 No Google refresh token is requested or stored for sign-in; Google is used only to verify identity during login. Callback failures clear stale OAuth state and return the browser to the configured app origin with a safe error code and message. If no app origin is configured, the Worker renders a small branded fallback page instead of exposing a raw exception.
 
-Google Reviews channel connect is a separate OAuth flow. Register an additional authorized redirect URI for `GOOGLE_BUSINESS_REDIRECT_URI` (default `/auth/google-business/callback`) on the same Web OAuth client, enable the Google Business Profile APIs (Account Management, Business Information, and My Business), and request the `https://www.googleapis.com/auth/business.manage` scope. Clients connect with Google sign-in and pick a Business location; Helixcer stores the refresh token in the encrypted channel credentials vault. No Place ID or API key is pasted by the client.
+Google Reviews channel connect is a separate OAuth flow. Register an additional authorized redirect URI for `GOOGLE_BUSINESS_REDIRECT_URI` (default `/auth/google-business/callback`) on the same Web OAuth client, enable the Google Business Profile APIs (Account Management, Business Information, My Business, and My Business Notifications), and request the `https://www.googleapis.com/auth/business.manage` scope. Clients connect with Google sign-in and pick a Business location; Helixcer stores the refresh token in the encrypted channel credentials vault. No Place ID or API key is pasted by the client.
+
+### Google Reviews sync + realtime Pub/Sub
+
+After connect, Helixcer:
+
+1. Pulls existing reviews into the inbox (`POST /api/channels/:id/sync-reviews`, also on confirm and via the minute cron).
+2. Registers `NEW_REVIEW` / `UPDATED_REVIEW` notifications when `GOOGLE_BUSINESS_PUBSUB_TOPIC` is set.
+3. Accepts Pub/Sub push at `POST /webhooks/google-reviews-pubsub` (optionally protected by `GOOGLE_REVIEWS_WEBHOOK_TOKEN`).
+
+Cloud setup:
+
+1. Enable **My Business Notifications API** and **Cloud Pub/Sub API**.
+2. Create topic `GOOGLE_BUSINESS_PUBSUB_TOPIC` in the same GCP project as the OAuth client.
+3. Grant `mybusiness-api-pubsub@system.gserviceaccount.com` Pub/Sub Publisher on that topic.
+4. Create a **push** subscription to `https://api.chat.helixcer.com/webhooks/google-reviews-pubsub?token=<GOOGLE_REVIEWS_WEBHOOK_TOKEN>`.
+5. Ensure Business Profile API quota is approved for the project (Basic API Access if quota is zero).
 
 ## Database and deployment
 

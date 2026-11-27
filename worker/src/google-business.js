@@ -6,7 +6,11 @@ const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
 const ACCOUNT_MANAGEMENT_URL = 'https://mybusinessaccountmanagement.googleapis.com/v1/accounts';
 const BUSINESS_INFORMATION_URL = 'https://mybusinessbusinessinformation.googleapis.com/v1';
 const MY_BUSINESS_V4_URL = 'https://mybusiness.googleapis.com/v4';
+const NOTIFICATIONS_URL = 'https://mybusinessnotifications.googleapis.com/v1';
 const encoder = new TextEncoder();
+const STAR_RATING_VALUES = Object.freeze({
+  ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5
+});
 
 export function googleBusinessRedirectUri(request, env) {
   return env.GOOGLE_BUSINESS_REDIRECT_URI
@@ -197,24 +201,219 @@ async function listLocationsForAccount(accessToken, accountId, fetchImpl) {
 }
 
 export async function verifyGoogleBusinessLocation(accessToken, accountId, locationId, fetchImpl = fetch) {
+  const page = await listGoogleBusinessReviews(accessToken, accountId, locationId, {
+    pageSize: 1,
+    orderBy: 'updateTime desc'
+  }, fetchImpl);
+  return {
+    ok: true,
+    totalReviewCount: page.totalReviewCount,
+    averageRating: page.averageRating
+  };
+}
+
+export async function listGoogleBusinessReviews(
+  accessToken,
+  accountId,
+  locationId,
+  { pageSize = 50, pageToken = '', orderBy = 'updateTime desc' } = {},
+  fetchImpl = fetch
+) {
   const parent = `accounts/${encodeURIComponent(accountId)}/locations/${encodeURIComponent(locationId)}`;
   const endpoint = new URL(`${MY_BUSINESS_V4_URL}/${parent}/reviews`);
-  endpoint.searchParams.set('pageSize', '1');
-  endpoint.searchParams.set('orderBy', 'updateTime desc');
+  endpoint.searchParams.set('pageSize', String(Math.min(50, Math.max(1, Number(pageSize) || 50))));
+  endpoint.searchParams.set('orderBy', orderBy || 'updateTime desc');
+  if (pageToken) endpoint.searchParams.set('pageToken', pageToken);
   const response = await fetchImpl(endpoint, {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(googleBusinessErrorMessage(payload, response.status,
-      'Google could not verify this Business location for reviews.'));
+      'Google could not list Business location reviews.'));
     error.status = 422;
     throw error;
   }
   return {
-    ok: true,
-    totalReviewCount: Number(payload.totalReviewCount) || (Array.isArray(payload.reviews) ? payload.reviews.length : 0),
-    averageRating: Number(payload.averageRating) || 0
+    reviews: Array.isArray(payload.reviews) ? payload.reviews : [],
+    totalReviewCount: Number(payload.totalReviewCount) || 0,
+    averageRating: Number(payload.averageRating) || 0,
+    nextPageToken: String(payload.nextPageToken || '')
+  };
+}
+
+export async function getGoogleBusinessReview(accessToken, reviewName, fetchImpl = fetch) {
+  const name = String(reviewName || '').trim().replace(/^\/+/, '');
+  if (!/^accounts\/[^/]+\/locations\/[^/]+\/reviews\/[^/]+$/.test(name)) {
+    const error = new Error('Google review resource name is invalid.');
+    error.status = 400;
+    throw error;
+  }
+  const endpoint = `${MY_BUSINESS_V4_URL}/${name}`;
+  const response = await fetchImpl(endpoint, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(googleBusinessErrorMessage(payload, response.status,
+      'Google could not fetch this Business review.'));
+    error.status = 422;
+    throw error;
+  }
+  return payload;
+}
+
+export async function updateGoogleBusinessNotificationSetting(
+  accessToken,
+  accountId,
+  { pubsubTopic = '', notificationTypes = ['NEW_REVIEW', 'UPDATED_REVIEW'] } = {},
+  fetchImpl = fetch
+) {
+  const id = String(accountId || '').trim();
+  if (!id) {
+    const error = new Error('Google Business account ID is required for notifications.');
+    error.status = 400;
+    throw error;
+  }
+  const name = `accounts/${id}/notificationSetting`;
+  const endpoint = new URL(`${NOTIFICATIONS_URL}/${name}`);
+  endpoint.searchParams.set('updateMask', 'pubsubTopic,notificationTypes');
+  const body = {
+    name,
+    pubsubTopic: String(pubsubTopic || ''),
+    notificationTypes: Array.isArray(notificationTypes) && notificationTypes.length
+      ? notificationTypes
+      : ['NEW_REVIEW', 'UPDATED_REVIEW']
+  };
+  const response = await fetchImpl(endpoint.toString(), {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(googleBusinessErrorMessage(payload, response.status,
+      'Google could not register Business review notifications.'));
+    error.status = 422;
+    throw error;
+  }
+  return payload;
+}
+
+export function parseGoogleReviewNotification(payload = {}) {
+  const type = String(
+    payload.type
+    || payload.noticeType
+    || payload.notificationType
+    || payload.eventType
+    || ''
+  ).trim().toUpperCase();
+  const locationName = String(
+    payload.location
+    || payload.locationName
+    || payload.location_name
+    || ''
+  ).trim();
+  const reviewName = String(
+    payload.review
+    || payload.reviewName
+    || payload.review_name
+    || ''
+  ).trim();
+  const locationParts = locationName.match(/^accounts\/([^/]+)\/locations\/([^/]+)$/);
+  const reviewParts = reviewName.match(/^accounts\/([^/]+)\/locations\/([^/]+)\/reviews\/([^/]+)$/);
+  return {
+    type,
+    locationName,
+    reviewName,
+    accountId: String(reviewParts?.[1] || locationParts?.[1] || ''),
+    locationId: String(reviewParts?.[2] || locationParts?.[2] || ''),
+    reviewId: String(reviewParts?.[3] || '')
+  };
+}
+
+export function decodePubSubPushMessage(body = {}) {
+  const message = body?.message && typeof body.message === 'object' ? body.message : null;
+  if (!message) return null;
+  const encoded = String(message.data || '');
+  if (!encoded) {
+    return {
+      messageId: String(message.messageId || message.message_id || ''),
+      publishTime: String(message.publishTime || message.publish_time || ''),
+      data: null
+    };
+  }
+  let decoded = '';
+  try {
+    decoded = atob(encoded.replace(/-/g, '+').replace(/_/g, '/'));
+  } catch {
+    return null;
+  }
+  let data = null;
+  try {
+    data = JSON.parse(decoded);
+  } catch {
+    data = { raw: decoded };
+  }
+  return {
+    messageId: String(message.messageId || message.message_id || ''),
+    publishTime: String(message.publishTime || message.publish_time || ''),
+    data
+  };
+}
+
+export function googleStarRatingValue(starRating) {
+  if (typeof starRating === 'number' && Number.isFinite(starRating)) {
+    return Math.max(0, Math.min(5, Math.round(starRating)));
+  }
+  return STAR_RATING_VALUES[String(starRating || '').trim().toUpperCase()] || 0;
+}
+
+export function normalizeGoogleReviewToInbound(review = {}) {
+  const reviewId = String(review.reviewId || '').trim()
+    || String(review.name || '').split('/').filter(Boolean).pop()
+    || '';
+  if (!reviewId) {
+    const error = new Error('Google review is missing a review ID.');
+    error.status = 400;
+    throw error;
+  }
+  const stars = googleStarRatingValue(review.starRating);
+  const comment = String(review.comment || '').trim();
+  const displayName = String(review.reviewer?.displayName || '').trim() || 'Google reviewer';
+  const starLabel = stars
+    ? `${'★'.repeat(stars)}${'☆'.repeat(Math.max(0, 5 - stars))}`
+    : '';
+  const text = [starLabel, comment].filter(Boolean).join('\n') || 'Google review';
+  return {
+    channelProfileId: `review:${reviewId}`,
+    displayName: displayName.slice(0, 120),
+    text: text.slice(0, 8000),
+    providerMessageId: reviewId,
+    timestamp: String(review.updateTime || review.createTime || ''),
+    messageType: 'review',
+    review: {
+      reviewId,
+      reviewName: String(review.name || ''),
+      starRating: stars,
+      comment,
+      createTime: String(review.createTime || ''),
+      updateTime: String(review.updateTime || ''),
+      reviewer: {
+        displayName,
+        isAnonymous: Boolean(review.reviewer?.isAnonymous),
+        profilePhotoUrl: String(review.reviewer?.profilePhotoUrl || '')
+      },
+      reply: review.reviewReply && typeof review.reviewReply === 'object'
+        ? {
+          comment: String(review.reviewReply.comment || ''),
+          updateTime: String(review.reviewReply.updateTime || '')
+        }
+        : null
+    }
   };
 }
 

@@ -239,7 +239,7 @@ test('Google Reviews OAuth callback and confirm create a connected channel from 
   const item = (await listed.json()).items.find(entry => entry.channelId === body.channelId);
   assert.equal(item.health, 'connected');
   assert.equal(item.setup.authMode, 'google_oauth');
-  assert.equal(item.setup.callbackPath, '');
+  assert.equal(item.setup.callbackPath, '/webhooks/google-reviews-pubsub');
   assert.equal(JSON.stringify(item).includes('google-business-refresh-token'), false);
   database.close();
 });

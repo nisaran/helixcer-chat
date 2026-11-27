@@ -2310,6 +2310,23 @@
         : this.request(`/api/channels/${encodeURIComponent(channelId)}/cancel-coexistence-sync`, { method: "POST" });
     }
 
+    syncGoogleReviews(channelId) {
+      return this.isDemo
+        ? Promise.resolve({
+          ok: true,
+          channelId,
+          imported: 2,
+          updated: 0,
+          reviewsSync: {
+            status: "idle",
+            imported: 2,
+            updated: 0,
+            lastSyncAt: new Date().toISOString(),
+          },
+        })
+        : this.request(`/api/channels/${encodeURIComponent(channelId)}/sync-reviews`, { method: "POST" });
+    }
+
     getVerifyToken(channelId) {
       return this.isDemo
         ? this.demo.getVerifyToken(channelId)
@@ -7706,6 +7723,21 @@
           `Account: ${channel.config?.accountName || channel.setup?.accountName}`));
       }
       setup.append(locationBlock);
+      const reviewsSync = channel.setup?.reviewsSync || {};
+      if (reviewsSync.status || reviewsSync.lastSyncAt || reviewsSync.error) {
+        const syncNote = element("p", "channel-setup-note coexistence-sync-note");
+        const imported = Number(reviewsSync.imported || 0);
+        if (reviewsSync.status === "syncing") {
+          syncNote.textContent = "Pulling Google reviews into Helixcer…";
+        } else if (reviewsSync.status === "error") {
+          syncNote.textContent = reviewsSync.error || "Google Reviews sync failed.";
+        } else if (reviewsSync.lastSyncAt) {
+          syncNote.textContent = `Reviews synced · ${imported} imported${reviewsSync.lastWebhookAt ? " · realtime webhook ready" : ""}.`;
+        } else if (reviewsSync.notificationsRegisteredAt) {
+          syncNote.textContent = "Realtime review webhook registered. Waiting for the first sync.";
+        }
+        if (syncNote.textContent) setup.append(syncNote);
+      }
     }
 
     const isEmbeddedWhatsApp = channel.connectorType === "whatsapp_cloud"
@@ -7783,6 +7815,16 @@
       connect.dataset.channelId = channel.channelId;
       actions.append(toggle, connect);
     } else {
+      if (isGoogleReviews && credentialsReady) {
+        const syncReviews = element("button", "secondary-button",
+          channel.setup?.reviewsSync?.lastSyncAt ? "Sync reviews again" : "Sync reviews");
+        syncReviews.type = "button";
+        syncReviews.dataset.action = "sync-google-reviews";
+        syncReviews.dataset.channelId = channel.channelId;
+        syncReviews.disabled = !channel.enabled || channel.setup?.reviewsSync?.status === "syncing";
+        syncReviews.title = "Pull Google Business Profile reviews into the Helixcer inbox";
+        actions.append(syncReviews);
+      }
       if (isEmbeddedWhatsApp && (channel.setup?.coexistence || channel.config?.coexistence)) {
         const syncState = channel.setup?.coexistenceSync || {};
         const syncRunning = syncState.status === "running";
@@ -16707,6 +16749,32 @@
     }
   }
 
+  async function syncGoogleReviewsChannel(channelId, button) {
+    if (!channelId || !button) return;
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    button.disabled = true;
+    const previousLabel = button.textContent;
+    button.textContent = "Syncing…";
+    try {
+      const result = await state.api.syncGoogleReviews(channelId);
+      await loadAll();
+      setRoute("channels");
+      const imported = Number(result?.imported || 0);
+      const updated = Number(result?.updated || 0);
+      showToast(
+        "Google Reviews synced",
+        imported || updated
+          ? `${channel?.name || "Google Reviews"}: ${imported} new, ${updated} updated.`
+          : `${channel?.name || "Google Reviews"} is up to date.`
+      );
+    } catch (error) {
+      showToast("Google Reviews sync failed", error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = previousLabel;
+    }
+  }
+
   function finishConfirmation(confirmed, { close = true } = {}) {
     const resolve = state.confirmationResolve;
     state.confirmationResolve = null;
@@ -17570,6 +17638,10 @@
         }
         if (actionButton.dataset.action === "cancel-whatsapp-coexistence-sync") {
           cancelWhatsAppCoexistenceSync(actionButton.dataset.channelId, actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "sync-google-reviews") {
+          syncGoogleReviewsChannel(actionButton.dataset.channelId, actionButton);
           return;
         }
         if (actionButton.dataset.action === "provider-setup-manual") {
