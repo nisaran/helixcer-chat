@@ -1,4 +1,9 @@
-import { downloadVoucherMedia, uploadVoucherMedia, voucherMediaPath } from './voucher-media.js';
+import {
+  downloadVoucherMedia,
+  loadVoucherMediaForWorkspace,
+  uploadVoucherMedia,
+  voucherMediaPath
+} from './voucher-media.js';
 import { applyCampaignActions, campaignDispatchState } from './campaign-controls.js';
 import {
   acceptInvitationWithPassword,
@@ -155,7 +160,7 @@ import {
   validateWhatsAppTemplateMappingsUpsert
 } from './template-mappings.js';
 
-const API_VERSION = '2026-11-27-document-preview-proxy';
+const API_VERSION = '2026-11-27-document-preview-voucher';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -9423,14 +9428,10 @@ async function streamMessageAttachment(env, workspaceId, messageId, request, url
       // (browser fetch of third-party CDNs fails CORS with "Failed to fetch").
       const externalUrl = safeStoredExternalMediaUrl(attachment.externalUrl);
       if (!externalUrl) throw httpError(410, 'This WhatsApp attachment is no longer available.');
-      providerResponse = await fetch(externalUrl, {
-        headers: {
-          ...(range ? { Range: range } : {}),
-          Accept: attachmentType === 'document' ? 'application/pdf,*/*' : '*/*',
-          'User-Agent': request.headers.get('User-Agent') || 'Mozilla/5.0'
-        },
-        redirect: 'follow',
-        referrerPolicy: 'no-referrer'
+      providerResponse = await fetchExternalAttachmentMedia(env, workspaceId, externalUrl, {
+        range,
+        accept: attachmentType === 'document' ? 'application/pdf,*/*' : '*/*',
+        userAgent: request.headers.get('User-Agent') || 'Mozilla/5.0'
       });
     }
   } else if (channel.connectorType === 'telegram') {
@@ -9462,18 +9463,14 @@ async function streamMessageAttachment(env, workspaceId, messageId, request, url
     if (!providerResponse) {
       const externalUrl = safeStoredExternalMediaUrl(attachment.externalUrl);
       if (!externalUrl) throw httpError(410, 'This attachment preview is no longer available.');
-      providerResponse = await fetch(externalUrl, {
-        headers: {
-          ...(range ? { Range: range } : {}),
-          Accept: attachmentType === 'image' ? 'image/*' : '*/*',
-          // Meta's messaging CDN can return a 200 HTML login/interstitial page
-          // to a headerless Worker fetch, even while the signed media URL works
-          // in a browser. Preserve the requesting browser's user-agent only;
-          // never forward its cookies or Helixcer authorization to Meta.
-          'User-Agent': request.headers.get('User-Agent') || 'Mozilla/5.0'
-        },
-        redirect: 'follow',
-        referrerPolicy: 'no-referrer'
+      // Meta's messaging CDN can return a 200 HTML login/interstitial page
+      // to a headerless Worker fetch, even while the signed media URL works
+      // in a browser. Preserve the requesting browser's user-agent only;
+      // never forward its cookies or Helixcer authorization to Meta.
+      providerResponse = await fetchExternalAttachmentMedia(env, workspaceId, externalUrl, {
+        range,
+        accept: attachmentType === 'image' ? 'image/*' : '*/*',
+        userAgent: request.headers.get('User-Agent') || 'Mozilla/5.0'
       });
     }
   } else {
@@ -9509,6 +9506,27 @@ async function streamMessageAttachment(env, workspaceId, messageId, request, url
 function isMetaMediaHost(hostname) {
   const host = String(hostname || '').toLowerCase();
   return host === 'lookaside.fbsbx.com' || host.endsWith('.fbcdn.net') || host === 'facebook.com' || host.endsWith('.facebook.com');
+}
+
+async function fetchExternalAttachmentMedia(env, workspaceId, externalUrl, {
+  range = '',
+  accept = '*/*',
+  userAgent = 'Mozilla/5.0'
+} = {}) {
+  // TallyPrime invoice PDFs use signed Helixcer voucher-media URLs. Workers cannot
+  // reliably self-fetch api.chat.helixcer.com, which produced inbox preview 502s.
+  // Read the PDF from R2 for the owning workspace instead.
+  const voucher = await loadVoucherMediaForWorkspace(env, workspaceId, externalUrl);
+  if (voucher) return voucher;
+  return fetch(externalUrl, {
+    headers: {
+      ...(range ? { Range: range } : {}),
+      Accept: accept,
+      'User-Agent': userAgent
+    },
+    redirect: 'follow',
+    referrerPolicy: 'no-referrer'
+  });
 }
 
 function safeInlineAttachmentMime(messageType, storedMime, providerMime) {
