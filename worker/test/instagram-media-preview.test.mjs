@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
 const start = source.indexOf('async function streamMessageAttachment(');
-const end = source.indexOf('function isMetaMediaHost(', start);
+const end = source.indexOf('function safeInlineAttachmentMime(', start);
 function setup(direction, html = false) {
   const attachment = { type: 'image', filename: 'image.jpg', mimeType: direction === 'outbound' ? 'image/jpeg' : '', externalUrl: 'https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=test' };
   const row = { message_type: 'image', payload_json: JSON.stringify({ attachment }), channel_id: 'instagram', connector_type: 'generic_http', provider_type: 'instagram', config_json: '{}', workspace_id: 'ws' };
@@ -17,6 +17,7 @@ function setup(direction, html = false) {
     safeInlineAttachmentMime: (type, stored, received) => received === 'image/jpeg' ? received : '',
     assertPrincipalChannelAccess() {},
     responseFromAttachmentPreviewBase64: () => null,
+    loadVoucherMediaForWorkspace: async () => null,
     httpError: (status, message) => Object.assign(new Error(message), { status }),
     fetch: async (url, options) => { forwarded = options.headers; return new Response(html ? '<html>Update Your Browser</html>' : new Uint8Array([255,216,255,217]), { headers: { 'Content-Type': html ? 'text/html' : 'image/jpeg' } }); },
   });

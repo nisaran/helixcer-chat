@@ -58,11 +58,67 @@ export async function uploadVoucherMedia(request, env, url, workspaceId, apiErro
   return { filename, downloadUrl: downloadUrl.href, expiresAt: new Date(expires * 1000).toISOString() };
 }
 
+const objectKeyPattern = /^(?:TallyPrime\/)?[A-Za-z0-9_%!.~*'()-]+\/[a-f0-9-]{36}\.pdf$/;
+
+function voucherResponse(object) {
+  return new Response(object.body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Length': String(object.size),
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff'
+    }
+  });
+}
+
+export function parseVoucherMediaDownloadUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    if (url.pathname !== downloadPath) return null;
+    const objectKey = url.searchParams.get('key') || '';
+    if (!objectKeyPattern.test(objectKey)) return null;
+    return {
+      objectKey,
+      expires: url.searchParams.get('expires') || '',
+      signature: url.searchParams.get('signature') || ''
+    };
+  } catch {
+    return null;
+  }
+}
+
+function objectKeyBelongsToWorkspace(objectKey, workspaceId) {
+  const id = String(workspaceId || '').trim();
+  if (!id || !objectKey) return false;
+  const encoded = encodeURIComponent(id);
+  return objectKey.startsWith(`${encoded}/`)
+    || objectKey.startsWith(`TallyPrime/${encoded}/`)
+    || objectKey.startsWith(`${id}/`)
+    || objectKey.startsWith(`TallyPrime/${id}/`);
+}
+
+/**
+ * Serve a TallyPrime voucher PDF for an authenticated inbox preview.
+ * Avoids Worker self-fetch of /api/v1/voucher-media/download (which fails with 502)
+ * and still works after the public signed link expires, as long as the object
+ * remains in R2 and belongs to the message's workspace.
+ */
+export async function loadVoucherMediaForWorkspace(env, workspaceId, value) {
+  const parsed = parseVoucherMediaDownloadUrl(value);
+  if (!parsed || !env?.TALLYPRIME_MEDIA) return null;
+  if (!objectKeyBelongsToWorkspace(parsed.objectKey, workspaceId)) return null;
+  const object = await env.TALLYPRIME_MEDIA.get(parsed.objectKey);
+  if (!object?.body) return null;
+  return voucherResponse(object);
+}
+
 export async function downloadVoucherMedia(env, url) {
   const objectKey = url.searchParams.get('key') || '';
   const expires = url.searchParams.get('expires') || '';
   const signature = url.searchParams.get('signature') || '';
-  if (!/^(?:TallyPrime\/)?[A-Za-z0-9_%!.~*'()-]+\/[a-f0-9-]{36}\.pdf$/.test(objectKey) ||
+  if (!objectKeyPattern.test(objectKey) ||
       !/^\d{10}$/.test(expires) || Number(expires) <= Date.now() / 1000 ||
       !/^[A-Za-z0-9+/]{43}=$/.test(signature)) {
     return new Response(null, { status: 404 });
@@ -73,10 +129,5 @@ export async function downloadVoucherMedia(env, url) {
   if (!valid) return new Response(null, { status: 404 });
   const object = await env.TALLYPRIME_MEDIA.get(objectKey);
   if (!object) return new Response(null, { status: 404 });
-  return new Response(object.body, { headers: {
-    'Content-Type': 'application/pdf',
-    'Content-Length': String(object.size),
-    'Cache-Control': 'private, no-store',
-    'X-Content-Type-Options': 'nosniff'
-  } });
+  return voucherResponse(object);
 }
