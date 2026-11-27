@@ -15807,7 +15807,6 @@
       // Editing a manual WhatsApp channel: hide Continue with Facebook.
       const showLogin = selectedProvider === "whatsapp_cloud"
         && (!editing || embeddedWhatsApp);
-      const loginLabel = whatsappLogin.querySelector(".facebook-login-button-label");
       whatsappLogin.hidden = !showLogin;
       if (showLogin && embeddedAvailable) {
         const reconnect = showEmbeddedDetails;
@@ -15815,25 +15814,15 @@
         whatsappLogin.removeAttribute("aria-disabled");
         whatsappLogin.removeAttribute("title");
         whatsappLogin.classList.toggle("is-active", showEmbeddedDetails || state.providerSetupMode === "facebook");
-        whatsappLogin.classList.toggle("is-reconnect", reconnect);
         whatsappLogin.setAttribute("aria-pressed", String(showEmbeddedDetails || state.providerSetupMode === "facebook"));
-        if (loginLabel) {
-          loginLabel.textContent = reconnect ? "Re-connect" : "Continue with Facebook";
-          loginLabel.classList.toggle("sr-only", !reconnect);
-        }
-        whatsappLogin.setAttribute("aria-label", reconnect ? "Re-connect" : "Continue with Facebook");
+        syncWhatsAppFacebookLoginPresentation({ reconnect, busy: false });
       } else {
         whatsappLogin.disabled = true;
         whatsappLogin.setAttribute("aria-disabled", "true");
         whatsappLogin.setAttribute("title", embeddedAvailable ? "" : "Continue with Facebook is not configured yet");
         whatsappLogin.classList.remove("is-active");
-        whatsappLogin.classList.remove("is-reconnect");
         whatsappLogin.setAttribute("aria-pressed", "false");
-        if (loginLabel) {
-          loginLabel.textContent = "Continue with Facebook";
-          loginLabel.classList.add("sr-only");
-        }
-        whatsappLogin.setAttribute("aria-label", "Continue with Facebook");
+        syncWhatsAppFacebookLoginPresentation({ reconnect: false, busy: false });
       }
     }
     if (whatsappHelp) {
@@ -16079,29 +16068,39 @@
     }
   }
 
-  function setWhatsAppFacebookLoginBusy(busy) {
+  function syncWhatsAppFacebookLoginPresentation({ reconnect = false, busy = false } = {}) {
     const button = $("whatsappSetupFacebook");
     if (!button) return;
     const label = button.querySelector(".facebook-login-button-label");
-    const reconnect = button.classList.contains("is-reconnect");
-    const idleLabel = reconnect ? "Re-connect" : "Continue with Facebook";
+    const image = button.querySelector(".facebook-login-button-image");
+    const showText = Boolean(busy || reconnect);
+    const text = busy ? "Loading..." : (reconnect ? "Re-connect" : "Continue with Facebook");
+    button.classList.toggle("is-reconnect", Boolean(reconnect));
     button.classList.toggle("is-busy", Boolean(busy));
     button.setAttribute("aria-busy", String(Boolean(busy)));
+    button.setAttribute("aria-label", text);
+    if (image) {
+      // bt_fb.png has "Continue with Facebook" baked in — hide it for Re-connect / Loading.
+      image.hidden = showText;
+      image.setAttribute("aria-hidden", showText ? "true" : "false");
+    }
+    if (label) {
+      label.textContent = text;
+      label.classList.toggle("sr-only", !showText);
+    }
+  }
+
+  function setWhatsAppFacebookLoginBusy(busy) {
+    const button = $("whatsappSetupFacebook");
+    if (!button) return;
+    const reconnect = button.classList.contains("is-reconnect");
     if (busy) {
       button.disabled = true;
       button.removeAttribute("aria-disabled");
-      if (label) {
-        label.textContent = "Loading...";
-        label.classList.remove("sr-only");
-      }
-      button.setAttribute("aria-label", "Loading...");
+      syncWhatsAppFacebookLoginPresentation({ reconnect, busy: true });
       return;
     }
-    if (label) {
-      label.textContent = idleLabel;
-      label.classList.toggle("sr-only", !reconnect);
-    }
-    button.setAttribute("aria-label", idleLabel);
+    syncWhatsAppFacebookLoginPresentation({ reconnect, busy: false });
   }
 
   function ensureFacebookSdk(config) {
