@@ -243,12 +243,28 @@
     google: "./assets/provider-google.svg",
   };
 
+  function whatsAppManagerUrl(channel) {
+    const businessId = String(channel?.config?.businessId || channel?.setup?.businessId || "").trim();
+    const assetId = String(channel?.config?.wabaId || channel?.setup?.wabaId || "").trim();
+    const url = new URL("https://business.facebook.com/latest/whatsapp_manager/phone_numbers/");
+    if (businessId) url.searchParams.set("business_id", businessId);
+    url.searchParams.set("tab", "phone-numbers");
+    url.searchParams.set("nav_ref", "whatsapp_manager");
+    if (assetId) url.searchParams.set("asset_id", assetId);
+    return url.toString();
+  }
+
+  function channelProviderSetupUrl(channel, profile) {
+    if (channel?.connectorType === "whatsapp_cloud") return whatsAppManagerUrl(channel);
+    return profile?.setupUrl || "#";
+  }
+
   const providerProfiles = {
     whatsapp_cloud: {
       label: "WhatsApp", noun: "WhatsApp number", placeholder: "919876543210",
       help: "Include the country code. Spaces, +, brackets and hyphens are accepted.",
       description: "Send and receive WhatsApp Cloud API conversations.",
-      setupUrl: "https://developers.facebook.com/apps/", setupLabel: "Open Meta",
+      setupUrl: "https://business.facebook.com/latest/whatsapp_manager/phone_numbers/", setupLabel: "Open Meta",
     },
     telegram: {
       label: "Telegram", noun: "Telegram chat ID", placeholder: "123456789",
@@ -7536,22 +7552,24 @@
       && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
     const isCoexistenceCard = Boolean(isEmbeddedWhatsAppCard
       && (channel.setup?.coexistence || channel.config?.coexistence));
+    const statusRow = element("div", "channel-status-row");
+    statusRow.append(element("span", `health-dot${health.className ? ` ${health.className}` : ""}`, health.label));
+    if (isCoexistenceCard) {
+      statusRow.append(element("span", "channel-mode-badge is-coexistence", "Coexistence"));
+    } else if (isEmbeddedWhatsAppCard) {
+      statusRow.append(element("span", "channel-mode-badge", "Login with Facebook"));
+    }
     name.append(
       element("span", "provider-label", profile.label),
       connectionName,
       providerName,
-      element("span", `health-dot${health.className ? ` ${health.className}` : ""}`, health.label)
+      statusRow
     );
-    if (isCoexistenceCard) {
-      name.append(element("span", "channel-mode-badge is-coexistence", "Coexistence"));
-    } else if (isEmbeddedWhatsAppCard) {
-      name.append(element("span", "channel-mode-badge", "Login with Facebook"));
-    }
     identity.append(logo, name);
     const headActions = element("div", "channel-head-actions");
     const providerLink = document.createElement("a");
     providerLink.className = "secondary-button compact-button";
-    providerLink.href = profile.setupUrl;
+    providerLink.href = channelProviderSetupUrl(channel, profile);
     providerLink.target = "_blank";
     providerLink.rel = "noopener noreferrer";
     providerLink.textContent = profile.setupLabel;
