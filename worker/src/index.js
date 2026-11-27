@@ -155,7 +155,7 @@ import {
   validateWhatsAppTemplateMappingsUpsert
 } from './template-mappings.js';
 
-const API_VERSION = '2026-11-26-admin-notify-bell-only';
+const API_VERSION = '2026-11-27-document-preview-proxy';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -9403,20 +9403,36 @@ async function streamMessageAttachment(env, workspaceId, messageId, request, url
   const range = request.headers.get('Range') || '';
   if (channel.connectorType === 'whatsapp_cloud') {
     const mediaId = String(attachment.providerMediaId || '');
-    if (!mediaId) throw httpError(410, 'This WhatsApp attachment is no longer available.');
-    const credentials = await readChannelCredentials(env, channel);
-    if (!credentials.accessToken) throw httpError(409, 'WhatsApp credentials are not configured.');
-    const version = metaApiVersion(channel.config?.apiVersion);
-    const infoResponse = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(mediaId)}`, {
-      headers: { Authorization: `Bearer ${credentials.accessToken}` }
-    });
-    const info = safeJsonParse(await infoResponse.text(), {});
-    if (!infoResponse.ok || !info.url) throw httpError(502, `WhatsApp media is unavailable: ${providerError(info, infoResponse.status)}`);
-    const mediaUrl = new URL(String(info.url));
-    if (mediaUrl.protocol !== 'https:' || !isMetaMediaHost(mediaUrl.hostname)) throw httpError(502, 'WhatsApp returned an invalid media location.');
-    providerResponse = await fetch(mediaUrl, { headers: {
-      Authorization: `Bearer ${credentials.accessToken}`, ...(range ? { Range: range } : {})
-    } });
+    if (mediaId) {
+      const credentials = await readChannelCredentials(env, channel);
+      if (!credentials.accessToken) throw httpError(409, 'WhatsApp credentials are not configured.');
+      const version = metaApiVersion(channel.config?.apiVersion);
+      const infoResponse = await fetch(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(mediaId)}`, {
+        headers: { Authorization: `Bearer ${credentials.accessToken}` }
+      });
+      const info = safeJsonParse(await infoResponse.text(), {});
+      if (!infoResponse.ok || !info.url) throw httpError(502, `WhatsApp media is unavailable: ${providerError(info, infoResponse.status)}`);
+      const mediaUrl = new URL(String(info.url));
+      if (mediaUrl.protocol !== 'https:' || !isMetaMediaHost(mediaUrl.hostname)) throw httpError(502, 'WhatsApp returned an invalid media location.');
+      providerResponse = await fetch(mediaUrl, { headers: {
+        Authorization: `Bearer ${credentials.accessToken}`, ...(range ? { Range: range } : {})
+      } });
+    } else {
+      // Template header documents often store a public HTTPS link instead of a
+      // Meta media id. Fetch server-side so the inbox PDF preview is same-origin
+      // (browser fetch of third-party CDNs fails CORS with "Failed to fetch").
+      const externalUrl = safeStoredExternalMediaUrl(attachment.externalUrl);
+      if (!externalUrl) throw httpError(410, 'This WhatsApp attachment is no longer available.');
+      providerResponse = await fetch(externalUrl, {
+        headers: {
+          ...(range ? { Range: range } : {}),
+          Accept: attachmentType === 'document' ? 'application/pdf,*/*' : '*/*',
+          'User-Agent': request.headers.get('User-Agent') || 'Mozilla/5.0'
+        },
+        redirect: 'follow',
+        referrerPolicy: 'no-referrer'
+      });
+    }
   } else if (channel.connectorType === 'telegram') {
     const fileId = String(attachment.providerFileId || '');
     if (!fileId) throw httpError(410, 'This Telegram attachment is no longer available.');
@@ -9470,8 +9486,10 @@ async function streamMessageAttachment(env, workspaceId, messageId, request, url
   }
   const filename = safeAttachmentFilename(attachment.filename || `${attachmentType}-attachment`);
   const requestedDownload = url.searchParams.get('download') === '1';
-  const mimeType = safeInlineAttachmentMime(attachmentType, attachment.mimeType, providerResponse.headers.get('Content-Type'));
-  const inline = !requestedDownload && attachmentType !== 'document' && Boolean(mimeType);
+  let mimeType = safeInlineAttachmentMime(attachmentType, attachment.mimeType, providerResponse.headers.get('Content-Type'));
+  if (!mimeType && attachmentType === 'document' && /\.pdf$/i.test(filename)) mimeType = 'application/pdf';
+  // Serve PDFs inline so authenticated preview fetch + blob viewers get a PDF type.
+  const inline = !requestedDownload && Boolean(mimeType);
   const headers = new Headers({
     'Content-Type': mimeType || 'application/octet-stream',
     'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename="${filename}"`,
@@ -9498,7 +9516,8 @@ function safeInlineAttachmentMime(messageType, storedMime, providerMime) {
   const allowed = {
     image: new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
     video: new Set(['video/mp4', 'video/3gpp', 'video/webm']),
-    audio: new Set(['audio/aac', 'audio/amr', 'audio/mpeg', 'audio/mp4', 'audio/ogg'])
+    audio: new Set(['audio/aac', 'audio/amr', 'audio/mpeg', 'audio/mp4', 'audio/ogg']),
+    document: new Set(['application/pdf'])
   };
   return allowed[String(messageType || '')]?.has(candidate) ? candidate : '';
 }
@@ -9519,9 +9538,10 @@ function messageAttachmentView(messageType, payload, messageId = '') {
   const available = Boolean(
     value.providerMediaId || value.providerFileId || externalUrl || previewCache || hasInlinePreview
   );
-  // Proxy chat media through Helixcer. Keep WhatsApp template header links as
-  // direct external URLs so approved CDN links stay unchanged.
-  const useProxy = Boolean(messageId) && available && !isTemplate && (
+  // Always proxy through Helixcer when we have a message id — including template
+  // header media with public HTTPS links — so PDF preview can fetch same-origin
+  // with the session cookie. Direct CDN links break browser fetch (CORS).
+  const useProxy = Boolean(messageId) && available && (
     value.providerMediaId || value.providerFileId || previewCache || hasInlinePreview || Boolean(externalUrl)
   );
   return {

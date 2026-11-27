@@ -754,7 +754,8 @@ test('external template API stores and broadcasts the rendered template and medi
     assert.deepEqual(created.message.template, stored.template);
     assert.deepEqual(created.message.attachment, {
       type: 'document', filename: 'invoice-1001.pdf', mimeType: '', size: 0, caption: '',
-      available: true, external: true, url: 'https://cdn.example.com/invoice-1001.pdf'
+      available: true, external: false,
+      url: `/api/messages/${encodeURIComponent(accepted.messageId)}/attachment`
     });
     assert.equal(created.conversation.lastMessage, expectedText);
     const history = await handleRequest(new Request(
