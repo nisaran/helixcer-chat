@@ -263,6 +263,59 @@ export async function getGoogleBusinessReview(accessToken, reviewName, fetchImpl
   return payload;
 }
 
+export function googleReviewIdFromChannelProfile(channelProfileId) {
+  const raw = String(channelProfileId || '').trim();
+  if (!raw) return '';
+  return raw.startsWith('review:') ? raw.slice('review:'.length).trim() : raw;
+}
+
+export async function updateGoogleBusinessReviewReply(
+  accessToken,
+  accountId,
+  locationId,
+  reviewId,
+  comment,
+  fetchImpl = fetch
+) {
+  const account = String(accountId || '').trim();
+  const location = String(locationId || '').trim();
+  const review = String(reviewId || '').trim();
+  const text = String(comment || '').trim();
+  if (!account || !location || !review) {
+    const error = new Error('Google review reply requires account, location, and review IDs.');
+    error.status = 400;
+    throw error;
+  }
+  if (!text) {
+    const error = new Error('Google review reply text is required.');
+    error.status = 400;
+    throw error;
+  }
+  const name = `accounts/${account}/locations/${location}/reviews/${review}`;
+  const endpoint = `${MY_BUSINESS_V4_URL}/${name}/reply`;
+  const response = await fetchImpl(endpoint, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ comment: text.slice(0, 4096) })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(googleBusinessErrorMessage(payload, response.status,
+      'Google could not post this Business review reply.'));
+    error.status = response.status === 401 || response.status === 403 ? response.status : 422;
+    throw error;
+  }
+  return {
+    comment: String(payload.comment || text).slice(0, 4096),
+    updateTime: String(payload.updateTime || ''),
+    reviewName: name,
+    httpStatus: response.status
+  };
+}
+
 export async function updateGoogleBusinessNotificationSetting(
   accessToken,
   accountId,

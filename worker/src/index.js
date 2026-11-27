@@ -39,6 +39,7 @@ import {
   googleBusinessOAuthCookieHeader,
   decodePubSubPushMessage,
   getGoogleBusinessReview,
+  googleReviewIdFromChannelProfile,
   listGoogleBusinessLocations,
   listGoogleBusinessReviews,
   normalizeGoogleReviewToInbound,
@@ -47,6 +48,7 @@ import {
   readGoogleBusinessOAuthCookie,
   refreshGoogleBusinessToken,
   updateGoogleBusinessNotificationSetting,
+  updateGoogleBusinessReviewReply,
   verifyGoogleBusinessLocation
 } from './google-business.js';
 import {
@@ -233,7 +235,7 @@ const CONNECTOR_DEFINITIONS = {
     label: 'Google Reviews', webhookPath: 'google-reviews',
     configFields: ['accountId', 'locationId', 'accountName', 'locationName'],
     requiredConfig: ['accountId', 'locationId'], requiredCredentials: ['accessToken', 'refreshToken'],
-    capabilities: ['reviews']
+    capabilities: ['reviews', 'text']
   }
 };
 
@@ -10117,7 +10119,10 @@ async function dispatchOutbound(env, messageId) {
     result = await sendFacebookMessenger(env, channel, row.channel_profile_id, row.text);
   }
   else if (channel.connectorType === 'google_reviews') {
-    throw nonRetryableError('Google Reviews connections sync reviews and do not send chat messages.');
+    if (row.message_type && row.message_type !== 'text') {
+      throw nonRetryableError('Google Reviews only supports text replies.');
+    }
+    result = await sendGoogleReviewReply(env, channel, row.channel_profile_id, row.text);
   }
   else if (channel.connectorType === 'generic_http') result = await sendGeneric(env, channel, row);
   else if (channel.connectorType === 'web_chat') result = { status: 'sent', providerMessageId: row.message_id, httpStatus: 200 };
@@ -10343,6 +10348,38 @@ async function sendInstagram(env, channel, recipient, text) {
     providerMessageId: String(data.message_id || data.id || ''),
     httpStatus: response.status
   };
+}
+
+async function sendGoogleReviewReply(env, channel, channelProfileId, text) {
+  const accountId = String(channel.config?.accountId || '').trim();
+  const locationId = String(channel.config?.locationId || '').trim();
+  const reviewId = googleReviewIdFromChannelProfile(channelProfileId);
+  const comment = String(text || '').trim();
+  if (!accountId || !locationId) {
+    throw nonRetryableError('Google Reviews location is not configured.');
+  }
+  if (!reviewId) throw nonRetryableError('Google review ID is missing for this conversation.');
+  if (!comment) throw nonRetryableError('Google review reply text is required.');
+  try {
+    const reply = await withGoogleReviewsAccessToken(env, channel, (accessToken) => (
+      updateGoogleBusinessReviewReply(accessToken, accountId, locationId, reviewId, comment)
+    ));
+    return {
+      status: 'sent',
+      providerMessageId: `review-reply:${reviewId}`,
+      httpStatus: reply.httpStatus || 200
+    };
+  } catch (error) {
+    const status = Number(error?.status) || 0;
+    if (status === 400 || status === 401 || status === 403 || status === 404 || status === 409) {
+      throw nonRetryableError(error.message || 'Google review reply failed.');
+    }
+    const retryable = Object.assign(
+      new Error(error.message || 'Google review reply failed.'),
+      { retryable: true, status: status || 502 }
+    );
+    throw retryable;
+  }
 }
 
 async function sendInstagramMedia(env, channel, recipient, file, attachment) {
