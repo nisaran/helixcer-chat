@@ -148,6 +148,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0026_campaign_upload_chunks.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0027_google_reviews_oauth.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0028_campaign_scheduled_at.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0033_google_contact_platform.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
 
@@ -4218,7 +4219,7 @@ test('flat contact platform IDs create, extend, protect history, and export one 
   const createdBody = await created.json();
   const contactId = createdBody.contactId;
   assert.deepEqual(createdBody.item.platformIds, {
-    whatsapp: '919999911111', telegram: 'tg-flat-1', instagram: '', facebook: '', email: ''
+    whatsapp: '919999911111', telegram: 'tg-flat-1', instagram: '', facebook: '', email: '', google: ''
   });
   assert.equal(createdBody.item.identities.length, 2, 'legacy identity views remain available for routing clients');
   assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM contact_platform_ids
@@ -4304,7 +4305,7 @@ test('flat contact platform IDs create, extend, protect history, and export one 
   assert.equal(exported.status, 200);
   assert.match(exported.headers.get('content-type'), /text\/csv/);
   const csv = await exported.text();
-  assert.match(csv, /contact_id,display_name,company,tags,whatsapp_id,telegram_id,instagram_id,facebook_id,email/);
+  assert.match(csv, /contact_id,display_name,company,tags,whatsapp_id,telegram_id,instagram_id,facebook_id,email,google_id/);
   assert.match(csv, /Flat Contact,"Example, Inc\.","VIP, Retail",919999911111,tg-flat-1,ig-flat-1,,/);
   assert.equal(csv.split('\r\n').filter(line => line.includes('Flat Contact')).length, 1);
   database.close();

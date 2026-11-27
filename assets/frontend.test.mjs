@@ -789,6 +789,9 @@ test("contacts use one flat ID per platform and open the exact saved channel rou
   assert.match(app, /instagram: \{ label: "Instagram", profileLabel: "Instagram ID"/);
   assert.match(app, /facebook: \{ label: "Facebook", profileLabel: "Facebook ID"/);
   assert.match(app, /email: \{ label: "Email", profileLabel: "Email Address"/);
+  assert.match(app, /google: \{ label: "Google", profileLabel: "Google Review ID"/);
+  assert.match(app, /\["google", "google_reviews", "google_business", "gbp"\]\.includes\(normalized\)/);
+  assert.match(app, /if \(platform === "google"\) return "google_reviews";/);
   const platformEditorBody = app.slice(
     app.indexOf("function renderContactPlatformIdFields"),
     app.indexOf("function contactIdentityDraftContext"),
