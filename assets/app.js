@@ -15776,11 +15776,6 @@
         }
       });
     });
-    document.querySelectorAll(".provider-setup-chooser").forEach((chooser) => {
-      const section = chooser.closest("[data-provider-fields]");
-      const providerKey = section?.dataset.providerFields || "";
-      chooser.hidden = selectedProvider !== providerKey;
-    });
     document.querySelectorAll(".provider-manual-fields").forEach((fields) => {
       const section = fields.closest("[data-provider-fields]");
       const providerKey = section?.dataset.providerFields || "";
@@ -15793,8 +15788,8 @@
     }
     document.querySelectorAll('.provider-setup-option[data-action="provider-setup-manual"]').forEach((button) => {
       const isWhatsAppManual = button.dataset.provider === "whatsapp_cloud";
-      // Editing Embedded Signup: hide Manual Setup. New connects still offer both options.
-      if (isWhatsAppManual) button.hidden = Boolean(editing && embeddedWhatsApp);
+      // WhatsApp: show Manual Setup only for new connects. Editing (manual or Facebook) hides it.
+      if (isWhatsAppManual) button.hidden = Boolean(editing);
       const active = selectedProvider === button.dataset.provider && manualReady && !button.hidden;
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-pressed", String(active));
@@ -15804,10 +15799,10 @@
     const embeddedAvailable = Boolean(state.whatsappEmbeddedSignup?.available && state.whatsappEmbeddedSignup?.appId
       && state.whatsappEmbeddedSignup?.configId);
     if (whatsappLogin) {
-      // Always offer Facebook login for WhatsApp, including already-connected manual channels
-      // so they can switch to / re-link with Embedded Signup. Re-connect label is only for
-      // channels that were already linked via Facebook / coexistence.
-      const showLogin = selectedProvider === "whatsapp_cloud";
+      // New WhatsApp: Continue with Facebook. Editing Facebook/coexistence: Re-connect only.
+      // Editing manual: hide Facebook CTA (fields only).
+      const showLogin = selectedProvider === "whatsapp_cloud"
+        && (!editing || embeddedWhatsApp);
       whatsappLogin.hidden = !showLogin;
       if (showLogin && embeddedAvailable) {
         const reconnect = showEmbeddedDetails;
@@ -15826,6 +15821,18 @@
         syncWhatsAppFacebookLoginPresentation({ reconnect: false, busy: false });
       }
     }
+    document.querySelectorAll(".provider-setup-chooser").forEach((chooser) => {
+      const section = chooser.closest("[data-provider-fields]");
+      const providerKey = section?.dataset.providerFields || "";
+      if (selectedProvider !== providerKey) {
+        chooser.hidden = true;
+        return;
+      }
+      // Hide the chooser when every option inside is hidden (e.g. editing a manual WhatsApp channel).
+      const hasVisibleOption = Array.from(chooser.querySelectorAll(".provider-setup-option"))
+        .some((button) => !button.hidden);
+      chooser.hidden = !hasVisibleOption;
+    });
     if (whatsappHelp) {
       whatsappHelp.hidden = !(selectedProvider === "whatsapp_cloud" && embeddedAvailable && !manualReady && !showEmbeddedDetails);
     }
