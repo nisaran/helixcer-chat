@@ -15816,7 +15816,9 @@
     }
     const instagramLoginButton = $("instagramSetupLogin");
     const instagramHelp = $("instagramLoginHelp");
-    const instagramLoginAvailable = Boolean(state.instagramLogin?.available && state.instagramLogin?.appId);
+    const instagramLoginAvailable = Boolean(state.instagramLogin?.available
+      && state.instagramLogin?.appId
+      && state.instagramLogin?.configId);
     if (instagramLoginButton) {
       const showInstagramLogin = selectedProvider === "instagram";
       instagramLoginButton.hidden = !showInstagramLogin;
