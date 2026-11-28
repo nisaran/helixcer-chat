@@ -17929,7 +17929,7 @@
           "save-role": () => { saveSelectedRole().catch(() => {}); },
           "delete-role": () => { deleteSelectedRole().catch(() => {}); },
           "invite-select-all-channels": toggleInviteSelectAllChannels,
-          "automation-select-all-channels": (button) => toggleAutomationSelectAllChannels(button.dataset.automationChannels || "greeting"),
+          "automation-select-all-channels": () => toggleAutomationSelectAllChannels(actionButton.dataset.automationChannels || "greeting"),
           "copy-invite-link": copyInviteLink,
           "open-api-key": openApiKeyDialog,
           "close-api-key": closeApiKeyDialog,
