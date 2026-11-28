@@ -150,6 +150,10 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="instagram"/);
   assert.match(html, /data-action="provider-setup-login"[^>]*data-provider="instagram"[^>]*disabled/);
   assert.match(html, /Login with Instagram/);
+  assert.match(html, /class="instagram-login-button provider-setup-option"[^>]*id="instagramSetupLogin"/);
+  assert.match(styles, /\.instagram-login-button\s*\{[^}]*linear-gradient\(45deg,\s*#f58529/);
+  assert.match(styles, /\.instagram-login-button\s*\{[^}]*color:\s*#fff/);
+  assert.match(html, /id="instagramSetupLogin"[^>]*>Login with Instagram<\/button>/);
   assert.match(html, /id="instagramLoginHelp" hidden/);
   assert.match(html, /id="instagramManualFields" hidden/);
   assert.match(app, /startInstagramLogin|\/api\/channels\/oauth\/instagram\/start/);
@@ -205,8 +209,9 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.doesNotMatch(app, /channelId:\s*"wa-main"/);
   assert.doesNotMatch(`${html}\n${app}`, /WA_MAIN_(?:ACCESS_TOKEN|APP_SECRET|VERIFY_TOKEN|PHONE_NUMBER_ID)/);
   assert.match(styles, /\.provider-setup-chooser/);
-  assert.match(styles, /\.provider-setup-option\.is-active:not\(\.facebook-login-button\)/);
+  assert.match(styles, /\.provider-setup-option\.is-active:not\(\.facebook-login-button\):not\(\.instagram-login-button\)/);
   assert.match(styles, /\.facebook-login-button\s*\{/);
+  assert.match(styles, /\.instagram-login-button\s*\{/);
   assert.match(styles, /background:\s*#1877f2/);
 });
 
