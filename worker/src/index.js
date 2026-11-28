@@ -459,11 +459,10 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (request.method === 'GET' && url.pathname === '/auth/google-business/callback') {
       return await finishGoogleBusinessOAuthResponse(request, env);
     }
-    if (request.method === 'GET' && (url.pathname === '/auth/instagram/callback' || url.pathname === '/auth/meta/callback')) {
-      return await finishInstagramLoginOAuthResponse(request, env);
-    }
-    if (request.method === 'GET' && url.pathname === '/auth/messenger/callback') {
-      return await finishMessengerLoginOAuthResponse(request, env);
+    if (request.method === 'GET' && (url.pathname === '/auth/instagram/callback'
+      || url.pathname === '/auth/meta/callback'
+      || url.pathname === '/auth/messenger/callback')) {
+      return await finishMetaChannelOAuthResponse(request, env);
     }
     if (request.method === 'GET' && url.pathname === '/auth/mobile/config') {
       return json(mobileAuthConfiguration(env));
@@ -4825,6 +4824,33 @@ async function startInstagramLoginChannelOAuth(request, env, principal) {
       'Set-Cookie': instagramOAuthCookieHeader(state, 10 * 60)
     }
   });
+}
+
+async function finishMetaChannelOAuthResponse(request, env, fetchImpl = fetch) {
+  // One Meta Valid OAuth Redirect URI serves Instagram + Messenger. Route by the
+  // HttpOnly OAuth cookie that matches the returned state (never by path alone).
+  const url = new URL(request.url);
+  const state = String(url.searchParams.get('state') || '');
+  const messengerCookie = readMessengerOAuthCookie(request) || '';
+  const instagramCookie = readInstagramOAuthCookie(request) || '';
+  if (state && messengerCookie && timingSafeEqual(state, messengerCookie)) {
+    return await finishMessengerLoginOAuthResponse(request, env, fetchImpl);
+  }
+  if (state && instagramCookie && timingSafeEqual(state, instagramCookie)) {
+    return await finishInstagramLoginOAuthResponse(request, env, fetchImpl);
+  }
+  if (messengerCookie && !instagramCookie) {
+    return await finishMessengerLoginOAuthResponse(request, env, fetchImpl);
+  }
+  if (instagramCookie && !messengerCookie) {
+    return await finishInstagramLoginOAuthResponse(request, env, fetchImpl);
+  }
+  // Ambiguous or missing cookies: prefer Instagram for the historical /auth/meta/callback path,
+  // Messenger for the dedicated /auth/messenger/callback alias.
+  if (url.pathname === '/auth/messenger/callback') {
+    return await finishMessengerLoginOAuthResponse(request, env, fetchImpl);
+  }
+  return await finishInstagramLoginOAuthResponse(request, env, fetchImpl);
 }
 
 async function finishInstagramLoginOAuthResponse(request, env, fetchImpl = fetch) {

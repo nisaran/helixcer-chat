@@ -25,8 +25,8 @@ META_WEBHOOK_VERIFY_TOKEN="replace-with-a-long-random-verify-token"
 META_INSTAGRAM_LOGIN_CONFIG_ID="your-instagram-unified-login-config-id"
 # Facebook Login for Business configuration for Messenger (Continue with Facebook).
 META_MESSENGER_LOGIN_CONFIG_ID="your-messenger-login-config-id"
-# Optional override; defaults to https://api.chat.helixcer.com/auth/messenger/callback
-# META_MESSENGER_OAUTH_REDIRECT_URI="https://api.chat.helixcer.com/auth/messenger/callback"
+# Optional override; defaults to the shared Instagram callback /auth/meta/callback.
+# META_MESSENGER_OAUTH_REDIRECT_URI="https://api.chat.helixcer.com/auth/meta/callback"
 META_GRAPH_API_VERSION="v22.0"
 BOOTSTRAP_OWNER_EMAIL="owner@example.com"
 ADMIN_TOKEN="generate-a-long-random-emergency-token"
