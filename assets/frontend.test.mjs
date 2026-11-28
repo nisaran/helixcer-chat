@@ -725,7 +725,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261127-provider-setup-button-height/);
+  assert.match(html, /app\.js\?v=20261128-automation-channel-selector/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -1098,8 +1098,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261127-provider-setup-button-height/);
-  assert.match(html, /assets\/styles\.css\?v=20261127-provider-setup-button-height/);
+  assert.match(html, /assets\/app\.js\?v=20261128-automation-channel-selector/);
+  assert.match(html, /assets\/styles\.css\?v=20261128-automation-channel-selector/);
   assert.match(html, /connect\.facebook\.net/);
   assert.match(html, /frame-src[^"]*https:\/\/www\.facebook\.com/);
   assert.doesNotMatch(html, /Bulk messaging/);
@@ -1286,20 +1286,28 @@ test("Automation menu configures greeting and out of office replies", () => {
   assert.match(html, /id="automationGreetingEnabled"/);
   assert.match(html, /id="automationGreetingMessage"/);
   assert.match(html, /id="automationGreetingInterval"/);
+  assert.match(html, /id="automationGreetingChannelOptions"/);
   assert.match(html, /id="automationOooEnabled"/);
   assert.match(html, /id="automationOooMessage"/);
   assert.match(html, /id="automationOooTimezone"/);
   assert.match(html, /id="automationOooStart"/);
   assert.match(html, /id="automationOooEnd"/);
+  assert.match(html, /id="automationOooChannelOptions"/);
+  assert.match(html, /data-action="automation-select-all-channels"[^>]*data-automation-channels="greeting"/);
+  assert.match(html, /data-action="automation-select-all-channels"[^>]*data-automation-channels="ooo"/);
   assert.match(html, /\{\{name\}\}/);
   assert.match(app, /getAutomation\(\)[\s\S]*?request\("\/api\/automation"\)/);
   assert.match(app, /updateAutomation\(payload\)[\s\S]*?request\("\/api\/automation", \{ method: "PATCH"/);
   assert.match(app, /async function loadAutomationSettings/);
   assert.match(app, /async function saveAutomationSettings/);
+  assert.match(app, /greetingChannelIds: selectedAutomationChannelIds\("greeting"\)/);
+  assert.match(app, /oooChannelIds: selectedAutomationChannelIds\("ooo"\)/);
+  assert.match(app, /function renderAutomationChannelOptions/);
   assert.match(app, /if \(route === "automation"\) loadAutomationSettings/);
   assert.match(app, /if \(!hasPermission\("automation\.manage"\) && route === "automation"\) route = "inbox"/);
   assert.match(styles, /\.automation-surface/);
   assert.match(styles, /\.automation-time-grid/);
+  assert.match(styles, /\.automation-channel-access/);
 });
 
 test("roles hash survives reload and stays aligned with setRoute", () => {

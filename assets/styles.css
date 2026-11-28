@@ -2544,6 +2544,8 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   margin-top: 12px;
 }
 .automation-window-help { margin: 10px 0 0; }
+.automation-channel-access { margin-top: 14px; }
+.automation-channel-access .invite-channel-options { max-height: 160px; }
 .automation-actions { margin-top: 4px; border-top: 0; padding-top: 4px; }
 .setting-icon.is-whatsapp { background: #e8f8ef; color: #128c7e; }
 .single-workspace-badge { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; border: 1px solid #d9d0f7; border-radius: 999px; background: var(--brand-soft); color: var(--brand-deep); padding: 6px 10px; font-size: 10px; font-weight: 750; }
