@@ -73,7 +73,9 @@ export function messengerOAuthRedirectUri(request, env) {
     || ''
   ).trim();
   if (explicit) return explicit;
-  return new URL('/auth/messenger/callback', request.url).toString();
+  // Share Instagram's already-whitelisted Meta OAuth callback so Messenger
+  // Login does not require a second Valid OAuth Redirect URI in the Meta app.
+  return new URL('/auth/meta/callback', request.url).toString();
 }
 
 export function buildMessengerAuthorizeUrl({ request, env, state }) {

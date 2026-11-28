@@ -82,7 +82,6 @@ function envFor(DB, overrides = {}) {
     META_APP_ID: '1051245721347219',
     META_APP_SECRET: 'meta-app-secret-value-1234567890ab',
     META_MESSENGER_LOGIN_CONFIG_ID: '9988776655443322',
-    META_MESSENGER_OAUTH_REDIRECT_URI: 'https://api.chat.helixcer.com/auth/messenger/callback',
     META_WEBHOOK_VERIFY_TOKEN: 'test-meta-webhook-verify-token',
     META_GRAPH_API_VERSION: 'v26.0',
     BOOTSTRAP_OWNER_EMAIL: 'owner@example.com',
@@ -174,7 +173,7 @@ test('Messenger Login OAuth start redirects to Facebook Login for Business', asy
   assert.equal(location.pathname, '/dialog/oauth');
   assert.equal(location.searchParams.get('client_id'), env.META_APP_ID);
   assert.equal(location.searchParams.get('config_id'), env.META_MESSENGER_LOGIN_CONFIG_ID);
-  assert.equal(location.searchParams.get('redirect_uri'), env.META_MESSENGER_OAUTH_REDIRECT_URI);
+  assert.equal(location.searchParams.get('redirect_uri'), 'https://api.chat.helixcer.com/auth/meta/callback');
   assert.equal(location.searchParams.get('response_type'), 'code');
   assert.ok(cookieValue(start, MESSENGER_OAUTH_COOKIE));
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM messenger_login_oauth_states').get().count, 1);
@@ -212,7 +211,7 @@ test('Messenger Login OAuth callback creates a facebook_login Messenger channel'
   let callbackResponse;
   try {
     callbackResponse = await handleRequest(new Request(
-      `https://api.chat.helixcer.com/auth/messenger/callback?code=AQBx-auth-code&state=${encodeURIComponent(state)}`,
+      `https://api.chat.helixcer.com/auth/meta/callback?code=AQBx-auth-code&state=${encodeURIComponent(state)}`,
       { headers: { Cookie: `${MESSENGER_OAUTH_COOKIE}=${encodeURIComponent(state)}` } }
     ), env);
   } finally {
