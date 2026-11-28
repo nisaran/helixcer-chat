@@ -4833,7 +4833,10 @@ async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
     .filter(key => key === 'instagramAccountId' || key === 'appId');
   await assertProviderIdentityConfigMutable(env, workspaceId, existing, 'instagram', changedIdentity);
 
-  const verifyToken = metaInstagramAppVerifyToken(env) || generateWhatsAppVerifyToken();
+  const verifyToken = metaInstagramAppVerifyToken(env);
+  if (!verifyToken) {
+    throw httpError(503, 'META_WEBHOOK_VERIFY_TOKEN is not configured on the Worker.');
+  }
   const capabilities = CONNECTOR_DEFINITIONS.instagram.capabilities;
   const enabled = 1;
   let saved;

@@ -58,10 +58,7 @@ export function instagramLoginPublicConfig(env) {
 }
 
 export function metaInstagramAppVerifyToken(env) {
-  const explicit = String(env.META_INSTAGRAM_WEBHOOK_VERIFY_TOKEN || env.META_WEBHOOK_VERIFY_TOKEN || '').trim();
-  if (explicit) return explicit;
-  const appId = instagramMetaAppId(env);
-  return appId ? `helixcer-ig-app-${appId}` : '';
+  return String(env.META_WEBHOOK_VERIFY_TOKEN || '').trim();
 }
 
 export function metaInstagramAppWebhookPath() {
