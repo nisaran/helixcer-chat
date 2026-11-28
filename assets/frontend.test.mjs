@@ -940,6 +940,8 @@ test("expanded channel cards expose the internal channel ID with a copy action",
   assert.match(app, /appendChannelProviderDetails\(setup, channel\)/);
   assert.match(app, /!isGoogleReviews && !loginConnected/);
   assert.match(app, /"Provider details"/);
+  assert.match(app, /Waiting for Instagram messages/);
+  assert.match(app, /Messenger → Instagram Settings → Webhooks/);
 });
 
 test("outbound messages expose sent, delivered, read, retry, and failure states for every provider", () => {
