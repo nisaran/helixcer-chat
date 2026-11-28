@@ -188,7 +188,17 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(app, /\/webhooks\/instagram-app\/\$\{encodeURIComponent\(channel\.config\.appId\)\}/);
   assert.match(app, /\/webhooks\/facebook-messenger-app\/\$\{encodeURIComponent\(channel\.config\.appId\)\}/);
   assert.match(app, /register-instagram-webhook/);
-  assert.match(app, /instagram-profile-block/);
+  assert.match(app, /function appendChannelProviderDetails/);
+  assert.match(app, /function isLoginConnectedChannel/);
+  assert.match(app, /channel-provider-details/);
+  assert.match(app, /WhatsApp Business Account ID/);
+  assert.match(app, /Instagram account ID/);
+  assert.match(app, /Facebook Page ID/);
+  assert.match(app, /Location ID/);
+  assert.match(html, /id="instagramLoginDetails" hidden/);
+  assert.match(html, /id="googleReviewsDetails" hidden/);
+  assert.match(app, /fillInstagramLoginDetails/);
+  assert.match(app, /fillGoogleReviewsDetails/);
   assert.match(app, /Login with Instagram/);
   assert.match(app, /isInstagramLogin/);
   assert.match(app, /Helixcer routes messages by account ID/);
@@ -926,6 +936,10 @@ test("expanded channel cards expose the internal channel ID with a copy action",
   assert.match(app, /dataset\.copyValue = channel\.channelId/);
   assert.match(app, /setAttribute\("aria-label", "Copy Channel ID"\)/);
   assert.match(app, /copyDeveloperApiValue\(actionButton\.dataset\.copyValue, "Channel ID copied"\)/);
+  // Expand also lists provider names/IDs for every connected channel type.
+  assert.match(app, /appendChannelProviderDetails\(setup, channel\)/);
+  assert.match(app, /!isGoogleReviews && !loginConnected/);
+  assert.match(app, /"Provider details"/);
 });
 
 test("outbound messages expose sent, delivered, read, retry, and failure states for every provider", () => {
