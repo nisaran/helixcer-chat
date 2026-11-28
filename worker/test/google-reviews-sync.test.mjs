@@ -328,6 +328,70 @@ test('sync-reviews imports Google reviews into the inbox', async () => {
   database.close();
 });
 
+test('google review outbound rejects a second successful reply', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = mockGoogleBusinessFetch();
+  const pending = [];
+  const ctx = { waitUntil(promise) { pending.push(promise); } };
+  try {
+    const body = await connectGoogleReviewsChannel(env);
+    const channelId = body.channelId;
+    const synced = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/channels/${encodeURIComponent(channelId)}/sync-reviews`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer recovery-secret',
+          Origin: 'https://chat.helixcer.com'
+        }
+      }
+    ), env, ctx);
+    assert.equal(synced.status, 200, await synced.clone().text());
+    const conversationId = database.prepare(`SELECT conversation_id FROM messages
+      WHERE channel_id=? AND provider_message_id='r1'`).get(channelId).conversation_id;
+
+    const apiHeaders = {
+      Authorization: 'Bearer recovery-secret',
+      Origin: 'https://chat.helixcer.com',
+      'Content-Type': 'application/json'
+    };
+    const failedAllowed = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+      { method: 'POST', headers: apiHeaders, body: JSON.stringify({ text: 'First attempt' }) }
+    ), env, ctx);
+    assert.equal(failedAllowed.status, 202, await failedAllowed.clone().text());
+    await Promise.all(pending.splice(0));
+    const first = await failedAllowed.json();
+    database.prepare(`UPDATE messages SET status='failed', error='simulated'
+      WHERE message_id=?`).run(first.item.messageId);
+
+    const retry = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+      { method: 'POST', headers: apiHeaders, body: JSON.stringify({ text: 'Thanks for visiting' }) }
+    ), env, ctx);
+    assert.equal(retry.status, 202, await retry.clone().text());
+    await Promise.all(pending.splice(0));
+    const sent = await retry.json();
+    database.prepare(`UPDATE messages SET status='sent', provider_message_id='review-reply:r1'
+      WHERE message_id=?`).run(sent.item.messageId);
+
+    const blocked = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+      { method: 'POST', headers: apiHeaders, body: JSON.stringify({ text: 'Second reply' }) }
+    ), env, ctx);
+    assert.equal(blocked.status, 409, await blocked.clone().text());
+    const blockedBody = await blocked.json();
+    assert.match(String(blockedBody.error || ''), /Only one reply can be sent for a Google review/i);
+    assert.equal(blockedBody.code, 'google_review_reply_exists');
+    await Promise.all(pending.splice(0));
+  } finally {
+    globalThis.fetch = previousFetch;
+    database.close();
+  }
+});
+
 test('google-reviews-pubsub webhook imports NEW_REVIEW events', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB);
