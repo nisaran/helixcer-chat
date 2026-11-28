@@ -616,7 +616,15 @@ export async function verifyGoogleIdToken(idToken, options, fetchImpl = fetch) {
   const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   if (!audiences.includes(options.clientId)) throw authError(401, 'Google ID token audience mismatch.');
   const authorizedParties = new Set(options.authorizedParties || [options.clientId]);
-  if (payload.azp && !authorizedParties.has(payload.azp)) throw authError(401, 'Google ID token authorized-party mismatch.');
+  // Play App Signing SHA-1s create extra Android OAuth clients in the same GCP project.
+  // aud already matched GOOGLE_CLIENT_ID, so accept same-project azp for client installs.
+  if (
+    payload.azp &&
+    !authorizedParties.has(payload.azp) &&
+    !isSameGoogleCloudProjectClient(payload.azp, options.clientId)
+  ) {
+    throw authError(401, 'Google ID token authorized-party mismatch.');
+  }
   if (!GOOGLE_ISSUERS.has(payload.iss)) throw authError(401, 'Google ID token issuer mismatch.');
   if (!Number.isFinite(payload.exp) || payload.exp <= now - 30) throw authError(401, 'Google ID token expired.');
   if (payload.nbf !== undefined && (!Number.isFinite(payload.nbf) || payload.nbf > now + 30)) throw authError(401, 'Google ID token is not active yet.');
@@ -1320,6 +1328,16 @@ function cleanMobileDeviceId(value) {
 function googleAuthorizedParties(env) {
   return [env.GOOGLE_CLIENT_ID, ...String(env.GOOGLE_ANDROID_CLIENT_IDS || '')
     .split(',').map(value => value.trim()).filter(Boolean)];
+}
+
+/** True when azp is another OAuth client from the same Google Cloud project as the web client ID. */
+function isSameGoogleCloudProjectClient(clientId, trustedClientId) {
+  const azp = String(clientId || '').trim();
+  const trusted = String(trustedClientId || '').trim();
+  if (!azp || !trusted) return false;
+  const projectNumber = trusted.split('-')[0];
+  if (!/^\d{6,}$/.test(projectNumber)) return false;
+  return azp.startsWith(`${projectNumber}-`) && azp.endsWith('.apps.googleusercontent.com');
 }
 
 export async function hashToken(value) {

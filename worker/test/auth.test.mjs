@@ -275,6 +275,15 @@ test('Google ID token verification checks signature, issuer, audience, expiry, e
   }, fetchJwks);
   assert.equal(androidIdentity.sub, 'google-subject');
 
+  const projectWeb = '18847559311-web.apps.googleusercontent.com';
+  const projectAndroid = '18847559311-play.apps.googleusercontent.com';
+  const sameProjectToken = await fixture.sign({ ...basePayload, aud: projectWeb, azp: projectAndroid });
+  const sameProjectIdentity = await verifyGoogleIdToken(sameProjectToken, {
+    clientId: projectWeb,
+    nonceHash, nowSeconds: now, jwksUrl
+  }, fetchJwks);
+  assert.equal(sameProjectIdentity.sub, 'google-subject');
+
   const wrongAudience = await fixture.sign({ ...basePayload, aud: 'wrong-client' });
   await assert.rejects(() => verifyGoogleIdToken(wrongAudience, {
     clientId: basePayload.aud, nonceHash, nowSeconds: now, jwksUrl

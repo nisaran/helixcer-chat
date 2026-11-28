@@ -192,7 +192,7 @@ import {
   validateWhatsAppTemplateMappingsUpsert
 } from './template-mappings.js';
 
-const API_VERSION = '2026-11-27-document-preview-voucher';
+const API_VERSION = '2026-11-28-google-azp-contacts-platform';
 const MAX_TEXT_LENGTH = 4096;
 const MAX_TEMPLATE_PREVIEW_LENGTH = 16384;
 const MAX_RAW_PAYLOAD = 64000;
@@ -6512,7 +6512,23 @@ export function whatsappReplyWindowState(connectorType, lastInboundAt, now = Dat
   };
 }
 
-function contactListWhereSql() {
+function contactListWhereSql(platformBindIndex = 0) {
+  const flatPlatforms = CONTACT_ID_PLATFORMS.map(platform => `'${platform}'`).join(',');
+  const platformFilter = platformBindIndex
+    ? ` AND (
+        EXISTS (SELECT 1 FROM contact_platform_ids platform_flat
+          WHERE platform_flat.workspace_id=c.workspace_id AND platform_flat.contact_id=c.contact_id
+            AND platform_flat.platform=?${platformBindIndex})
+        OR EXISTS (SELECT 1 FROM contact_identities platform_identity
+          WHERE platform_identity.workspace_id=c.workspace_id AND platform_identity.contact_id=c.contact_id
+            AND (
+              platform_identity.platform=?${platformBindIndex}
+              OR (?${platformBindIndex}='google' AND platform_identity.platform IN (
+                'google_reviews','google_business','google-business'
+              ))
+            ))
+      )`
+    : '';
   return `c.workspace_id=?1 AND (?2='' OR
       instr(lower(COALESCE(c.display_name,'')),lower(?2))>0 OR
       instr(lower(COALESCE(c.company,'')),lower(?2))>0 OR
@@ -6522,8 +6538,23 @@ function contactListWhereSql() {
           AND instr(lower(COALESCE(flat.profile_id,'')),lower(?2))>0) OR
       EXISTS (SELECT 1 FROM contact_identities legacy
         WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id
-          AND legacy.platform NOT IN ('whatsapp','telegram','instagram','facebook','email','google')
-          AND instr(lower(COALESCE(legacy.profile_id,'')),lower(?2))>0))`;
+          AND legacy.platform NOT IN (${flatPlatforms})
+          AND instr(lower(COALESCE(legacy.profile_id,'')),lower(?2))>0))${platformFilter}`;
+}
+
+function parseContactPlatformFilter(url) {
+  const raw = String(url.searchParams.get('platform') || '').trim();
+  if (!raw) return '';
+  let platform;
+  try {
+    platform = canonicalIdentityPlatform(raw);
+  } catch {
+    throw httpError(400, 'Contact platform filter is invalid.');
+  }
+  if (!CONTACT_ID_PLATFORM_SET.has(platform)) {
+    throw httpError(400, 'Contact platform filter is not supported.');
+  }
+  return platform;
 }
 
 async function listContacts(env, workspaceId, url) {
@@ -6535,9 +6566,12 @@ async function listContacts(env, workspaceId, url) {
   const page = clampInt(url.searchParams.get('page'), 1, 1_000_000, 1);
   const offset = (page - 1) * limit;
   const cursor = String(url.searchParams.get('cursor') || url.searchParams.get('contactCursor') || '').trim();
-  const whereSql = contactListWhereSql();
+  const platform = parseContactPlatformFilter(url);
+  const platformBindIndex = platform ? 3 : 0;
+  const whereSql = contactListWhereSql(platformBindIndex);
+  const countBinds = platform ? [workspaceId, q, platform] : [workspaceId, q];
   const countRow = await env.DB.prepare(`SELECT COUNT(*) AS count FROM contacts c WHERE ${whereSql}`)
-    .bind(workspaceId, q).first();
+    .bind(...countBinds).first();
   const total = Number(countRow?.count || 0);
   // Prefer explicit page/offset paging; keep cursor for older clients.
   const result = cursor
@@ -6549,14 +6583,16 @@ async function listContacts(env, workspaceId, url) {
       AND COALESCE(
         (SELECT MAX(last_message_at) FROM conversations cv
           WHERE cv.workspace_id=c.workspace_id AND cv.contact_id=c.contact_id),
-        c.updated_at) < ?3
-    ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?4`).bind(workspaceId, q, cursor, limit).all()
+        c.updated_at) < ?${platform ? 4 : 3}
+    ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?${platform ? 5 : 4}`)
+      .bind(...(platform ? [workspaceId, q, platform, cursor, limit] : [workspaceId, q, cursor, limit])).all()
     : await env.DB.prepare(`SELECT c.contact_id,c.display_name,c.company,c.tags_json,c.attributes_json,c.updated_at,
       (SELECT MAX(last_message_at) FROM conversations cv
         WHERE cv.workspace_id=c.workspace_id AND cv.contact_id=c.contact_id) AS last_message_at
     FROM contacts c
     WHERE ${whereSql}
-    ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?3 OFFSET ?4`).bind(workspaceId, q, limit, offset).all();
+    ORDER BY COALESCE(last_message_at,c.updated_at) DESC LIMIT ?${platform ? 4 : 3} OFFSET ?${platform ? 5 : 4}`)
+      .bind(...(platform ? [workspaceId, q, platform, limit, offset] : [workspaceId, q, limit, offset])).all();
   const rows = result.results || [];
   const items = await hydrateContactViews(env, workspaceId, rows);
   const lastRow = rows[rows.length - 1];
