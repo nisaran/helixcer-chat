@@ -2941,7 +2941,7 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
   min-height: 36px;
   padding: 0 14px;
 }
-.provider-setup-option.is-active:not(.facebook-login-button) {
+.provider-setup-option.is-active:not(.facebook-login-button):not(.instagram-login-button) {
   border-color: #b9a4ef;
   background: #f4efff;
   color: #4b2f9b;
@@ -2949,6 +2949,46 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .provider-setup-option:disabled {
   opacity: .55;
   cursor: not-allowed;
+}
+/* Instagram Login button: brand gradient, text only (no logo). */
+.instagram-login-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(45deg, #f58529 0%, #dd2a7b 50%, #8134af 100%);
+  color: #fff;
+  box-shadow: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.instagram-login-button:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.instagram-login-button:focus-visible {
+  outline: 2px solid #dd2a7b;
+  outline-offset: 2px;
+}
+.instagram-login-button.is-active {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .28);
+  filter: brightness(.96);
+}
+.instagram-login-button:disabled {
+  color: #fff;
+  opacity: .55;
+  cursor: not-allowed;
+  filter: none;
 }
 /* Meta Login button look: https://developers.facebook.com/docs/facebook-login/userexperience/
    Same 36px height as Manual Setup in the chooser row. */
