@@ -162,7 +162,15 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(html, /id="messengerSetupChooser"/);
   assert.match(html, /data-action="provider-setup-manual"[^>]*data-provider="facebook_messenger"/);
   assert.match(html, /data-action="provider-setup-login"[^>]*data-provider="facebook_messenger"[^>]*disabled/);
+  assert.match(html, /id="messengerLoginHelp" hidden/);
+  assert.match(html, /id="messengerLoginDetails" hidden/);
   assert.match(html, /id="messengerManualFields" hidden/);
+  assert.match(app, /messengerLoginConnectUrl/);
+  assert.match(app, /startMessengerLogin/);
+  assert.match(app, /consumeMessengerOAuthReturn/);
+  assert.match(app, /showMessengerOauthReconnect/);
+  assert.match(app, /authMode === "facebook_login"/);
+  assert.match(app, /fillMessengerLoginDetails/);
   assert.match(app, /completeWhatsAppEmbeddedSignup|\/api\/channels\/oauth\/whatsapp-embedded\/complete/);
   assert.match(app, /WA_EMBEDDED_SIGNUP/);
   assert.match(app, /startWhatsAppEmbeddedSignup/);
@@ -213,7 +221,8 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(app, /fields\.hidden = !\(selectedProvider === providerKey && manualReady\)/);
   // WhatsApp-style chooser: Manual Setup hidden while editing; OAuth CTA shows Re-connect.
   assert.match(app, /PROVIDER_SETUP_CHOOSERS\.has\(button\.dataset\.provider\)\) button\.hidden = Boolean\(editing\)/);
-  assert.match(app, /showMessengerLogin = selectedProvider === "facebook_messenger" && !editing/);
+  assert.match(app, /showMessengerLogin = selectedProvider === "facebook_messenger"/);
+  assert.match(app, /showMessengerOauthReconnect/);
   assert.match(app, /showInstagramOauthReconnect/);
   assert.match(app, /instagramLoginButton\.textContent = showInstagramOauthReconnect \? "Re-connect" : "Login with Instagram"/);
   assert.match(app, /googleConnect\.textContent = googleConnected \? "Reconnect" : "Connect with Google"/);
