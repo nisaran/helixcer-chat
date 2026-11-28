@@ -10,17 +10,42 @@ export const AUTOMATION_TIMEZONES = Object.freeze([
   'UTC'
 ]);
 
+export function parseAutomationChannelIds(raw) {
+  if (Array.isArray(raw)) {
+    return [...new Set(raw.map((item) => String(item || '').trim()).filter(Boolean))];
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parseAutomationChannelIds(parsed);
+    } catch {
+      return raw.split(',').map((item) => item.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+/** True only when channelId is in the selected allowlist. Empty allowlist matches nothing. */
+export function automationAppliesToChannel(channelIds, channelId) {
+  const ids = parseAutomationChannelIds(channelIds);
+  if (!ids.length) return false;
+  const id = String(channelId || '').trim();
+  return Boolean(id) && ids.includes(id);
+}
+
 export function defaultAutomationSettings(workspaceId = '') {
   return {
     workspaceId: String(workspaceId || ''),
     greetingEnabled: false,
     greetingMessage: '',
     greetingIntervalHours: 24,
+    greetingChannelIds: [],
     oooEnabled: false,
     oooMessage: '',
     oooTimezone: 'Asia/Kolkata',
     oooStartTime: '18:00',
     oooEndTime: '09:00',
+    oooChannelIds: [],
     updatedAt: '',
     updatedBy: ''
   };
@@ -33,11 +58,13 @@ export function serializeAutomationSettings(row, workspaceId = '') {
     greetingEnabled: Number(row.greeting_enabled || 0) === 1,
     greetingMessage: String(row.greeting_message || ''),
     greetingIntervalHours: Number(row.greeting_interval_hours || 24),
+    greetingChannelIds: parseAutomationChannelIds(row.greeting_channel_ids_json),
     oooEnabled: Number(row.ooo_enabled || 0) === 1,
     oooMessage: String(row.ooo_message || ''),
     oooTimezone: String(row.ooo_timezone || 'Asia/Kolkata'),
     oooStartTime: String(row.ooo_start_time || '18:00'),
     oooEndTime: String(row.ooo_end_time || '09:00'),
+    oooChannelIds: parseAutomationChannelIds(row.ooo_channel_ids_json),
     updatedAt: String(row.updated_at || ''),
     updatedBy: String(row.updated_by || '')
   };

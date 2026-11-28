@@ -153,8 +153,10 @@ import {
 
 import {
   AUTOMATION_TIMEZONES,
+  automationAppliesToChannel,
   defaultAutomationSettings,
   localDayKey,
+  parseAutomationChannelIds,
   parseTimeToMinutes,
   renderAutomationMessage,
   serializeAutomationSettings,
@@ -3354,11 +3356,27 @@ async function getAutomationSettings(env, workspaceId) {
   }
 }
 
+async function resolveAutomationChannelIds(env, workspaceId, raw, label) {
+  const channelIds = parseAutomationChannelIds(raw);
+  if (!channelIds.length) return [];
+  if (channelIds.length > 200) throw httpError(400, `${label} can include at most 200 channels.`);
+  const placeholders = channelIds.map((_, index) => `?${index + 2}`).join(',');
+  const rows = await env.DB.prepare(
+    `SELECT channel_id FROM channels WHERE workspace_id=?1 AND channel_id IN (${placeholders})`
+  ).bind(workspaceId, ...channelIds).all();
+  const found = new Set((rows?.results || []).map((row) => String(row.channel_id || '')));
+  const missing = channelIds.filter((id) => !found.has(id));
+  if (missing.length) {
+    throw httpError(400, `${label} includes unknown channels: ${missing.slice(0, 5).join(', ')}.`);
+  }
+  return channelIds;
+}
+
 async function updateAutomationSettings(env, workspaceId, payload, principal) {
   if (!isPlainObject(payload)) throw httpError(400, 'Automation settings must be an object.');
   rejectUnknownKeys(payload, new Set([
-    'greetingEnabled', 'greetingMessage', 'greetingIntervalHours',
-    'oooEnabled', 'oooMessage', 'oooTimezone', 'oooStartTime', 'oooEndTime'
+    'greetingEnabled', 'greetingMessage', 'greetingIntervalHours', 'greetingChannelIds',
+    'oooEnabled', 'oooMessage', 'oooTimezone', 'oooStartTime', 'oooEndTime', 'oooChannelIds'
   ]), 'automation settings');
   const current = await getAutomationSettings(env, workspaceId);
   const next = { ...current };
@@ -3392,27 +3410,46 @@ async function updateAutomationSettings(env, workspaceId, payload, principal) {
     if (parseTimeToMinutes(payload.oooEndTime) == null) throw httpError(400, 'Out of office end time is invalid.');
     next.oooEndTime = String(payload.oooEndTime).trim();
   }
+  if (payload.greetingChannelIds !== undefined) {
+    next.greetingChannelIds = await resolveAutomationChannelIds(
+      env, workspaceId, payload.greetingChannelIds, 'Greeting channels'
+    );
+  }
+  if (payload.oooChannelIds !== undefined) {
+    next.oooChannelIds = await resolveAutomationChannelIds(
+      env, workspaceId, payload.oooChannelIds, 'Out of office channels'
+    );
+  }
   if (next.greetingEnabled && !next.greetingMessage) {
     throw httpError(400, 'Enter a greeting message before enabling greeting automation.');
   }
   if (next.oooEnabled && !next.oooMessage) {
     throw httpError(400, 'Enter an out of office message before enabling it.');
   }
+  if (next.greetingEnabled && !next.greetingChannelIds.length) {
+    throw httpError(400, 'Select at least one channel for greeting automation.');
+  }
+  if (next.oooEnabled && !next.oooChannelIds.length) {
+    throw httpError(400, 'Select at least one channel for out of office automation.');
+  }
   const now = new Date().toISOString();
   const updatedBy = String(principal?.user?.email || principal?.user?.displayName || '').slice(0, 254);
   await env.DB.prepare(`INSERT INTO workspace_automation_settings
-      (workspace_id,greeting_enabled,greeting_message,greeting_interval_hours,ooo_enabled,ooo_message,
-       ooo_timezone,ooo_start_time,ooo_end_time,updated_at,updated_by)
-    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+      (workspace_id,greeting_enabled,greeting_message,greeting_interval_hours,greeting_channel_ids_json,
+       ooo_enabled,ooo_message,ooo_timezone,ooo_start_time,ooo_end_time,ooo_channel_ids_json,
+       updated_at,updated_by)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
     ON CONFLICT(workspace_id) DO UPDATE SET
       greeting_enabled=excluded.greeting_enabled,
       greeting_message=excluded.greeting_message,
       greeting_interval_hours=excluded.greeting_interval_hours,
+      greeting_channel_ids_json=excluded.greeting_channel_ids_json,
       ooo_enabled=excluded.ooo_enabled,
       ooo_message=excluded.ooo_message,
       ooo_timezone=excluded.ooo_timezone,
       ooo_start_time=excluded.ooo_start_time,
       ooo_end_time=excluded.ooo_end_time,
+      ooo_channel_ids_json=excluded.ooo_channel_ids_json,
       updated_at=excluded.updated_at,
       updated_by=excluded.updated_by`)
     .bind(
@@ -3420,17 +3457,21 @@ async function updateAutomationSettings(env, workspaceId, payload, principal) {
       next.greetingEnabled ? 1 : 0,
       next.greetingMessage,
       next.greetingIntervalHours,
+      JSON.stringify(next.greetingChannelIds || []),
       next.oooEnabled ? 1 : 0,
       next.oooMessage,
       next.oooTimezone,
       next.oooStartTime,
       next.oooEndTime,
+      JSON.stringify(next.oooChannelIds || []),
       now,
       updatedBy
     ).run();
   await audit(env, principal, 'update', 'automation', workspaceId, {
     greetingEnabled: next.greetingEnabled,
-    oooEnabled: next.oooEnabled
+    oooEnabled: next.oooEnabled,
+    greetingChannelCount: (next.greetingChannelIds || []).length,
+    oooChannelCount: (next.oooChannelIds || []).length
   });
   return getAutomationSettings(env, workspaceId);
 }
@@ -3484,7 +3525,10 @@ async function maybeRunAutomationReplies(env, channel, inbound) {
     return created.message;
   };
 
-  if (shouldSendGreeting({
+  const greetingOnChannel = automationAppliesToChannel(settings.greetingChannelIds, channel?.channelId);
+  const oooOnChannel = automationAppliesToChannel(settings.oooChannelIds, channel?.channelId);
+
+  if (greetingOnChannel && shouldSendGreeting({
     enabled: settings.greetingEnabled,
     intervalHours: settings.greetingIntervalHours,
     previousInboundAt
@@ -3497,7 +3541,7 @@ async function maybeRunAutomationReplies(env, channel, inbound) {
     if (!recentGreeting) await sendAutomation('greeting', settings.greetingMessage);
   }
 
-  if (shouldSendOutOfOffice({
+  if (oooOnChannel && shouldSendOutOfOffice({
     enabled: settings.oooEnabled,
     timezone: settings.oooTimezone,
     startTime: settings.oooStartTime,

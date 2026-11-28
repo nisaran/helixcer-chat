@@ -803,11 +803,13 @@
           greetingEnabled: false,
           greetingMessage: "Hi {{name}}, thanks for reaching out. How can we help?",
           greetingIntervalHours: 24,
+          greetingChannelIds: [],
           oooEnabled: false,
           oooMessage: "Hi {{name}}, we are currently away and will reply soon.",
           oooTimezone: "Asia/Kolkata",
           oooStartTime: "18:00",
           oooEndTime: "09:00",
+          oooChannelIds: [],
         };
       }
       return { item: clone(this.data.automationSettings) };
@@ -815,7 +817,12 @@
 
     async updateAutomation(payload) {
       await smallDelay(120);
-      this.data.automationSettings = { ...(this.data.automationSettings || {}), ...payload };
+      this.data.automationSettings = {
+        ...(this.data.automationSettings || {}),
+        ...payload,
+        greetingChannelIds: normalizeAllowedChannelIds(payload?.greetingChannelIds),
+        oooChannelIds: normalizeAllowedChannelIds(payload?.oooChannelIds),
+      };
       return { ok: true, item: clone(this.data.automationSettings) };
     }
 
@@ -2774,11 +2781,13 @@
       greetingEnabled: false,
       greetingMessage: "",
       greetingIntervalHours: 24,
+      greetingChannelIds: [],
       oooEnabled: false,
       oooMessage: "",
       oooTimezone: "Asia/Kolkata",
       oooStartTime: "18:00",
       oooEndTime: "09:00",
+      oooChannelIds: [],
     };
   }
 
@@ -2790,12 +2799,87 @@
       greetingEnabled: Boolean(item.greetingEnabled),
       greetingMessage: String(item.greetingMessage || ""),
       greetingIntervalHours: Number.isFinite(interval) ? interval : 24,
+      greetingChannelIds: normalizeAllowedChannelIds(item.greetingChannelIds ?? item.greeting_channel_ids),
       oooEnabled: Boolean(item.oooEnabled),
       oooMessage: String(item.oooMessage || ""),
       oooTimezone: String(item.oooTimezone || "Asia/Kolkata"),
       oooStartTime: String(item.oooStartTime || "18:00"),
       oooEndTime: String(item.oooEndTime || "09:00"),
+      oooChannelIds: normalizeAllowedChannelIds(item.oooChannelIds ?? item.ooo_channel_ids),
     };
+  }
+
+  function automationChannelHostIds(kind) {
+    return kind === "ooo"
+      ? {
+          options: "automationOooChannelOptions",
+          empty: "automationOooChannelEmpty",
+          selectAll: "automationOooSelectAll",
+          checkboxName: "oooChannelIds",
+        }
+      : {
+          options: "automationGreetingChannelOptions",
+          empty: "automationGreetingChannelEmpty",
+          selectAll: "automationGreetingSelectAll",
+          checkboxName: "greetingChannelIds",
+        };
+  }
+
+  function selectedAutomationChannelIds(kind) {
+    const { options, checkboxName } = automationChannelHostIds(kind);
+    return [...document.querySelectorAll(`#${options} input[name="${checkboxName}"]:checked`)]
+      .map((input) => input.value)
+      .filter(Boolean);
+  }
+
+  function updateAutomationSelectAllLabel(kind) {
+    const { options, selectAll, checkboxName } = automationChannelHostIds(kind);
+    const button = $(selectAll);
+    const boxes = [...document.querySelectorAll(`#${options} input[name="${checkboxName}"]`)];
+    if (!button) return;
+    const allSelected = boxes.length > 0 && boxes.every((input) => input.checked);
+    button.textContent = allSelected ? "Clear all" : "Select all";
+  }
+
+  function toggleAutomationSelectAllChannels(kind = "greeting") {
+    const { options, checkboxName } = automationChannelHostIds(kind);
+    const boxes = [...document.querySelectorAll(`#${options} input[name="${checkboxName}"]`)];
+    if (!boxes.length) return;
+    const allSelected = boxes.every((input) => input.checked);
+    boxes.forEach((input) => { input.checked = !allSelected; });
+    updateAutomationSelectAllLabel(kind);
+  }
+
+  function renderAutomationChannelOptions(kind, selectedIds = null) {
+    const ids = automationChannelHostIds(kind);
+    const host = $(ids.options);
+    const empty = $(ids.empty);
+    const selectAll = $(ids.selectAll);
+    if (!host || !empty || !selectAll) return;
+    const selected = selectedIds === null
+      ? new Set(selectedAutomationChannelIds(kind))
+      : new Set(normalizeAllowedChannelIds(selectedIds));
+    host.replaceChildren();
+    const channels = asItems(state.channels).slice().sort((left, right) =>
+      String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }));
+    empty.hidden = channels.length > 0;
+    selectAll.disabled = channels.length === 0;
+    channels.forEach((channel) => {
+      const option = element("label", "invite-channel-option");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.name = ids.checkboxName;
+      checkbox.value = channel.channelId;
+      checkbox.checked = selected.has(channel.channelId);
+      const copy = document.createElement("span");
+      copy.append(document.createTextNode(channel.name || channel.channelId));
+      const meta = document.createElement("small");
+      meta.textContent = channelStyles[channel.connectorType]?.label || channel.connectorType || "Channel";
+      copy.append(meta);
+      option.append(checkbox, copy);
+      host.append(option);
+    });
+    updateAutomationSelectAllLabel(kind);
   }
 
   function setAutomationFormBusy(busy) {
@@ -2807,6 +2891,16 @@
       field.disabled = !editable;
     });
     if ($("automationSaveButton")) $("automationSaveButton").disabled = !editable;
+    ["automationGreetingSelectAll", "automationOooSelectAll"].forEach((id) => {
+      const button = $(id);
+      if (!button) return;
+      if (!editable) button.disabled = true;
+      else {
+        const kind = id.includes("Ooo") ? "ooo" : "greeting";
+        const { options, checkboxName } = automationChannelHostIds(kind);
+        button.disabled = !document.querySelector(`#${options} input[name="${checkboxName}"]`);
+      }
+    });
   }
 
   function renderAutomationSettings(settings = state.automationSettings) {
@@ -2822,6 +2916,8 @@
     $("automationOooTimezone").value = item.oooTimezone;
     $("automationOooStart").value = item.oooStartTime;
     $("automationOooEnd").value = item.oooEndTime;
+    renderAutomationChannelOptions("greeting", item.greetingChannelIds);
+    renderAutomationChannelOptions("ooo", item.oooChannelIds);
     setAutomationFormBusy(false);
   }
 
@@ -2854,11 +2950,13 @@
       greetingEnabled: $("automationGreetingEnabled").checked,
       greetingMessage: String(data.get("greetingMessage") || "").trim(),
       greetingIntervalHours: Number(data.get("greetingIntervalHours")),
+      greetingChannelIds: selectedAutomationChannelIds("greeting"),
       oooEnabled: $("automationOooEnabled").checked,
       oooMessage: String(data.get("oooMessage") || "").trim(),
       oooTimezone: String(data.get("oooTimezone") || "").trim(),
       oooStartTime: String(data.get("oooStartTime") || "").trim(),
       oooEndTime: String(data.get("oooEndTime") || "").trim(),
+      oooChannelIds: selectedAutomationChannelIds("ooo"),
     };
     if (payload.greetingEnabled && !payload.greetingMessage) {
       $("automationGreetingMessage").setCustomValidity("Enter a greeting message before enabling greeting automation.");
@@ -2870,6 +2968,14 @@
       $("automationOooMessage").setCustomValidity("Enter an out of office message before enabling it.");
       form.reportValidity();
       $("automationOooMessage").setCustomValidity("");
+      return;
+    }
+    if (payload.greetingEnabled && !payload.greetingChannelIds.length) {
+      showToast("Select greeting channels", "Choose at least one channel before enabling greeting automation.", true);
+      return;
+    }
+    if (payload.oooEnabled && !payload.oooChannelIds.length) {
+      showToast("Select out of office channels", "Choose at least one channel before enabling out of office automation.", true);
       return;
     }
     $("automationSaveState").textContent = "Saving…";
@@ -7603,6 +7709,10 @@
     }
     channels.forEach((channel) => grid.append(renderChannelCard(channel)));
     if (state.route === "import-chat") renderImportChatPage();
+    if (state.route === "automation" && state.automationSettingsLoaded) {
+      renderAutomationChannelOptions("greeting");
+      renderAutomationChannelOptions("ooo");
+    }
   }
 
   function renderChannelCard(channel) {
@@ -17819,6 +17929,7 @@
           "save-role": () => { saveSelectedRole().catch(() => {}); },
           "delete-role": () => { deleteSelectedRole().catch(() => {}); },
           "invite-select-all-channels": toggleInviteSelectAllChannels,
+          "automation-select-all-channels": (button) => toggleAutomationSelectAllChannels(button.dataset.automationChannels || "greeting"),
           "copy-invite-link": copyInviteLink,
           "open-api-key": openApiKeyDialog,
           "close-api-key": closeApiKeyDialog,
@@ -18605,6 +18716,12 @@
     $("inviteRole").addEventListener("change", updateInviteRoleHelp);
     $("inviteChannelOptions")?.addEventListener("change", (event) => {
       if (event.target?.matches?.('input[type="checkbox"]')) updateInviteSelectAllLabel();
+    });
+    $("automationGreetingChannelOptions")?.addEventListener("change", (event) => {
+      if (event.target?.matches?.('input[type="checkbox"]')) updateAutomationSelectAllLabel("greeting");
+    });
+    $("automationOooChannelOptions")?.addEventListener("change", (event) => {
+      if (event.target?.matches?.('input[type="checkbox"]')) updateAutomationSelectAllLabel("ooo");
     });
     $("roleListSearch")?.addEventListener("input", renderRolesPage);
     $("rolePermissionSearch")?.addEventListener("input", applyRolePermissionSearch);

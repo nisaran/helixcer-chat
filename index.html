@@ -14,9 +14,9 @@
   <link rel="manifest" href="./manifest.webmanifest?v=20261106-role-cards">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261127-google-reviews-sync">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261128-automation-channel-selector">
   <script src="./assets/vendor/xlsx-0.20.3.full.min.js" defer></script>
-  <script src="./assets/app.js?v=20261127-google-reviews-sync" defer></script>
+  <script src="./assets/app.js?v=20261128-automation-channel-selector" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to inbox</a>
@@ -1156,6 +1156,17 @@
               Send only if the customer’s last message was at least this many hours ago
               <input class="text-field" id="automationGreetingInterval" name="greetingIntervalHours" type="number" min="0" max="8760" step="0.5" value="24">
             </label>
+            <div class="automation-channel-access" id="automationGreetingChannelAccess">
+              <div class="invite-channel-access-head">
+                <div>
+                  <strong>Channels</strong>
+                  <span class="subtle">Greeting sends only on the channels you select.</span>
+                </div>
+                <button class="secondary-button invite-channel-select-all" type="button" data-action="automation-select-all-channels" data-automation-channels="greeting" id="automationGreetingSelectAll">Select all</button>
+              </div>
+              <div class="invite-channel-options" id="automationGreetingChannelOptions" role="group" aria-label="Greeting channels"></div>
+              <p class="field-hint" id="automationGreetingChannelEmpty" hidden>No messaging channels are configured yet. Add a channel before enabling greeting.</p>
+            </div>
           </fieldset>
 
           <fieldset class="automation-card">
@@ -1193,6 +1204,17 @@
               </label>
             </div>
             <p class="subtle automation-window-help">Overnight windows are supported (for example 18:00 to 09:00).</p>
+            <div class="automation-channel-access" id="automationOooChannelAccess">
+              <div class="invite-channel-access-head">
+                <div>
+                  <strong>Channels</strong>
+                  <span class="subtle">Out of office sends only on the channels you select.</span>
+                </div>
+                <button class="secondary-button invite-channel-select-all" type="button" data-action="automation-select-all-channels" data-automation-channels="ooo" id="automationOooSelectAll">Select all</button>
+              </div>
+              <div class="invite-channel-options" id="automationOooChannelOptions" role="group" aria-label="Out of office channels"></div>
+              <p class="field-hint" id="automationOooChannelEmpty" hidden>No messaging channels are configured yet. Add a channel before enabling out of office.</p>
+            </div>
           </fieldset>
 
           <div class="workspace-form-actions automation-actions">

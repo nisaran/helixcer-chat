@@ -4,7 +4,9 @@ import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { handleRequest } from '../src/index.js';
 import {
+  automationAppliesToChannel,
   isWithinDailyWindow,
+  parseAutomationChannelIds,
   parseTimeToMinutes,
   renderAutomationMessage,
   shouldSendGreeting,
@@ -69,7 +71,8 @@ async function testDatabase() {
     '0017_agent_channel_access.sql', '0019_outbound_sender.sql', '0020_user_profile.sql',
     '0021_campaigns.sql', '0022_facebook_messenger_page.sql', '0023_workspace_roles.sql',
     '0024_password_auth.sql', '0025_campaign_jobs.sql', '0026_campaign_upload_chunks.sql',
-    '0027_google_reviews_oauth.sql', '0028_campaign_scheduled_at.sql', '0029_workspace_automation.sql'
+    '0027_google_reviews_oauth.sql', '0028_campaign_scheduled_at.sql', '0029_workspace_automation.sql',
+    '0034_automation_channel_ids.sql'
   ];
   for (const name of migrations) {
     database.exec(await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));
@@ -169,6 +172,13 @@ test('shouldSendOutOfOffice uses timezone local clock', () => {
   }), false);
 });
 
+test('automation channel allowlists match only selected channels', () => {
+  assert.deepEqual(parseAutomationChannelIds('["wa-1","wa-2","wa-1"]'), ['wa-1', 'wa-2']);
+  assert.equal(automationAppliesToChannel([], 'wa-1'), false);
+  assert.equal(automationAppliesToChannel(['wa-1', 'ig-1'], 'wa-1'), true);
+  assert.equal(automationAppliesToChannel(['wa-1', 'ig-1'], 'tg-1'), false);
+});
+
 test('PATCH /api/automation accepts multiline greeting messages', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB);
@@ -177,6 +187,10 @@ test('PATCH /api/automation accepts multiline greeting messages', async () => {
     Origin: 'https://chat.helixcer.com',
     'Content-Type': 'application/json'
   };
+  const now = '2026-01-01T00:00:00.000Z';
+  database.prepare(`INSERT INTO channels
+      (channel_id,name,connector_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+    VALUES ('wa-sales','Sales WhatsApp','whatsapp_cloud',1,'["text"]','{}','SECRET',?,?, 'ws_default')`).run(now, now);
   const greetingMessage = 'Hi {{name}},\nThanks for reaching out to us. We are glad to help you.\nRegards, Helixcer';
   const response = await handleRequest(new Request('https://api.chat.helixcer.com/api/automation', {
     method: 'PATCH',
@@ -184,7 +198,8 @@ test('PATCH /api/automation accepts multiline greeting messages', async () => {
     body: JSON.stringify({
       greetingEnabled: true,
       greetingMessage,
-      greetingIntervalHours: 24
+      greetingIntervalHours: 24,
+      greetingChannelIds: ['wa-sales']
     })
   }), env);
   assert.equal(response.status, 200, await response.clone().text());
@@ -192,6 +207,7 @@ test('PATCH /api/automation accepts multiline greeting messages', async () => {
   assert.equal(body.ok, true);
   assert.equal(body.item.greetingEnabled, true);
   assert.equal(body.item.greetingMessage, greetingMessage);
+  assert.deepEqual(body.item.greetingChannelIds, ['wa-sales']);
 
   const loaded = await handleRequest(new Request('https://api.chat.helixcer.com/api/automation', {
     headers: { Authorization: 'Bearer recovery-secret', Origin: 'https://chat.helixcer.com' }
@@ -199,5 +215,28 @@ test('PATCH /api/automation accepts multiline greeting messages', async () => {
   assert.equal(loaded.status, 200);
   const loadedBody = await loaded.json();
   assert.equal(loadedBody.item.greetingMessage, greetingMessage);
+  assert.deepEqual(loadedBody.item.greetingChannelIds, ['wa-sales']);
+  database.close();
+});
+
+test('PATCH /api/automation requires channels when enabling greeting', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const response = await handleRequest(new Request('https://api.chat.helixcer.com/api/automation', {
+    method: 'PATCH',
+    headers: {
+      Authorization: 'Bearer recovery-secret',
+      Origin: 'https://chat.helixcer.com',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      greetingEnabled: true,
+      greetingMessage: 'Hello',
+      greetingChannelIds: []
+    })
+  }), env);
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.match(String(body.error || body.message || ''), /channel/i);
   database.close();
 });
