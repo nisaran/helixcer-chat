@@ -148,6 +148,7 @@ async function testDatabase() {
   database.exec(await readFile(new URL('../migrations/0026_campaign_upload_chunks.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0027_google_reviews_oauth.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0028_campaign_scheduled_at.sql', import.meta.url), 'utf8'));
+  database.exec(await readFile(new URL('../migrations/0032_instagram_login_oauth.sql', import.meta.url), 'utf8'));
   database.exec(await readFile(new URL('../migrations/0033_google_contact_platform.sql', import.meta.url), 'utf8'));
   return { database, DB: new TestD1(database) };
 }
@@ -1924,6 +1925,11 @@ test('Instagram verification uses /me and exposes sanitized credential errors', 
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     providerCalls.push(url);
+    if (url.pathname.endsWith('/subscribed_apps')) {
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
     if (url.pathname !== '/v26.0/me') return new Response('{}', { status: 404 });
     if (url.searchParams.get('fields') !== 'user_id,username') return new Response('{}', { status: 400 });
     const authorization = new Headers(init.headers).get('Authorization') || '';
@@ -1943,8 +1949,12 @@ test('Instagram verification uses /me and exposes sanitized credential errors', 
     assert.equal(verified.status, 200);
     assert.equal(providerCalls[0].origin, 'https://graph.instagram.com');
     assert.equal(providerCalls[0].pathname, '/v26.0/me');
+    assert.ok(providerCalls.some(url => url.pathname === '/v26.0/17841400000000001/subscribed_apps'));
     assert.equal(database.prepare("SELECT json_extract(config_json,'$.verifiedProviderId') AS id FROM channels WHERE channel_id='ig-valid'").get().id,
       '17841400000000001');
+    assert.ok(database.prepare(
+      "SELECT json_extract(config_json,'$.subscribedAppsAt') AS at FROM channels WHERE channel_id='ig-valid'"
+    ).get().at);
 
     const rejected = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels/ig-invalid/verify', {
       method: 'POST', headers: { Authorization: 'Bearer recovery-secret' }
@@ -2279,6 +2289,90 @@ test('shared Instagram app webhook verifies all matches and routes each account 
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature }, body: singlePayload
   }), env);
   assert.equal(ambiguous.status, 409);
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+  }
+});
+
+test('fixed Instagram app webhook uses META_APP_ID path and app verify token', async () => {
+  const { database, DB } = await testDatabase();
+  const appId = '1051245721347219';
+  const appSecret = 'meta-app-secret-value-1234567890ab';
+  const verifyToken = 'helixcer-shared-ig-verify';
+  const env = envFor(DB, {
+    ADMIN_TOKEN: 'recovery-secret', RECOVERY_MODE: 'true',
+    CHANNEL_CREDENTIALS_KEY: 'test-channel-master-key-material-'.repeat(2),
+    META_APP_ID: appId,
+    META_APP_SECRET: appSecret,
+    META_WEBHOOK_VERIFY_TOKEN: verifyToken
+  });
+  const headers = { Authorization: 'Bearer recovery-secret', 'Content-Type': 'application/json' };
+  const accountId = '17841400000000099';
+  const created = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      channelId: 'ig-shared-app',
+      name: 'IG Shared',
+      connectorType: 'instagram',
+      config: { instagramAccountId: accountId, appId, apiVersion: 'v26.0', authMode: 'unified_login' },
+      credentials: { accessToken: 'instagram-access-token-shared', appSecret, verifyToken: 'channel-local-token' }
+    })
+  }), env);
+  assert.equal(created.status, 201);
+
+  const listed = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  const item = (await listed.json()).items.find(row => row.channelId === 'ig-shared-app');
+  assert.equal(item.setup.callbackPath, '/webhooks/instagram-app');
+
+  const handshake = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/webhooks/instagram-app?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(verifyToken)}&hub.challenge=ig-challenge`
+  ), env);
+  assert.equal(handshake.status, 200);
+  assert.equal(await handshake.text(), 'ig-challenge');
+  assert.ok(database.prepare(
+    `SELECT json_extract(config_json,'$.webhookVerifiedAt') AS at FROM channels WHERE channel_id='ig-shared-app'`
+  ).get().at);
+
+  const tokenResponse = await handleRequest(new Request(
+    'https://api.chat.helixcer.com/api/channels/ig-shared-app/verify-token',
+    { headers: { Authorization: 'Bearer recovery-secret' } }
+  ), env);
+  assert.equal(tokenResponse.status, 200);
+  assert.equal((await tokenResponse.json()).verifyToken, verifyToken);
+
+  const payload = {
+    object: 'instagram',
+    entry: [{
+      id: accountId,
+      messaging: [{
+        sender: { id: '5550099' },
+        recipient: { id: accountId },
+        timestamp: 1761360000000,
+        message: { mid: 'ig-shared-app-message', text: 'Shared path inbound' }
+      }]
+    }]
+  };
+  const raw = JSON.stringify(payload);
+  const hmacKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(appSecret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const digest = await crypto.subtle.sign('HMAC', hmacKey, new TextEncoder().encode(raw));
+  const signature = `sha256=${Buffer.from(digest).toString('hex')}`;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('{}', { status: 404 });
+  try {
+    const delivered = await handleRequest(new Request('https://api.chat.helixcer.com/webhooks/instagram-app', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature },
+      body: raw
+    }), env);
+    assert.equal(delivered.status, 200);
+    assert.deepEqual(await delivered.json(), { ok: true, received: 1, channels: 1 });
+    assert.equal(database.prepare(
+      "SELECT COUNT(*) AS count FROM messages WHERE provider_message_id='ig-shared-app-message'"
+    ).get().count, 1);
   } finally {
     globalThis.fetch = originalFetch;
     database.close();

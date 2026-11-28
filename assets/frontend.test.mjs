@@ -183,6 +183,8 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(app, /copy-webhook-callback/);
   assert.match(app, /\/webhooks\/instagram-app\/\$\{encodeURIComponent\(channel\.config\.appId\)\}/);
   assert.match(app, /\/webhooks\/facebook-messenger-app\/\$\{encodeURIComponent\(channel\.config\.appId\)\}/);
+  assert.match(app, /register-instagram-webhook/);
+  assert.match(app, /webhooks\/instagram-app/);
   assert.match(app, /Helixcer routes messages by account ID/);
   assert.match(app, /Helixcer routes messages by Page ID/);
   assert.match(app, /function identityChannels\(platform, bindings = \[\]\)/);

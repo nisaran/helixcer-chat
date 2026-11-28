@@ -128,6 +128,9 @@ function mockUnifiedInstagramFetch() {
     if (url.includes('graph.facebook.com') && url.includes('/me?') && url.includes('client_business_id')) {
       return Response.json({ client_business_id: '123456789012345', id: '999' });
     }
+    if (url.includes('/subscribed_apps')) {
+      return Response.json({ success: true });
+    }
     return new Response(`unexpected fetch ${url}`, { status: 500 });
   };
 }
@@ -218,8 +221,15 @@ test('Instagram Login OAuth callback creates a unified-login Instagram channel',
   assert.equal(config.authMode, 'unified_login');
   assert.equal(config.clientBusinessId, '123456789012345');
   assert.ok(config.credentialsVerifiedAt);
+  assert.ok(config.subscribedAppsAt);
   assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM channel_credentials
     WHERE channel_id=? AND credential_key IN ('accessToken','appSecret','verifyToken')`).get(channelId).count, 3);
+
+  const listed = await handleRequest(new Request('https://api.chat.helixcer.com/api/channels', {
+    headers: { Authorization: 'Bearer recovery-secret' }
+  }), env);
+  const item = (await listed.json()).items.find(row => row.channelId === channelId);
+  assert.equal(item.setup.callbackPath, '/webhooks/instagram-app');
   database.close();
 });
 

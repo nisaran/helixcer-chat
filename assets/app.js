@@ -2373,6 +2373,7 @@
             : connectorType === "facebook_messenger" ? "facebook-messenger"
               : connectorType;
       const base = this.isDemo ? "https://api.chat.helixcer.com" : this.base;
+      // Prefer setup.callbackPath from the API (fixed /webhooks/instagram-app for Helixcer Meta app).
       const sharedInstagramPath = connectorType === "instagram" && channel?.config?.appId
         ? `/webhooks/instagram-app/${encodeURIComponent(channel.config.appId)}`
         : "";
@@ -7976,16 +7977,24 @@
         }
       }
       actions.append(toggle, verify);
-      if (isEmbeddedWhatsApp && credentialsReady) {
+      const isInstagramLogin = channel.connectorType === "instagram"
+        && (channel.setup?.authMode === "unified_login" || channel.setup?.authMode === "instagram_login"
+          || channel.config?.authMode === "unified_login" || channel.config?.authMode === "instagram_login"
+          || channel.setup?.callbackPath === "/webhooks/instagram-app");
+      if ((isEmbeddedWhatsApp || isInstagramLogin) && credentialsReady) {
         const registerWebhook = element("button", "secondary-button",
           webhookVerified ? "Re-register webhook" : "Register Webhook");
         registerWebhook.type = "button";
-        registerWebhook.dataset.action = "register-whatsapp-webhook";
+        registerWebhook.dataset.action = isInstagramLogin ? "register-instagram-webhook" : "register-whatsapp-webhook";
         registerWebhook.dataset.channelId = channel.channelId;
         registerWebhook.disabled = !channel.enabled;
-        registerWebhook.title = webhookVerified
-          ? "Ask Meta to subscribe this WhatsApp account to Helixcer's webhook again"
-          : "Subscribe this WhatsApp account and set Helixcer's webhook callback in Meta";
+        registerWebhook.title = isInstagramLogin
+          ? (webhookVerified
+            ? "Ask Meta to subscribe this Instagram account to Helixcer's app webhook again"
+            : "Subscribe this Instagram account to Helixcer's shared /webhooks/instagram-app callback")
+          : (webhookVerified
+            ? "Ask Meta to subscribe this WhatsApp account to Helixcer's webhook again"
+            : "Subscribe this WhatsApp account and set Helixcer's webhook callback in Meta");
         actions.append(registerWebhook);
       }
     }
@@ -7999,8 +8008,11 @@
           element("strong", "", "Login with Facebook webhook"),
           element("span", "", "Use Register Webhook if Meta did not finish the automatic callback setup for this connection.")
         );
-      } else if (channel.connectorType === "instagram" && channel.config?.appId) {
-        note.append(element("strong", "", "Shared Meta app callback"), element("span", "", "Use this URL once for every Instagram account connected through the same Meta App ID. Helixcer routes messages by account ID."));
+      } else if (channel.connectorType === "instagram" && (channel.setup?.callbackPath === "/webhooks/instagram-app" || channel.config?.appId)) {
+        note.append(
+          element("strong", "", "Shared Meta app callback"),
+          element("span", "", "Paste https://api.chat.helixcer.com/webhooks/instagram-app into Meta → Instagram → Webhooks (same pattern as WhatsApp). Helixcer routes messages by account ID. Use Register Webhook to subscribe this account after the callback is verified.")
+        );
       } else if (channel.connectorType === "facebook_messenger" && channel.config?.appId) {
         note.append(element("strong", "", "Shared Meta app callback"), element("span", "", "Use this URL once for every Facebook Page connected through the same Meta App ID. Helixcer routes messages by Page ID."));
       } else {
@@ -16815,6 +16827,30 @@
     }
   }
 
+  async function registerInstagramWebhook(channelId, button) {
+    if (!channelId || !button) return;
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    button.disabled = true;
+    const previousLabel = button.textContent;
+    button.textContent = "Registering…";
+    try {
+      const result = await state.api.registerWhatsAppWebhook(channelId);
+      await loadAll();
+      setRoute("channels");
+      showToast(
+        result.subscribedAppsAt ? "Instagram account subscribed" : "Instagram webhook updated",
+        result.health === "connected"
+          ? `${channel?.name || "Instagram"} is subscribed to Helixcer's shared app webhook.`
+          : "Account subscribed. Verify Callback URL https://api.chat.helixcer.com/webhooks/instagram-app in Meta if the webhook step is still pending."
+      );
+    } catch (error) {
+      showToast("Webhook was not registered", error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = previousLabel;
+    }
+  }
+
   async function syncWhatsAppCoexistenceHistory(channelId, button) {
     if (!channelId || !button) return;
     const channel = state.channels.find((item) => item.channelId === channelId);
@@ -17743,6 +17779,10 @@
         }
         if (actionButton.dataset.action === "register-whatsapp-webhook") {
           registerWhatsAppWebhook(actionButton.dataset.channelId, actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "register-instagram-webhook") {
+          registerInstagramWebhook(actionButton.dataset.channelId, actionButton);
           return;
         }
         if (actionButton.dataset.action === "sync-whatsapp-coexistence-history") {

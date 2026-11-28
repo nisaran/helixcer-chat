@@ -70,7 +70,7 @@ Optional Instagram Unified Login (`Login with Instagram` on Instagram channel se
 - `META_INSTAGRAM_LOGIN_CONFIG_ID`: Facebook Login for Business configuration ID from App Dashboard → Instagram → API setup with Unified login (the `config_id` in the Login URL).
 - `META_INSTAGRAM_OAUTH_REDIRECT_URI`: optional override for the OAuth callback (defaults to `https://api.chat.helixcer.com/auth/meta/callback`). Register this exact URI under the configuration’s Redirect URL list.
 
-In Meta, allow Helixcer app domains under Facebook Login for Business → Settings (Allowed domains / Valid OAuth redirect URIs). Helixcer auto-configures the app-level WhatsApp webhook (`/webhooks/whatsapp-app`) and then sets each WABA’s `override_callback_uri` to `https://api.chat.helixcer.com/webhooks/whatsapp/{channelId}` during Embedded Signup / Register Webhook.
+In Meta, allow Helixcer app domains under Facebook Login for Business → Settings (Allowed domains / Valid OAuth redirect URIs). Helixcer auto-configures the app-level WhatsApp webhook (`/webhooks/whatsapp-app`) and then sets each WABA’s `override_callback_uri` to `https://api.chat.helixcer.com/webhooks/whatsapp/{channelId}` during Embedded Signup / Register Webhook. For Instagram, configure the Meta App Dashboard callback once to `https://api.chat.helixcer.com/webhooks/instagram-app` (Instagram cannot set this via Graph API); Helixcer then subscribes each connected Instagram account with `subscribed_apps`.
 
 Optional password-reset delivery secrets:
 
@@ -260,7 +260,8 @@ Browser requests must use `credentials: "include"`. Cookie-authenticated mutatio
 - `GET|POST /webhooks/whatsapp/:channelId`
 - `POST /webhooks/telegram/:channelId`
 - `GET|POST /webhooks/instagram/:channelId`
-- `GET|POST /webhooks/instagram-app/:appId`
+- `GET|POST /webhooks/instagram-app` (Helixcer Meta app shared callback; same pattern as `/webhooks/whatsapp-app`)
+- `GET|POST /webhooks/instagram-app/:appId` (custom Meta App ID)
 - `GET|POST /webhooks/facebook-messenger/:channelId`
 - `GET|POST /webhooks/facebook-messenger-app/:appId`
 - `POST /webhooks/generic/:channelId`
@@ -283,7 +284,7 @@ Provider payloads use these fields:
 - Instagram Messaging with Instagram Login: `config` contains `instagramAccountId` and may contain `username`, `appId`, `apiVersion`, and `authMode` (`instagram_login`); `credentials` contains `accessToken`, `appSecret`, and `verifyToken`. A Facebook Page ID is not required.
 - Facebook Messenger: `config` contains `pageId` and may contain `pageName`, `appId`, and `apiVersion`; `credentials` contains a Page `accessToken`, `appSecret`, and `verifyToken`. Rows are stored as `generic_http` in `connector_type` for the legacy CHECK constraint; runtime routing uses `provider_type='facebook_messenger'`. Contact identities map to the existing `facebook` platform (Page-scoped IDs).
 
-Meta connections default to Graph API `v26.0`. `GET /api/channels` returns the provider callback as `setup.callbackPath`. WhatsApp and Telegram use channel-specific paths. Instagram connections with an `appId` share `/webhooks/instagram-app/:appId`, matching Meta's app-level webhook model; connections without an `appId` retain `/webhooks/instagram/:channelId` for backward compatibility. Facebook Messenger connections with an `appId` share `/webhooks/facebook-messenger-app/:appId` and route by `pageId`; connections without an `appId` use `/webhooks/facebook-messenger/:channelId`. Shared handlers resolve every entry by app plus account/Page ID, reject missing or ambiguous mappings before storage, and validate the signature with each resolved connection's stored App Secret. Verification GET matches the supplied verify token across enabled connections for that app and marks every match verified. WhatsApp, Instagram, and Messenger validate `X-Hub-Signature-256`; Telegram validates `X-Telegram-Bot-Api-Secret-Token`.
+Meta connections default to Graph API `v26.0`. `GET /api/channels` returns the provider callback as `setup.callbackPath`. WhatsApp Embedded Signup uses the shared app callback `/webhooks/whatsapp-app` plus per-channel overrides. Instagram connections that use Helixcer's `META_APP_ID` share the fixed callback `/webhooks/instagram-app` (paste into Meta → Instagram → Webhooks, with `META_WEBHOOK_VERIFY_TOKEN` / `META_INSTAGRAM_WEBHOOK_VERIFY_TOKEN`); other `appId` values keep `/webhooks/instagram-app/:appId`. Connections without an `appId` retain `/webhooks/instagram/:channelId`. Login with Instagram also calls `POST /{ig-user-id}/subscribed_apps` on connect / Verify / Register Webhook. Facebook Messenger connections with an `appId` share `/webhooks/facebook-messenger-app/:appId` and route by `pageId`; connections without an `appId` use `/webhooks/facebook-messenger/:channelId`. Shared handlers resolve every entry by app plus account/Page ID, reject missing or ambiguous mappings before storage, and validate the signature with each resolved connection's stored App Secret (or the Helixcer app secret on the fixed Instagram path). Verification GET matches the app or channel verify token and marks matching connections verified. WhatsApp, Instagram, and Messenger validate `X-Hub-Signature-256`; Telegram validates `X-Telegram-Bot-Api-Secret-Token`.
 
 Credential rows are encrypted independently with a random nonce and authenticated workspace/channel/field context. Listing channels checks only which credential field rows exist and does not decrypt them. Audit entries contain only the names of credential fields changed, never their values.
 
