@@ -86,6 +86,21 @@ import {
   usesSharedInstagramAppWebhook
 } from './instagram-login.js';
 import {
+  buildMessengerAuthorizeUrl,
+  clearMessengerOAuthCookieHeader,
+  exchangeMessengerAuthorizationCode,
+  fetchMessengerLoginProfile,
+  messengerLoginPublicConfig,
+  messengerMetaAppId,
+  messengerMetaAppSecret,
+  messengerOAuthCookieHeader,
+  metaMessengerAppVerifyToken,
+  readMessengerOAuthCookie,
+  requireMessengerLoginConfig,
+  subscribeMessengerPageWebhooks,
+  usesSharedMessengerAppWebhook
+} from './messenger-login.js';
+import {
   assertChatAccess,
   attachPrincipalPermissions,
   chatScope,
@@ -234,7 +249,7 @@ const CONNECTOR_DEFINITIONS = {
   },
   facebook_messenger: {
     label: 'Facebook Messenger', webhookPath: 'facebook-messenger',
-    configFields: ['pageId', 'pageName', 'appId', 'apiVersion'],
+    configFields: ['pageId', 'pageName', 'appId', 'apiVersion', 'authMode'],
     requiredConfig: ['pageId'], requiredCredentials: ['accessToken', 'verifyToken', 'appSecret'],
     capabilities: ['text', 'attachments']
   },
@@ -444,6 +459,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     if (request.method === 'GET' && (url.pathname === '/auth/instagram/callback' || url.pathname === '/auth/meta/callback')) {
       return await finishInstagramLoginOAuthResponse(request, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/auth/messenger/callback') {
+      return await finishMessengerLoginOAuthResponse(request, env);
     }
     if (request.method === 'GET' && url.pathname === '/auth/mobile/config') {
       return json(mobileAuthConfiguration(env));
@@ -735,6 +753,7 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
         me: principalView(principal),
         whatsappEmbeddedSignup: metaEmbeddedSignupPublicConfig(env),
         instagramLogin: instagramLoginPublicConfig(env),
+        messengerLogin: messengerLoginPublicConfig(env),
         connectorTypes: [
           { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', capabilities: CONNECTOR_DEFINITIONS.whatsapp_cloud.capabilities },
           { value: 'telegram', label: 'Telegram Bot', capabilities: CONNECTOR_DEFINITIONS.telegram.capabilities },
@@ -910,6 +929,16 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
       const limited = await enforceOAuthRateLimit(request, env);
       if (limited) return withCors(limited, cors);
       return await startInstagramLoginChannelOAuth(request, env, principal);
+    }
+    if (url.pathname === '/api/channels/oauth/messenger/config' && request.method === 'GET') {
+      requirePermission(principal, 'channels.manage');
+      return withCors(json(messengerLoginPublicConfig(env)), cors);
+    }
+    if (url.pathname === '/api/channels/oauth/messenger/start' && request.method === 'GET') {
+      requirePermission(principal, 'channels.manage');
+      const limited = await enforceOAuthRateLimit(request, env);
+      if (limited) return withCors(limited, cors);
+      return await startMessengerLoginChannelOAuth(request, env, principal);
     }
     if (url.pathname === '/api/channels/oauth/google-reviews/pending' && request.method === 'GET') {
       requirePermission(principal, 'channels.manage');
@@ -3019,7 +3048,9 @@ async function handleFacebookMessengerWebhook(request, env, channelId, ctx) {
 async function handleFacebookMessengerAppWebhook(request, env, requestedAppId, ctx) {
   const appId = cleanMetaIdentifier(requestedAppId, 'Meta App ID');
   const channels = await findFacebookMessengerAppChannels(env, appId);
-  if (!channels.length) return json({ ok: false, error: 'Unknown Messenger app webhook.' }, 404);
+  const sharedToken = usesSharedMessengerAppWebhook(env, { appId })
+    ? metaMessengerAppVerifyToken(env)
+    : '';
 
   if (request.method === 'GET') {
     const url = new URL(request.url);
@@ -3028,9 +3059,16 @@ async function handleFacebookMessengerAppWebhook(request, env, requestedAppId, c
     const matches = [];
     for (const channel of channels) {
       const credentials = await readChannelCredentials(env, channel);
-      if (credentials.verifyToken && timingSafeEqual(supplied, credentials.verifyToken)) matches.push(channel);
+      const channelToken = credentials.verifyToken || '';
+      if ((channelToken && timingSafeEqual(supplied, channelToken))
+        || (sharedToken && timingSafeEqual(supplied, sharedToken))) {
+        matches.push(channel);
+      }
     }
-    if (!matches.length) return new Response('Forbidden', { status: 403 });
+    // Helixcer Meta app can verify the shared callback before any Page is linked.
+    if (!matches.length && !(sharedToken && timingSafeEqual(supplied, sharedToken))) {
+      return new Response('Forbidden', { status: 403 });
+    }
     const verifiedAt = new Date().toISOString();
     for (const channel of matches) {
       await updateChannelRuntimeConfig(env, channel, { webhookVerifiedAt: verifiedAt });
@@ -3038,6 +3076,8 @@ async function handleFacebookMessengerAppWebhook(request, env, requestedAppId, c
     }
     return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
   }
+
+  if (!channels.length) return json({ ok: false, error: 'Unknown Messenger app webhook.' }, 404);
 
   if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed.' }, 405);
   const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
@@ -4920,6 +4960,238 @@ async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
   });
 }
 
+async function startMessengerLoginChannelOAuth(request, env, principal) {
+  requireMessengerLoginConfig(env);
+  const url = new URL(request.url);
+  const returnTo = validateReturnTo(url.searchParams.get('return_to') || url.searchParams.get('returnTo') || '/#channels', env);
+  const channelName = String(url.searchParams.get('name') || '').trim().slice(0, 80);
+  const channelIdRaw = String(url.searchParams.get('channelId') || '').trim();
+  let channelId = '';
+  if (channelIdRaw) {
+    channelId = cleanId(channelIdRaw, 'Channel ID');
+    const existing = await env.DB.prepare(`SELECT channel_id,provider_type,name FROM channels
+      WHERE channel_id=?1 AND workspace_id=?2`).bind(channelId, principal.workspace.workspaceId).first();
+    if (!existing) throw httpError(404, 'Channel not found.');
+    if (logicalConnectorType(existing) !== 'facebook_messenger') {
+      throw httpError(400, 'Only Messenger connections can be linked with Login with Facebook.');
+    }
+  }
+  const previousState = readMessengerOAuthCookie(request);
+  if (previousState) {
+    await env.DB.prepare('DELETE FROM messenger_login_oauth_states WHERE state_hash=?1')
+      .bind(await hashToken(previousState)).run();
+  }
+  const state = randomOAuthToken(32);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+  await env.DB.prepare(`INSERT INTO messenger_login_oauth_states
+      (state_hash,workspace_id,user_id,channel_id,channel_name,return_to,expires_at,created_at)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8)`)
+    .bind(await hashToken(state), principal.workspace.workspaceId, principal.user.userId,
+      channelId || null, channelName, returnTo, expiresAt, now.toISOString()).run();
+  const authorizeUrl = buildMessengerAuthorizeUrl({ request, env, state });
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: authorizeUrl,
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'Set-Cookie': messengerOAuthCookieHeader(state, 10 * 60)
+    }
+  });
+}
+
+async function finishMessengerLoginOAuthResponse(request, env, fetchImpl = fetch) {
+  try {
+    return await finishMessengerLoginOAuth(request, env, fetchImpl);
+  } catch (error) {
+    const message = String(error?.message || 'Messenger connection failed.');
+    const target = googleBusinessFailureTarget(env);
+    const headers = new Headers({
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'Set-Cookie': clearMessengerOAuthCookieHeader()
+    });
+    if (!target) {
+      return new Response(`Messenger connection failed: ${message}`, {
+        status: Number(error?.status) >= 500 ? 503 : (Number(error?.status) || 400),
+        headers: { ...Object.fromEntries(headers), 'Content-Type': 'text/plain; charset=utf-8' }
+      });
+    }
+    target.searchParams.set('messenger_error', message.slice(0, 240));
+    target.hash = 'channels';
+    headers.set('Location', target.toString());
+    return new Response(null, { status: 302, headers });
+  }
+}
+
+async function finishMessengerLoginOAuth(request, env, fetchImpl = fetch) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('error')) {
+    const description = String(url.searchParams.get('error_description') || 'Facebook authorization was cancelled or denied.')
+      .replace(/\+/g, ' ')
+      .trim();
+    throw httpError(401, description || 'Facebook authorization was cancelled or denied.');
+  }
+  const code = String(url.searchParams.get('code') || '').replace(/#_+$/, '');
+  const state = url.searchParams.get('state') || '';
+  const cookieState = readMessengerOAuthCookie(request) || '';
+  if (!code || !state || !cookieState || !timingSafeEqual(state, cookieState)) {
+    throw httpError(400, 'Invalid Messenger OAuth state.');
+  }
+  const stateHash = await hashToken(state);
+  const stored = await env.DB.prepare(`SELECT state_hash,workspace_id,user_id,channel_id,channel_name,return_to,expires_at
+    FROM messenger_login_oauth_states WHERE state_hash=?1`).bind(stateHash).first();
+  if (!stored || stored.expires_at <= new Date().toISOString()) throw httpError(400, 'Messenger OAuth state expired.');
+  await env.DB.prepare('DELETE FROM messenger_login_oauth_states WHERE state_hash=?1').bind(stateHash).run();
+
+  const tokenResult = await exchangeMessengerAuthorizationCode({ request, env, code, fetchImpl });
+  const workspaceId = stored.workspace_id;
+  const forcedChannelId = String(stored.channel_id || '').trim();
+  let preferredPageId = '';
+  if (forcedChannelId) {
+    const existingRow = await env.DB.prepare('SELECT config_json FROM channels WHERE channel_id=?1 AND workspace_id=?2')
+      .bind(cleanId(forcedChannelId, 'Channel ID'), workspaceId).first();
+    preferredPageId = String(safeJsonParse(existingRow?.config_json, {}).pageId || '').trim();
+  }
+  const profile = await fetchMessengerLoginProfile(env, tokenResult.accessToken, {
+    preferredPageId,
+    fetchImpl
+  });
+
+  let channelId = forcedChannelId ? cleanId(forcedChannelId, 'Channel ID') : crypto.randomUUID();
+  let existing = await env.DB.prepare('SELECT * FROM channels WHERE channel_id=?1 AND workspace_id=?2')
+    .bind(channelId, workspaceId).first();
+  if (forcedChannelId && !existing) throw httpError(404, 'Channel not found.');
+  if (!forcedChannelId) {
+    const byPage = await env.DB.prepare(`SELECT * FROM channels
+      WHERE workspace_id=?1 AND provider_type='facebook_messenger'
+        AND json_extract(config_json,'$.pageId')=?2`)
+      .bind(workspaceId, profile.pageId).first();
+    if (byPage) {
+      existing = byPage;
+      channelId = byPage.channel_id;
+    }
+  }
+  if (existing && logicalConnectorType(existing) !== 'facebook_messenger') {
+    throw httpError(400, 'Only Messenger channels can complete Login with Facebook.');
+  }
+
+  const previousConfig = safeJsonParse(existing?.config_json, {});
+  const channelName = cleanRequired(
+    stored.channel_name || existing?.name || profile.pageName || 'Messenger',
+    'Channel name',
+    80
+  );
+  const apiVersion = metaGraphApiVersion(env, previousConfig.apiVersion || 'v26.0');
+  const appId = messengerMetaAppId(env);
+  const appSecret = messengerMetaAppSecret(env);
+  assertMetaAppSecret(appSecret, 422);
+  const now = new Date().toISOString();
+  const config = {
+    ...previousConfig,
+    pageId: profile.pageId,
+    pageName: profile.pageName || previousConfig.pageName || '',
+    appId,
+    apiVersion,
+    authMode: 'facebook_login',
+    credentialsVerifiedAt: now,
+    verifiedProviderId: profile.pageId,
+    verifiedName: profile.pageName || ''
+  };
+  if (!config.pageName) delete config.pageName;
+  if (!config.verifiedName) delete config.verifiedName;
+  await assertUniqueManagedConfig(env, workspaceId, 'facebook_messenger', channelId, config);
+  const changedIdentity = editableConfigChanges('facebook_messenger', previousConfig, config)
+    .filter(key => key === 'pageId' || key === 'appId');
+  await assertProviderIdentityConfigMutable(env, workspaceId, existing, 'facebook_messenger', changedIdentity);
+
+  const verifyToken = metaMessengerAppVerifyToken(env);
+  if (!verifyToken) {
+    throw httpError(503, 'META_WEBHOOK_VERIFY_TOKEN is not configured on the Worker.');
+  }
+  const capabilities = CONNECTOR_DEFINITIONS.facebook_messenger.capabilities;
+  const enabled = 1;
+  let saved;
+  try {
+    saved = await env.DB.prepare(`INSERT INTO channels
+        (channel_id,name,connector_type,provider_type,enabled,capabilities_json,config_json,secret_key,created_at,updated_at,workspace_id)
+      VALUES (?1,?2,'generic_http','facebook_messenger',?3,?4,?5,'DATABASE',?6,?6,?7)
+      ON CONFLICT(channel_id) DO UPDATE SET name=excluded.name,connector_type=excluded.connector_type,
+        provider_type=excluded.provider_type,enabled=excluded.enabled,capabilities_json=excluded.capabilities_json,
+        config_json=excluded.config_json,secret_key='DATABASE',updated_at=excluded.updated_at
+        WHERE channels.workspace_id=excluded.workspace_id`)
+      .bind(channelId, channelName, enabled, JSON.stringify(capabilities), JSON.stringify(config), now, workspaceId).run();
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw httpError(409, 'This Facebook Page is already connected in the workspace.');
+    throw error;
+  }
+  if (!saved.meta?.changes) throw httpError(409, 'Channel ID is already used by another workspace.');
+
+  await storeChannelCredentials(env, {
+    workspaceId,
+    channelId,
+    connectorType: 'facebook_messenger'
+  }, {
+    accessToken: profile.accessToken,
+    verifyToken,
+    appSecret
+  }, stored.user_id || '');
+
+  let subscribedAppsAt = '';
+  try {
+    await subscribeMessengerPageWebhooks({
+      env,
+      accessToken: profile.accessToken,
+      pageId: profile.pageId,
+      apiVersion
+    });
+    subscribedAppsAt = new Date().toISOString();
+    await updateChannelRuntimeConfig(env, {
+      workspaceId,
+      channelId,
+      connectorType: 'facebook_messenger',
+      config
+    }, { subscribedAppsAt });
+  } catch {
+    // Meta App Dashboard still needs the shared Messenger callback once;
+    // Verify connection can retry Page subscription afterward.
+  }
+
+  const actor = await env.DB.prepare('SELECT user_id,email FROM users WHERE user_id=?1')
+    .bind(stored.user_id).first();
+  const principal = {
+    workspace: { workspaceId },
+    user: { userId: stored.user_id, email: actor?.email || '' }
+  };
+  await audit(env, principal, existing ? 'update' : 'create', 'channel', channelId, {
+    name: channelName,
+    connectorType: 'facebook_messenger',
+    enabled: true,
+    authMode: 'facebook_login',
+    updatedCredentialFields: ['accessToken', 'verifyToken', 'appSecret'],
+    pageId: profile.pageId,
+    pageName: profile.pageName || '',
+    subscribedAppsAt: Boolean(subscribedAppsAt)
+  });
+
+  const returnTo = new URL(stored.return_to);
+  returnTo.searchParams.set('messenger_connected', '1');
+  returnTo.searchParams.set('messenger_channel', channelId);
+  if (profile.pageName) returnTo.searchParams.set('messenger_page', profile.pageName);
+  returnTo.searchParams.delete('messenger_error');
+  if (!returnTo.hash) returnTo.hash = 'channels';
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: returnTo.toString(),
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'Set-Cookie': clearMessengerOAuthCookieHeader()
+    }
+  });
+}
+
 async function startGoogleBusinessChannelOAuth(request, env, principal) {
   const url = new URL(request.url);
   const returnTo = validateReturnTo(url.searchParams.get('return_to') || url.searchParams.get('returnTo') || '/#channels', env);
@@ -5480,7 +5752,8 @@ function normalizeChannelConfigValue(key, value) {
     return text.slice(0, 100);
   }
   if (key === 'authMode') {
-    if (text !== 'instagram_login' && text !== 'unified_login' && text !== 'embedded_signup') {
+    if (text !== 'instagram_login' && text !== 'unified_login'
+      && text !== 'embedded_signup' && text !== 'facebook_login') {
       throw httpError(400, 'Authentication mode is invalid.');
     }
     return text;

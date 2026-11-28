@@ -161,6 +161,7 @@
     whatsappEmbeddedSignup: { available: false },
     whatsappEmbeddedSignupPending: null,
     instagramLogin: { available: false },
+    messengerLogin: { available: false },
     selectedConversationId: null,
     selectedContactId: null,
     contactCreateIdentityDrafts: [],
@@ -1821,6 +1822,23 @@
         : this.request("/api/channels/oauth/instagram/config");
     }
 
+    messengerLoginConnectUrl({ name = "", channelId = "" } = {}) {
+      if (this.isDemo) return "#";
+      const url = new URL("/api/channels/oauth/messenger/start", this.base);
+      const returnTo = new URL(location.pathname || "/", location.origin);
+      returnTo.hash = "#channels";
+      url.searchParams.set("return_to", returnTo.toString());
+      if (name) url.searchParams.set("name", name);
+      if (channelId) url.searchParams.set("channelId", channelId);
+      return url.toString();
+    }
+
+    getMessengerLoginConfig() {
+      return this.isDemo
+        ? Promise.resolve({ available: false, provider: "facebook_messenger" })
+        : this.request("/api/channels/oauth/messenger/config");
+    }
+
     getGoogleReviewsPending(token) {
       if (this.isDemo) {
         return Promise.resolve({
@@ -3164,6 +3182,7 @@
       await applyLocationRoute();
       await consumeGoogleReviewsOAuthReturn();
       await consumeInstagramOAuthReturn();
+      await consumeMessengerOAuthReturn();
     } catch (error) {
       const message = error.status === 403
         ? "Your account does not currently have access to this workspace."
@@ -3234,6 +3253,7 @@
     await applyLocationRoute();
     await consumeGoogleReviewsOAuthReturn();
     await consumeInstagramOAuthReturn();
+    await consumeMessengerOAuthReturn();
   }
 
   async function submitPasswordLogin(form) {
@@ -4033,6 +4053,9 @@
       if (data.instagramLogin && typeof data.instagramLogin === "object") {
         state.instagramLogin = data.instagramLogin;
       }
+      if (data.messengerLogin && typeof data.messengerLogin === "object") {
+        state.messengerLogin = data.messengerLogin;
+      }
       if (data.tags) state.workspaceTags = normalizeWorkspaceTags(data.tags);
       const searchQuery = state.search.trim();
       state.conversationSearchActive = Boolean(searchQuery);
@@ -4111,6 +4134,9 @@
       }
       if (data.instagramLogin && typeof data.instagramLogin === "object") {
         state.instagramLogin = data.instagramLogin;
+      }
+      if (data.messengerLogin && typeof data.messengerLogin === "object") {
+        state.messengerLogin = data.messengerLogin;
       }
       if (data.tags) state.workspaceTags = normalizeWorkspaceTags(data.tags);
       // Bootstrap has no search `q`. Never merge that unfiltered first page over an
@@ -7721,6 +7747,7 @@
     const authMode = String(channel?.setup?.authMode || channel?.config?.authMode || "").trim();
     if (type === "whatsapp_cloud") return authMode === "embedded_signup";
     if (type === "instagram") return authMode === "unified_login" || authMode === "instagram_login";
+    if (type === "facebook_messenger") return authMode === "facebook_login";
     if (type === "google_reviews") return authMode === "google_oauth" || Boolean(channel?.setup?.credentialsPresent);
     return false;
   }
@@ -7773,6 +7800,8 @@
         appendChannelDetailRow(list, "Webhook subscription", relativeTime(setup.subscribedAppsAt), { allowEmpty: true });
       }
     } else if (channel.connectorType === "facebook_messenger") {
+      appendChannelDetailRow(list, "Connection type",
+        isLoginConnectedChannel(channel) ? "Messenger via Login with Facebook" : "Messenger (manual)");
       appendChannelDetailRow(list, "Page name",
         setup.verifiedName || config.pageName, { fallback: "Not verified yet", allowEmpty: true });
       appendChannelDetailRow(list, "Facebook Page ID",
@@ -7819,6 +7848,8 @@
     const isInstagramLoginCard = channel.connectorType === "instagram"
       && (channel.setup?.authMode === "unified_login" || channel.setup?.authMode === "instagram_login"
         || channel.config?.authMode === "unified_login" || channel.config?.authMode === "instagram_login");
+    const isMessengerLoginCard = channel.connectorType === "facebook_messenger"
+      && (channel.setup?.authMode === "facebook_login" || channel.config?.authMode === "facebook_login");
     const isCoexistenceCard = Boolean(isEmbeddedWhatsAppCard
       && (channel.setup?.coexistence || channel.config?.coexistence));
     const statusRow = element("div", "channel-status-row");
@@ -7829,6 +7860,8 @@
       statusRow.append(element("span", "channel-mode-badge", "Login with Facebook"));
     } else if (isInstagramLoginCard) {
       statusRow.append(element("span", "channel-mode-badge", "Login with Instagram"));
+    } else if (isMessengerLoginCard) {
+      statusRow.append(element("span", "channel-mode-badge", "Login with Facebook"));
     }
     name.append(
       element("span", "provider-label", profile.label),
@@ -16000,8 +16033,10 @@
       && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
     const isInstagramOauth = channel?.connectorType === "instagram"
       && ["unified_login", "instagram_login"].includes(String(channel.setup?.authMode || channel.config?.authMode || ""));
+    const isMessengerOauth = channel?.connectorType === "facebook_messenger"
+      && String(channel.setup?.authMode || channel.config?.authMode || "") === "facebook_login";
     // OAuth edits show Re-connect + account details; manual connections open API fields + Save.
-    state.providerSetupMode = isEmbeddedWhatsApp
+    state.providerSetupMode = isEmbeddedWhatsApp || isMessengerOauth
       ? "facebook"
       : isInstagramOauth
         ? "login"
@@ -16063,6 +16098,13 @@
     fillConnectedDetail("googleReviewsConnectedAccountId", config.accountId);
   }
 
+  function fillMessengerLoginDetails(config = {}, setup = {}) {
+    fillConnectedDetail("messengerLoginPageName",
+      setup.verifiedName || config.pageName, "Not available yet");
+    fillConnectedDetail("messengerLoginPageId", config.pageId || setup.verifiedProviderId);
+    fillConnectedDetail("messengerLoginAppId", config.appId, "Helixcer Meta app");
+  }
+
   function syncChannelForm(provider, editing = Boolean($("channelIdInput").value), setup = {}, config = {}) {
     const credentialKeys = {
       whatsappAccessToken: "accessToken", whatsappAppSecret: "appSecret",
@@ -16077,14 +16119,18 @@
       && (setup.authMode === "embedded_signup" || config.authMode === "embedded_signup");
     const instagramOauth = selectedProvider === "instagram"
       && ["unified_login", "instagram_login"].includes(String(setup.authMode || config.authMode || ""));
+    const messengerOauth = selectedProvider === "facebook_messenger"
+      && String(setup.authMode || config.authMode || "") === "facebook_login";
     const showEmbeddedDetails = embeddedWhatsApp && editing && state.providerSetupMode !== "manual";
     // Instagram Login edits: hide credential fields; show profile + Re-connect (same as WhatsApp FB).
     const showInstagramOauthReconnect = instagramOauth && editing && state.providerSetupMode !== "manual";
+    const showMessengerOauthReconnect = messengerOauth && editing && state.providerSetupMode !== "manual";
     const googleOauthConnected = selectedProvider === "google_reviews" && editing
       && Boolean(setup.credentialsPresent || config.accountId || config.locationId);
     const manualReady = chooserProvider
       && !showEmbeddedDetails
       && !showInstagramOauthReconnect
+      && !showMessengerOauthReconnect
       && (editing || state.providerSetupMode === "manual");
     document.querySelectorAll("[data-provider-fields]").forEach((section) => {
       const active = Boolean(selectedProvider) && section.dataset.providerFields === selectedProvider;
@@ -16139,6 +16185,11 @@
     if (googleDetails) {
       googleDetails.hidden = !(selectedProvider === "google_reviews" && googleOauthConnected);
       if (!googleDetails.hidden) fillGoogleReviewsDetails(config, setup);
+    }
+    const messengerDetails = $("messengerLoginDetails");
+    if (messengerDetails) {
+      messengerDetails.hidden = !(selectedProvider === "facebook_messenger" && showMessengerOauthReconnect);
+      if (!messengerDetails.hidden) fillMessengerLoginDetails(config, setup);
     }
     document.querySelectorAll('.provider-setup-option[data-action="provider-setup-manual"]').forEach((button) => {
       // WhatsApp / Facebook / Instagram: Manual Setup only for new connects.
@@ -16208,15 +16259,36 @@
       instagramHelp.hidden = !(selectedProvider === "instagram" && instagramLoginAvailable && !manualReady && !showInstagramOauthReconnect);
     }
     const messengerLogin = $("messengerSetupFacebook");
+    const messengerHelp = $("messengerLoginHelp");
+    const messengerLoginAvailable = Boolean(state.messengerLogin?.available
+      && state.messengerLogin?.appId
+      && state.messengerLogin?.configId);
     if (messengerLogin) {
-      // Same visibility as WhatsApp Facebook CTA: new connects only until Messenger
-      // Login with Facebook is available for re-auth of OAuth-connected pages.
-      const showMessengerLogin = selectedProvider === "facebook_messenger" && !editing;
+      // New Messenger: Continue with Facebook. Editing OAuth pages: Re-connect only.
+      // Editing manual: hide Facebook CTA (fields only).
+      const showMessengerLogin = selectedProvider === "facebook_messenger"
+        && (!editing || showMessengerOauthReconnect);
       messengerLogin.hidden = !showMessengerLogin;
-      if (!showMessengerLogin) {
+      const label = messengerLogin.querySelector(".facebook-login-button-label");
+      if (showMessengerLogin && messengerLoginAvailable) {
+        messengerLogin.disabled = false;
+        messengerLogin.removeAttribute("aria-disabled");
+        messengerLogin.removeAttribute("title");
+        messengerLogin.classList.toggle("is-active", showMessengerOauthReconnect || state.providerSetupMode === "facebook");
+        messengerLogin.setAttribute("aria-pressed", String(showMessengerOauthReconnect || state.providerSetupMode === "facebook"));
+        if (label) label.textContent = showMessengerOauthReconnect ? "Re-connect" : "Continue with Facebook";
+      } else {
+        messengerLogin.disabled = true;
+        messengerLogin.setAttribute("aria-disabled", "true");
+        messengerLogin.setAttribute("title", messengerLoginAvailable ? "" : "Login with Facebook is not configured yet");
         messengerLogin.classList.remove("is-active");
         messengerLogin.setAttribute("aria-pressed", "false");
+        if (label && showMessengerLogin) label.textContent = "Continue with Facebook";
       }
+    }
+    if (messengerHelp) {
+      messengerHelp.hidden = !(selectedProvider === "facebook_messenger" && messengerLoginAvailable
+        && !manualReady && !showMessengerOauthReconnect);
     }
     document.querySelectorAll(".provider-setup-chooser").forEach((chooser) => {
       const section = chooser.closest("[data-provider-fields]");
@@ -16248,7 +16320,8 @@
     if (submit) {
       const hideSubmit = !selectedProvider
         || (selectedProvider === "google_reviews" && !editing)
-        || (chooserProvider && !manualReady && !showEmbeddedDetails && !showInstagramOauthReconnect);
+        || (chooserProvider && !manualReady && !showEmbeddedDetails
+          && !showInstagramOauthReconnect && !showMessengerOauthReconnect);
       if (hideSubmit) {
         submit.hidden = true;
         submit.disabled = true;
@@ -16361,6 +16434,75 @@
         button.textContent = "Login with Instagram";
       }
     }
+  }
+
+  async function startMessengerLogin() {
+    const name = $("channelNameInput")?.value?.trim() || "";
+    if (!name) {
+      showToast("Connection name required", "Enter a connection name, then try Continue with Facebook again.", true);
+      $("channelNameInput")?.focus();
+      return;
+    }
+    if (state.api.isDemo) {
+      showToast("Demo mode", "Login with Facebook for Messenger is simulated in demo mode. Use a live workspace to connect a Page.");
+      return;
+    }
+    const button = $("messengerSetupFacebook");
+    const label = button?.querySelector(".facebook-login-button-label");
+    if (button) {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      if (label) label.textContent = "Connecting…";
+    }
+    try {
+      let config = state.messengerLogin;
+      if (!config?.available) {
+        config = await state.api.getMessengerLoginConfig();
+        state.messengerLogin = config;
+      }
+      if (!config?.available) {
+        showToast("Login with Facebook unavailable", "Messenger Login with Facebook is not configured on this Helixcer API yet.", true);
+        return;
+      }
+      const channelId = $("channelIdInput")?.value || "";
+      location.assign(state.api.messengerLoginConnectUrl({ name, channelId }));
+    } catch (error) {
+      showToast("Login with Facebook failed", error.message, true);
+      if (button) {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        if (label) label.textContent = "Continue with Facebook";
+      }
+    }
+  }
+
+  async function consumeMessengerOAuthReturn() {
+    const params = new URLSearchParams(location.search);
+    const connected = String(params.get("messenger_connected") || "").trim();
+    const oauthError = String(params.get("messenger_error") || "").trim();
+    const channelId = String(params.get("messenger_channel") || "").trim();
+    const pageName = String(params.get("messenger_page") || "").trim();
+    if (!connected && !oauthError) return;
+    params.delete("messenger_connected");
+    params.delete("messenger_error");
+    params.delete("messenger_channel");
+    params.delete("messenger_page");
+    const cleanQuery = params.toString();
+    history.replaceState(null, "", `${location.pathname}${cleanQuery ? `?${cleanQuery}` : ""}${location.hash || "#channels"}`);
+    setRoute("channels");
+    if (oauthError) {
+      showToast("Messenger was not connected", oauthError, true);
+      return;
+    }
+    await loadAll();
+    if (channelId) state.expandedChannelIds.add(channelId);
+    renderChannels();
+    showToast(
+      "Messenger connected",
+      pageName
+        ? `${pageName} is linked with Login with Facebook.`
+        : "Facebook Page is linked with Login with Facebook."
+    );
   }
 
   async function consumeInstagramOAuthReturn() {
@@ -17937,6 +18079,9 @@
           } else if (actionButton.dataset.provider === "instagram") {
             setProviderSetupMode("login");
             startInstagramLogin();
+          } else if (actionButton.dataset.provider === "facebook_messenger") {
+            setProviderSetupMode("facebook");
+            startMessengerLogin();
           }
           return;
         }
