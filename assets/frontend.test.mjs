@@ -725,7 +725,7 @@ test("the unified inbox is person-first while route identity stays on messages a
   assert.match(html, /data-action="bulk-close-conversations"/);
   assert.match(html, /data-action="bulk-delete-conversations"/);
   assert.match(html, /data-action="bulk-delete-contacts"/);
-  assert.match(html, /app\.js\?v=20261128-automation-channel-selector/);
+  assert.match(html, /app\.js\?v=20261128-automation-select-all/);
   assert.doesNotMatch(html, /id="contactLoadMore"|id="contactLoadMoreButton"|id="contactPageSize"/);
   assert.doesNotMatch(html, /eyebrow">Audience<|>One person record with one ID for each messaging platform/);
   assert.match(styles, /\.contacts-heading h2/);
@@ -1098,8 +1098,8 @@ test("attachment-only conversation previews use a human media type", () => {
   assert.match(app, /awaitingPreview \? "Media is uploading"/);
   assert.match(styles, /\.message-media-spinner\s*\{/);
   assert.match(styles, /\.message-media-loading\s*\{/);
-  assert.match(html, /assets\/app\.js\?v=20261128-automation-channel-selector/);
-  assert.match(html, /assets\/styles\.css\?v=20261128-automation-channel-selector/);
+  assert.match(html, /assets\/app\.js\?v=20261128-automation-select-all/);
+  assert.match(html, /assets\/styles\.css\?v=20261128-automation-select-all/);
   assert.match(html, /connect\.facebook\.net/);
   assert.match(html, /frame-src[^"]*https:\/\/www\.facebook\.com/);
   assert.doesNotMatch(html, /Bulk messaging/);
@@ -1295,6 +1295,7 @@ test("Automation menu configures greeting and out of office replies", () => {
   assert.match(html, /id="automationOooChannelOptions"/);
   assert.match(html, /data-action="automation-select-all-channels"[^>]*data-automation-channels="greeting"/);
   assert.match(html, /data-action="automation-select-all-channels"[^>]*data-automation-channels="ooo"/);
+  assert.match(app, /"automation-select-all-channels": \(\) => toggleAutomationSelectAllChannels\(actionButton\.dataset\.automationChannels/);
   assert.match(html, /\{\{name\}\}/);
   assert.match(app, /getAutomation\(\)[\s\S]*?request\("\/api\/automation"\)/);
   assert.match(app, /updateAutomation\(payload\)[\s\S]*?request\("\/api\/automation", \{ method: "PATCH"/);
