@@ -7812,6 +7812,18 @@
         setup.verifiedName || config.pageName, { fallback: "Not verified yet", allowEmpty: true });
       appendChannelDetailRow(list, "Facebook Page ID",
         config.pageId || setup.verifiedProviderId, { copyable: true, allowEmpty: true, fallback: "—" });
+      if (isLoginConnectedChannel(channel)) {
+        appendChannelDetailRow(list, "Page webhook subscription",
+          setup.subscribedAppsAt ? relativeTime(setup.subscribedAppsAt) : "", {
+            allowEmpty: true,
+            fallback: "Not subscribed yet — use Register Webhook"
+          });
+        appendChannelDetailRow(list, "Last message webhook",
+          setup.lastWebhookAt ? relativeTime(setup.lastWebhookAt) : "", {
+            allowEmpty: true,
+            fallback: "Waiting — Meta has not delivered a messages event yet"
+          });
+      }
     } else if (channel.connectorType === "google_reviews") {
       appendChannelDetailRow(list, "Business location",
         setup.locationName || config.locationName || setup.verifiedName, { fallback: "Connected with Google", allowEmpty: true });
@@ -8107,32 +8119,51 @@
         }
       }
       actions.append(toggle, verify);
-      if ((isEmbeddedWhatsApp || isInstagramLogin) && credentialsReady) {
+      const isMessengerLogin = channel.connectorType === "facebook_messenger"
+        && (channel.setup?.authMode === "facebook_login" || channel.config?.authMode === "facebook_login");
+      if ((isEmbeddedWhatsApp || isInstagramLogin || isMessengerLogin) && credentialsReady) {
         const registerWebhook = element("button", "secondary-button",
           webhookVerified ? "Re-register webhook" : "Register Webhook");
         registerWebhook.type = "button";
-        registerWebhook.dataset.action = isInstagramLogin ? "register-instagram-webhook" : "register-whatsapp-webhook";
+        registerWebhook.dataset.action = isInstagramLogin
+          ? "register-instagram-webhook"
+          : isMessengerLogin
+            ? "register-messenger-webhook"
+            : "register-whatsapp-webhook";
         registerWebhook.dataset.channelId = channel.channelId;
         registerWebhook.disabled = !channel.enabled;
         registerWebhook.title = isInstagramLogin
           ? (webhookVerified
             ? "Ask Meta to subscribe this Instagram account to Helixcer's app webhook again"
             : "Subscribe this Instagram account to Helixcer's shared app webhook")
-          : (webhookVerified
-            ? "Ask Meta to subscribe this WhatsApp account to Helixcer's webhook again"
-            : "Subscribe this WhatsApp account and set Helixcer's webhook callback in Meta");
+          : isMessengerLogin
+            ? (webhookVerified
+              ? "Ask Meta to subscribe this Facebook Page to Helixcer's Messenger webhook again"
+              : "Subscribe this Facebook Page to Helixcer's shared Messenger app webhook")
+            : (webhookVerified
+              ? "Ask Meta to subscribe this WhatsApp account to Helixcer's webhook again"
+              : "Subscribe this WhatsApp account and set Helixcer's webhook callback in Meta");
         actions.append(registerWebhook);
       }
     }
     setup.append(actions);
 
+    const isMessengerLoginNote = channel.connectorType === "facebook_messenger"
+      && (channel.setup?.authMode === "facebook_login" || channel.config?.authMode === "facebook_login");
     const instagramAccountSubscribed = Boolean(channel.setup?.subscribedAppsAt);
+    const messengerPageSubscribed = Boolean(channel.setup?.subscribedAppsAt);
     const instagramWaitingForMessages = isInstagramLogin
       && credentialsReady
       && !channel.setup?.lastWebhookAt;
+    const messengerWaitingForMessages = isMessengerLoginNote
+      && credentialsReady
+      && webhookVerified
+      && !channel.setup?.lastWebhookAt;
     if ((channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram" ||
         channel.connectorType === "facebook_messenger")
-      && (!webhookVerified || (isInstagramLogin && (!instagramAccountSubscribed || instagramWaitingForMessages)))) {
+      && (!webhookVerified
+        || (isInstagramLogin && (!instagramAccountSubscribed || instagramWaitingForMessages))
+        || (isMessengerLoginNote && (!messengerPageSubscribed || messengerWaitingForMessages)))) {
       const note = element("div", "meta-webhook-warning");
       if (isEmbeddedWhatsApp && !webhookVerified) {
         note.append(
@@ -8144,6 +8175,11 @@
           element("strong", "", "Login with Instagram"),
           element("span", "", "Use Register Webhook so Meta subscribes this Instagram account to Helixcer's shared app callback.")
         );
+      } else if (isMessengerLoginNote && !messengerPageSubscribed) {
+        note.append(
+          element("strong", "", "Login with Facebook Messenger"),
+          element("span", "", "Use Register Webhook so Meta subscribes this Facebook Page to Helixcer's shared Messenger callback.")
+        );
       } else if (isInstagramLogin && instagramWaitingForMessages) {
         const handle = instagramUsername
           ? `@${String(instagramUsername).replace(/^@/, "")}`
@@ -8152,10 +8188,20 @@
           element("strong", "", "Waiting for Instagram messages"),
           element("span", "", `Helixcer is connected and the account is subscribed, but Meta has not delivered a messages webhook yet. In Meta App Dashboard → Instagram (API setup with Unified login) → Configure webhooks, set Callback URL https://api.chat.helixcer.com/webhooks/instagram-app, enable the messages field, then DM ${handle} from an Instagram Tester / Admin account. If messages still never arrive, also check Messenger → Instagram Settings → Webhooks.`)
         );
+      } else if (isMessengerLoginNote && messengerWaitingForMessages) {
+        note.append(
+          element("strong", "", "Waiting for Messenger messages"),
+          element("span", "", "Helixcer is connected and the Page is subscribed, but Meta has not delivered a messages webhook yet. In Meta App Dashboard → Messenger → Settings → Webhooks, set Callback URL https://api.chat.helixcer.com/webhooks/facebook-messenger-app, subscribe to messages (and messaging_postbacks / message_deliveries / message_reads), then send a test message to the Page. Do not use the generic Webhooks product alone — Messenger fields must be subscribed under Messenger.")
+        );
       } else if (!webhookVerified && channel.connectorType === "instagram" && channel.config?.appId) {
         note.append(
           element("strong", "", "Shared Meta app callback"),
           element("span", "", "Paste https://api.chat.helixcer.com/webhooks/instagram-app into Meta → Instagram → Webhooks. Helixcer routes messages by account ID.")
+        );
+      } else if (!webhookVerified && isMessengerLoginNote) {
+        note.append(
+          element("strong", "", "Shared Messenger callback"),
+          element("span", "", "In Meta → Messenger → Settings → Webhooks, set Callback URL https://api.chat.helixcer.com/webhooks/facebook-messenger-app and subscribe to messages. Then use Register Webhook or Verify connection so Helixcer links this Page.")
         );
       } else if (!webhookVerified && channel.connectorType === "facebook_messenger" && channel.config?.appId) {
         note.append(element("strong", "", "Shared Meta app callback"), element("span", "", "Use this URL once for every Facebook Page connected through the same Meta App ID. Helixcer routes messages by Page ID."));
@@ -17138,6 +17184,30 @@
     }
   }
 
+  async function registerMessengerWebhook(channelId, button) {
+    if (!channelId || !button) return;
+    const channel = state.channels.find((item) => item.channelId === channelId);
+    button.disabled = true;
+    const previousLabel = button.textContent;
+    button.textContent = "Registering…";
+    try {
+      const result = await state.api.registerWhatsAppWebhook(channelId);
+      await loadAll();
+      setRoute("channels");
+      showToast(
+        result.subscribedAppsAt ? "Facebook Page subscribed" : "Messenger webhook updated",
+        result.health === "connected"
+          ? `${channel?.name || "Messenger"} is subscribed to Helixcer's shared Messenger webhook.`
+          : "Page subscribed. In Meta → Messenger → Settings → Webhooks, confirm Callback URL https://api.chat.helixcer.com/webhooks/facebook-messenger-app and subscribe to messages."
+      );
+    } catch (error) {
+      showToast("Webhook was not registered", error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = previousLabel;
+    }
+  }
+
   async function syncWhatsAppCoexistenceHistory(channelId, button) {
     if (!channelId || !button) return;
     const channel = state.channels.find((item) => item.channelId === channelId);
@@ -18070,6 +18140,10 @@
         }
         if (actionButton.dataset.action === "register-instagram-webhook") {
           registerInstagramWebhook(actionButton.dataset.channelId, actionButton);
+          return;
+        }
+        if (actionButton.dataset.action === "register-messenger-webhook") {
+          registerMessengerWebhook(actionButton.dataset.channelId, actionButton);
           return;
         }
         if (actionButton.dataset.action === "sync-whatsapp-coexistence-history") {

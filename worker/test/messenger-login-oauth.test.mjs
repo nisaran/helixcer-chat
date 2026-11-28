@@ -232,6 +232,7 @@ test('Messenger Login OAuth callback creates a facebook_login Messenger channel'
   assert.equal(config.authMode, 'facebook_login');
   assert.ok(config.credentialsVerifiedAt);
   assert.ok(config.subscribedAppsAt);
+  assert.ok(config.webhookVerifiedAt, 'shared Messenger callback should mark webhook ready after Page subscribe');
 
   const listed = await handleRequest(new Request(
     'https://api.chat.helixcer.com/api/channels',
@@ -240,5 +241,23 @@ test('Messenger Login OAuth callback creates a facebook_login Messenger channel'
   assert.equal(listed.status, 200, await listed.clone().text());
   const item = (await listed.json()).items.find((row) => row.channelId === channel.channel_id);
   assert.equal(item.setup.callbackPath, '/webhooks/facebook-messenger-app');
+  assert.equal(item.health, 'connected');
+
+  const registerFetch = globalThis.fetch;
+  globalThis.fetch = mockMessengerFetch();
+  let registered;
+  try {
+    registered = await handleRequest(new Request(
+      `https://api.chat.helixcer.com/api/channels/${encodeURIComponent(channel.channel_id)}/register-webhook`,
+      { method: 'POST', headers: { Authorization: 'Bearer recovery-secret' } }
+    ), env);
+  } finally {
+    globalThis.fetch = registerFetch;
+  }
+  assert.equal(registered.status, 200, await registered.clone().text());
+  const registerBody = await registered.json();
+  assert.ok(registerBody.subscribedAppsAt);
+  assert.ok(registerBody.webhookVerifiedAt);
+  assert.equal(registerBody.health, 'connected');
   database.close();
 });
