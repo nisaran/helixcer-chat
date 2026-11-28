@@ -7716,6 +7716,87 @@
     }
   }
 
+  function isLoginConnectedChannel(channel) {
+    const type = channel?.connectorType || "";
+    const authMode = String(channel?.setup?.authMode || channel?.config?.authMode || "").trim();
+    if (type === "whatsapp_cloud") return authMode === "embedded_signup";
+    if (type === "instagram") return authMode === "unified_login" || authMode === "instagram_login";
+    if (type === "google_reviews") return authMode === "google_oauth" || Boolean(channel?.setup?.credentialsPresent);
+    return false;
+  }
+
+  function appendChannelDetailRow(list, label, value, options = {}) {
+    const text = String(value || "").trim();
+    if (!text && !options.allowEmpty) return;
+    const row = element("div", "channel-detail-row");
+    row.append(element("span", "callback-label", label));
+    const valueRow = element("div", "meta-callback-row");
+    valueRow.append(element("code", "channel-callback", text || options.fallback || "—"));
+    if (options.copyable && text) {
+      const copy = element("button", "secondary-button compact-button", options.copyLabel || "Copy");
+      copy.type = "button";
+      copy.dataset.action = "copy-channel-id";
+      copy.dataset.copyValue = text;
+      copy.title = options.copyTitle || `Copy ${label}`;
+      valueRow.append(copy);
+    }
+    row.append(valueRow);
+    if (options.help) row.append(element("span", "callback-token-help", options.help));
+    list.append(row);
+  }
+
+  function appendChannelProviderDetails(container, channel) {
+    const block = element("div", "callback-block channel-provider-details");
+    block.append(element("span", "callback-label", "Provider details"));
+    const list = element("div", "channel-detail-list");
+    const setup = channel.setup || {};
+    const config = channel.config || {};
+    if (channel.connectorType === "whatsapp_cloud") {
+      const coexistence = Boolean(setup.coexistence || config.coexistence);
+      appendChannelDetailRow(list, "Connection type", coexistence
+        ? "Coexistence — WhatsApp Business app + Cloud API"
+        : (isLoginConnectedChannel(channel) ? "Cloud API via Login with Facebook" : "Cloud API (manual)"));
+      appendChannelDetailRow(list, "Verified name", setup.verifiedName || config.verifiedName, { fallback: "Not verified yet", allowEmpty: true });
+      appendChannelDetailRow(list, "Phone number", setup.verifiedPhoneNumber || config.verifiedPhoneNumber, { fallback: "Not verified yet", allowEmpty: true });
+      appendChannelDetailRow(list, "WhatsApp Business Account ID", config.wabaId, { copyable: true, allowEmpty: true, fallback: "—" });
+      appendChannelDetailRow(list, "Phone Number ID", config.phoneNumberId, { copyable: true, allowEmpty: true, fallback: "—" });
+      if (config.businessId) appendChannelDetailRow(list, "Business portfolio ID", config.businessId, { copyable: true });
+    } else if (channel.connectorType === "instagram") {
+      const username = setup.verifiedUsername || config.username || "";
+      appendChannelDetailRow(list, "Instagram username", username
+        ? `@${String(username).replace(/^@/, "")}`
+        : (setup.verifiedName || ""), { fallback: "Not available yet", allowEmpty: true });
+      appendChannelDetailRow(list, "Instagram account ID",
+        config.instagramAccountId || setup.verifiedProviderId, { copyable: true, allowEmpty: true, fallback: "—" });
+      if (config.appId) appendChannelDetailRow(list, "Meta App ID", config.appId, { copyable: true });
+      if (setup.subscribedAppsAt) {
+        appendChannelDetailRow(list, "Webhook subscription", relativeTime(setup.subscribedAppsAt), { allowEmpty: true });
+      }
+    } else if (channel.connectorType === "facebook_messenger") {
+      appendChannelDetailRow(list, "Page name",
+        setup.verifiedName || config.pageName, { fallback: "Not verified yet", allowEmpty: true });
+      appendChannelDetailRow(list, "Facebook Page ID",
+        config.pageId || setup.verifiedProviderId, { copyable: true, allowEmpty: true, fallback: "—" });
+      if (config.appId) appendChannelDetailRow(list, "Meta App ID", config.appId, { copyable: true });
+    } else if (channel.connectorType === "google_reviews") {
+      appendChannelDetailRow(list, "Business location",
+        setup.locationName || config.locationName || setup.verifiedName, { fallback: "Connected with Google", allowEmpty: true });
+      appendChannelDetailRow(list, "Location ID", config.locationId, { copyable: true, allowEmpty: true, fallback: "—" });
+      appendChannelDetailRow(list, "Google account",
+        setup.accountName || config.accountName, { fallback: "—", allowEmpty: true });
+      if (config.accountId) appendChannelDetailRow(list, "Account ID", config.accountId, { copyable: true });
+    } else if (channel.connectorType === "telegram") {
+      appendChannelDetailRow(list, "Bot name", setup.verifiedName, { fallback: "Not verified yet", allowEmpty: true });
+      appendChannelDetailRow(list, "Bot username", setup.verifiedUsername
+        ? `@${String(setup.verifiedUsername).replace(/^@/, "")}`
+        : "", { fallback: "—", allowEmpty: true });
+    }
+    if (list.childElementCount) {
+      block.append(list);
+      container.append(block);
+    }
+  }
+
   function renderChannelCard(channel) {
     const profile = providerProfiles[channel.connectorType] || providerProfiles.whatsapp_cloud;
     const health = channelHealthView(channel);
@@ -7844,17 +7925,9 @@
     channelIdRow.append(copyChannelId);
     channelIdBlock.append(channelIdRow);
     setup.append(channelIdBlock);
+    appendChannelProviderDetails(setup, channel);
 
     if (isGoogleReviews) {
-      const locationBlock = element("div", "callback-block");
-      locationBlock.append(element("span", "callback-label", "Google Business location"));
-      locationBlock.append(element("code", "channel-callback",
-        channel.setup?.locationName || channel.config?.locationName || channel.setup?.verifiedName || "Connected with Google"));
-      if (channel.config?.accountName || channel.setup?.accountName) {
-        locationBlock.append(element("span", "callback-token-help",
-          `Account: ${channel.config?.accountName || channel.setup?.accountName}`));
-      }
-      setup.append(locationBlock);
       const reviewsSync = channel.setup?.reviewsSync || {};
       if (reviewsSync.status || reviewsSync.lastSyncAt || reviewsSync.error) {
         const syncNote = element("p", "channel-setup-note coexistence-sync-note");
@@ -7872,37 +7945,11 @@
       }
     }
 
-    const isEmbeddedWhatsApp = channel.connectorType === "whatsapp_cloud"
-      && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
-    // Login flows own Meta app webhook config; show profile details instead of callback/token UI.
-    if (isInstagramLogin) {
-      const profileBlock = element("div", "callback-block instagram-profile-block");
-      profileBlock.append(element("span", "callback-label", "Instagram profile"));
-      const usernameValue = instagramUsername
-        ? `@${String(instagramUsername).replace(/^@/, "")}`
-        : (channel.setup?.verifiedName || "Connected with Instagram");
-      profileBlock.append(element("code", "channel-callback", usernameValue));
-      const accountId = String(channel.config?.instagramAccountId || channel.setup?.verifiedProviderId || "").trim();
-      if (accountId) {
-        const accountRow = element("div", "meta-callback-row");
-        accountRow.append(element("code", "channel-callback", accountId));
-        const copyAccountId = element("button", "secondary-button compact-button", "Copy account ID");
-        copyAccountId.type = "button";
-        copyAccountId.dataset.action = "copy-channel-id";
-        copyAccountId.dataset.copyValue = accountId;
-        copyAccountId.title = "Copy Instagram account ID";
-        accountRow.append(copyAccountId);
-        profileBlock.append(
-          element("span", "callback-token-help", "Instagram account ID"),
-          accountRow
-        );
-      }
-      if (channel.setup?.subscribedAppsAt) {
-        profileBlock.append(element("span", "callback-token-help",
-          `Webhook subscription · ${relativeTime(channel.setup.subscribedAppsAt)}`));
-      }
-      setup.append(profileBlock);
-    } else if (!isGoogleReviews && !isEmbeddedWhatsApp) {
+    const isEmbeddedWhatsApp = isLoginConnectedChannel(channel) && channel.connectorType === "whatsapp_cloud";
+    const loginConnected = isLoginConnectedChannel(channel);
+    // Manual Meta/Telegram connections still need callback + verify token on the card.
+    // Login-connected WhatsApp/Instagram/Google use app-level or OAuth setup instead.
+    if (!isGoogleReviews && !loginConnected) {
       const callbackUrl = channel.setup?.webhookUrl || state.api.webhookUrl(channel);
       const callbackBlock = element("div", "callback-block");
       callbackBlock.append(element("span", "callback-label", "Webhook callback"));
@@ -15952,8 +15999,8 @@
     const isEmbeddedWhatsApp = channel?.connectorType === "whatsapp_cloud"
       && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
     const isInstagramOauth = channel?.connectorType === "instagram"
-      && (channel.setup?.authMode === "unified_login" || channel.config?.authMode === "unified_login");
-    // OAuth edits show Re-connect (and WhatsApp account details); manual chooser providers open fields.
+      && ["unified_login", "instagram_login"].includes(String(channel.setup?.authMode || channel.config?.authMode || ""));
+    // OAuth edits show Re-connect + account details; manual connections open API fields + Save.
     state.providerSetupMode = isEmbeddedWhatsApp
       ? "facebook"
       : isInstagramOauth
@@ -15975,11 +16022,12 @@
     syncChannelForm(provider, Boolean(channelId), channel?.setup || {}, channel?.config || {});
   }
 
+  function fillConnectedDetail(id, value, fallback = "—") {
+    const node = $(id);
+    if (node) node.textContent = String(value || "").trim() || fallback;
+  }
+
   function fillWhatsAppEmbeddedDetails(config = {}, setup = {}) {
-    const setText = (id, value, fallback = "—") => {
-      const node = $(id);
-      if (node) node.textContent = String(value || "").trim() || fallback;
-    };
     const coexistence = Boolean(setup.coexistence || config.coexistence);
     const eyebrow = $("whatsappEmbeddedEyebrow");
     if (eyebrow) {
@@ -15987,14 +16035,32 @@
         ? "Connected with coexistence (WhatsApp Business app)"
         : "Connected with Login with Facebook";
     }
-    setText("whatsappEmbeddedConnectionType", coexistence
+    fillConnectedDetail("whatsappEmbeddedConnectionType", coexistence
       ? "Coexistence — WhatsApp Business app + Cloud API"
       : "Cloud API via Login with Facebook");
-    setText("whatsappEmbeddedVerifiedName", setup.verifiedName || config.verifiedName, "Not verified yet");
-    setText("whatsappEmbeddedPhoneNumber", setup.verifiedPhoneNumber || config.verifiedPhoneNumber, "Not verified yet");
-    setText("whatsappEmbeddedWabaId", config.wabaId);
-    setText("whatsappEmbeddedPhoneNumberId", config.phoneNumberId);
-    setText("whatsappEmbeddedBusinessId", config.businessId, "Not provided");
+    fillConnectedDetail("whatsappEmbeddedVerifiedName", setup.verifiedName || config.verifiedName, "Not verified yet");
+    fillConnectedDetail("whatsappEmbeddedPhoneNumber", setup.verifiedPhoneNumber || config.verifiedPhoneNumber, "Not verified yet");
+    fillConnectedDetail("whatsappEmbeddedWabaId", config.wabaId);
+    fillConnectedDetail("whatsappEmbeddedPhoneNumberId", config.phoneNumberId);
+    fillConnectedDetail("whatsappEmbeddedBusinessId", config.businessId, "Not provided");
+  }
+
+  function fillInstagramLoginDetails(config = {}, setup = {}) {
+    const username = setup.verifiedUsername || config.username || "";
+    fillConnectedDetail("instagramLoginUsername", username
+      ? `@${String(username).replace(/^@/, "")}`
+      : "", "Not available yet");
+    fillConnectedDetail("instagramLoginDisplayName", setup.verifiedName || config.verifiedName, "Not available yet");
+    fillConnectedDetail("instagramLoginAccountId", config.instagramAccountId || setup.verifiedProviderId);
+    fillConnectedDetail("instagramLoginAppId", config.appId, "Helixcer Meta app");
+  }
+
+  function fillGoogleReviewsDetails(config = {}, setup = {}) {
+    fillConnectedDetail("googleReviewsConnectedLocationName",
+      setup.locationName || config.locationName || setup.verifiedName, "Connected with Google");
+    fillConnectedDetail("googleReviewsConnectedLocationId", config.locationId);
+    fillConnectedDetail("googleReviewsConnectedAccountName", setup.accountName || config.accountName);
+    fillConnectedDetail("googleReviewsConnectedAccountId", config.accountId);
   }
 
   function syncChannelForm(provider, editing = Boolean($("channelIdInput").value), setup = {}, config = {}) {
@@ -16010,10 +16076,12 @@
     const embeddedWhatsApp = selectedProvider === "whatsapp_cloud"
       && (setup.authMode === "embedded_signup" || config.authMode === "embedded_signup");
     const instagramOauth = selectedProvider === "instagram"
-      && (setup.authMode === "unified_login" || config.authMode === "unified_login");
+      && ["unified_login", "instagram_login"].includes(String(setup.authMode || config.authMode || ""));
     const showEmbeddedDetails = embeddedWhatsApp && editing && state.providerSetupMode !== "manual";
-    // Instagram Login edits: hide credential fields; show Re-connect only (same as WhatsApp FB).
+    // Instagram Login edits: hide credential fields; show profile + Re-connect (same as WhatsApp FB).
     const showInstagramOauthReconnect = instagramOauth && editing && state.providerSetupMode !== "manual";
+    const googleOauthConnected = selectedProvider === "google_reviews" && editing
+      && Boolean(setup.credentialsPresent || config.accountId || config.locationId);
     const manualReady = chooserProvider
       && !showEmbeddedDetails
       && !showInstagramOauthReconnect
@@ -16061,6 +16129,16 @@
     if (embeddedDetails) {
       embeddedDetails.hidden = !(selectedProvider === "whatsapp_cloud" && showEmbeddedDetails);
       if (!embeddedDetails.hidden) fillWhatsAppEmbeddedDetails(config, setup);
+    }
+    const instagramDetails = $("instagramLoginDetails");
+    if (instagramDetails) {
+      instagramDetails.hidden = !(selectedProvider === "instagram" && showInstagramOauthReconnect);
+      if (!instagramDetails.hidden) fillInstagramLoginDetails(config, setup);
+    }
+    const googleDetails = $("googleReviewsDetails");
+    if (googleDetails) {
+      googleDetails.hidden = !(selectedProvider === "google_reviews" && googleOauthConnected);
+      if (!googleDetails.hidden) fillGoogleReviewsDetails(config, setup);
     }
     document.querySelectorAll('.provider-setup-option[data-action="provider-setup-manual"]').forEach((button) => {
       // WhatsApp / Facebook / Instagram: Manual Setup only for new connects.
@@ -16158,6 +16236,11 @@
     const googleConnect = $("googleReviewsConnectButton");
     if (googleConnect) {
       googleConnect.textContent = googleConnected ? "Reconnect" : "Connect with Google";
+    }
+    const googleConnectPanel = $("googleReviewsConnectPanel");
+    if (googleConnectPanel) {
+      const intro = googleConnectPanel.querySelector(":scope > .field-help:not(#googleReviewsConnectedNote)");
+      if (intro) intro.hidden = googleOauthConnected;
     }
     const enabledRow = document.querySelector("#channelForm .channel-enabled");
     if (enabledRow) enabledRow.hidden = !selectedProvider;

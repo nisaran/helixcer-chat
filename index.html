@@ -1504,6 +1504,16 @@
           <button class="instagram-login-button provider-setup-option" type="button" id="instagramSetupLogin" data-action="provider-setup-login" data-provider="instagram" disabled aria-disabled="true" title="Login with Instagram is not configured yet">Login with Instagram</button>
         </div>
         <p class="field-help provider-setup-help" id="instagramLoginHelp" hidden>Opens Meta Login with Instagram. Helixcer stores the business token and links the shared Instagram professional account.</p>
+        <div class="provider-connected-summary" id="instagramLoginDetails" hidden>
+          <p class="provider-connected-eyebrow" id="instagramLoginEyebrow">Connected with Login with Instagram</p>
+          <dl class="provider-connected-grid">
+            <div><dt>Instagram username</dt><dd id="instagramLoginUsername">—</dd></div>
+            <div><dt>Display name</dt><dd id="instagramLoginDisplayName">—</dd></div>
+            <div class="form-span"><dt>Instagram account ID</dt><dd id="instagramLoginAccountId">—</dd></div>
+            <div class="form-span"><dt>Meta App ID</dt><dd id="instagramLoginAppId">—</dd></div>
+          </dl>
+          <p class="field-help">Access token and App Secret stay encrypted in Helixcer. Use Re-connect only to re-link this Instagram account.</p>
+        </div>
         <div class="provider-manual-fields" id="instagramManualFields" hidden>
           <div class="form-grid channel-form-grid">
             <label class="field-label">Instagram account ID<input class="text-field" name="instagramAccountId" inputmode="numeric" maxlength="40" placeholder="17841400000000000" required></label>
@@ -1539,6 +1549,16 @@
 
       <section class="provider-fields" data-provider-fields="google_reviews" hidden>
         <div class="provider-form-head"><img class="provider-mark google" src="./assets/provider-google.svg" alt=""><div><strong>Google Reviews</strong><span>Connect a Google Business Profile location with Google sign-in. No API keys or tokens to paste.</span></div></div>
+        <div class="provider-connected-summary" id="googleReviewsDetails" hidden>
+          <p class="provider-connected-eyebrow">Connected with Google</p>
+          <dl class="provider-connected-grid">
+            <div class="form-span"><dt>Business location</dt><dd id="googleReviewsConnectedLocationName">—</dd></div>
+            <div><dt>Location ID</dt><dd id="googleReviewsConnectedLocationId">—</dd></div>
+            <div><dt>Account</dt><dd id="googleReviewsConnectedAccountName">—</dd></div>
+            <div class="form-span"><dt>Account ID</dt><dd id="googleReviewsConnectedAccountId">—</dd></div>
+          </dl>
+          <p class="field-help">OAuth tokens stay encrypted in Helixcer. Use Reconnect only to re-authorize this location.</p>
+        </div>
         <div class="google-oauth-connect" id="googleReviewsConnectPanel">
           <p class="field-help">Your client signs in with Google, chooses the business location, and Helixcer stores the connection securely.</p>
           <button class="primary-button" type="button" id="googleReviewsConnectButton" data-action="connect-google-reviews">Connect with Google</button>

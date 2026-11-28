@@ -1352,6 +1352,15 @@ dialog.attachment-preview-dialog { width: min(940px, calc(100vw - 20px)); max-wi
 .readiness-item.is-ready { border-color: #cee5d9; background: #eff9f4; color: var(--green); }
 .readiness-item.is-ready i { background: var(--green); }
 .callback-block { display: grid; gap: 6px; }
+.channel-provider-details .channel-detail-list {
+  display: grid;
+  gap: 10px;
+}
+.channel-detail-row {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
 .callback-label { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
 .channel-id-block { border-top: 1px solid var(--line); margin-top: 2px; padding-top: 11px; }
 .callback-token-block { display: grid; gap: 6px; border-top: 1px solid #e8eae7; margin-top: 5px; padding-top: 11px; }
