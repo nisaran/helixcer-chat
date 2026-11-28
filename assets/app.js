@@ -7769,9 +7769,16 @@
       appendChannelDetailRow(list, "Instagram account ID",
         config.instagramAccountId || setup.verifiedProviderId, { copyable: true, allowEmpty: true, fallback: "—" });
       if (config.appId) appendChannelDetailRow(list, "Meta App ID", config.appId, { copyable: true });
-      if (setup.subscribedAppsAt) {
-        appendChannelDetailRow(list, "Webhook subscription", relativeTime(setup.subscribedAppsAt), { allowEmpty: true });
-      }
+      appendChannelDetailRow(list, "Account webhook subscription",
+        setup.subscribedAppsAt ? relativeTime(setup.subscribedAppsAt) : "", {
+          allowEmpty: true,
+          fallback: "Not subscribed yet — use Register Webhook"
+        });
+      appendChannelDetailRow(list, "Last message webhook",
+        setup.lastWebhookAt ? relativeTime(setup.lastWebhookAt) : "", {
+          allowEmpty: true,
+          fallback: "Waiting — Meta has not delivered a messages event yet"
+        });
     } else if (channel.connectorType === "facebook_messenger") {
       appendChannelDetailRow(list, "Page name",
         setup.verifiedName || config.pageName, { fallback: "Not verified yet", allowEmpty: true });
@@ -8088,30 +8095,43 @@
     }
     setup.append(actions);
 
+    const instagramAccountSubscribed = Boolean(channel.setup?.subscribedAppsAt);
+    const instagramWaitingForMessages = isInstagramLogin
+      && credentialsReady
+      && !channel.setup?.lastWebhookAt;
     if ((channel.connectorType === "whatsapp_cloud" || channel.connectorType === "instagram" ||
-        channel.connectorType === "facebook_messenger") && !webhookVerified) {
+        channel.connectorType === "facebook_messenger")
+      && (!webhookVerified || (isInstagramLogin && (!instagramAccountSubscribed || instagramWaitingForMessages)))) {
       const note = element("div", "meta-webhook-warning");
-      if (isEmbeddedWhatsApp) {
+      if (isEmbeddedWhatsApp && !webhookVerified) {
         note.append(
           element("strong", "", "Login with Facebook webhook"),
           element("span", "", "Use Register Webhook if Meta did not finish the automatic callback setup for this connection.")
         );
-      } else if (isInstagramLogin) {
+      } else if (isInstagramLogin && !instagramAccountSubscribed) {
         note.append(
           element("strong", "", "Login with Instagram"),
-          element("span", "", "Use Register Webhook if Meta did not finish subscribing this Instagram account to Helixcer.")
+          element("span", "", "Use Register Webhook so Meta subscribes this Instagram account to Helixcer's shared app callback.")
         );
-      } else if (channel.connectorType === "instagram" && channel.config?.appId) {
+      } else if (isInstagramLogin && instagramWaitingForMessages) {
+        const handle = instagramUsername
+          ? `@${String(instagramUsername).replace(/^@/, "")}`
+          : "this Instagram account";
+        note.append(
+          element("strong", "", "Waiting for Instagram messages"),
+          element("span", "", `Helixcer is connected and the account is subscribed, but Meta has not delivered a messages webhook yet. In Meta App Dashboard → Instagram (API setup with Unified login) → Configure webhooks, set Callback URL https://api.chat.helixcer.com/webhooks/instagram-app, enable the messages field, then DM ${handle} from an Instagram Tester / Admin account. If messages still never arrive, also check Messenger → Instagram Settings → Webhooks.`)
+        );
+      } else if (!webhookVerified && channel.connectorType === "instagram" && channel.config?.appId) {
         note.append(
           element("strong", "", "Shared Meta app callback"),
           element("span", "", "Paste https://api.chat.helixcer.com/webhooks/instagram-app into Meta → Instagram → Webhooks. Helixcer routes messages by account ID.")
         );
-      } else if (channel.connectorType === "facebook_messenger" && channel.config?.appId) {
+      } else if (!webhookVerified && channel.connectorType === "facebook_messenger" && channel.config?.appId) {
         note.append(element("strong", "", "Shared Meta app callback"), element("span", "", "Use this URL once for every Facebook Page connected through the same Meta App ID. Helixcer routes messages by Page ID."));
-      } else {
+      } else if (!webhookVerified) {
         note.append(element("strong", "", "Meta callback"), element("span", "", "Meta allows one callback per app. Replace an existing callback only when this connection is ready."));
       }
-      setup.append(note);
+      if (note.childElementCount) setup.append(note);
     }
 
     const overview = element("div", "channel-overview");
