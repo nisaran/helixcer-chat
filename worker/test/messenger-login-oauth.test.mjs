@@ -181,6 +181,22 @@ test('Messenger Login OAuth start redirects to Facebook Login for Business', asy
   database.close();
 });
 
+test('Messenger shared app webhook verifies with META_WEBHOOK_VERIFY_TOKEN', async () => {
+  const { database, DB } = await testDatabase();
+  const env = envFor(DB);
+  const ok = await handleRequest(new Request(
+    `https://api.chat.helixcer.com/webhooks/facebook-messenger-app?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(env.META_WEBHOOK_VERIFY_TOKEN)}&hub.challenge=messenger-shared`
+  ), env);
+  assert.equal(ok.status, 200, await ok.clone().text());
+  assert.equal(await ok.text(), 'messenger-shared');
+
+  const denied = await handleRequest(new Request(
+    'https://api.chat.helixcer.com/webhooks/facebook-messenger-app?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=nope'
+  ), env);
+  assert.equal(denied.status, 403);
+  database.close();
+});
+
 test('Messenger Login OAuth callback creates a facebook_login Messenger channel', async () => {
   const { database, DB } = await testDatabase();
   const env = envFor(DB);
@@ -217,5 +233,13 @@ test('Messenger Login OAuth callback creates a facebook_login Messenger channel'
   assert.equal(config.authMode, 'facebook_login');
   assert.ok(config.credentialsVerifiedAt);
   assert.ok(config.subscribedAppsAt);
+
+  const listed = await handleRequest(new Request(
+    'https://api.chat.helixcer.com/api/channels',
+    { headers: { Authorization: 'Bearer recovery-secret' } }
+  ), env);
+  assert.equal(listed.status, 200, await listed.clone().text());
+  const item = (await listed.json()).items.find((row) => row.channelId === channel.channel_id);
+  assert.equal(item.setup.callbackPath, '/webhooks/facebook-messenger-app');
   database.close();
 });

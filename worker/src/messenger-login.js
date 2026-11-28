@@ -44,6 +44,14 @@ export function metaMessengerAppVerifyToken(env) {
   return String(env.META_WEBHOOK_VERIFY_TOKEN || '').trim();
 }
 
+export function metaMessengerAppWebhookPath() {
+  return '/webhooks/facebook-messenger-app';
+}
+
+export function metaMessengerAppCallbackUri(origin) {
+  return `${String(origin || '').replace(/\/$/, '')}${metaMessengerAppWebhookPath()}`;
+}
+
 export function usesSharedMessengerAppWebhook(env, config = {}) {
   const appId = String(config?.appId || '').trim();
   const sharedAppId = messengerMetaAppId(env);
