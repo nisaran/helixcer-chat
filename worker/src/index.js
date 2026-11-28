@@ -94,7 +94,9 @@ import {
   messengerMetaAppId,
   messengerMetaAppSecret,
   messengerOAuthCookieHeader,
+  metaMessengerAppCallbackUri,
   metaMessengerAppVerifyToken,
+  metaMessengerAppWebhookPath,
   readMessengerOAuthCookie,
   requireMessengerLoginConfig,
   subscribeMessengerPageWebhooks,
@@ -542,6 +544,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (instagramAppMatch) return await handleInstagramAppWebhook(request, env, decodeURIComponent(instagramAppMatch[1]), ctx);
     const instagramMatch = url.pathname.match(/^\/webhooks\/instagram\/([^/]+)$/);
     if (instagramMatch) return await handleInstagramWebhook(request, env, decodeURIComponent(instagramMatch[1]), ctx);
+    if (url.pathname === metaMessengerAppWebhookPath()) {
+      return await handleFacebookMessengerSharedAppWebhook(request, env, ctx);
+    }
     const messengerAppMatch = url.pathname.match(/^\/webhooks\/facebook-messenger-app\/([^/]+)$/);
     if (messengerAppMatch) return await handleFacebookMessengerAppWebhook(request, env, decodeURIComponent(messengerAppMatch[1]), ctx);
     const messengerMatch = url.pathname.match(/^\/webhooks\/facebook-messenger\/([^/]+)$/);
@@ -3045,6 +3050,42 @@ async function handleFacebookMessengerWebhook(request, env, channelId, ctx) {
   return json({ ok: true, received });
 }
 
+async function handleFacebookMessengerSharedAppWebhook(request, env, ctx) {
+  const appId = messengerMetaAppId(env);
+  const expected = metaMessengerAppVerifyToken(env);
+  if (!appId || !expected) {
+    return json({ ok: false, error: 'Messenger app webhook is not configured.' }, 503);
+  }
+
+  if (request.method === 'GET') {
+    const url = new URL(request.url);
+    if (url.searchParams.get('hub.mode') === 'subscribe'
+      && timingSafeEqual(url.searchParams.get('hub.verify_token') || '', expected)) {
+      const channels = await findFacebookMessengerAppChannels(env, appId);
+      const verifiedAt = new Date().toISOString();
+      for (const channel of channels) {
+        await updateChannelRuntimeConfig(env, channel, { webhookVerifiedAt: verifiedAt });
+        await broadcast(env, channel.workspaceId, { type: 'channel.updated', channelId: channel.channelId });
+      }
+      return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
+    }
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed.' }, 405);
+  const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
+  const appSecret = messengerMetaAppSecret(env);
+  if (!appSecret) return json({ ok: false, error: 'Webhook secret is not configured.' }, 503);
+  if (!await verifyMetaSignature(raw, request.headers.get('X-Hub-Signature-256') || '', appSecret)) {
+    return json({ ok: false, error: 'Invalid signature.' }, 401);
+  }
+  const payload = safeJsonParse(raw, null);
+  if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
+  return await deliverFacebookMessengerAppWebhookPayload(env, ctx, appId, raw, payload, {
+    signatureAlreadyVerified: true
+  });
+}
+
 async function handleFacebookMessengerAppWebhook(request, env, requestedAppId, ctx) {
   const appId = cleanMetaIdentifier(requestedAppId, 'Meta App ID');
   const channels = await findFacebookMessengerAppChannels(env, appId);
@@ -3083,6 +3124,14 @@ async function handleFacebookMessengerAppWebhook(request, env, requestedAppId, c
   const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
   const payload = safeJsonParse(raw, null);
   if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
+  return await deliverFacebookMessengerAppWebhookPayload(env, ctx, appId, raw, payload, {
+    signatureHeader: request.headers.get('X-Hub-Signature-256') || ''
+  });
+}
+
+async function deliverFacebookMessengerAppWebhookPayload(env, ctx, appId, raw, payload, options = {}) {
+  const channels = await findFacebookMessengerAppChannels(env, appId);
+  if (!channels.length) return json({ ok: false, error: 'Unknown Messenger app webhook.' }, 404);
   const groups = partitionFacebookMessengerAppPayload(payload);
   const channelsByPage = new Map();
   for (const channel of channels) {
@@ -3098,11 +3147,13 @@ async function handleFacebookMessengerAppWebhook(request, env, requestedAppId, c
     routes.push({ pageId, payload: groupedPayload, channel: matches[0] });
   }
 
-  const suppliedSignature = request.headers.get('X-Hub-Signature-256') || '';
-  for (const route of routes) {
-    const credentials = await readChannelCredentials(env, route.channel);
-    if (!credentials.appSecret || !await verifyMetaSignature(raw, suppliedSignature, credentials.appSecret)) {
-      return json({ ok: false, error: 'Invalid signature.' }, 401);
+  if (!options.signatureAlreadyVerified) {
+    const suppliedSignature = options.signatureHeader || '';
+    for (const route of routes) {
+      const credentials = await readChannelCredentials(env, route.channel);
+      if (!credentials.appSecret || !await verifyMetaSignature(raw, suppliedSignature, credentials.appSecret)) {
+        return json({ ok: false, error: 'Invalid signature.' }, 401);
+      }
     }
   }
 
@@ -3819,9 +3870,11 @@ function channelSetupView(env, row, config = safeJsonParse(row.config_json, {}),
       ? metaInstagramAppWebhookPath()
       : connectorType === 'instagram' && config.appId
         ? `/webhooks/instagram-app/${encodeURIComponent(config.appId)}`
-        : connectorType === 'facebook_messenger' && config.appId
-          ? `/webhooks/facebook-messenger-app/${encodeURIComponent(config.appId)}`
-          : `/webhooks/${definition.webhookPath}/${encodeURIComponent(row.channel_id)}`;
+        : connectorType === 'facebook_messenger' && usesSharedMessengerAppWebhook(env, config)
+          ? metaMessengerAppWebhookPath()
+          : connectorType === 'facebook_messenger' && config.appId
+            ? `/webhooks/facebook-messenger-app/${encodeURIComponent(config.appId)}`
+            : `/webhooks/${definition.webhookPath}/${encodeURIComponent(row.channel_id)}`;
   return {
     credentialsPresent: definition.requiredConfig.every(key => Boolean(config[key])) && Object.values(presence).every(Boolean),
     credentialFields: presence,
