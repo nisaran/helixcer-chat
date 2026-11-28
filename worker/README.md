@@ -62,13 +62,14 @@ Optional Meta WhatsApp Embedded Signup (`Login with Facebook` on WhatsApp channe
 - `META_APP_SECRET`: Meta App Secret used to exchange Embedded Signup codes and to verify per-channel WhatsApp webhook signatures after signup.
 - `META_EMBEDDED_SIGNUP_CONFIG_ID`: Facebook Login for Business configuration ID created from the WhatsApp Embedded Signup template.
 - `META_GRAPH_API_VERSION`: optional Graph API version override (defaults to `v22.0`).
-- `META_WEBHOOK_VERIFY_TOKEN`: optional shared verify token for the app-level WhatsApp webhook at `/webhooks/whatsapp-app`. When unset, Helixcer uses `helixcer-wa-app-{META_APP_ID}`.
+- `META_WEBHOOK_VERIFY_TOKEN`: **recommended** shared verify token for Meta app webhooks (WhatsApp `/webhooks/whatsapp-app` and Instagram `/webhooks/instagram-app`). Set it as a Cloudflare Worker variable or secret (one value for WA + IG). Prefer a long random string; do not commit it to git. When unset, WhatsApp falls back to `helixcer-wa-app-{META_APP_ID}` and Instagram to `helixcer-ig-app-{META_APP_ID}` (or `META_INSTAGRAM_WEBHOOK_VERIFY_TOKEN` if set). After changing this value, re-run **Register Webhook** on WhatsApp channels (pushes the new token to Meta) and update the Instagram product Verify token in the App Dashboard to match.
 
 Optional Instagram Unified Login (`Login with Instagram` on Instagram channel setup):
 
 - `META_APP_ID` / `META_APP_SECRET`: Meta app credentials used for Facebook Login for Business code exchange and webhook signature verification.
 - `META_INSTAGRAM_LOGIN_CONFIG_ID`: Facebook Login for Business configuration ID from App Dashboard → Instagram → API setup with Unified login (the `config_id` in the Login URL).
 - `META_INSTAGRAM_OAUTH_REDIRECT_URI`: optional override for the OAuth callback (defaults to `https://api.chat.helixcer.com/auth/meta/callback`). Register this exact URI under the configuration’s Redirect URL list.
+- `META_INSTAGRAM_WEBHOOK_VERIFY_TOKEN`: optional Instagram-only override; defaults to `META_WEBHOOK_VERIFY_TOKEN`.
 
 In Meta, allow Helixcer app domains under Facebook Login for Business → Settings (Allowed domains / Valid OAuth redirect URIs). Helixcer auto-configures the app-level WhatsApp webhook (`/webhooks/whatsapp-app`) and then sets each WABA’s `override_callback_uri` to `https://api.chat.helixcer.com/webhooks/whatsapp/{channelId}` during Embedded Signup / Register Webhook. For Instagram, configure the Meta App Dashboard callback once to `https://api.chat.helixcer.com/webhooks/instagram-app` (Instagram cannot set this via Graph API); Helixcer then subscribes each connected Instagram account with `subscribed_apps`.
 
