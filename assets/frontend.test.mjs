@@ -196,6 +196,10 @@ test("channel management supports multiple provider accounts without hardcoded c
   assert.match(app, /\/webhooks\/instagram-app\/\$\{encodeURIComponent\(channel\.config\.appId\)\}/);
   assert.match(app, /\/webhooks\/facebook-messenger-app\/\$\{encodeURIComponent\(channel\.config\.appId\)\}/);
   assert.match(app, /register-instagram-webhook/);
+  assert.match(app, /register-messenger-webhook/);
+  assert.match(app, /registerMessengerWebhook/);
+  assert.match(app, /Waiting for Messenger messages/);
+  assert.match(app, /Page webhook subscription/);
   assert.match(app, /function appendChannelProviderDetails/);
   assert.match(app, /function isLoginConnectedChannel/);
   assert.match(app, /channel-provider-details/);

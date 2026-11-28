@@ -3955,8 +3955,11 @@ async function registerWhatsAppEmbeddedWebhook(env, workspaceId, channelId, requ
   if (channel.connectorType === 'instagram') {
     return await registerInstagramAppWebhook(env, channel, request, fetchImpl);
   }
+  if (channel.connectorType === 'facebook_messenger') {
+    return await registerMessengerAppWebhook(env, channel, request, fetchImpl);
+  }
   if (channel.connectorType !== 'whatsapp_cloud') {
-    throw httpError(400, 'Webhook registration is only available for WhatsApp and Instagram channels.');
+    throw httpError(400, 'Webhook registration is only available for WhatsApp, Instagram, and Messenger channels.');
   }
   if (String(channel.config?.authMode || '') !== 'embedded_signup') {
     throw httpError(400, 'Register Webhook is only available for Login with Facebook connections.');
@@ -4034,6 +4037,47 @@ async function registerInstagramAppWebhook(env, channel, request, fetchImpl = fe
     subscribedAppsAt: config.subscribedAppsAt || now,
     webhookVerifiedAt: config.webhookVerifiedAt || '',
     appCallbackUri: metaInstagramAppCallbackUri(new URL(request.url).origin)
+  };
+}
+
+async function registerMessengerAppWebhook(env, channel, request, fetchImpl = fetch) {
+  if (String(channel.config?.authMode || '') !== 'facebook_login'
+    && !usesSharedMessengerAppWebhook(env, channel.config)) {
+    throw httpError(400, 'Register Webhook is only available for Login with Facebook Messenger connections.');
+  }
+  const credentials = await readChannelCredentials(env, channel);
+  const accessToken = credentials.accessToken;
+  const pageId = String(channel.config?.pageId || '').trim();
+  if (!accessToken || !pageId) {
+    throw httpError(409, 'Secure Messenger credentials have not been fully configured.');
+  }
+  try {
+    await subscribeMessengerPageWebhooks({
+      env,
+      accessToken,
+      pageId,
+      apiVersion: channel.config?.apiVersion || '',
+      fetchImpl
+    });
+  } catch (error) {
+    throw httpError(error.status || 422, error.message || 'Meta could not register this Messenger webhook.');
+  }
+  const now = new Date().toISOString();
+  // Shared app callback is verified once in Meta App Dashboard; Page subscribe is the
+  // channel-specific step. Mark webhook-ready when Helixcer owns the shared verify token.
+  const sharedReady = usesSharedMessengerAppWebhook(env, channel.config)
+    && Boolean(metaMessengerAppVerifyToken(env));
+  const config = await updateChannelRuntimeConfig(env, channel, {
+    subscribedAppsAt: now,
+    webhookVerifiedAt: channel.config?.webhookVerifiedAt || (sharedReady ? now : '')
+  });
+  return {
+    ok: true,
+    channelId: channel.channelId,
+    health: config.webhookVerifiedAt ? 'connected' : 'webhook_required',
+    subscribedAppsAt: config.subscribedAppsAt || now,
+    webhookVerifiedAt: config.webhookVerifiedAt || '',
+    appCallbackUri: metaMessengerAppCallbackUri(new URL(request.url).origin)
   };
 }
 
@@ -4322,23 +4366,29 @@ async function verifyFacebookMessengerChannel(env, channel) {
   const data = safeJsonParse(await response.text(), {});
   if (!response.ok) throw httpError(422, `Meta could not verify this Facebook Page: ${providerError(data, response.status)}`);
   if (String(data.id || '') !== pageId) throw httpError(422, 'Meta returned a different Facebook Page.');
-  const subscriptionEndpoint = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(pageId)}/subscribed_apps`);
-  subscriptionEndpoint.searchParams.set('subscribed_fields', 'messages,messaging_postbacks,message_deliveries,message_reads');
-  const subscriptionResponse = await fetch(subscriptionEndpoint, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${credentials.accessToken}` }
-  });
-  const subscriptionData = safeJsonParse(await subscriptionResponse.text(), {});
-  if (!subscriptionResponse.ok || subscriptionData.success === false) {
-    throw httpError(422, `Meta could not subscribe this app to the Facebook Page: ${providerError(subscriptionData, subscriptionResponse.status)}`);
+  try {
+    await subscribeMessengerPageWebhooks({
+      env,
+      accessToken: credentials.accessToken,
+      pageId,
+      apiVersion: version
+    });
+  } catch (error) {
+    throw httpError(error.status || 422,
+      error.message || 'Meta could not subscribe this app to the Facebook Page.');
   }
   const now = new Date().toISOString();
+  const sharedReady = usesSharedMessengerAppWebhook(env, channel.config)
+    && Boolean(metaMessengerAppVerifyToken(env));
   const config = await updateChannelRuntimeConfig(env, channel, {
     apiVersion: version,
     credentialsVerifiedAt: now,
     subscribedAppsAt: now,
     verifiedProviderId: pageId,
-    verifiedName: String(data.name || channel.config?.pageName || '')
+    verifiedName: String(data.name || channel.config?.pageName || ''),
+    // Shared Meta App callback is verified once in the dashboard; Page subscribe
+    // after Login connects this channel without waiting for another handshake.
+    webhookVerifiedAt: channel.config?.webhookVerifiedAt || (sharedReady ? now : '')
   });
   await refreshFacebookMessengerPlaceholderProfiles(env, channel, credentials).catch(() => {});
   return {
@@ -5226,15 +5276,21 @@ async function finishMessengerLoginOAuth(request, env, fetchImpl = fetch) {
       apiVersion
     });
     subscribedAppsAt = new Date().toISOString();
+    const sharedReady = usesSharedMessengerAppWebhook(env, config)
+      && Boolean(metaMessengerAppVerifyToken(env));
     await updateChannelRuntimeConfig(env, {
       workspaceId,
       channelId,
       connectorType: 'facebook_messenger',
       config
-    }, { subscribedAppsAt });
+    }, {
+      subscribedAppsAt,
+      // Shared callback is verified once in Meta; mark ready after Page subscribe.
+      webhookVerifiedAt: previousConfig.webhookVerifiedAt || (sharedReady ? subscribedAppsAt : '')
+    });
   } catch {
     // Meta App Dashboard still needs the shared Messenger callback once;
-    // Verify connection can retry Page subscription afterward.
+    // Register Webhook / Verify connection can retry Page subscription afterward.
   }
 
   const actor = await env.DB.prepare('SELECT user_id,email FROM users WHERE user_id=?1')
