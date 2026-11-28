@@ -879,7 +879,12 @@ export async function requestPasswordReset(env, payload = {}) {
   try {
     const { sendTransactionalEmail, passwordResetEmailContent } = await import('./mail.js');
     const content = passwordResetEmailContent(resetUrl);
-    await sendTransactionalEmail(env, { to: email, ...content });
+    const delivered = await sendTransactionalEmail(env, { to: email, ...content });
+    console.log('password_reset_email_sent', {
+      provider: delivered?.provider || '',
+      hasUser: Boolean(user),
+      hasInvite: Boolean(invite)
+    });
   } catch (error) {
     console.error('password_reset_email_failed', {
       code: error?.code || '',
