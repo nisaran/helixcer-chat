@@ -77,8 +77,13 @@ import {
   instagramMetaAppId,
   instagramMetaAppSecret,
   instagramOAuthCookieHeader,
+  metaInstagramAppCallbackUri,
+  metaInstagramAppVerifyToken,
+  metaInstagramAppWebhookPath,
   readInstagramOAuthCookie,
-  requireInstagramLoginConfig
+  requireInstagramLoginConfig,
+  subscribeInstagramAccountWebhooks,
+  usesSharedInstagramAppWebhook
 } from './instagram-login.js';
 import {
   assertChatAccess,
@@ -512,6 +517,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (whatsappMatch) return await handleWhatsAppWebhook(request, env, decodeURIComponent(whatsappMatch[1]), ctx);
     const telegramMatch = url.pathname.match(/^\/webhooks\/telegram\/([^/]+)$/);
     if (telegramMatch && request.method === 'POST') return await handleTelegramWebhook(request, env, decodeURIComponent(telegramMatch[1]), ctx);
+    if (url.pathname === metaInstagramAppWebhookPath()) {
+      return await handleInstagramSharedAppWebhook(request, env, ctx);
+    }
     const instagramAppMatch = url.pathname.match(/^\/webhooks\/instagram-app\/([^/]+)$/);
     if (instagramAppMatch) return await handleInstagramAppWebhook(request, env, decodeURIComponent(instagramAppMatch[1]), ctx);
     const instagramMatch = url.pathname.match(/^\/webhooks\/instagram\/([^/]+)$/);
@@ -2789,6 +2797,42 @@ async function handleInstagramWebhook(request, env, channelId, ctx) {
   return json({ ok: true, received });
 }
 
+async function handleInstagramSharedAppWebhook(request, env, ctx) {
+  const appId = instagramMetaAppId(env);
+  const expected = metaInstagramAppVerifyToken(env);
+  if (!appId || !expected) {
+    return json({ ok: false, error: 'Instagram app webhook is not configured.' }, 503);
+  }
+
+  if (request.method === 'GET') {
+    const url = new URL(request.url);
+    if (url.searchParams.get('hub.mode') === 'subscribe'
+      && timingSafeEqual(url.searchParams.get('hub.verify_token') || '', expected)) {
+      const channels = await findInstagramAppChannels(env, appId);
+      const verifiedAt = new Date().toISOString();
+      for (const channel of channels) {
+        await updateChannelRuntimeConfig(env, channel, { webhookVerifiedAt: verifiedAt });
+        await broadcast(env, channel.workspaceId, { type: 'channel.updated', channelId: channel.channelId });
+      }
+      return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
+    }
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  if (request.method !== 'POST') return json({ ok: false, error: 'Method not allowed.' }, 405);
+  const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
+  const appSecret = instagramMetaAppSecret(env);
+  if (!appSecret) return json({ ok: false, error: 'Webhook secret is not configured.' }, 503);
+  if (!await verifyMetaSignature(raw, request.headers.get('X-Hub-Signature-256') || '', appSecret)) {
+    return json({ ok: false, error: 'Invalid signature.' }, 401);
+  }
+  const payload = safeJsonParse(raw, null);
+  if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
+  return await deliverInstagramAppWebhookPayload(env, ctx, appId, raw, payload, {
+    signatureAlreadyVerified: true
+  });
+}
+
 async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
   const appId = cleanMetaIdentifier(requestedAppId, 'Meta App ID');
   const channels = await findInstagramAppChannels(env, appId);
@@ -2798,10 +2842,17 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
     const url = new URL(request.url);
     if (url.searchParams.get('hub.mode') !== 'subscribe') return new Response('Forbidden', { status: 403 });
     const supplied = url.searchParams.get('hub.verify_token') || '';
+    const sharedToken = usesSharedInstagramAppWebhook(env, { appId })
+      ? metaInstagramAppVerifyToken(env)
+      : '';
     const matches = [];
     for (const channel of channels) {
       const credentials = await readChannelCredentials(env, channel);
-      if (credentials.verifyToken && timingSafeEqual(supplied, credentials.verifyToken)) matches.push(channel);
+      const channelToken = credentials.verifyToken || '';
+      if ((channelToken && timingSafeEqual(supplied, channelToken))
+        || (sharedToken && timingSafeEqual(supplied, sharedToken))) {
+        matches.push(channel);
+      }
     }
     if (!matches.length) return new Response('Forbidden', { status: 403 });
     const verifiedAt = new Date().toISOString();
@@ -2816,6 +2867,14 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
   const raw = await readBoundedText(request, MAX_RAW_PAYLOAD);
   const payload = safeJsonParse(raw, null);
   if (!payload) return json({ ok: false, error: 'Invalid JSON.' }, 400);
+  return await deliverInstagramAppWebhookPayload(env, ctx, appId, raw, payload, {
+    signatureHeader: request.headers.get('X-Hub-Signature-256') || ''
+  });
+}
+
+async function deliverInstagramAppWebhookPayload(env, ctx, appId, raw, payload, options = {}) {
+  const channels = await findInstagramAppChannels(env, appId);
+  if (!channels.length) return json({ ok: false, error: 'Unknown Instagram app webhook.' }, 404);
   const groups = partitionInstagramAppPayload(payload);
   const channelsByAccount = new Map();
   for (const channel of channels) {
@@ -2831,11 +2890,13 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
     routes.push({ accountId, payload: groupedPayload, channel: matches[0] });
   }
 
-  const suppliedSignature = request.headers.get('X-Hub-Signature-256') || '';
-  for (const route of routes) {
-    const credentials = await readChannelCredentials(env, route.channel);
-    if (!credentials.appSecret || !await verifyMetaSignature(raw, suppliedSignature, credentials.appSecret)) {
-      return json({ ok: false, error: 'Invalid signature.' }, 401);
+  if (!options.signatureAlreadyVerified) {
+    const suppliedSignature = options.signatureHeader || '';
+    for (const route of routes) {
+      const credentials = await readChannelCredentials(env, route.channel);
+      if (!credentials.appSecret || !await verifyMetaSignature(raw, suppliedSignature, credentials.appSecret)) {
+        return json({ ok: false, error: 'Invalid signature.' }, 401);
+      }
     }
   }
 
@@ -2873,7 +2934,10 @@ async function handleInstagramAppWebhook(request, env, requestedAppId, ctx) {
     }
     await refreshInstagramPlaceholderProfiles(env, route.channel, credentials,
       instagramCustomerIds(route.payload, route.accountId)).catch(() => {});
-    await updateChannelRuntimeConfig(env, route.channel, { lastWebhookAt: now });
+    await updateChannelRuntimeConfig(env, route.channel, {
+      lastWebhookAt: now,
+      webhookVerifiedAt: route.channel.config?.webhookVerifiedAt || now
+    });
     await broadcastMessageStatusChanges(env, route.channel.workspaceId, statusChanges);
     if (channelReceived || channelStatuses) {
       await broadcast(env, route.channel.workspaceId, {
@@ -3671,7 +3735,7 @@ async function listChannels(env, workspaceId, includeConfiguration = false) {
       channelId: row.channel_id, name: row.name, connectorType,
       enabled: Boolean(row.enabled), capabilities: safeJsonParse(row.capabilities_json, []),
       health: channelHealth(row, config, credentialFields),
-      ...(includeConfiguration ? { config: publicChannelConfig(connectorType, config), setup: channelSetupView(row, config, credentialFields) } : {})
+      ...(includeConfiguration ? { config: publicChannelConfig(connectorType, config), setup: channelSetupView(env, row, config, credentialFields) } : {})
     };
   });
 }
@@ -3704,18 +3768,20 @@ function publicGoogleReviewsSync(sync = {}) {
   };
 }
 
-function channelSetupView(row, config = safeJsonParse(row.config_json, {}), credentialFields = new Set()) {
+function channelSetupView(env, row, config = safeJsonParse(row.config_json, {}), credentialFields = new Set()) {
   const connectorType = logicalConnectorType(row);
   const definition = CONNECTOR_DEFINITIONS[connectorType];
   if (!definition) return {};
   const presence = Object.fromEntries(definition.requiredCredentials.map(key => [key, credentialFields.has(key)]));
   const callbackPath = connectorType === 'google_reviews'
     ? '/webhooks/google-reviews-pubsub'
-    : connectorType === 'instagram' && config.appId
-      ? `/webhooks/instagram-app/${encodeURIComponent(config.appId)}`
-      : connectorType === 'facebook_messenger' && config.appId
-        ? `/webhooks/facebook-messenger-app/${encodeURIComponent(config.appId)}`
-        : `/webhooks/${definition.webhookPath}/${encodeURIComponent(row.channel_id)}`;
+    : connectorType === 'instagram' && usesSharedInstagramAppWebhook(env, config)
+      ? metaInstagramAppWebhookPath()
+      : connectorType === 'instagram' && config.appId
+        ? `/webhooks/instagram-app/${encodeURIComponent(config.appId)}`
+        : connectorType === 'facebook_messenger' && config.appId
+          ? `/webhooks/facebook-messenger-app/${encodeURIComponent(config.appId)}`
+          : `/webhooks/${definition.webhookPath}/${encodeURIComponent(row.channel_id)}`;
   return {
     credentialsPresent: definition.requiredConfig.every(key => Boolean(config[key])) && Object.values(presence).every(Boolean),
     credentialFields: presence,
@@ -3794,8 +3860,11 @@ async function registerWhatsAppEmbeddedWebhook(env, workspaceId, channelId, requ
     secretKey: row.secret_key,
     workspaceId: row.workspace_id
   };
+  if (channel.connectorType === 'instagram') {
+    return await registerInstagramAppWebhook(env, channel, request, fetchImpl);
+  }
   if (channel.connectorType !== 'whatsapp_cloud') {
-    throw httpError(400, 'Webhook registration is only available for WhatsApp channels.');
+    throw httpError(400, 'Webhook registration is only available for WhatsApp and Instagram channels.');
   }
   if (String(channel.config?.authMode || '') !== 'embedded_signup') {
     throw httpError(400, 'Register Webhook is only available for Login with Facebook connections.');
@@ -3834,6 +3903,45 @@ async function registerWhatsAppEmbeddedWebhook(env, workspaceId, channelId, requ
     health: config.webhookVerifiedAt ? 'connected' : 'webhook_required',
     subscribedAppsAt: config.subscribedAppsAt || now,
     webhookVerifiedAt: config.webhookVerifiedAt || ''
+  };
+}
+
+async function registerInstagramAppWebhook(env, channel, request, fetchImpl = fetch) {
+  if (!usesSharedInstagramAppWebhook(env, channel.config)
+    && !['instagram_login', 'unified_login'].includes(String(channel.config?.authMode || ''))) {
+    throw httpError(400, 'Register Webhook is only available for Login with Instagram connections.');
+  }
+  const credentials = await readChannelCredentials(env, channel);
+  const accessToken = credentials.accessToken;
+  const accountId = String(channel.config?.instagramAccountId || '').trim();
+  if (!accessToken || !accountId) {
+    throw httpError(409, 'Secure Instagram credentials have not been fully configured.');
+  }
+  try {
+    await subscribeInstagramAccountWebhooks({
+      env,
+      accessToken,
+      instagramAccountId: accountId,
+      authMode: channel.config?.authMode || 'unified_login',
+      apiVersion: channel.config?.apiVersion || '',
+      fetchImpl
+    });
+  } catch (error) {
+    throw httpError(error.status || 422, error.message || 'Meta could not register this Instagram webhook.');
+  }
+  const now = new Date().toISOString();
+  const config = await updateChannelRuntimeConfig(env, channel, {
+    subscribedAppsAt: now,
+    // Account subscribe does not verify the Meta dashboard callback URL; keep prior handshake.
+    webhookVerifiedAt: channel.config?.webhookVerifiedAt || ''
+  });
+  return {
+    ok: true,
+    channelId: channel.channelId,
+    health: config.webhookVerifiedAt ? 'connected' : 'webhook_required',
+    subscribedAppsAt: config.subscribedAppsAt || now,
+    webhookVerifiedAt: config.webhookVerifiedAt || '',
+    appCallbackUri: metaInstagramAppCallbackUri(new URL(request.url).origin)
   };
 }
 
@@ -3955,7 +4063,10 @@ async function getChannelVerifyToken(env, workspaceId, channelId, principal) {
     secretKey: row.secret_key,
     workspaceId: row.workspace_id
   };
-  const verifyToken = (await readChannelCredentials(env, channel)).verifyToken || '';
+  let verifyToken = (await readChannelCredentials(env, channel)).verifyToken || '';
+  if (connectorType === 'instagram' && usesSharedInstagramAppWebhook(env, channel.config)) {
+    verifyToken = metaInstagramAppVerifyToken(env) || verifyToken;
+  }
   if (!verifyToken) throw httpError(404, 'No webhook verify token is saved for this channel.');
   await audit(env, principal, 'read_verify_token', 'channel', id, {});
   return { ok: true, channelId: id, verifyToken };
@@ -4080,15 +4191,29 @@ async function verifyInstagramChannel(env, channel) {
     if (String(data.user_id || '') !== accountId) throw httpError(422, 'Meta returned a different Instagram account.');
     verifiedUsername = String(data.username || '');
   }
+  let subscribedAppsAt = channel.config?.subscribedAppsAt || '';
+  try {
+    await subscribeInstagramAccountWebhooks({
+      env,
+      accessToken: credentials.accessToken,
+      instagramAccountId: accountId,
+      authMode: channel.config?.authMode || 'instagram_login',
+      apiVersion: version
+    });
+    subscribedAppsAt = new Date().toISOString();
+  } catch (error) {
+    throw httpError(error.status || 422,
+      error.message || 'Meta could not subscribe Helixcer to this Instagram account.');
+  }
   const now = new Date().toISOString();
   const config = await updateChannelRuntimeConfig(env, channel, {
     apiVersion: version, credentialsVerifiedAt: now, verifiedProviderId: accountId,
-    verifiedName: verifiedUsername, verifiedUsername
+    verifiedName: verifiedUsername, verifiedUsername, subscribedAppsAt
   });
   await refreshInstagramPlaceholderProfiles(env, channel, credentials).catch(() => {});
   return { ok: true, channelId: channel.channelId, health: config.webhookVerifiedAt ? 'connected' : 'webhook_required',
     verifiedName: config.verifiedName, verifiedUsername: config.verifiedUsername,
-    credentialsVerifiedAt: now, webhookVerifiedAt: config.webhookVerifiedAt || '' };
+    credentialsVerifiedAt: now, subscribedAppsAt, webhookVerifiedAt: config.webhookVerifiedAt || '' };
 }
 
 async function verifyFacebookMessengerChannel(env, channel) {
@@ -4708,16 +4833,9 @@ async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
     .filter(key => key === 'instagramAccountId' || key === 'appId');
   await assertProviderIdentityConfigMutable(env, workspaceId, existing, 'instagram', changedIdentity);
 
-  let verifyToken = generateWhatsAppVerifyToken();
-  if (existing) {
-    try {
-      const previousCredentials = await readChannelCredentials(env, {
-        workspaceId,
-        channelId,
-        connectorType: 'instagram'
-      });
-      if (previousCredentials.verifyToken) verifyToken = previousCredentials.verifyToken;
-    } catch { /* Keep the freshly generated verify token. */ }
+  const verifyToken = metaInstagramAppVerifyToken(env);
+  if (!verifyToken) {
+    throw httpError(503, 'META_WEBHOOK_VERIFY_TOKEN is not configured on the Worker.');
   }
   const capabilities = CONNECTOR_DEFINITIONS.instagram.capabilities;
   const enabled = 1;
@@ -4747,6 +4865,27 @@ async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
     appSecret
   }, stored.user_id || '');
 
+  let subscribedAppsAt = '';
+  try {
+    await subscribeInstagramAccountWebhooks({
+      env,
+      accessToken: tokenResult.accessToken,
+      instagramAccountId: profile.userId,
+      authMode: 'unified_login',
+      apiVersion
+    });
+    subscribedAppsAt = new Date().toISOString();
+    await updateChannelRuntimeConfig(env, {
+      workspaceId,
+      channelId,
+      connectorType: 'instagram',
+      config
+    }, { subscribedAppsAt });
+  } catch {
+    // Meta App Dashboard still needs the shared /webhooks/instagram-app callback once;
+    // Register Webhook can retry account subscription afterward.
+  }
+
   const actor = await env.DB.prepare('SELECT user_id,email FROM users WHERE user_id=?1')
     .bind(stored.user_id).first();
   const principal = {
@@ -4760,7 +4899,8 @@ async function finishInstagramLoginOAuth(request, env, fetchImpl = fetch) {
     authMode: 'unified_login',
     updatedCredentialFields: ['accessToken', 'verifyToken', 'appSecret'],
     instagramAccountId: profile.userId,
-    username: profile.username || ''
+    username: profile.username || '',
+    subscribedAppsAt: Boolean(subscribedAppsAt)
   });
 
   const returnTo = new URL(stored.return_to);

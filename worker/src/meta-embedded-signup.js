@@ -68,10 +68,7 @@ export async function exchangeMetaEmbeddedSignupCode(env, code, fetchImpl = fetc
 }
 
 export function metaWhatsAppAppVerifyToken(env) {
-  const explicit = String(env.META_WEBHOOK_VERIFY_TOKEN || '').trim();
-  if (explicit) return explicit;
-  const appId = String(env.META_APP_ID || '').trim();
-  return appId ? `helixcer-wa-app-${appId}` : '';
+  return String(env.META_WEBHOOK_VERIFY_TOKEN || '').trim();
 }
 
 export function metaWhatsAppAppWebhookPath() {
@@ -91,6 +88,11 @@ export async function ensureWhatsAppAppWebhookSubscription({
   const appId = String(env.META_APP_ID).trim();
   const appSecret = String(env.META_APP_SECRET).trim();
   const verifyToken = metaWhatsAppAppVerifyToken(env);
+  if (!verifyToken) {
+    const error = new Error('META_WEBHOOK_VERIFY_TOKEN is not configured on the Worker.');
+    error.status = 503;
+    throw error;
+  }
   const version = metaGraphApiVersion(env);
   const endpoint = `https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(appId)}/subscriptions`;
   const body = new URLSearchParams({

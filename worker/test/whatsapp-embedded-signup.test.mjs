@@ -94,6 +94,7 @@ function envFor(DB, overrides = {}) {
     META_APP_ID: '9988776655443322',
     META_APP_SECRET: 'meta-app-secret-value-123456',
     META_EMBEDDED_SIGNUP_CONFIG_ID: '1122334455667788',
+    META_WEBHOOK_VERIFY_TOKEN: 'test-meta-webhook-verify-token',
     META_GRAPH_API_VERSION: 'v22.0',
     ...overrides
   };

@@ -6,6 +6,13 @@ export const INSTAGRAM_LOGIN_SCOPES = [
   'instagram_business_basic',
   'instagram_business_manage_messages'
 ];
+export const INSTAGRAM_WEBHOOK_FIELDS = [
+  'messages',
+  'messaging_postbacks',
+  'messaging_seen',
+  'messaging_referral',
+  'message_reactions'
+];
 const FACEBOOK_AUTHORIZE_URL = 'https://www.facebook.com/dialog/oauth';
 const FACEBOOK_GRAPH_HOST = 'https://graph.facebook.com';
 const INSTAGRAM_GRAPH_HOST = 'https://graph.instagram.com';
@@ -48,6 +55,64 @@ export function instagramLoginPublicConfig(env) {
     graphVersion: metaGraphApiVersion(env),
     authMode: 'unified_login'
   };
+}
+
+export function metaInstagramAppVerifyToken(env) {
+  return String(env.META_WEBHOOK_VERIFY_TOKEN || '').trim();
+}
+
+export function metaInstagramAppWebhookPath() {
+  return '/webhooks/instagram-app';
+}
+
+export function metaInstagramAppCallbackUri(origin) {
+  return `${String(origin || '').replace(/\/$/, '')}${metaInstagramAppWebhookPath()}`;
+}
+
+export function usesSharedInstagramAppWebhook(env, config = {}) {
+  const appId = String(config?.appId || '').trim();
+  const sharedAppId = instagramMetaAppId(env);
+  return Boolean(appId && sharedAppId && appId === sharedAppId);
+}
+
+export async function subscribeInstagramAccountWebhooks({
+  env,
+  accessToken,
+  instagramAccountId,
+  authMode = 'unified_login',
+  apiVersion = '',
+  fetchImpl = fetch
+}) {
+  const accountId = String(instagramAccountId || '').trim();
+  if (!/^\d{5,40}$/.test(accountId)) {
+    const error = new Error('Instagram account ID is invalid.');
+    error.status = 400;
+    throw error;
+  }
+  const token = String(accessToken || '').trim();
+  if (!token) {
+    const error = new Error('Instagram access token is missing.');
+    error.status = 400;
+    throw error;
+  }
+  const version = String(apiVersion || '').trim() || metaGraphApiVersion(env);
+  const host = instagramGraphApiHost(authMode);
+  const endpoint = new URL(
+    `${host}/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}/subscribed_apps`
+  );
+  endpoint.searchParams.set('subscribed_fields', INSTAGRAM_WEBHOOK_FIELDS.join(','));
+  const response = await fetchImpl(endpoint.toString(), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success === false) {
+    const error = new Error(instagramLoginErrorMessage(payload, response.status,
+      'Meta could not subscribe Helixcer to this Instagram account.'));
+    error.status = 422;
+    throw error;
+  }
+  return { ok: true };
 }
 
 export function requireInstagramLoginConfig(env) {

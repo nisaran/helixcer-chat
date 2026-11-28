@@ -19,6 +19,10 @@ GOOGLE_REVIEWS_WEBHOOK_TOKEN=""
 META_APP_ID="your-meta-app-id"
 META_APP_SECRET="your-meta-app-secret"
 META_EMBEDDED_SIGNUP_CONFIG_ID="your-facebook-login-for-business-config-id"
+# Required shared Meta app webhook verify token (WhatsApp + Instagram). Prefer a
+# long random value; set the same string in Meta App Dashboard Verify token fields.
+META_WEBHOOK_VERIFY_TOKEN="replace-with-a-long-random-verify-token"
+META_INSTAGRAM_LOGIN_CONFIG_ID="your-instagram-unified-login-config-id"
 META_GRAPH_API_VERSION="v22.0"
 BOOTSTRAP_OWNER_EMAIL="owner@example.com"
 ADMIN_TOKEN="generate-a-long-random-emergency-token"
