@@ -7795,7 +7795,6 @@
         : (setup.verifiedName || ""), { fallback: "Not available yet", allowEmpty: true });
       appendChannelDetailRow(list, "Instagram account ID",
         config.instagramAccountId || setup.verifiedProviderId, { copyable: true, allowEmpty: true, fallback: "—" });
-      if (config.appId) appendChannelDetailRow(list, "Meta App ID", config.appId, { copyable: true });
       appendChannelDetailRow(list, "Account webhook subscription",
         setup.subscribedAppsAt ? relativeTime(setup.subscribedAppsAt) : "", {
           allowEmpty: true,
@@ -7813,7 +7812,6 @@
         setup.verifiedName || config.pageName, { fallback: "Not verified yet", allowEmpty: true });
       appendChannelDetailRow(list, "Facebook Page ID",
         config.pageId || setup.verifiedProviderId, { copyable: true, allowEmpty: true, fallback: "—" });
-      if (config.appId) appendChannelDetailRow(list, "Meta App ID", config.appId, { copyable: true });
     } else if (channel.connectorType === "google_reviews") {
       appendChannelDetailRow(list, "Business location",
         setup.locationName || config.locationName || setup.verifiedName, { fallback: "Connected with Google", allowEmpty: true });
@@ -16107,7 +16105,6 @@
       : "", "Not available yet");
     fillConnectedDetail("instagramLoginDisplayName", setup.verifiedName || config.verifiedName, "Not available yet");
     fillConnectedDetail("instagramLoginAccountId", config.instagramAccountId || setup.verifiedProviderId);
-    fillConnectedDetail("instagramLoginAppId", config.appId, "Helixcer Meta app");
   }
 
   function fillGoogleReviewsDetails(config = {}, setup = {}) {
@@ -16122,7 +16119,6 @@
     fillConnectedDetail("messengerLoginPageName",
       setup.verifiedName || config.pageName, "Not available yet");
     fillConnectedDetail("messengerLoginPageId", config.pageId || setup.verifiedProviderId);
-    fillConnectedDetail("messengerLoginAppId", config.appId, "Helixcer Meta app");
   }
 
   function syncChannelForm(provider, editing = Boolean($("channelIdInput").value), setup = {}, config = {}) {
