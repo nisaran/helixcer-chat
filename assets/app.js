@@ -530,7 +530,7 @@
         { channelId: "wa-sales", name: "Sales WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", config: { wabaId: "123456789012345", phoneNumberId: "123456789012346" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(120), webhookVerifiedAt: ago(118), lastWebhookAt: ago(3), verifiedName: "Helixcer Sales", verifiedPhoneNumber: "+91 98765 43210" } },
         { channelId: "wa-service", name: "Service WhatsApp", connectorType: "whatsapp_cloud", enabled: true, health: "connected", config: { wabaId: "123456789012347", phoneNumberId: "123456789012348" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(95), webhookVerifiedAt: ago(94), lastWebhookAt: ago(11), verifiedName: "Helixcer Service", verifiedPhoneNumber: "+91 91234 56780" } },
         { channelId: "telegram-support", name: "Support Bot", connectorType: "telegram", enabled: true, health: "connected", config: {}, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(160), webhookVerifiedAt: ago(158), lastWebhookAt: ago(18), verifiedName: "helixcer_support_bot" } },
-        { channelId: "instagram-main", name: "Helixcer Instagram", connectorType: "instagram", enabled: true, health: "connected", config: { instagramAccountId: "17841400000000000", appId: "123456789012345", username: "helixcer", authMode: "instagram_login" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(200), webhookVerifiedAt: ago(198), lastWebhookAt: ago(57), verifiedName: "helixcer" } },
+        { channelId: "instagram-main", name: "Helixcer Instagram", connectorType: "instagram", enabled: true, health: "connected", config: { instagramAccountId: "17841400000000000", appId: "123456789012345", username: "helixcer", authMode: "unified_login" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(200), webhookVerifiedAt: ago(198), subscribedAppsAt: ago(198), lastWebhookAt: ago(57), verifiedName: "helixcer", verifiedUsername: "helixcer", verifiedProviderId: "17841400000000000", authMode: "unified_login", callbackPath: "/webhooks/instagram-app" } },
         { channelId: "messenger-main", name: "Helixcer Messenger", connectorType: "facebook_messenger", enabled: true, health: "connected", config: { pageId: "109876543210987", appId: "123456789012345", pageName: "Helixcer", apiVersion: "v26.0" }, setup: { credentialsPresent: true, credentialsVerifiedAt: ago(190), webhookVerifiedAt: ago(188), lastWebhookAt: ago(42), verifiedName: "Helixcer" } },
       ],
       contacts: [
@@ -7735,6 +7735,9 @@
     );
     const isEmbeddedWhatsAppCard = channel.connectorType === "whatsapp_cloud"
       && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
+    const isInstagramLoginCard = channel.connectorType === "instagram"
+      && (channel.setup?.authMode === "unified_login" || channel.setup?.authMode === "instagram_login"
+        || channel.config?.authMode === "unified_login" || channel.config?.authMode === "instagram_login");
     const isCoexistenceCard = Boolean(isEmbeddedWhatsAppCard
       && (channel.setup?.coexistence || channel.config?.coexistence));
     const statusRow = element("div", "channel-status-row");
@@ -7743,6 +7746,8 @@
       statusRow.append(element("span", "channel-mode-badge is-coexistence", "Coexistence"));
     } else if (isEmbeddedWhatsAppCard) {
       statusRow.append(element("span", "channel-mode-badge", "Login with Facebook"));
+    } else if (isInstagramLoginCard) {
+      statusRow.append(element("span", "channel-mode-badge", "Login with Instagram"));
     }
     name.append(
       element("span", "provider-label", profile.label),
@@ -7782,11 +7787,24 @@
 
     const body = element("div", "connection-card-body");
     body.append(element("p", "channel-description", profile.description));
-    const verifiedIdentity = [channel.setup?.verifiedName, channel.setup?.verifiedPhoneNumber].filter(Boolean).join(" · ");
+    const instagramUsername = channel.setup?.verifiedUsername || channel.config?.username || "";
+    let verifiedIdentity = "";
+    if (channel.connectorType === "instagram") {
+      const handle = instagramUsername ? `@${String(instagramUsername).replace(/^@/, "")}` : "";
+      const displayName = String(channel.setup?.verifiedName || "").trim();
+      const sameAsHandle = displayName
+        && displayName.replace(/^@/, "").toLowerCase() === handle.replace(/^@/, "").toLowerCase();
+      verifiedIdentity = [handle, sameAsHandle ? "" : displayName].filter(Boolean).join(" · ");
+    } else {
+      verifiedIdentity = [channel.setup?.verifiedName, channel.setup?.verifiedPhoneNumber].filter(Boolean).join(" · ");
+    }
     if (verifiedIdentity) body.append(element("p", "verified-identity", verifiedIdentity));
 
     const setup = element("section", "connection-setup");
     const isGoogleReviews = channel.connectorType === "google_reviews";
+    const isInstagramLogin = channel.connectorType === "instagram"
+      && (channel.setup?.authMode === "unified_login" || channel.setup?.authMode === "instagram_login"
+        || channel.config?.authMode === "unified_login" || channel.config?.authMode === "instagram_login");
     const credentialsReady = Boolean(channel.setup?.credentialsPresent || ["configured", "receiving", "webhook_required", "connected"].includes(channel.health));
     const identityVerified = Boolean(channel.setup?.credentialsVerifiedAt || ["webhook_required", "connected"].includes(channel.health));
     const webhookVerified = Boolean(channel.setup?.webhookVerifiedAt || channel.health === "connected" || isGoogleReviews);
@@ -7856,8 +7874,35 @@
 
     const isEmbeddedWhatsApp = channel.connectorType === "whatsapp_cloud"
       && (channel.setup?.authMode === "embedded_signup" || channel.config?.authMode === "embedded_signup");
-    // Embedded Signup owns webhook config via Meta override; hide manual callback/token UI.
-    if (!isGoogleReviews && !isEmbeddedWhatsApp) {
+    // Login flows own Meta app webhook config; show profile details instead of callback/token UI.
+    if (isInstagramLogin) {
+      const profileBlock = element("div", "callback-block instagram-profile-block");
+      profileBlock.append(element("span", "callback-label", "Instagram profile"));
+      const usernameValue = instagramUsername
+        ? `@${String(instagramUsername).replace(/^@/, "")}`
+        : (channel.setup?.verifiedName || "Connected with Instagram");
+      profileBlock.append(element("code", "channel-callback", usernameValue));
+      const accountId = String(channel.config?.instagramAccountId || channel.setup?.verifiedProviderId || "").trim();
+      if (accountId) {
+        const accountRow = element("div", "meta-callback-row");
+        accountRow.append(element("code", "channel-callback", accountId));
+        const copyAccountId = element("button", "secondary-button compact-button", "Copy account ID");
+        copyAccountId.type = "button";
+        copyAccountId.dataset.action = "copy-channel-id";
+        copyAccountId.dataset.copyValue = accountId;
+        copyAccountId.title = "Copy Instagram account ID";
+        accountRow.append(copyAccountId);
+        profileBlock.append(
+          element("span", "callback-token-help", "Instagram account ID"),
+          accountRow
+        );
+      }
+      if (channel.setup?.subscribedAppsAt) {
+        profileBlock.append(element("span", "callback-token-help",
+          `Webhook subscription · ${relativeTime(channel.setup.subscribedAppsAt)}`));
+      }
+      setup.append(profileBlock);
+    } else if (!isGoogleReviews && !isEmbeddedWhatsApp) {
       const callbackUrl = channel.setup?.webhookUrl || state.api.webhookUrl(channel);
       const callbackBlock = element("div", "callback-block");
       callbackBlock.append(element("span", "callback-label", "Webhook callback"));
@@ -7977,10 +8022,6 @@
         }
       }
       actions.append(toggle, verify);
-      const isInstagramLogin = channel.connectorType === "instagram"
-        && (channel.setup?.authMode === "unified_login" || channel.setup?.authMode === "instagram_login"
-          || channel.config?.authMode === "unified_login" || channel.config?.authMode === "instagram_login"
-          || channel.setup?.callbackPath === "/webhooks/instagram-app");
       if ((isEmbeddedWhatsApp || isInstagramLogin) && credentialsReady) {
         const registerWebhook = element("button", "secondary-button",
           webhookVerified ? "Re-register webhook" : "Register Webhook");
@@ -7991,7 +8032,7 @@
         registerWebhook.title = isInstagramLogin
           ? (webhookVerified
             ? "Ask Meta to subscribe this Instagram account to Helixcer's app webhook again"
-            : "Subscribe this Instagram account to Helixcer's shared /webhooks/instagram-app callback")
+            : "Subscribe this Instagram account to Helixcer's shared app webhook")
           : (webhookVerified
             ? "Ask Meta to subscribe this WhatsApp account to Helixcer's webhook again"
             : "Subscribe this WhatsApp account and set Helixcer's webhook callback in Meta");
@@ -8008,10 +8049,15 @@
           element("strong", "", "Login with Facebook webhook"),
           element("span", "", "Use Register Webhook if Meta did not finish the automatic callback setup for this connection.")
         );
-      } else if (channel.connectorType === "instagram" && (channel.setup?.callbackPath === "/webhooks/instagram-app" || channel.config?.appId)) {
+      } else if (isInstagramLogin) {
+        note.append(
+          element("strong", "", "Login with Instagram"),
+          element("span", "", "Use Register Webhook if Meta did not finish subscribing this Instagram account to Helixcer.")
+        );
+      } else if (channel.connectorType === "instagram" && channel.config?.appId) {
         note.append(
           element("strong", "", "Shared Meta app callback"),
-          element("span", "", "Paste https://api.chat.helixcer.com/webhooks/instagram-app into Meta → Instagram → Webhooks (same pattern as WhatsApp). Helixcer routes messages by account ID. Use Register Webhook to subscribe this account after the callback is verified.")
+          element("span", "", "Paste https://api.chat.helixcer.com/webhooks/instagram-app into Meta → Instagram → Webhooks. Helixcer routes messages by account ID.")
         );
       } else if (channel.connectorType === "facebook_messenger" && channel.config?.appId) {
         note.append(element("strong", "", "Shared Meta app callback"), element("span", "", "Use this URL once for every Facebook Page connected through the same Meta App ID. Helixcer routes messages by Page ID."));
