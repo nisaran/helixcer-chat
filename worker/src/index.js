@@ -199,7 +199,7 @@ const LEGACY_WORKSPACE_ID = 'ws_default';
 const WHATSAPP_TEMPLATE_CACHE_SECONDS = 5 * 60;
 const WHATSAPP_TEMPLATE_CACHE_ORIGIN = 'https://template-cache.helixcer.internal';
 const MANAGED_CONNECTORS = new Set(['whatsapp_cloud', 'telegram', 'instagram', 'facebook_messenger', 'google_reviews']);
-const CONTACT_ID_PLATFORMS = Object.freeze(['whatsapp', 'telegram', 'instagram', 'facebook', 'email']);
+const CONTACT_ID_PLATFORMS = Object.freeze(['whatsapp', 'telegram', 'instagram', 'facebook', 'email', 'google']);
 const CONTACT_ID_PLATFORM_SET = new Set(CONTACT_ID_PLATFORMS);
 // Only these providers expose an address that is portable between connected
 // accounts. Instagram/Facebook profile ids are account/app scoped, so an
@@ -1580,7 +1580,8 @@ function externalContactView(item) {
       telegram: item.platformIds?.telegram || '',
       instagram: item.platformIds?.instagram || '',
       facebook: item.platformIds?.facebook || '',
-      email: item.platformIds?.email || ''
+      email: item.platformIds?.email || '',
+      google: item.platformIds?.google || ''
     }
   };
 }
@@ -5924,7 +5925,7 @@ function contactListWhereSql() {
           AND instr(lower(COALESCE(flat.profile_id,'')),lower(?2))>0) OR
       EXISTS (SELECT 1 FROM contact_identities legacy
         WHERE legacy.workspace_id=c.workspace_id AND legacy.contact_id=c.contact_id
-          AND legacy.platform NOT IN ('whatsapp','telegram','instagram','facebook','email')
+          AND legacy.platform NOT IN ('whatsapp','telegram','instagram','facebook','email','google')
           AND instr(lower(COALESCE(legacy.profile_id,'')),lower(?2))>0))`;
 }
 
@@ -5987,7 +5988,8 @@ async function exportContactsCsv(env, workspaceId) {
       MAX(CASE WHEN flat.platform='telegram' THEN flat.profile_id ELSE '' END) AS telegram_id,
       MAX(CASE WHEN flat.platform='instagram' THEN flat.profile_id ELSE '' END) AS instagram_id,
       MAX(CASE WHEN flat.platform='facebook' THEN flat.profile_id ELSE '' END) AS facebook_id,
-      MAX(CASE WHEN flat.platform='email' THEN flat.profile_id ELSE '' END) AS email
+      MAX(CASE WHEN flat.platform='email' THEN flat.profile_id ELSE '' END) AS email,
+      MAX(CASE WHEN flat.platform='google' THEN flat.profile_id ELSE '' END) AS google_id
     FROM contacts c
     LEFT JOIN contact_platform_ids flat
       ON flat.workspace_id=c.workspace_id AND flat.contact_id=c.contact_id
@@ -5996,7 +5998,7 @@ async function exportContactsCsv(env, workspaceId) {
     ORDER BY lower(c.display_name),c.contact_id`).bind(workspaceId).all();
   const headers = [
     'contact_id', 'display_name', 'company', 'tags',
-    'whatsapp_id', 'telegram_id', 'instagram_id', 'facebook_id', 'email'
+    'whatsapp_id', 'telegram_id', 'instagram_id', 'facebook_id', 'email', 'google_id'
   ];
   const lines = [headers.join(',')];
   for (const row of result.results || []) {
@@ -6009,7 +6011,8 @@ async function exportContactsCsv(env, workspaceId) {
       row.telegram_id,
       row.instagram_id,
       row.facebook_id,
-      row.email
+      row.email,
+      row.google_id
     ].map(csvCell).join(','));
   }
   return new Response(`\uFEFF${lines.join('\r\n')}\r\n`, {
@@ -6026,7 +6029,8 @@ function canonicalIdentityPlatform(value) {
   const raw = String(value || '').trim().toLowerCase();
   const platform = raw === 'whatsapp_cloud' ? 'whatsapp'
     : (raw === 'facebook_messenger' || raw === 'messenger') ? 'facebook'
-      : raw;
+      : (raw === 'google_reviews' || raw === 'google_business') ? 'google'
+        : raw;
   if (!/^[a-z][a-z0-9_-]{1,39}$/.test(platform)) throw httpError(400, 'Identity platform is invalid.');
   return platform;
 }
@@ -6307,7 +6311,7 @@ async function contactIdentityRows(env, workspaceId, contactIds = []) {
     LEFT JOIN conversations cv ON cv.workspace_id=ci.workspace_id AND cv.identity_id=ci.identity_id
       AND cv.channel_id=b.channel_id
     WHERE ci.workspace_id=?1 AND ci.contact_id IN (SELECT value FROM json_each(?2))
-      AND (ci.platform NOT IN ('whatsapp','telegram','instagram','facebook','email')
+      AND (ci.platform NOT IN ('whatsapp','telegram','instagram','facebook','email','google')
         OR flat.identity_id IS NOT NULL)
     ORDER BY ci.created_at,ci.identity_id,b.last_seen_at DESC,b.created_at DESC`)
     .bind(workspaceId, JSON.stringify(ids)).all();

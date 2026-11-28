@@ -298,6 +298,7 @@
     instagram: { label: "Instagram", profileLabel: "Instagram ID", profilePlaceholder: "Instagram profile ID or username" },
     facebook: { label: "Facebook", profileLabel: "Facebook ID", profilePlaceholder: "Facebook profile ID or username" },
     email: { label: "Email", profileLabel: "Email Address", profilePlaceholder: "name@example.com" },
+    google: { label: "Google", profileLabel: "Google Review ID", profilePlaceholder: "review:AbCdEf..." },
   };
 
   const avatarPalettes = [
@@ -2179,13 +2180,13 @@
 
     exportContacts() {
       if (this.isDemo) {
-        const headers = ["Contact ID", "Name", "Company", "Tags", "WhatsApp ID", "Telegram ID", "Instagram ID", "Facebook ID", "Email ID"];
+        const headers = ["Contact ID", "Name", "Company", "Tags", "WhatsApp ID", "Telegram ID", "Instagram ID", "Facebook ID", "Email ID", "Google ID"];
         const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
         const rows = this.demo.data.contacts.map((raw) => {
           const contact = normalizeContact(raw);
           const ids = contactPlatformIds(contact);
           return [contact.contactId, contact.displayName, contact.company, contact.tags.join(", "), ids.whatsapp,
-            ids.telegram, ids.instagram, ids.facebook, ids.email].map(escape).join(",");
+            ids.telegram, ids.instagram, ids.facebook, ids.email, ids.google].map(escape).join(",");
         });
         return Promise.resolve([headers.map(escape).join(","), ...rows].join("\r\n"));
       }
@@ -3239,6 +3240,7 @@
     if (["instagram", "instagram_messaging", "ig"].includes(normalized)) return "instagram";
     if (["facebook", "facebook_messenger", "messenger", "fb"].includes(normalized)) return "facebook";
     if (["email", "gmail", "outlook", "mail"].includes(normalized)) return "email";
+    if (["google", "google_reviews", "google_business", "gbp"].includes(normalized)) return "google";
     return identityPlatforms[normalized] ? normalized : "";
   }
 
@@ -6964,6 +6966,7 @@
 
   function platformConnectorType(platform) {
     if (platform === "whatsapp") return "whatsapp_cloud";
+    if (platform === "google") return "google_reviews";
     return platform;
   }
 

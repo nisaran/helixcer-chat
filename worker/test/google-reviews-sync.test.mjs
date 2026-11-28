@@ -70,7 +70,7 @@ async function testDatabase() {
     '0017_agent_channel_access.sql', '0019_outbound_sender.sql', '0020_user_profile.sql',
     '0021_campaigns.sql', '0022_facebook_messenger_page.sql', '0023_workspace_roles.sql',
     '0024_password_auth.sql', '0025_campaign_jobs.sql', '0026_campaign_upload_chunks.sql',
-    '0027_google_reviews_oauth.sql'
+    '0027_google_reviews_oauth.sql', '0033_google_contact_platform.sql'
   ]) {
     database.exec(await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));
   }
@@ -317,6 +317,14 @@ test('sync-reviews imports Google reviews into the inbox', async () => {
   assert.ok(message);
   assert.equal(message.message_type, 'review');
   assert.match(message.text, /Great service/);
+  const identity = database.prepare(`SELECT platform,profile_id FROM contact_identities
+    WHERE profile_id='review:r1'`).get();
+  assert.ok(identity);
+  assert.equal(identity.platform, 'google');
+  const flat = database.prepare(`SELECT platform,profile_id FROM contact_platform_ids
+    WHERE profile_id='review:r1'`).get();
+  assert.ok(flat);
+  assert.equal(flat.platform, 'google');
   database.close();
 });
 
