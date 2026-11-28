@@ -1272,7 +1272,12 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     const message = status === 500
       ? 'The service could not complete the request.'
       : (error.message || 'The service could not complete the request.');
-    return withCors(json({ ok: false, error: message }, status), cors);
+    return withCors(json({
+      ok: false,
+      error: message,
+      ...(error.code ? { code: String(error.code).slice(0, 80) } : {}),
+      ...(error.replyWindowExpiresAt ? { replyWindowExpiresAt: error.replyWindowExpiresAt } : {})
+    }, status), cors);
   }
 }
 
@@ -7786,6 +7791,9 @@ async function createOutboundMessage(env, workspaceId, conversationId, payload, 
   if (!row.enabled) throw httpError(409, 'The selected channel is disabled.');
   const connectorType = row.connectorType;
   assertFreeformReplyAllowed(connectorType, row.last_inbound_at);
+  if (connectorType === 'google_reviews') {
+    await assertGoogleReviewSingleReplyAllowed(env, workspaceId, conversationId, row.channel_id);
+  }
   const reply = await resolveReplyTarget(env, workspaceId, conversationId, row.channel_id,
     connectorType, payload.replyToMessageId);
   const now = new Date().toISOString();
@@ -7857,6 +7865,37 @@ function assertFreeformReplyAllowed(connectorType, lastInboundAt) {
     throw error;
   }
   return state;
+}
+
+async function assertGoogleReviewSingleReplyAllowed(env, workspaceId, conversationId, channelId) {
+  const existingOutbound = await env.DB.prepare(`SELECT message_id,status FROM messages
+    WHERE workspace_id=?1 AND conversation_id=?2 AND channel_id=?3
+      AND direction='outbound'
+      AND status IN ('submitted','sent','delivered','read')
+    ORDER BY timestamp DESC,message_id DESC LIMIT 1`)
+    .bind(workspaceId, conversationId, channelId).first();
+  if (existingOutbound) {
+    const error = httpError(409, 'Only one reply can be sent for a Google review.');
+    error.code = 'google_review_reply_exists';
+    throw error;
+  }
+
+  const inboundReview = await env.DB.prepare(`SELECT payload_json FROM messages
+    WHERE workspace_id=?1 AND conversation_id=?2 AND channel_id=?3
+      AND direction='inbound' AND message_type='review'
+    ORDER BY timestamp DESC,message_id DESC LIMIT 1`)
+    .bind(workspaceId, conversationId, channelId).first();
+  const payload = safeJsonParse(inboundReview?.payload_json, {});
+  const replyComment = String(
+    payload?.googleReview?.reply?.comment
+    || payload?.reviewReply?.comment
+    || ''
+  ).trim();
+  if (replyComment) {
+    const error = httpError(409, 'Only one reply can be sent for a Google review.');
+    error.code = 'google_review_reply_exists';
+    throw error;
+  }
 }
 
 async function conversationDeliveryTarget(env, workspaceId, conversationId, selection = {}) {
@@ -10169,6 +10208,15 @@ async function dispatchOutbound(env, messageId) {
   else if (channel.connectorType === 'google_reviews') {
     if (row.message_type && row.message_type !== 'text') {
       throw nonRetryableError('Google Reviews only supports text replies.');
+    }
+    const priorReply = await env.DB.prepare(`SELECT message_id FROM messages
+      WHERE workspace_id=?1 AND conversation_id=?2 AND channel_id=?3
+        AND direction='outbound' AND message_id<>?4
+        AND status IN ('submitted','sent','delivered','read')
+      LIMIT 1`)
+      .bind(row.workspace_id, row.conversation_id, row.channel_id, messageId).first();
+    if (priorReply) {
+      throw nonRetryableError('Only one reply can be sent for a Google review.');
     }
     result = await sendGoogleReviewReply(env, channel, row.channel_profile_id, row.text);
   }
